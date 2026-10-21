@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ble/universal_ble_transport.dart';
+import '../capture/capture_screen.dart';
 import '../debug/debug_screen.dart';
 import 'connect_providers.dart';
 
@@ -125,6 +126,15 @@ class RealPanel extends ConsumerWidget {
               FilledButton(
                 onPressed: () => controller.connect(s.deviceId!),
                 child: const Text('Reconnect'),
+              ),
+            if (s.connected)
+              FilledButton.tonal(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const CaptureScreen(),
+                  ),
+                ),
+                child: const Text('Capture'),
               ),
           ],
         ),

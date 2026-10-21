@@ -79,6 +79,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   UniversalBleTransport get _transport => ref.read(realTransportProvider);
 
+  /// The service behind the current connection, for consumers that share its
+  /// frame stream (the capture screen). Null before the first connect.
+  ControllerService? get service => _service;
+
   void _update({List<BleScanResult>? results, String? deviceId}) {
     state = RealDeviceState(
       status: _transport.status,
