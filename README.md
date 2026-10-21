@@ -10,3 +10,8 @@ flutter analyze
 flutter test
 flutter run -d <device>   # BLE needs a physical phone
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Third-party packages (universal_ble, ector_math, Flutter) keep their own BSD-style licenses; Flutter's built-in license page lists them in the app.
+
