@@ -31,6 +31,12 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
+      - name: wmr_fusion package
+        working-directory: packages/wmr_fusion
+        run: |
+          dart pub get
+          dart analyze
+          dart test
       - run: flutter build apk --debug
 
       - uses: actions/upload-artifact@v4
