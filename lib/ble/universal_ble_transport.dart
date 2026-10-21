@@ -1,0 +1,596 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import '../protocol/bridge_status.dart';
+import '../protocol/gatt.dart';
+import 'ble_adapter.dart';
+import 'ble_transport.dart';
+
+/// Where the link to the bridge currently is. The failure phases double as
+/// the reason carried by [BleTransportException].
+enum BleLinkPhase {
+  idle,
+  scanning,
+  connecting,
+  negotiatingMtu,
+  discovering,
+  subscribing,
+  ready,
+  disconnecting,
+  disconnected,
+
+  // Failures.
+  bluetoothOff,
+  bluetoothUnavailable,
+  permissionDenied,
+  scanTimeout,
+  connectFailed,
+  serviceNotFound,
+  connectionLost,
+}
+
+class BleTransportException implements Exception {
+  const BleTransportException(this.phase, this.message);
+
+  final BleLinkPhase phase;
+  final String message;
+
+  @override
+  String toString() => 'BleTransportException(${phase.name}): $message';
+}
+
+/// A snapshot of the link, for the UI.
+class BleLinkStatus {
+  const BleLinkStatus(
+    this.phase, {
+    this.deviceId,
+    this.message,
+    this.mtu,
+    this.priorityRequested,
+    this.warnings = const [],
+  });
+
+  final BleLinkPhase phase;
+  final String? deviceId;
+  final String? message;
+
+  /// ATT MTU as reported by the stack after the request, never the value
+  /// that was asked for. Null until negotiated or when the request failed.
+  final int? mtu;
+
+  /// True once high connection priority was requested successfully; null
+  /// where the platform has no such call (everything but Android).
+  final bool? priorityRequested;
+
+  /// Setup steps that failed without stopping the connection.
+  final List<String> warnings;
+
+  bool get isFailure => phase.index >= BleLinkPhase.bluetoothOff.index;
+}
+
+class _Session {
+  _Session(this.deviceId);
+
+  final String deviceId;
+  int? mtu;
+  bool? priorityRequested;
+  final List<String> warnings = [];
+  bool ready = false;
+  final Set<String> enabled = {};
+}
+
+class _Wanted {
+  const _Wanted(this.deviceId, this.serviceUuid, this.characteristicUuid);
+
+  final String deviceId;
+  final String serviceUuid;
+  final String characteristicUuid;
+}
+
+/// [BleTransport] on top of a [BleAdapter] (in production `universal_ble`).
+///
+/// [connect] runs the bridge's connection sequence: link, MTU request (the
+/// negotiated value is recorded), high connection priority where available,
+/// service discovery and a check for FF10/FF11. [subscribe] enables
+/// notifications once that finished. Every GATT step is serialized and the
+/// whole sequence runs again on every [connect], because the bridge forgets
+/// the subscription when the link drops. After an unexpected drop the
+/// transport only reports [BleLinkPhase.connectionLost]; the caller
+/// reconnects.
+///
+/// Not verified on hardware.
+class UniversalBleTransport implements BleTransport {
+  UniversalBleTransport({
+    required BleAdapter adapter,
+    MonotonicClock? clock,
+    this.scanTimeout = const Duration(seconds: 15),
+    this.availabilityWait = const Duration(seconds: 3),
+    this.requestedMtu = wmrRequestedMtu,
+  }) : _adapter = adapter,
+       clock = clock ?? MonotonicClock() {
+    _paramsSub = adapter.connectionParams.listen(
+      (p) => _intervalUs[p.deviceId] = p.intervalUs,
+    );
+  }
+
+  final BleAdapter _adapter;
+  final Duration scanTimeout;
+  final Duration availabilityWait;
+  final int requestedMtu;
+
+  @override
+  final MonotonicClock clock;
+
+  BleLinkStatus _status = const BleLinkStatus(BleLinkPhase.idle);
+  final StreamController<BleLinkStatus> _statusCtl =
+      StreamController.broadcast();
+
+  BleLinkStatus get status => _status;
+  Stream<BleLinkStatus> get statusChanges => _statusCtl.stream;
+
+  Future<void> _tail = Future.value();
+  _Session? _session;
+  final Set<String> _connecting = {};
+  final Map<String, BleConnectionState> _states = {};
+  final Map<String, StreamController<BleConnectionState>> _stateCtls = {};
+  StreamSubscription<AdapterConnectionEvent>? _linkSub;
+
+  final Map<String, _Wanted> _wanted = {};
+  final Map<String, StreamController<BleNotification>> _streams = {};
+  final Map<String, StreamSubscription<Uint8List>> _valueSubs = {};
+  final Map<String, int> _intervalUs = {};
+  StreamSubscription<AdapterConnectionParams>? _paramsSub;
+
+  StreamController<BleScanResult>? _scanCtl;
+  StreamSubscription<BleScanResult>? _scanSub;
+  Timer? _scanTimer;
+
+  /// Runs [op] after every earlier GATT operation finished.
+  Future<T> _serial<T>(Future<T> Function() op) {
+    final done = Completer<void>();
+    final previous = _tail;
+    _tail = done.future;
+    return previous.then((_) => op()).whenComplete(done.complete);
+  }
+
+  void _emit(BleLinkPhase phase, {String? deviceId, String? message}) {
+    final s = _session;
+    _status = BleLinkStatus(
+      phase,
+      deviceId: deviceId ?? s?.deviceId,
+      message: message,
+      mtu: s?.mtu,
+      priorityRequested: s?.priorityRequested,
+      warnings: List.unmodifiable(s?.warnings ?? const []),
+    );
+    if (!_statusCtl.isClosed) _statusCtl.add(_status);
+  }
+
+  BleTransportException _fail(
+    BleLinkPhase phase,
+    String message, {
+    String? deviceId,
+  }) {
+    _emit(phase, deviceId: deviceId, message: message);
+    return BleTransportException(phase, message);
+  }
+
+  void _setState(String deviceId, BleConnectionState state) {
+    _states[deviceId] = state;
+    _stateCtl(deviceId).add(state);
+  }
+
+  StreamController<BleConnectionState> _stateCtl(String deviceId) => _stateCtls
+      .putIfAbsent(deviceId, StreamController<BleConnectionState>.broadcast);
+
+  /// Permissions first, then the radio. Throws a classified
+  /// [BleTransportException].
+  Future<void> _preflight({String? deviceId}) async {
+    try {
+      if (!await _adapter.hasPermissions()) {
+        await _adapter.requestPermissions();
+      }
+    } catch (e) {
+      throw _fail(
+        BleLinkPhase.permissionDenied,
+        'Bluetooth permission denied: $e',
+        deviceId: deviceId,
+      );
+    }
+    var state = await _adapter.availability();
+    if (state == BleAvailability.unknown ||
+        state == BleAvailability.resetting) {
+      try {
+        state = await _adapter.availabilityChanges
+            .firstWhere(
+              (s) =>
+                  s != BleAvailability.unknown &&
+                  s != BleAvailability.resetting,
+            )
+            .timeout(availabilityWait);
+      } on TimeoutException {
+        throw _fail(
+          BleLinkPhase.bluetoothUnavailable,
+          'Bluetooth state is still ${state.name}',
+          deviceId: deviceId,
+        );
+      }
+    }
+    switch (state) {
+      case BleAvailability.poweredOn:
+        return;
+      case BleAvailability.poweredOff:
+        throw _fail(
+          BleLinkPhase.bluetoothOff,
+          'Bluetooth is turned off',
+          deviceId: deviceId,
+        );
+      case BleAvailability.unauthorized:
+        throw _fail(
+          BleLinkPhase.permissionDenied,
+          'Bluetooth access is not authorized',
+          deviceId: deviceId,
+        );
+      default:
+        throw _fail(
+          BleLinkPhase.bluetoothUnavailable,
+          'Bluetooth is not available (${state.name})',
+          deviceId: deviceId,
+        );
+    }
+  }
+
+  @override
+  Stream<BleScanResult> scan({List<String> withServices = const []}) {
+    // Always match the advertised name as well as the service.
+    final services = withServices.isEmpty
+        ? [wmrBridgeServiceUuid]
+        : withServices;
+    late final StreamController<BleScanResult> ctl;
+    ctl = StreamController<BleScanResult>(
+      onListen: () async {
+        var seen = 0;
+        try {
+          await _preflight();
+          _scanSub = _adapter.scanResults.listen((r) {
+            seen++;
+            ctl.add(r);
+          });
+          await _adapter.startScan(
+            withServices: services,
+            withNamePrefixes: [wmrBridgeDeviceName],
+          );
+          _emit(BleLinkPhase.scanning);
+          _scanTimer = Timer(scanTimeout, () async {
+            await stopScan();
+            if (ctl.isClosed) return;
+            if (seen == 0) {
+              ctl.addError(
+                _fail(
+                  BleLinkPhase.scanTimeout,
+                  'No bridge found in ${scanTimeout.inSeconds} s',
+                ),
+              );
+            }
+            await ctl.close();
+          });
+        } on BleTransportException catch (e) {
+          ctl.addError(e);
+          await ctl.close();
+        } catch (e) {
+          ctl.addError(_fail(BleLinkPhase.connectFailed, 'Scan failed: $e'));
+          await ctl.close();
+        }
+      },
+      onCancel: stopScan,
+    );
+    _scanCtl = ctl;
+    return ctl.stream;
+  }
+
+  @override
+  Future<void> stopScan() async {
+    _scanTimer?.cancel();
+    _scanTimer = null;
+    final sub = _scanSub;
+    _scanSub = null;
+    await sub?.cancel();
+    final wasScanning = _status.phase == BleLinkPhase.scanning;
+    try {
+      await _adapter.stopScan();
+    } catch (_) {
+      // Stopping a scan that never started is not an error worth surfacing.
+    }
+    if (wasScanning) _emit(BleLinkPhase.idle);
+  }
+
+  @override
+  Future<void> connect(String deviceId) {
+    if (_session?.deviceId == deviceId && _session!.ready) {
+      return Future.value();
+    }
+    _connecting.add(deviceId);
+    return _serial(() => _setup(deviceId))
+        .whenComplete(() => _connecting.remove(deviceId));
+  }
+
+  Future<void> _setup(String deviceId) async {
+    final session = _session = _Session(deviceId);
+    _setState(deviceId, BleConnectionState.connecting);
+    _emit(BleLinkPhase.connecting);
+    var linkAttempted = false;
+    try {
+      await _preflight(deviceId: deviceId);
+      await _linkSub?.cancel();
+      _linkSub = _adapter
+          .connectionEvents(deviceId)
+          .listen((e) => _onLinkEvent(session, e));
+
+      linkAttempted = true;
+      try {
+        await _adapter.connect(deviceId);
+      } catch (e) {
+        throw _fail(
+          BleLinkPhase.connectFailed,
+          'Connect failed: $e',
+          deviceId: deviceId,
+        );
+      }
+
+      _emit(BleLinkPhase.negotiatingMtu);
+      try {
+        session.mtu = await _adapter.requestMtu(deviceId, requestedMtu);
+      } catch (e) {
+        session.warnings.add('MTU request failed: $e');
+      }
+
+      if (_adapter.supportsConnectionPriority) {
+        try {
+          await _adapter.requestHighConnectionPriority(deviceId);
+          session.priorityRequested = true;
+        } catch (e) {
+          session.priorityRequested = false;
+          session.warnings.add('Connection priority request failed: $e');
+        }
+      }
+
+      _emit(BleLinkPhase.discovering);
+      final List<BleServiceInfo> services;
+      try {
+        services = await _adapter.discoverServices(deviceId);
+      } catch (e) {
+        throw _fail(
+          BleLinkPhase.connectFailed,
+          'Service discovery failed: $e',
+          deviceId: deviceId,
+        );
+      }
+      final hasStream = services.any(
+        (s) =>
+            s.uuid.toLowerCase() == wmrBridgeServiceUuid &&
+            s.characteristicUuids.any(
+              (c) => c.toLowerCase() == wmrBridgeStreamCharUuid,
+            ),
+      );
+      if (!hasStream) {
+        throw _fail(
+          BleLinkPhase.serviceNotFound,
+          'Service FF10 / characteristic FF11 not found',
+          deviceId: deviceId,
+        );
+      }
+      if (_session != session) {
+        throw _fail(
+          BleLinkPhase.connectionLost,
+          'Disconnected during setup',
+          deviceId: deviceId,
+        );
+      }
+
+      session.ready = true;
+      for (final key in _wanted.keys.toList()) {
+        final w = _wanted[key]!;
+        if (w.deviceId == deviceId) await _enable(session, key, w);
+      }
+      _setState(deviceId, BleConnectionState.connected);
+      _emit(BleLinkPhase.ready);
+    } catch (e) {
+      if (_session == session) _session = null;
+      _setState(deviceId, BleConnectionState.disconnected);
+      if (linkAttempted) {
+        try {
+          await _adapter.disconnect(deviceId);
+        } catch (_) {}
+      }
+      if (e is BleTransportException) rethrow;
+      throw _fail(BleLinkPhase.connectFailed, '$e', deviceId: deviceId);
+    }
+  }
+
+  void _onLinkEvent(_Session session, AdapterConnectionEvent e) {
+    if (e.connected || _session != session) return;
+    final wasReady = session.ready;
+    _session = null;
+    _setState(session.deviceId, BleConnectionState.disconnected);
+    // During setup the failing step reports the error; only a drop after
+    // setup is an unexpected disconnect.
+    if (wasReady) {
+      _emit(
+        BleLinkPhase.connectionLost,
+        deviceId: session.deviceId,
+        message: e.error ?? 'Connection lost',
+      );
+    }
+  }
+
+  Future<void> _enable(_Session session, String key, _Wanted w) async {
+    if (session.enabled.contains(key)) return;
+    _emit(BleLinkPhase.subscribing);
+    await _adapter.enableNotifications(
+      w.deviceId,
+      w.serviceUuid,
+      w.characteristicUuid,
+    );
+    session.enabled.add(key);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async {
+    // Clearing the session first makes the link event this causes harmless.
+    _session = null;
+    _emit(BleLinkPhase.disconnecting, deviceId: deviceId);
+    await _closeStreams(deviceId);
+    try {
+      await _adapter.disconnect(deviceId);
+    } finally {
+      await _linkSub?.cancel();
+      _linkSub = null;
+      _setState(deviceId, BleConnectionState.disconnected);
+      _emit(BleLinkPhase.disconnected, deviceId: deviceId);
+    }
+  }
+
+  Future<void> _closeStreams(String deviceId) async {
+    final prefix = '$deviceId|';
+    for (final key
+        in _valueSubs.keys.where((k) => k.startsWith(prefix)).toList()) {
+      await _valueSubs.remove(key)!.cancel();
+    }
+    for (final key
+        in _streams.keys.where((k) => k.startsWith(prefix)).toList()) {
+      await _streams.remove(key)!.close();
+    }
+    _wanted.removeWhere((k, _) => k.startsWith(prefix));
+  }
+
+  @override
+  Stream<BleConnectionState> connectionState(String deviceId) async* {
+    yield _states[deviceId] ?? BleConnectionState.disconnected;
+    yield* _stateCtl(deviceId).stream;
+  }
+
+  @override
+  Future<List<BleServiceInfo>> discoverServices(String deviceId) {
+    return _serial(() => _adapter.discoverServices(deviceId));
+  }
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final active = _session?.deviceId == deviceId && _session!.ready;
+    if (!active && !_connecting.contains(deviceId)) {
+      throw StateError('Device $deviceId is not connected');
+    }
+    final key = '$deviceId|${characteristicUuid.toLowerCase()}';
+    final ctl = _streams.putIfAbsent(
+      key,
+      StreamController<BleNotification>.broadcast,
+    );
+    _valueSubs.putIfAbsent(
+      key,
+      () => _adapter.notifications(deviceId, characteristicUuid).listen((v) {
+        // Stamp first; nothing else happens on this path.
+        final t = clock.nowUs;
+        ctl.add(BleNotification(value: v, receivedAtUs: t));
+      }),
+    );
+    final w = _wanted[key] = _Wanted(deviceId, serviceUuid, characteristicUuid);
+    // Queued behind any setup in progress, so it only runs after the MTU
+    // result, priority and discovery. A no-op if setup already enabled it.
+    unawaited(
+      _serial(() async {
+        final session = _session;
+        if (session == null || session.deviceId != deviceId || !session.ready) {
+          return;
+        }
+        await _enable(session, key, w);
+        if (_status.phase == BleLinkPhase.subscribing) {
+          _emit(BleLinkPhase.ready);
+        }
+      }).catchError((Object e) {
+        if (!ctl.isClosed) ctl.addError(e);
+        _fail(BleLinkPhase.connectFailed, 'Enable notifications failed: $e');
+      }),
+    );
+    return ctl.stream;
+  }
+
+  @override
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) {
+    return _serial(
+      () => _adapter.write(
+        deviceId,
+        serviceUuid,
+        characteristicUuid,
+        value,
+        withoutResponse: withoutResponse,
+      ),
+    );
+  }
+
+  /// Reads the 16-byte FF11 status once. On demand only: never call this at
+  /// stream rate. Null if the value does not parse.
+  Future<BridgeStatus?> readBridgeStatus(String deviceId) async {
+    final bytes = await _serial(
+      () => _adapter.read(
+        deviceId,
+        wmrBridgeServiceUuid,
+        wmrBridgeStreamCharUuid,
+      ),
+    );
+    return BridgeStatus.parse(bytes);
+  }
+
+  /// MTU negotiated for the current session, or null.
+  int? negotiatedMtu(String deviceId) =>
+      _session?.deviceId == deviceId ? _session!.mtu : null;
+
+  /// PHY is not exposed by universal_ble, so it stays null. The connection
+  /// interval is only known after Android reports a parameter update.
+  @override
+  Future<BleConnectionInfo> connectionInfo(String deviceId) async {
+    final session = _session;
+    if (session == null || session.deviceId != deviceId) {
+      throw StateError('Device $deviceId is not connected');
+    }
+    int? rssi;
+    try {
+      rssi = await _adapter.readRssi(deviceId);
+    } catch (_) {}
+    return BleConnectionInfo(
+      mtu: session.mtu,
+      rssi: rssi,
+      connectionIntervalUs: _intervalUs[deviceId],
+    );
+  }
+
+  @override
+  Future<void> dispose() async {
+    await stopScan();
+    await _scanCtl?.close();
+    await _linkSub?.cancel();
+    await _paramsSub?.cancel();
+    for (final s in _valueSubs.values) {
+      await s.cancel();
+    }
+    for (final c in _streams.values) {
+      await c.close();
+    }
+    for (final c in _stateCtls.values) {
+      await c.close();
+    }
+    _valueSubs.clear();
+    _streams.clear();
+    _stateCtls.clear();
+    await _statusCtl.close();
+  }
+}

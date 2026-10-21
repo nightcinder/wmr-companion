@@ -62,6 +62,9 @@ class ControllerService {
   Future<void> start() async {
     await transport.connect(deviceId);
     await _subscription?.cancel();
+    // Sequence numbers kept advancing while we were away, so the first frame
+    // of a new subscription is a new baseline, not a gap.
+    _lastSeq.fillRange(0, _lastSeq.length, null);
     _subscription = transport
         .subscribe(deviceId, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid)
         .listen(_onNotification);
