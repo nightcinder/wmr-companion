@@ -18,7 +18,7 @@ Keep layers separate so the BLE layer can be swapped without touching the rest.
 UI (screens, widgets)
   -> State (Riverpod providers)
     -> ControllerService   (per-controller stream of ControllerState)
-      -> Protocol parser   (pure Dart: bytes -> ControllerPacket)
+      -> Protocol layer    (pure Dart: reassembler -> WMR report decoder -> fusion)
       -> BleTransport      (interface)
            -> UniversalBleTransport   (default, uses universal_ble)
            -> FakeTransport           (synthetic packets, for tests/UI dev)
@@ -48,21 +48,32 @@ wmr-companion/
       latency/      # latency test screen
   test/
   docs/PLAN.md      # this file
-  docs/PROTOCOL.md  # must mirror the ESP32 firmware
+  docs/PROTOCOL.md  # links to WMR_Bridge docs + app-side decisions
   .github/workflows/ci.yml
   CLAUDE.md
 ```
 
-## GATT protocol (PLACEHOLDER: must match firmware)
-Claude Code: **read the ESP32 firmware repo to get the real service/characteristic UUIDs and packet layout, then write them to `docs/PROTOCOL.md` and mirror in `lib/protocol/`.** Do not invent UUIDs. Proposed shape if the firmware has no definition yet:
+## GATT protocol (source of truth: the WMR_Bridge repo)
+Firmware: https://github.com/nightcinder/WMR_Bridge. Read `docs/PROTOCOL.md`, `docs/ANDROID.md`, `wmr_bridge.gatt`, `tests/test_protocol.c` and `samples/controller_frames.txt` there before writing any protocol code. Do not invent or restate layouts here; `docs/PROTOCOL.md` in this repo should link to the firmware docs and record only app-side decisions.
 
-| Characteristic | Props | Payload |
-|---|---|---|
-| Controller state (one per controller or one with an ID byte) | Notify | `seq:u16, esp_ts_us:u32, quat:4xint16 (Q15) or 4xf32, buttons:u16, axes:..., battery:u8` |
-| Latency echo | Write w/o response + Notify | `ping_id:u16` echoed straight back |
-| Config (optional) | Read/Write | rate, calibration command |
+The firmware is a **raw pipe**: it does not decode, filter or time-stamp. What the app can rely on:
+- Device name `WMR Bridge`, service `0000FF10-0000-1000-8000-00805F9B34FB`, characteristic `0000FF11-...` (notify + read). A read of FF11 returns a 16-byte status, not stream data.
+- Notifications are **fragments**: 12-byte header (magic 0x52, hand u8, sequence u32 LE, total_len u16, offset u16, chunk_len u16) plus a chunk. Reassemble per hand using the receiver rules in the firmware doc. A frame is 46 bytes: 0xA1, report ID 0x01, 44 payload bytes (the raw WMR HID input report).
+- Per-hand sequence numbers (first frame is 1). Gaps mean loss before the BLE stack; they reset only when the ESP32 reboots; compare with modular arithmetic.
+- There is **no quaternion, no ESP32 timestamp and no echo characteristic** in the stream.
+- Connection sequence (from the firmware's ANDROID.md): connect, requestMtu(247 or 517), wait for the negotiated MTU, request High connection priority, discover services, enable notifications (CCC 0x0001). Repeat all of it after every reconnect. Serialize GATT operations and do no heavy work in the notification callback. The bridge serves one phone at a time.
 
-Little-endian. Keep the packet under the negotiated MTU minus 3.
+## Decoded stream (planned, in progress in WMR_Bridge)
+WMR report decoding is being done in the ESP32 firmware (separate session with the full ESP setup), not in the app. The layout is not final. It will be fixed in WMR_Bridge `docs/PROTOCOL.md` before the app depends on it. Expected shape:
+- A new characteristic (proposed `FF12`) next to the existing raw `FF11` stream, which keeps working.
+- A version byte, per-hand sequence number, an ESP32 receive timestamp, gyro and accel in physical units, plus buttons, stick, trackpad and battery.
+- Raw IMU is sent, not a quaternion: fusion runs on the phone.
+Do not guess the layout. Until the spec lands, develop against `FakeTransport` and keep the raw FF11 path as a debug view.
+## Orientation pipeline (app side)
+1. Per-hand fragment reassembler (pure Dart port of `wmr_reassembler_push`); reuse the firmware's test vectors and sample frames.
+2. Decoded samples: the firmware decodes the HID reports (see "Decoded stream" above). The app parses the decoded format and feeds IMU samples to fusion. The raw FF11 frames stay available as a debug view.
+3. Fusion: Madgwick or Mahony filter (small pure-Dart implementation) on gyro + accel gives a quaternion per hand. Expect yaw drift; keep the "Reset orientation" button and show drift in debug mode.
+4. If no device timestamp exists, dt comes from phone arrival time, which adds jitter-induced error. Flag that in the UI.
 
 ## Debug mode (3DoF view)
 - Toggle from the controller screen or a settings switch (`debugMode` provider).
@@ -78,12 +89,13 @@ Little-endian. Keep the packet under the negotiated MTU minus 3.
 - "Reset orientation" button (zero yaw) to test drift.
 - Optional: record to CSV (`phone_ts_us, seq, esp_ts_us, quat..., buttons`) and share via the system share sheet.
 
-## Latency test screen
-1. **One-way jitter**: from the notification stream above. Never compare ESP32 timestamps to the phone clock (not synced); use only inter-arrival deltas and the sequence counter.
-2. **Round trip**: write `ping_id` to the echo characteristic, time until the echo notification returns, report p50/p99/max over N=1000 pings.
-3. Run at several ESP32 rates (e.g. 50/100/200 Hz) and show a comparison table.
-4. Export results as JSON/CSV for the write-up. If p99 is bad, we add a bare-Kotlin `BluetoothGattCallback` baseline to separate plugin overhead from radio/connection-parameter effects.
-
+## Latency and link-quality test screen
+The firmware sends no timestamps and has no echo characteristic, so true round-trip latency is not measurable yet. From the phone alone, measure:
+1. Inter-arrival time of complete frames per hand (p50 / p99 / max), against the controllers' roughly 150-180 reports per second per hand.
+2. Sequence gaps, out-of-order frames, and incomplete or abandoned frames from the reassembler. This is the "sequence-checking Android receiver" the firmware docs list as not yet provided.
+3. Negotiated MTU, requested connection priority, RSSI. Compare a run at MTU 23 (6 notifications per frame) with MTU 247 or more (one per frame).
+4. Export results as CSV/JSON.
+Real round-trip numbers need a firmware change (an echo characteristic or a device timestamp). Propose it as a WMR_Bridge issue once the numbers above show whether it is needed. If p99 jitter is bad, build a bare-Kotlin `BluetoothGattCallback` baseline to separate plugin overhead from radio and connection-parameter effects.
 ## Packages
 - `universal_ble` (BLE; maintained by Rohit, can raise issues upstream)
 - `flutter_riverpod` (state)
