@@ -23,16 +23,18 @@ Quaternion simulate(
   var truth = start;
   final n = (seconds * hz).round();
   f.update(
-      gyro: Vector3.zero,
-      accel: truth.conjugate().rotate(const Vector3(0, 0, g)),
-      dt: dt);
+    gyro: Vector3.zero,
+    accel: truth.conjugate().rotate(const Vector3(0, 0, g)),
+    dt: dt,
+  );
   for (var i = 0; i < n; i++) {
     truth = (truth * Quaternion.fromAxisAngle(rate, rate.length * dt))
         .normalized();
     f.update(
-        gyro: rate,
-        accel: truth.conjugate().rotate(const Vector3(0, 0, g)),
-        dt: dt);
+      gyro: rate,
+      accel: truth.conjugate().rotate(const Vector3(0, 0, g)),
+      dt: dt,
+    );
   }
   return truth;
 }
@@ -123,8 +125,7 @@ void main() {
       test('zero accel gives no NaN and keeps integrating gyro', () {
         f.update(gyro: Vector3.zero, accel: const Vector3(0, 0, g), dt: 0.01);
         for (var i = 0; i < 100; i++) {
-          f.update(
-              gyro: const Vector3(0, 0, 1), accel: Vector3.zero, dt: 0.01);
+          f.update(gyro: const Vector3(0, 0, 1), accel: Vector3.zero, dt: 0.01);
         }
         final q = f.orientation;
         expect(q.isFinite, isTrue);
@@ -133,12 +134,14 @@ void main() {
         expect(f.skippedUpdates, 0);
       });
 
-      test('zero accel as the very first sample does not initialize or NaN',
-          () {
-        f.update(gyro: Vector3.zero, accel: Vector3.zero, dt: 0.01);
-        expect(f.orientation.isFinite, isTrue);
-        expect(f.isInitialized, isFalse);
-      });
+      test(
+        'zero accel as the very first sample does not initialize or NaN',
+        () {
+          f.update(gyro: Vector3.zero, accel: Vector3.zero, dt: 0.01);
+          expect(f.orientation.isFinite, isTrue);
+          expect(f.isInitialized, isFalse);
+        },
+      );
 
       test('bad dt is skipped and counted', () {
         const level = Vector3(0, 0, g);
@@ -158,20 +161,25 @@ void main() {
       test('maxDt is configurable', () {
         final custom = MadgwickFilter(maxDt: 0.5);
         custom.update(
-            gyro: Vector3.zero, accel: const Vector3(0, 0, g), dt: 0.01);
+          gyro: Vector3.zero,
+          accel: const Vector3(0, 0, g),
+          dt: 0.01,
+        );
         custom.update(
-            gyro: const Vector3(0, 0, 1),
-            accel: const Vector3(0, 0, g),
-            dt: 0.3);
+          gyro: const Vector3(0, 0, 1),
+          accel: const Vector3(0, 0, g),
+          dt: 0.3,
+        );
         expect(custom.skippedUpdates, 0);
       });
 
       test('non-finite input is skipped and counted', () {
         f.update(gyro: Vector3.zero, accel: const Vector3(0, 0, g), dt: 0.01);
         f.update(
-            gyro: const Vector3(double.nan, 0, 0),
-            accel: const Vector3(0, 0, g),
-            dt: 0.01);
+          gyro: const Vector3(double.nan, 0, 0),
+          accel: const Vector3(0, 0, g),
+          dt: 0.01,
+        );
         expect(f.skippedUpdates, 1);
         expect(f.orientation.isFinite, isTrue);
       });
@@ -239,9 +247,10 @@ void main() {
       f.update(gyro: Vector3.zero, accel: const Vector3(0, 0, g), dt: 0.01);
       for (var i = 0; i < 500; i++) {
         f.update(
-            gyro: const Vector3(0.1, 0, 0),
-            accel: const Vector3(0, 0, g),
-            dt: 0.01);
+          gyro: const Vector3(0.1, 0, 0),
+          accel: const Vector3(0, 0, g),
+          dt: 0.01,
+        );
       }
       expect(f.gyroBiasEstimate.x, isNot(0));
       f.reset();

@@ -12,11 +12,7 @@ class MadgwickFilter extends OrientationFilterBase {
   /// Gradient step gain. Mutable so it can be tuned live.
   double beta;
 
-  MadgwickFilter({
-    this.beta = 0.05,
-    super.maxDt,
-    super.minAccelNorm,
-  });
+  MadgwickFilter({this.beta = 0.05, super.maxDt, super.minAccelNorm});
 
   @override
   void step(Vector3 gyro, Vector3? a, double dt) {
