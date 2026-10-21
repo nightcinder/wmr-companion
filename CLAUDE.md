@@ -11,7 +11,7 @@ Flutter companion app for ESP32 (BTstack) WMR controllers. Full plan: `docs/PLAN
 - Keep heavy work off the UI isolate or behind interfaces so it can move.
 
 ## Protocol
-- The firmware repo https://github.com/nightcinder/WMR_Bridge is the source of truth (docs/PROTOCOL.md, docs/ANDROID.md). It sends raw, fragmented 46-byte WMR HID frames with per-hand sequence numbers: no quaternion, no timestamp. The app reassembles, decodes and fuses. Do not invent UUIDs or layouts.
+- The firmware repo https://github.com/nightcinder/WMR_Bridge is the source of truth (docs/PROTOCOL.md, docs/ANDROID.md). It sends raw, fragmented 46-byte WMR HID frames with per-hand sequence numbers: no quaternion, no timestamp. Decoding is moving into the firmware (a new decoded characteristic, spec pending in WMR_Bridge docs/PROTOCOL.md); the app parses that format and fuses on the phone. Do not invent UUIDs or layouts.
 - Ask before changing the GATT protocol.
 
 ## Commands

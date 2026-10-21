@@ -63,9 +63,15 @@ The firmware is a **raw pipe**: it does not decode, filter or time-stamp. What t
 - There is **no quaternion, no ESP32 timestamp and no echo characteristic** in the stream.
 - Connection sequence (from the firmware's ANDROID.md): connect, requestMtu(247 or 517), wait for the negotiated MTU, request High connection priority, discover services, enable notifications (CCC 0x0001). Repeat all of it after every reconnect. Serialize GATT operations and do no heavy work in the notification callback. The bridge serves one phone at a time.
 
-## Orientation pipeline (done in the app)
+## Decoded stream (planned, in progress in WMR_Bridge)
+WMR report decoding is being done in the ESP32 firmware (separate session with the full ESP setup), not in the app. The layout is not final. It will be fixed in WMR_Bridge `docs/PROTOCOL.md` before the app depends on it. Expected shape:
+- A new characteristic (proposed `FF12`) next to the existing raw `FF11` stream, which keeps working.
+- A version byte, per-hand sequence number, an ESP32 receive timestamp, gyro and accel in physical units, plus buttons, stick, trackpad and battery.
+- Raw IMU is sent, not a quaternion: fusion runs on the phone.
+Do not guess the layout. Until the spec lands, develop against `FakeTransport` and keep the raw FF11 path as a debug view.
+## Orientation pipeline (app side)
 1. Per-hand fragment reassembler (pure Dart port of `wmr_reassembler_push`); reuse the firmware's test vectors and sample frames.
-2. WMR report decoder: 44 payload bytes to IMU samples (gyro, accel), buttons, thumbstick, trackpad, battery and so on, as present. Monado's WMR controller driver is the reference. Verify against `samples/controller_frames.txt` and the real controllers, document offsets in `docs/REPORT_FORMAT.md`, and mark unknown fields as unknown. Check whether the report carries a sample timestamp and prefer it for dt.
+2. Decoded samples: the firmware decodes the HID reports (see "Decoded stream" above). The app parses the decoded format and feeds IMU samples to fusion. The raw FF11 frames stay available as a debug view.
 3. Fusion: Madgwick or Mahony filter (small pure-Dart implementation) on gyro + accel gives a quaternion per hand. Expect yaw drift; keep the "Reset orientation" button and show drift in debug mode.
 4. If no device timestamp exists, dt comes from phone arrival time, which adds jitter-induced error. Flag that in the UI.
 
