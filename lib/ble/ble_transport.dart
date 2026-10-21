@@ -1,0 +1,97 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+/// A device seen during a scan.
+class BleScanResult {
+  const BleScanResult({
+    required this.deviceId,
+    required this.name,
+    required this.rssi,
+    this.serviceUuids = const [],
+  });
+
+  final String deviceId;
+  final String? name;
+  final int? rssi;
+  final List<String> serviceUuids;
+}
+
+/// A discovered GATT service and the UUIDs of its characteristics.
+class BleServiceInfo {
+  const BleServiceInfo({required this.uuid, required this.characteristicUuids});
+
+  final String uuid;
+  final List<String> characteristicUuids;
+}
+
+/// One notification, stamped with the phone's monotonic clock the moment the
+/// transport received it.
+class BleNotification {
+  const BleNotification({required this.value, required this.receivedAtUs});
+
+  final Uint8List value;
+
+  /// Microseconds on the transport's [MonotonicClock]. Only meaningful
+  /// relative to other timestamps from the same clock; never compare it with
+  /// ESP32 timestamps.
+  final int receivedAtUs;
+}
+
+enum BleConnectionState { disconnected, connecting, connected, disconnecting }
+
+/// Link parameters. Fields are null when the platform does not expose them.
+class BleConnectionInfo {
+  const BleConnectionInfo({
+    this.mtu,
+    this.rssi,
+    this.connectionIntervalUs,
+    this.phy,
+  });
+
+  final int? mtu;
+  final int? rssi;
+  final int? connectionIntervalUs;
+  final String? phy;
+}
+
+/// Monotonic microsecond clock shared by a transport and its consumers.
+class MonotonicClock {
+  MonotonicClock() : _stopwatch = Stopwatch()..start();
+
+  final Stopwatch _stopwatch;
+
+  int get nowUs => _stopwatch.elapsedMicroseconds;
+}
+
+/// BLE GATT central operations used by the app. Implementations must stamp
+/// every notification with [clock] as early as possible.
+abstract class BleTransport {
+  MonotonicClock get clock;
+
+  Stream<BleScanResult> scan({List<String> withServices = const []});
+  Future<void> stopScan();
+
+  Future<void> connect(String deviceId);
+  Future<void> disconnect(String deviceId);
+  Stream<BleConnectionState> connectionState(String deviceId);
+
+  Future<List<BleServiceInfo>> discoverServices(String deviceId);
+
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  );
+
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  });
+
+  Future<BleConnectionInfo> connectionInfo(String deviceId);
+
+  Future<void> dispose();
+}
