@@ -64,7 +64,7 @@ class DebugScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
           switch (stats) {
-            AsyncData(:final value) => _StatsTable(value, style: mono),
+            AsyncData(:final value) => StatsTable(value, style: mono),
             AsyncError(:final error) => Text('Error: $error'),
             _ => const Text('Connecting...'),
           },
@@ -77,8 +77,8 @@ class DebugScreen extends ConsumerWidget {
   static String _deg(double v) => '${v.toStringAsFixed(1).padLeft(6)}°';
 }
 
-class _StatsTable extends StatelessWidget {
-  const _StatsTable(this.stats, {this.style});
+class StatsTable extends StatelessWidget {
+  const StatsTable(this.stats, {super.key, this.style});
 
   final StreamStats stats;
   final TextStyle? style;
