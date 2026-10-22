@@ -108,7 +108,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 
 Near term:
 1. FF14 batching: firmware merged (`8f5921a`, not run on hardware); app support merged (#8). A first FF12/FF14 A/B/A with nRF Connect is recorded below (inconclusive for RIGHT because the second A drifted). Next: repeat at a recorded position, then B4/B9 with the app.
-2. LEFT's extra loss: auto latency and modem sleep off were each tried twice, interleaved with baselines (2026-10-22, user-reported): no effect shown, and the session drifted (LEFT's RSSI 5 to 10 dB weaker from run 5 on, baselines 15.4 to 25.6 %). Next: a long baseline run with nothing changed to measure the drift.
+2. LEFT's extra loss: auto latency and modem sleep off were each tried twice, interleaved with baselines (2026-10-22, user-reported): no effect shown, and the session drifted (LEFT's RSSI 5 to 10 dB weaker from run 5 on, baselines 15.4 to 25.6 %). Next: a long baseline run with nothing changed to measure the drift. That long run (user-reported) showed RIGHT's loss falling from about 20 % to about 11 % when LEFT went to sleep. Single-controller runs with the phone on FF14 at MTU 517 (user-reported, 5 to 8 min each): LEFT alone about 0.5 %, RIGHT alone about 10.8 %, both connected about 19 % each (same build and position). Working hypothesis, not proven: the two Classic links and the phone compete for the ESP32's radio. Tracked in WMR_Bridge issue #18.
 3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
 
 Then:
