@@ -47,6 +47,7 @@ const int wmrBatchedMinMtu = 61;
 /// connect; the bridge does not persist the subscription.
 const String cccDescriptorUuid = '00002902-0000-1000-8000-00805f9b34fb';
 
-/// ATT MTU to request after connecting (docs/ANDROID.md). The negotiated
-/// value may be lower.
-const int wmrRequestedMtu = 247;
+/// ATT MTU to request after connecting (docs/ANDROID.md): 517 is the largest
+/// ATT MTU, and with it an FF14 batch holds up to 9 records. The negotiated
+/// value may be lower; the app uses what the stack reports.
+const int wmrRequestedMtu = 517;
