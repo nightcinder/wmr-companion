@@ -9,6 +9,8 @@ import '../../domain/orientation.dart';
 import '../../services/controller_service.dart';
 import '../connect/connect_providers.dart';
 import '../gamepad/gamepad_screen.dart';
+import '../../ble/fake_wmr_bridge.dart';
+import 'config_panel.dart';
 import 'debug_providers.dart';
 import 'orientation_painter.dart';
 import 'stream_settings.dart';
@@ -160,6 +162,17 @@ class DebugScreen extends ConsumerWidget {
               DecodedStatsView(view.stats, selectedHand: hand, style: mono)
           else
             _rawStats(ref, mono),
+          const SizedBox(height: 16),
+          ConfigPanel(
+            key: ValueKey('${source.name}$hand'),
+            transport: source == DebugSource.fake
+                ? ref.watch(transportProvider)
+                : ref.watch(realTransportProvider),
+            deviceId: source == DebugSource.fake
+                ? fakeBridgeDeviceId
+                : ref.watch(realDeviceProvider).deviceId,
+            hand: hand,
+          ),
           const SizedBox(height: 8),
           const AxisSettingsPanel(),
         ],

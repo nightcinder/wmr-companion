@@ -97,7 +97,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Stick rest offset (RIGHT y about 0.148 at rest): dead zone / learned centre | App follow-up (in progress) |
 | Missing-report definition differs between app and firmware | App follow-up (in progress) |
 | Yaw drifts (no magnetometer); gyro bias estimated from the first stationary second | Known limitation |
-| FF13 controller calibration blob | Firmware merged (WMR_Bridge #16, #17); both blocks read to READY on a bench run (user-reported). App: client, CRC check, de-obfuscation and JSON parsing built and unit tested with synthetic data, never run against the bridge; the Monado XOR key table is not in the repo; calibration not applied to the fusion ([PROTOCOL.md](PROTOCOL.md) "FF13 config block in the app") |
+| FF13 controller calibration blob | Firmware merged (WMR_Bridge #16, #17); both blocks read to READY on a bench run (user-reported). App: client, CRC check, de-obfuscation and JSON parsing built and unit tested with synthetic data, a "Read config" button on the debug screen shows the decoded sensors, never run against the bridge; the Monado XOR key table is not in the repo; calibration not applied to the fusion ([PROTOCOL.md](PROTOCOL.md) "FF13 config block in the app") |
 | Round trip over FF15: first distribution on a phone (min, p50, p95, max over a few hundred pings) | Latency screen; one 24 ms turnaround seen in nRF Connect (user-reported), no distribution yet |
 | Controller discovery by name instead of compiled-in addresses | Firmware merged (WMR_Bridge #14); checks D1-D11 reported as passed by the project owner (user-reported, 2026-10-22, no output pasted) |
 | No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
