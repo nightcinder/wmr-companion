@@ -199,10 +199,13 @@ the bridge, and no real block has been de-obfuscated or parsed.**
 Not done, deliberately:
 
 - **The XOR key table is not in this repository.** It is Monado's
-  `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0). The
-  decoder takes it as an argument; tests use a synthetic key. Adding the real
-  table needs a decision on how to ship it (asset with Monado's notice, or a
-  fetch script), and it could not be fetched from the build container.
+  `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0) and is
+  fetched, not committed: run `dart run tool/fetch_wmr_config_key.dart` once
+  (or `--file` with a downloaded header); it writes the gitignored
+  `assets/monado/wmr_config_key.bin`, which the app bundles on the next build.
+  `loadConfigKey` reports a missing or wrong-size key as a status, never an
+  exception. The decoder takes the key as an argument; tests use a synthetic
+  one.
 - **Nothing calls the client yet** (no UI, no service wiring), and calibration
   is **not applied** to the fusion. Applying it needs the pose composition from
   Monado's `wmr_config_precompute_transforms`, which should be taken from that

@@ -25,3 +25,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # Holds only .gitkeep in git; tool/fetch_wmr_config_key.dart adds the key.
+    - assets/monado/
