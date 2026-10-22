@@ -6,6 +6,7 @@ import '../capture/capture_screen.dart';
 import '../../services/controller_service.dart';
 import '../debug/debug_providers.dart';
 import '../debug/debug_screen.dart';
+import '../latency/latency_screen.dart';
 import 'connect_providers.dart';
 
 enum _Source { fake, real }
@@ -63,6 +64,15 @@ class _FakePanel extends StatelessWidget {
             context,
           ).push(MaterialPageRoute<void>(builder: (_) => const DebugScreen())),
           child: const Text('Open 3D debug view'),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.tonal(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const LatencyScreen(source: DebugSource.fake),
+            ),
+          ),
+          child: const Text('Latency test'),
         ),
       ],
     );
@@ -142,6 +152,15 @@ class RealPanel extends ConsumerWidget {
                   ),
                 ),
                 child: const Text('Open 3D debug view'),
+              ),
+            if (s.connected)
+              FilledButton.tonal(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const LatencyScreen(),
+                  ),
+                ),
+                child: const Text('Latency test'),
               ),
           ],
         ),
