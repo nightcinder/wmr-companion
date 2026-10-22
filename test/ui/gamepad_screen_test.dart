@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion/domain/gamepad.dart';
+import 'package:wmr_companion/hid/hid_gamepad_transport.dart';
+import 'package:wmr_companion/hid/hid_output.dart';
 import 'package:wmr_companion/protocol/decoded_record.dart';
 import 'package:wmr_companion/services/controller_service.dart';
 import 'package:wmr_companion/ui/debug/debug_providers.dart';
 import 'package:wmr_companion/ui/debug/stream_settings.dart';
 import 'package:wmr_companion/ui/gamepad/gamepad_providers.dart';
 import 'package:wmr_companion/ui/gamepad/gamepad_screen.dart';
+
+import '../hid/fake_hid.dart';
 
 void tall(WidgetTester tester) {
   tester.view.physicalSize = const Size(900, 3200);
@@ -87,5 +91,39 @@ void main() {
     expect(find.textContaining('Needs the decoded stream'), findsOneWidget);
     expect(find.text('LEFT (no data)'), findsOneWidget);
     expect(find.text('RIGHT (no data)'), findsOneWidget);
+  });
+
+  testWidgets('HID panel shows the state and starts the output', (
+    tester,
+  ) async {
+    tall(tester);
+    final hid = FakeHid();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          hidTransportProvider.overrideWithValue(hid),
+          gamepadInputsProvider.overrideWith(
+            (ref, source) => const Stream.empty(),
+          ),
+        ],
+        child: const MaterialApp(home: GamepadScreen()),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Not available on this device'), findsNothing);
+    expect(find.byType(HidOutputPanel), findsOneWidget);
+
+    await tester.tap(find.text('Bluetooth HID output'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+    await tester.pump();
+    expect(hid.calls, contains('start'));
+    expect(find.text('Stop'), findsOneWidget);
+    expect(find.text('PC'), findsOneWidget); // paired host listed
+
+    hid.emit(const HidStatus(HidState.connected, deviceName: 'PC'));
+    await tester.pump();
+    expect(find.text('Connected to PC'), findsOneWidget);
+    expect(find.text('Disconnect'), findsOneWidget);
   });
 }

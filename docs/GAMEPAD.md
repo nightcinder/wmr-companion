@@ -1,6 +1,6 @@
 # Gamepad mapping
 
-Status: in-app mapping layer and debug screen built; **not run on hardware**. Nothing leaves the app: no other app, OS or device sees a gamepad yet. The options for that are at the end and need a decision.
+Status: in-app mapping layer, debug screen and a Bluetooth HID output (option A below, chosen by the project owner) are built; **none of it has been run on hardware or on a phone**. CI only builds and unit-tests it.
 
 ## Where it sits
 
@@ -58,9 +58,27 @@ Settings are not saved between app runs yet.
 4. Click the trackpad top, bottom, left, right: Up/Down/Left/Right on LEFT, Y/A/X/B on RIGHT. If up and down swap, toggle "Invert trackpad Y".
 5. Tilt to the right stick: lean the ring top right gives +x, tip it away gives +y.
 
-## Making it a real gamepad (decision needed, not built)
+## Bluetooth HID output (option A, built, untested)
 
-The in-app layer is the common first step for every option below; each one only adds an output stage that sends `GamepadState` somewhere.
+The phone registers as a Bluetooth HID gamepad with Android's `BluetoothHidDevice` (Android 9+) and sends one input report whenever the mapped state changes.
+
+- `lib/hid/hid_report.dart` (pure Dart): report descriptor and `encodeHidReport`. Report ID 1, 9 bytes: 16 button bits (order `hidButtonOrder`, A first), hat switch from the d-pad (0..7 clockwise from up, 15 centred), left stick X/Y and right stick X/Y as signed -127..127 (HID Y is positive down, so the model's y is negated), left/right trigger as Brake/Accelerator 0..255.
+- `lib/hid/hid_gamepad_transport.dart`: `HidGamepadTransport` interface and the method/event-channel implementation. Without the Android plugin it reports `unsupported`.
+- `lib/hid/hid_output.dart`: `HidOutput` subscribes to the service's decoded samples (not the 30 Hz screen provider), maps both hands with the live settings and sends when the encoded bytes change. A new host gets the current state on connect.
+- `android/.../HidGamepadPlugin.kt`: permission request (BLUETOOTH_CONNECT), profile proxy, `registerApp`, connection state, `sendReport`, paired devices, discoverable request. `MainActivity` wires it up.
+- UI: "Bluetooth HID output" section on the Gamepad screen: Start/Stop, Make discoverable, paired devices with Connect, Disconnect, reports sent / errors.
+
+Limits: reports go out only while the app is open and started (no background service); after reconnecting to the bridge, Stop and Start again; one host at a time; button naming depends on the host.
+
+To check on a phone and host (not yet run):
+1. Start; Android asks for the Bluetooth permission. If it says the HID profile is unavailable, that phone does not support it (some vendors do not).
+2. Make discoverable, pair from the host's Bluetooth settings, or tap Connect on an already paired host. The status line shows "Connected to <host>".
+3. On the host open a gamepad tester: press each controller button, move sticks, pull triggers, click the trackpad. Note which host button each one lands on, and report stick directions that are inverted.
+4. Check the latency by feel and report whether input stalls while the app is in the foreground.
+
+## Options considered
+
+All options share the in-app layer; each only adds an output stage that sends `GamepadState` somewhere. Option A was chosen; the rest are not built.
 
 | Option | What it is | Reaches | Needs | Main risks |
 |---|---|---|---|---|
