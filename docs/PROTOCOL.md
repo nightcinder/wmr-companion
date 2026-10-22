@@ -218,17 +218,29 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
 - A `dt` above 100 ms skips that filter step (`largeDtSkips`) and restarts the
   gyro-bias window. A `dt` of a few periods (lost reports) is integrated with
   its real value.
-- **Missing reports** are counted from the tick deltas: each delta spans
-  `round(delta / period)` report periods, so that minus one are missing. The
-  period is the **10th percentile** of the last 256 deltas, after 32 deltas
-  (earlier deltas are settled then). The task asked for the median; the median
-  is a multiple of the true period once a link loses about half the reports
-  (the measured LEFT case), which would hide the loss, and a lower quartile
-  still failed on an irregular 50 % pattern in a test. This relies on the
-  controller's own timer being regular, which is not established. The count
-  is shown next to the sequence-gap count: sequence gaps only see reports lost
-  after the ESP32 numbered them, the tick count also sees reports lost on the
-  controller link.
+- **Missing reports** use the **firmware's definition**, so the app's number
+  and the bridge's `dev_missing` (LINKLOG / `link:` line, WMR_Bridge
+  `docs/COUNTERS.md`) mean the same thing. Read from `src/wmr_devloss.c`,
+  `docs/COUNTERS.md`, `docs/DECODING.md` and `tools/analyze_capture.py`
+  (`device_loss`) on `main`: each delta between consecutive reports spans
+  `round(delta / period)` periods, so that minus one are missing; `period` is
+  the **median of the deltas not longer than 1.5x the 10th-percentile delta**
+  (`sorted[n / 10]`), over a sliding window of the last 256 deltas, refreshed
+  every 32 deltas. Nothing is counted until 16 deltas exist (they are then
+  counted retroactively); a zero delta is ignored; a delta over 5 s is not
+  counted as missing (`longGaps`). This replaces the earlier app rule (plain
+  10th-percentile period, 32-delta warm-up), which sat at the low end of the
+  jitter and so differed from the firmware's nominal period (the firmware's
+  own write-up quotes 4.98 ms for the missing percentages). The reason for
+  following the firmware: the two numbers can then be compared directly. The
+  app resets its window on a timer discontinuity (the firmware resets on a
+  Classic reconnect); that is the one deliberate difference. Same limit as
+  the firmware: perfectly uniform loss looks like a slower controller. The
+  count is shown next to the sequence-gap count, which is unchanged: sequence
+  gaps only see reports lost after the ESP32 numbered them, the tick count
+  also sees reports lost on the controller link. The nominal period in use is
+  shown per hand on the debug screen. Like the rest of this section, the
+  counter has not been compared against a live bridge.
 - `tick/clock` (controller ticks at 100 ns over ESP32 `rx_time_us`) is shown as
   a check of the unverified 100 ns unit; about 1.0 if it is right.
 

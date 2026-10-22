@@ -314,6 +314,10 @@ class DecodedStatsView extends StatelessWidget {
         style: style,
       ),
       Text(
+        '  nominal period ${s.periodTicks == null ? '-' : '${(s.periodTicks! * 1e-4).toStringAsFixed(2)} ms (${s.periodTicks} ticks)'}',
+        style: style,
+      ),
+      Text(
         '  dt p50 ${_ms(s.dt.p50)} ms  p95 ${_ms(s.dt.p95)} ms  '
         'max ${_ms(s.dt.max)} ms',
         style: style,
