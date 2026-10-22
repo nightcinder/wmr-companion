@@ -347,7 +347,7 @@ version 1 records (oldest first, both hands mixed), length exactly
   reported as for FF12.
 - **MTU.** FF14 needs at least 61 (FF12 needs 59), so `mtuTooSmall` fires at
   59 and 60 on FF14 only. The app requests MTU 517, which allows up to 9
-  records per batch (247 would allow 4); not run on hardware yet.
+  records per batch (247 would allow 4). The 2026-10-22 round-trip run recorded MTU 517 (user-reported).
 - **Stats.** `DecodedStats` adds `batches`, `batchRecords`, `batchMean`,
   `batchMax` and `batchErrors`; the debug panel shows them as
   `FF14 batches  mean  max  rejected` while FF14 is active.
