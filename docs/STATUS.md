@@ -35,7 +35,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
 | - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
 | - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | In review; tests only, not run on hardware. Firmware FF14 not run on hardware either |
-| 4 | Latency screen and CSV export | Not done. Inter-arrival, gaps and loss figures exist in the debug panel; no export, no true round trip (needs firmware issue #1) |
+| 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from FF12 `rx_time_us`), CSV + JSON export ([LATENCY.md](LATENCY.md)). No true round trip (needs firmware issue #1) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS build, then gamepad-style mapping | Not started |
 
@@ -82,7 +82,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Missing-report definition differs between app and firmware | App follow-up (in progress) |
 | Yaw drifts (no magnetometer); gyro bias estimated from the first stationary second | Known limitation |
 | FF13 controller calibration blob | Design only, not implemented |
-| Echo characteristic or device timestamp for true latency | WMR_Bridge issue #1 |
+| Echo characteristic for true round-trip latency (the app's latency screen measures one-way delay variation only) | WMR_Bridge issue #1 |
 | Controller discovery by name instead of compiled-in addresses | WMR_Bridge issue #2 |
 | No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
 | `universal_ble` gaps (PHY, connection interval readout) to raise upstream | [PROTOCOL.md](PROTOCOL.md) "universal_ble coverage" |
@@ -96,7 +96,7 @@ Near term:
 3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
 
 Then:
-4. Latency test screen with CSV/JSON export (milestone 4); firmware echo/timestamp (issue #1) for true round trip.
+4. Latency runs on hardware with the latency screen (milestone 4, built); firmware echo (issue #1) for true round trip.
 5. Calibration (FF13 or phone side), fusion tuning, optional magnetometer-free yaw handling.
 6. Controller discovery by name (issue #2), bridge security.
 7. iOS build; gamepad-style mapping (buttons, stick, trackpad, 3DoF pose to input).
@@ -108,6 +108,7 @@ Then:
 | Plan and architecture rules | [PLAN.md](PLAN.md), `CLAUDE.md` |
 | App-side protocol decisions, FF12 in the app, axis mapping | [PROTOCOL.md](PROTOCOL.md) |
 | Raw capture format and screen | [CAPTURE.md](CAPTURE.md) |
+| Latency screen, CSV/JSON export format | [LATENCY.md](LATENCY.md) |
 | Firmware wire protocol (source of truth) | WMR_Bridge `docs/PROTOCOL.md` |
 | Decoding, timing, loss investigation, unknowns | WMR_Bridge `docs/DECODING.md` |
 | Firmware counters and log lines | WMR_Bridge `docs/COUNTERS.md` |

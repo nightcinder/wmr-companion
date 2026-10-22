@@ -1,0 +1,178 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_companion/ble/ble_transport.dart';
+import 'package:wmr_companion/ble/fake_transport.dart';
+import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
+import 'package:wmr_companion/domain/hand_pipeline.dart';
+import 'package:wmr_companion/protocol/wmr_fragment.dart';
+import 'package:wmr_companion/services/controller_service.dart';
+import 'package:wmr_companion/services/latency_files.dart';
+import 'package:wmr_companion/ui/debug/debug_providers.dart';
+import 'package:wmr_companion/ui/latency/latency_providers.dart';
+
+class _Clock implements MonotonicClock {
+  int now = 5000000;
+
+  @override
+  int get nowUs => now;
+}
+
+void main() {
+  late Directory dir;
+  late _Clock clock;
+  late ProviderContainer container;
+  final shared = <SavedLatencyRun>[];
+
+  LatencyController controller() =>
+      container.read(latencyControllerProvider.notifier);
+  LatencyState state() => container.read(latencyControllerProvider);
+
+  Future<void> until(bool Function() test) async {
+    for (var i = 0; i < 500 && !test(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+    }
+    expect(test(), isTrue);
+  }
+
+  void setUpContainer(Future<LatencyInput?> Function(DebugSource) input) {
+    container = ProviderContainer(
+      overrides: [
+        latencyInputProvider.overrideWithValue(input),
+        latencyStoreProvider.overrideWith(
+          (ref) => LatencyStore(Directory('${dir.path}/latency')),
+        ),
+        latencyTickProvider.overrideWithValue(const Duration(milliseconds: 1)),
+        shareLatencyProvider.overrideWithValue((r) async => shared.add(r)),
+      ],
+    );
+    container.listen(latencyControllerProvider, (_, _) {});
+  }
+
+  setUp(() {
+    dir = Directory.systemTemp.createTempSync('latency_ui');
+    clock = _Clock();
+    shared.clear();
+  });
+
+  tearDown(() {
+    container.dispose();
+    dir.deleteSync(recursive: true);
+  });
+
+  test('a run on the fake bridge FF12 stream measures and saves', () async {
+    final transport = FakeTransport(
+      devices: const [fakeBridgeDevice],
+      clock: clock,
+    );
+    final service = ControllerService(
+      transport,
+      fakeBridgeDeviceId,
+      mode: StreamMode.decoded,
+    );
+    await service.start();
+    addTearDown(() async {
+      await service.dispose();
+      await transport.dispose();
+    });
+    // LEFT report 30 is lost (the fake bridge still consumes its sequence
+    // number), so both the sequence and the ticks show one missing.
+    final bridge = FakeWmrBridge(
+      transport,
+      dropRecord: (hand, seq) => hand == wmrHandLeft && seq == 30,
+    );
+    setUpContainer((_) async => LatencyInput.fromService(service));
+
+    controller().selectDuration(null);
+    await controller().start(DebugSource.fake);
+    expect(state().stage, LatencyStage.running);
+
+    for (var i = 0; i < 100; i++) {
+      clock.now += 10000;
+      bridge.tick();
+    }
+    await Future<void>.delayed(Duration.zero);
+    await controller().stop();
+
+    expect(state().stage, LatencyStage.finished);
+    final report = state().report!;
+    expect(report.stream, 'decoded');
+    expect(report.link.mtu, isNotNull);
+    expect(report.durationUs, 1000000);
+    final left = report.hands[wmrHandLeft];
+    final right = report.hands[wmrHandRight];
+    expect(left.records, 99);
+    expect(left.sequenceGaps, 1);
+    expect(left.missingFromTicks, 1);
+    expect(left.periodUs, 10000);
+    expect(right.records, 100);
+    expect(right.missingFromTicks, 0);
+    expect(right.interArrival.p50, 10000);
+    expect(right.delay!.max, 0);
+
+    final saved = state().saved!;
+    final csv = File(saved.csvPath).readAsLinesSync();
+    expect(csv.first, startsWith('hand,sequence,arrival_us'));
+    expect(csv, hasLength(1 + 199));
+    expect(File(saved.jsonPath).readAsStringSync(), contains('"LEFT"'));
+    expect(state().runs.map((r) => r.csvPath), [saved.csvPath]);
+
+    await controller().share(saved);
+    expect(shared, [saved]);
+
+    controller().reset();
+    expect(state().stage, LatencyStage.idle);
+    expect(state().runs, hasLength(1));
+  });
+
+  test('a timed run stops by itself; raw frames are counted', () async {
+    final frames = StreamController<ReceivedFrame>.broadcast();
+    addTearDown(frames.close);
+    var incomplete = 0;
+    setUpContainer(
+      (_) async => LatencyInput(
+        frames: frames.stream,
+        samples: const Stream<DecodedSample>.empty(),
+        modeChanges: const Stream<ModeState>.empty(),
+        clock: clock,
+        stream: 'raw',
+        linkInfo: () async => const BleConnectionInfo(mtu: 23, rssi: -70),
+        counters: () => {'incomplete_frames': incomplete},
+      ),
+    );
+
+    controller().selectDuration(30);
+    await controller().start(DebugSource.real);
+    for (var seq = 1; seq <= 10; seq++) {
+      clock.now += 5000;
+      frames.add(
+        ReceivedFrame(syntheticFrame(wmrHandRight, seq * 2), clock.now),
+      );
+    }
+    incomplete = 3;
+    await Future<void>.delayed(Duration.zero);
+    expect(state().stage, LatencyStage.running);
+
+    clock.now += 30000000;
+    await until(() => state().stage == LatencyStage.finished);
+    final report = state().report!;
+    expect(report.stream, 'raw');
+    expect(report.link.mtu, 23);
+    expect(report.link.rssiEnd, -70);
+    expect(report.counters, {'incomplete_frames': 3});
+    final right = report.hands[wmrHandRight];
+    expect(right.records, 10);
+    expect(right.sequenceGaps, 9);
+    expect(right.missingFromTicks, isNull);
+    expect(state().saved, isNotNull);
+  });
+
+  test('no connection: an error, no run', () async {
+    setUpContainer((_) async => null);
+    await controller().start(DebugSource.real);
+    expect(state().stage, LatencyStage.idle);
+    expect(state().error, 'Not connected to the bridge.');
+  });
+}

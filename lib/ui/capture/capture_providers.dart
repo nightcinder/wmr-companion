@@ -149,8 +149,11 @@ class CaptureController extends Notifier<CaptureState> {
     return const CaptureState();
   }
 
+  /// Also runs from [build] a turn later, so the notifier may be gone.
   Future<void> refreshSaved() async {
+    if (!ref.mounted) return;
     final store = await ref.read(captureStoreProvider.future);
+    if (!ref.mounted) return;
     state = state.copyWith(saved: store.list());
   }
 

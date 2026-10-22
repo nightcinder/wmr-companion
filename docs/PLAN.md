@@ -48,7 +48,7 @@ wmr-companion/
       controller/   # live controller view (buttons, axes, battery)
       debug/        # 3DoF view + stats panel + stream settings
       capture/      # guided raw capture (FF11)
-      latency/      # latency test screen (not built yet)
+      latency/      # latency test screen and CSV/JSON export (docs/LATENCY.md)
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
   test/
   docs/STATUS.md    # current state and roadmap
@@ -95,7 +95,7 @@ WMR report decoding is done in the ESP32 firmware, not in the app. The layout is
 - Optional: record to CSV (`phone_ts_us, seq, esp_ts_us, quat..., buttons`) and share via the system share sheet.
 
 ## Latency and link-quality test screen
-The firmware sends no timestamps and has no echo characteristic, so true round-trip latency is not measurable yet. From the phone alone, measure:
+Built; see [LATENCY.md](LATENCY.md). The firmware has no echo characteristic, so true round-trip latency is not measurable yet; FF12's `rx_time_us` gives one-way delay variation. From the phone alone, measure:
 1. Inter-arrival time of complete frames per hand (p50 / p99 / max), against the controllers' roughly 150-180 reports per second per hand.
 2. Sequence gaps, out-of-order frames, and incomplete or abandoned frames from the reassembler. This is the "sequence-checking Android receiver" the firmware docs list as not yet provided.
 3. Negotiated MTU, requested connection priority, RSSI. Compare a run at MTU 23 (6 notifications per frame) with MTU 247 or more (one per frame).
