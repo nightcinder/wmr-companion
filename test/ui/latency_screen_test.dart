@@ -1,9 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_companion/ble/fake_transport.dart';
+import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
 import 'package:wmr_companion/protocol/echo.dart';
 import 'package:wmr_companion/protocol/wmr_fragment.dart';
+import 'package:wmr_companion/services/controller_service.dart';
 import 'package:wmr_companion/services/echo_client.dart';
+import 'package:wmr_companion/services/latency_files.dart';
 import 'package:wmr_companion/services/latency_recorder.dart';
+import 'package:wmr_companion/ui/debug/debug_providers.dart';
+import 'package:wmr_companion/ui/latency/latency_providers.dart';
 import 'package:wmr_companion/ui/latency/latency_screen.dart';
 
 void main() {
@@ -78,5 +87,103 @@ void main() {
     );
     expect(find.textContaining('max 24.0'), findsOneWidget);
     expect(find.textContaining('queue depth max 2'), findsOneWidget);
+  });
+
+  testWidgets('no-stream report says so and shows no stream figures', (
+    tester,
+  ) async {
+    final r = LatencyRecorder(
+      started: DateTime(2026, 10, 22),
+      originUs: 0,
+      stream: 'none',
+    );
+    r.addEcho(
+      EchoSample(
+        t1Us: 250000,
+        t1DoneUs: 250100,
+        t4Us: 260300,
+        answer: const EchoAnswer(
+          pingId: 1,
+          rxTimeUs: 1000000,
+          turnaroundUs: 300,
+          queueDepth: 0,
+        ),
+      ),
+    );
+    final report = r.report(nowUs: 500000, echoIntervalUs: 50000);
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: LatencyReportView(report))),
+    );
+    expect(find.text('Stream: no stream'), findsOneWidget);
+    expect(find.textContaining('FF11, FF12 and FF14 were off'), findsOneWidget);
+    expect(find.text('LEFT'), findsNothing);
+    expect(find.text('RIGHT'), findsNothing);
+    expect(find.text('Round trip (FF15)'), findsOneWidget);
+  });
+
+  testWidgets('stream selector applies a choice through the service', (
+    tester,
+  ) async {
+    final dir = Directory.systemTemp.createTempSync('latency_screen');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final transport = FakeTransport(devices: const [fakeBridgeDevice]);
+    final service = ControllerService(
+      transport,
+      fakeBridgeDeviceId,
+      mode: StreamMode.decoded,
+    );
+    await service.start();
+    FakeWmrBridge(transport);
+    addTearDown(() async {
+      await service.dispose();
+      await transport.dispose();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          controllerServiceProvider(DebugSource.fake)
+              .overrideWithValue(service),
+          latencyInputProvider.overrideWithValue(
+            (_) async => LatencyInput.fromService(service),
+          ),
+          latencyStoreProvider.overrideWith(
+            (ref) => LatencyStore(
+              Directory('${dir.path}${Platform.pathSeparator}latency'),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: LatencyScreen(source: DebugSource.fake)),
+      ),
+    );
+    await tester.pump();
+
+    for (final label in ['None', 'FF11 raw', 'FF12 decoded', 'FF14 batched']) {
+      expect(find.text(label), findsOneWidget);
+    }
+
+    await tester.tap(find.text('None'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    expect(service.mode, StreamMode.none);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'None'))
+          .selected,
+      isTrue,
+    );
+
+    await tester.tap(find.text('FF11 raw'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    expect(service.mode, StreamMode.raw);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'FF11 raw'))
+          .selected,
+      isTrue,
+    );
+    // Let the controller's first-run bookkeeping finish.
+    await tester.pumpAndSettle();
   });
 }
