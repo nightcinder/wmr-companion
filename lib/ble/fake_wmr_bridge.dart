@@ -7,6 +7,7 @@ import '../domain/orientation.dart';
 import '../domain/synthetic_motion.dart';
 import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
+import '../protocol/echo.dart';
 import '../protocol/gatt.dart';
 import '../protocol/wmr_fragment.dart';
 import 'ble_transport.dart';
@@ -25,6 +26,7 @@ const FakeDevice fakeBridgeDevice = FakeDevice(
         wmrBridgeStreamCharUuid,
         wmrBridgeDecodedCharUuid,
         wmrBridgeBatchedCharUuid,
+        wmrBridgeEchoCharUuid,
       ],
     ),
   ],
@@ -78,6 +80,12 @@ WmrFrame syntheticFrame(int hand, int sequence, {int length = 46}) {
 /// [batchMaxCount] records for [attMtu] are queued, or when the oldest queued
 /// record has waited [batchHold] (one connection interval on the bridge).
 /// Records of both hands share a batch, oldest first.
+///
+/// FF15: a valid 4-byte write while FF15 is subscribed is answered with a
+/// 20-byte answer after [echoDelay] (zero: inside the write call, so a test
+/// that moves its clock in a wrapped `onWrite` controls the round trip).
+/// [echoTurnaround] is what the answer reports; [echoEnabled] false makes
+/// the bridge ignore pings, like a bridge without the answer.
 class FakeWmrBridge {
   FakeWmrBridge(
     this.transport, {
@@ -89,7 +97,12 @@ class FakeWmrBridge {
     List<int>? startTicks,
     this.espBootUs = 1000000,
     this.batchHold = const Duration(milliseconds: 15),
-  }) : _ticks = List.of(startTicks ?? const [1000, 1000]);
+    this.echoDelay = Duration.zero,
+    this.echoTurnaround = const Duration(microseconds: 300),
+    this.echoEnabled = true,
+  }) : _ticks = List.of(startTicks ?? const [1000, 1000]) {
+    transport.onWrite = _onWrite;
+  }
 
   final FakeTransport transport;
   final String deviceId;
@@ -105,6 +118,43 @@ class FakeWmrBridge {
 
   /// How long the oldest record may wait for its FF14 batch.
   final Duration batchHold;
+
+  final Duration echoDelay;
+  final Duration echoTurnaround;
+  bool echoEnabled;
+
+  /// FF15 answers sent so far.
+  int echoesSent = 0;
+
+  void _onWrite(FakeWrite w) {
+    if (!echoEnabled ||
+        w.deviceId != deviceId ||
+        w.characteristicUuid.toLowerCase() != wmrBridgeEchoCharUuid ||
+        w.value.length != wmrEchoRequestSize ||
+        w.value[0] != wmrEchoVersion ||
+        !transport.isSubscribed(deviceId, wmrBridgeEchoCharUuid)) {
+      return;
+    }
+    final answer = encodeEchoAnswer(
+      EchoAnswer(
+        pingId: ByteData.sublistView(w.value).getUint16(2, Endian.little),
+        rxTimeUs: espBootUs + _elapsedUs,
+        turnaroundUs: echoTurnaround.inMicroseconds,
+        queueDepth: 0,
+      ),
+    );
+    void send() {
+      if (transport.emit(deviceId, wmrBridgeEchoCharUuid, answer)) {
+        echoesSent++;
+      }
+    }
+
+    if (echoDelay == Duration.zero) {
+      send();
+    } else {
+      Timer(echoDelay, send);
+    }
+  }
 
   final List<int> _sequence = List.filled(wmrNumControllers, 0);
   final List<int> _ticks;

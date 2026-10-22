@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../ble/ble_transport.dart';
 import '../../domain/hand_pipeline.dart';
 import '../../services/controller_service.dart';
+import '../../services/echo_client.dart';
 import '../../services/latency_files.dart';
 import '../../services/latency_recorder.dart';
 import '../connect/connect_providers.dart';
@@ -25,6 +26,7 @@ class LatencyInput {
     required this.linkInfo,
     required this.counters,
     this.priorityRequested,
+    this.echoFactory,
   });
 
   final Stream<ReceivedFrame> frames;
@@ -42,6 +44,10 @@ class LatencyInput {
   final Map<String, int> Function() counters;
   final bool? priorityRequested;
 
+  /// Makes the FF15 echo client for this connection; null when there is none
+  /// (nothing to ping).
+  final EchoClient Function(Duration timeout)? echoFactory;
+
   static LatencyInput fromService(
     ControllerService service, {
     bool? priorityRequested,
@@ -53,6 +59,8 @@ class LatencyInput {
       clock: service.transport.clock,
       stream: service.mode.name,
       priorityRequested: priorityRequested,
+      echoFactory: (timeout) =>
+          EchoClient(service.transport, service.deviceId, timeout: timeout),
       linkInfo: () async {
         try {
           return await service.transport.connectionInfo(service.deviceId);
@@ -104,15 +112,20 @@ final latencyStoreProvider = FutureProvider<LatencyStore>((ref) async {
   );
 });
 
-/// Opens the system share sheet for a run's CSV and JSON.
+/// Opens the system share sheet for a run's files (CSV, JSON, echo CSV).
 final shareLatencyProvider =
     Provider<Future<void> Function(SavedLatencyRun run)>((ref) {
       return (run) async {
         await SharePlus.instance.share(
           ShareParams(
             files: [
-              XFile(run.csvPath, mimeType: 'text/csv'),
-              XFile(run.jsonPath, mimeType: 'application/json'),
+              for (final p in run.paths)
+                XFile(
+                  p,
+                  mimeType: p.endsWith('.json')
+                      ? 'application/json'
+                      : 'text/csv',
+                ),
             ],
           ),
         );
@@ -121,6 +134,17 @@ final shareLatencyProvider =
 
 /// How often the live figures refresh while a run goes.
 final latencyTickProvider = Provider<Duration>(
+  (ref) => const Duration(seconds: 1),
+);
+
+/// Time between echo pings. One is outstanding at a time; a tick that finds
+/// the previous ping still waiting does nothing.
+final echoIntervalProvider = Provider<Duration>(
+  (ref) => const Duration(milliseconds: 250),
+);
+
+/// Wait for an echo answer before counting the ping as lost.
+final echoTimeoutProvider = Provider<Duration>(
   (ref) => const Duration(seconds: 1),
 );
 
@@ -138,6 +162,8 @@ class LatencyState {
     this.saved,
     this.runs = const [],
     this.error,
+    this.echoEnabled = true,
+    this.echoNote,
   });
 
   final LatencyStage stage;
@@ -154,6 +180,12 @@ class LatencyState {
   final List<SavedLatencyRun> runs;
   final String? error;
 
+  /// Whether the next run pings the FF15 echo.
+  final bool echoEnabled;
+
+  /// Why a run goes without a round trip, when echo was asked for.
+  final String? echoNote;
+
   LatencyState copyWith({
     LatencyStage? stage,
     int? Function()? durationSeconds,
@@ -163,6 +195,8 @@ class LatencyState {
     List<SavedLatencyRun>? runs,
     String? error,
     bool clearError = false,
+    bool? echoEnabled,
+    String? Function()? echoNote,
   }) {
     return LatencyState(
       stage: stage ?? this.stage,
@@ -174,6 +208,8 @@ class LatencyState {
       saved: saved ?? this.saved,
       runs: runs ?? this.runs,
       error: clearError ? null : (error ?? this.error),
+      echoEnabled: echoEnabled ?? this.echoEnabled,
+      echoNote: echoNote != null ? echoNote() : this.echoNote,
     );
   }
 }
@@ -191,11 +227,15 @@ class LatencyController extends Notifier<LatencyState> {
   Map<String, int> _countersAtStart = const {};
   final List<StreamSubscription<Object?>> _subs = [];
   Timer? _timer;
+  Timer? _echoTimer;
+  EchoClient? _echo;
 
   @override
   LatencyState build() {
     ref.onDispose(() {
       _timer?.cancel();
+      _echoTimer?.cancel();
+      _echo?.dispose();
       for (final s in _subs) {
         s.cancel();
       }
@@ -215,6 +255,11 @@ class LatencyController extends Notifier<LatencyState> {
   void selectDuration(int? seconds) {
     if (state.stage == LatencyStage.running) return;
     state = state.copyWith(durationSeconds: () => seconds);
+  }
+
+  void setEchoEnabled(bool on) {
+    if (state.stage == LatencyStage.running) return;
+    state = state.copyWith(echoEnabled: on, echoNote: () => null);
   }
 
   Future<void> start(DebugSource source) async {
@@ -239,6 +284,26 @@ class LatencyController extends Notifier<LatencyState> {
       originUs: input.clock.nowUs,
       stream: input.stream,
     );
+    String? note;
+    final factory = input.echoFactory;
+    if (state.echoEnabled && factory != null) {
+      final echo = _echo = factory(ref.read(echoTimeoutProvider));
+      if (await echo.start()) {
+        recorder.useEcho();
+        _echoTimer = Timer.periodic(
+          ref.read(echoIntervalProvider),
+          (_) => unawaited(_pingOnce(recorder, echo)),
+        );
+      } else {
+        _echo = null;
+        note = echo.support == EchoSupport.unsupported
+            ? 'This bridge has no FF15 echo (firmware older than WMR_Bridge '
+                  '#13): running without a round trip.'
+            : 'Echo setup failed (${echo.lastError}): running without a '
+                  'round trip.';
+        unawaited(echo.dispose());
+      }
+    }
     _subs
       ..add(
         input.frames.listen(
@@ -267,9 +332,32 @@ class LatencyController extends Notifier<LatencyState> {
       durationSeconds: state.durationSeconds,
       report: _report(),
       runs: state.runs,
+      echoEnabled: state.echoEnabled,
+      echoNote: note,
     );
     _timer?.cancel();
     _timer = Timer.periodic(ref.read(latencyTickProvider), (_) => _tick());
+  }
+
+  Future<void> _pingOnce(LatencyRecorder recorder, EchoClient echo) async {
+    if (echo.busy) return;
+    final r = await echo.ping();
+    // The run may have ended while the ping was out.
+    if (!identical(recorder, _recorder)) return;
+    final sample = r.sample;
+    if (sample != null) {
+      recorder.addEcho(sample);
+      return;
+    }
+    switch (r.failure!) {
+      case EchoFailure.timeout:
+        recorder.addEchoTimeout();
+      case EchoFailure.writeFailed:
+        recorder.addEchoFailure();
+      case EchoFailure.busy:
+      case EchoFailure.cancelled:
+        break;
+    }
   }
 
   void _tick() {
@@ -294,16 +382,28 @@ class LatencyController extends Notifier<LatencyState> {
     };
   }
 
-  LatencyReport _report() => _recorder!.report(
-    nowUs: _input!.clock.nowUs,
-    link: _link,
-    counters: _counterGrowth(),
-  );
+  LatencyReport _report() {
+    final echo = _echo;
+    return _recorder!.report(
+      nowUs: _input!.clock.nowUs,
+      link: _link,
+      counters: _counterGrowth(),
+      echoCounters: echo == null
+          ? const {}
+          : {
+              'late_or_duplicate_answers': echo.stale,
+              'bad_answers': echo.badAnswers,
+              'pings_skipped_busy': echo.skipped,
+            },
+    );
+  }
 
   /// Ends the run and saves the CSV and JSON.
   Future<void> stop() async {
     if (state.stage != LatencyStage.running) return;
     _timer?.cancel();
+    _echoTimer?.cancel();
+    _echoTimer = null;
     for (final s in _subs) {
       await s.cancel();
     }
@@ -313,6 +413,9 @@ class LatencyController extends Notifier<LatencyState> {
     final info = await input.linkInfo();
     _link = _link.withEnd(rssiEnd: info?.rssi);
     final report = _report();
+    final echo = _echo;
+    _echo = null;
+    await echo?.dispose();
     final elapsed = report.durationUs ~/ Duration.microsecondsPerSecond;
     _recorder = null;
     _input = null;
@@ -343,6 +446,7 @@ class LatencyController extends Notifier<LatencyState> {
     state = LatencyState(
       durationSeconds: state.durationSeconds,
       runs: state.runs,
+      echoEnabled: state.echoEnabled,
     );
   }
 

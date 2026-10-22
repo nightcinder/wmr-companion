@@ -1,8 +1,9 @@
 /// Link timing measured on the phone: inter-arrival, sequence gaps, loss from
 /// device ticks and one-way delay variation, plus the CSV/JSON export.
 ///
-/// Pure Dart. There is no true round trip: that needs an echo from the bridge
-/// (WMR_Bridge issue #1). What is measured instead:
+/// Pure Dart. A round trip is measured only when the caller feeds echo samples
+/// ([LatencyRecorder.addEcho], from the bridge's FF15 echo); otherwise the
+/// report says it was not measured. From the streams alone:
 ///
 /// - Inter-arrival of distinct phone arrival times per hand. Records that share
 ///   one notification (batching) count once.
@@ -20,9 +21,13 @@ import 'dart:convert';
 
 import '../domain/tick_timer.dart';
 import '../protocol/wmr_fragment.dart';
+import 'echo_client.dart';
 
 const String latencyFormatName = 'wmr-latency';
-const int latencyFormatVersion = 1;
+
+/// Version 2: `round_trip` is an object (`measured` plus the figures) instead
+/// of a string.
+const int latencyFormatVersion = 2;
 
 /// Inter-arrival above this counts as a stall.
 const int latencyStallUs = 50000;
@@ -35,8 +40,10 @@ const int latencyDelayWindowUs = 10000000;
 class UsPercentiles {
   const UsPercentiles({
     this.count = 0,
+    this.min = 0,
     this.p50 = 0,
     this.p90 = 0,
+    this.p95 = 0,
     this.p99 = 0,
     this.max = 0,
   });
@@ -47,23 +54,29 @@ class UsPercentiles {
     int at(double q) => sorted[(q * (sorted.length - 1)).round()];
     return UsPercentiles(
       count: sorted.length,
+      min: sorted.first,
       p50: at(0.5),
       p90: at(0.9),
+      p95: at(0.95),
       p99: at(0.99),
       max: sorted.last,
     );
   }
 
   final int count;
+  final int min;
   final int p50;
   final int p90;
+  final int p95;
   final int p99;
   final int max;
 
   Map<String, Object> toJson() => {
     'count': count,
+    'min_us': min,
     'p50_us': p50,
     'p90_us': p90,
+    'p95_us': p95,
     'p99_us': p99,
     'max_us': max,
   };
@@ -201,6 +214,55 @@ class LatencyHandSummary {
   };
 }
 
+/// Round-trip figures of a run, from the FF15 echo.
+class EchoSummary {
+  const EchoSummary({
+    this.answered = 0,
+    this.timeouts = 0,
+    this.failedWrites = 0,
+    this.rtt = const UsPercentiles(),
+    this.endToEnd = const UsPercentiles(),
+    this.turnaround = const UsPercentiles(),
+    this.maxQueueDepth = 0,
+    this.counters = const {},
+  });
+
+  final int answered;
+  final int timeouts;
+  final int failedWrites;
+
+  /// `(t4 - t1) - turnaround`: see [EchoSample.rttUs].
+  final UsPercentiles rtt;
+
+  /// `t4 - t1`: write call to notification, what the app sees.
+  final UsPercentiles endToEnd;
+
+  /// Time the answer waited on the ESP32.
+  final UsPercentiles turnaround;
+
+  /// Largest stream backlog the answers skipped.
+  final int maxQueueDepth;
+
+  /// Client counters (late answers, bad answers, pings skipped), by name.
+  final Map<String, int> counters;
+
+  int get sent => answered + timeouts + failedWrites;
+
+  Map<String, Object?> toJson() => {
+    'measured': true,
+    'source': 'FF15 echo',
+    'sent': sent,
+    'answered': answered,
+    'timeouts': timeouts,
+    'failed_writes': failedWrites,
+    'rtt': rtt.toJson(),
+    'end_to_end': endToEnd.toJson(),
+    'turnaround': turnaround.toJson(),
+    'max_queue_depth': maxQueueDepth,
+    'counters': counters,
+  };
+}
+
 /// A finished (or in-progress) run.
 class LatencyReport {
   const LatencyReport({
@@ -212,6 +274,7 @@ class LatencyReport {
     this.counters = const {},
     this.rowsDropped = 0,
     this.modeChanged = false,
+    this.echo,
   });
 
   final DateTime started;
@@ -234,6 +297,9 @@ class LatencyReport {
   /// streams.
   final bool modeChanged;
 
+  /// Null when no echo was used: the round trip was not measured.
+  final EchoSummary? echo;
+
   Map<String, Object?> toJson() => {
     'format': latencyFormatName,
     'version': latencyFormatVersion,
@@ -241,7 +307,12 @@ class LatencyReport {
     'started': started.toIso8601String(),
     'stream': stream,
     'duration_us': durationUs,
-    'round_trip': 'not measured: needs WMR_Bridge issue #1 (echo)',
+    'round_trip':
+        echo?.toJson() ??
+        {
+          'measured': false,
+          'reason': 'echo not used (needs the FF15 echo, WMR_Bridge #13)',
+        },
     'link': link.toJson(),
     'counters': counters,
     'rows_dropped': rowsDropped,
@@ -301,6 +372,35 @@ class LatencyRow {
   ].join(',');
 }
 
+/// One answered echo, as written to the echo CSV. Phone times are relative to
+/// the start of the run; ESP32 times are raw.
+class EchoRow {
+  const EchoRow(this.sample, this.originUs);
+
+  final EchoSample sample;
+  final int originUs;
+
+  static const String csvHeader =
+      'ping_id,t1_us,t1_done_us,t4_us,end_to_end_us,esp_rx_us,turnaround_us,'
+      'rtt_us,queue_depth,clock_offset_us';
+
+  String toCsv() {
+    final s = sample;
+    return [
+      s.pingId,
+      s.t1Us - originUs,
+      s.t1DoneUs - originUs,
+      s.t4Us - originUs,
+      s.endToEndUs,
+      s.answer.rxTimeUs,
+      s.answer.turnaroundUs,
+      s.rttUs,
+      s.answer.queueDepth,
+      s.offsetUs,
+    ].join(',');
+  }
+}
+
 class _HandState {
   int records = 0;
   int arrivals = 0;
@@ -358,10 +458,41 @@ class LatencyRecorder {
     for (var h = 0; h < wmrNumControllers; h++) _HandState(),
   ];
   final List<LatencyRow> _rows = [];
+  final List<EchoRow> _echoRows = [];
+  int _echoTimeouts = 0;
+  int _echoFailed = 0;
+  bool _echoUsed = false;
   int _rowsDropped = 0;
   bool _modeChanged = false;
 
   List<LatencyRow> get rows => List.unmodifiable(_rows);
+  List<EchoRow> get echoRows => List.unmodifiable(_echoRows);
+
+  /// True once any echo result was fed in, so the report has a round-trip
+  /// section (and the export an echo file) even when every ping timed out.
+  bool get echoUsed => _echoUsed;
+
+  /// Declares that echo pings are part of this run.
+  void useEcho() => _echoUsed = true;
+
+  /// An answered ping.
+  void addEcho(EchoSample sample) {
+    _echoUsed = true;
+    _echoRows.add(EchoRow(sample, originUs));
+  }
+
+  /// A ping that got no answer within the timeout.
+  void addEchoTimeout() {
+    _echoUsed = true;
+    _echoTimeouts++;
+  }
+
+  /// A ping whose write failed.
+  void addEchoFailure() {
+    _echoUsed = true;
+    _echoFailed++;
+  }
+
   int get rowsDropped => _rowsDropped;
 
   /// Call when the service switched streams during the run.
@@ -476,8 +607,10 @@ class LatencyRecorder {
     required int nowUs,
     LatencyLink link = const LatencyLink(),
     Map<String, int> counters = const {},
+    Map<String, int> echoCounters = const {},
   }) {
     return LatencyReport(
+      echo: _echoUsed ? _echoSummary(echoCounters) : null,
       started: started,
       stream: stream,
       durationUs: nowUs - originUs,
@@ -488,6 +621,26 @@ class LatencyRecorder {
       hands: [
         for (var h = 0; h < wmrNumControllers; h++) _summary(h, _hands[h]),
       ],
+    );
+  }
+
+  EchoSummary _echoSummary(Map<String, int> counters) {
+    final samples = [for (final r in _echoRows) r.sample];
+    var maxQueue = 0;
+    for (final s in samples) {
+      if (s.answer.queueDepth > maxQueue) maxQueue = s.answer.queueDepth;
+    }
+    return EchoSummary(
+      answered: samples.length,
+      timeouts: _echoTimeouts,
+      failedWrites: _echoFailed,
+      rtt: UsPercentiles.of([for (final s in samples) s.rttUs]),
+      endToEnd: UsPercentiles.of([for (final s in samples) s.endToEndUs]),
+      turnaround: UsPercentiles.of([
+        for (final s in samples) s.answer.turnaroundUs,
+      ]),
+      maxQueueDepth: maxQueue,
+      counters: counters,
     );
   }
 
@@ -521,6 +674,17 @@ class LatencyRecorder {
   String toCsv() {
     final b = StringBuffer(LatencyRow.csvHeader)..write('\n');
     for (final r in _rows) {
+      b
+        ..write(r.toCsv())
+        ..write('\n');
+    }
+    return b.toString();
+  }
+
+  /// The answered pings with a header line.
+  String toEchoCsv() {
+    final b = StringBuffer(EchoRow.csvHeader)..write('\n');
+    for (final r in _echoRows) {
       b
         ..write(r.toCsv())
         ..write('\n');

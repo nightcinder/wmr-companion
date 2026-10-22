@@ -35,7 +35,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
 | - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
 | - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8); tests only, the app has not been run against FF14 on hardware. Firmware FF14 was run with nRF Connect (see the A/B/A below) |
-| 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from FF12 `rx_time_us`), CSV + JSON export ([LATENCY.md](LATENCY.md)). No true round trip (needs firmware issue #1) |
+| 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from `rx_time_us`), and round trip over the FF15 echo, CSV + JSON export ([LATENCY.md](LATENCY.md)). Firmware FF15 merged (WMR_Bridge #13), also not run on hardware |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer, Gamepad screen and Bluetooth HID output (phone as a gamepad) built, not run on hardware or on a phone ([GAMEPAD.md](GAMEPAD.md)) |
 
@@ -98,7 +98,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Missing-report definition differs between app and firmware | App follow-up (in progress) |
 | Yaw drifts (no magnetometer); gyro bias estimated from the first stationary second | Known limitation |
 | FF13 controller calibration blob | Design only, not implemented |
-| Echo characteristic for true round-trip latency (the app's latency screen measures one-way delay variation only) | WMR_Bridge issue #1 |
+| Round trip over FF15: first distribution on a phone (min, p50, p95, max over a few hundred pings) | Latency screen; one 24 ms turnaround seen in nRF Connect (user-reported), no distribution yet |
 | Controller discovery by name instead of compiled-in addresses | WMR_Bridge issue #2 |
 | No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
 | `universal_ble` gaps (PHY, connection interval readout) to raise upstream | [PROTOCOL.md](PROTOCOL.md) "universal_ble coverage" |
@@ -112,7 +112,7 @@ Near term:
 3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
 
 Then:
-4. Latency runs on hardware with the latency screen (milestone 4, built); firmware echo (issue #1) for true round trip.
+4. Latency runs on hardware with the latency screen (milestone 4, built); round trip over FF15 now in the latency screen.
 5. Calibration (FF13 or phone side), fusion tuning, optional magnetometer-free yaw handling.
 6. Controller discovery by name (issue #2), bridge security.
 7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then try the Bluetooth HID output on a phone and a host (GAMEPAD.md checklist).

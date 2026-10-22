@@ -2,9 +2,24 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_companion/protocol/echo.dart';
 import 'package:wmr_companion/protocol/wmr_fragment.dart';
+import 'package:wmr_companion/services/echo_client.dart';
 import 'package:wmr_companion/services/latency_files.dart';
 import 'package:wmr_companion/services/latency_recorder.dart';
+
+EchoSample _echo(int id, {required int t1, int rtt = 8000, int queue = 0}) =>
+    EchoSample(
+      t1Us: t1,
+      t1DoneUs: t1 + 200,
+      t4Us: t1 + rtt + 300,
+      answer: EchoAnswer(
+        pingId: id,
+        rxTimeUs: 9000000 + id * 1000,
+        turnaroundUs: 300,
+        queueDepth: queue,
+      ),
+    );
 
 LatencyRecorder _recorder({int maxRows = 250000}) => LatencyRecorder(
   started: DateTime(2026, 10, 22, 13, 5, 9),
@@ -18,7 +33,9 @@ void main() {
     test('nearest rank over sorted values', () {
       final p = UsPercentiles.of([for (var i = 100; i >= 1; i--) i * 10]);
       expect(p.count, 100);
+      expect(p.min, 10);
       expect(p.p50, 510); // index round(0.5 * 99) = 50
+      expect(p.p95, 950);
       expect(p.p90, 900);
       expect(p.p99, 990);
       expect(p.max, 1000);
@@ -198,11 +215,14 @@ void main() {
       );
       final json = jsonDecode(rep.toJsonString()) as Map<String, Object?>;
       expect(json['format'], 'wmr-latency');
-      expect(json['version'], 1);
+      expect(json['version'], 2);
       expect(json['stream'], 'decoded');
       expect(json['duration_us'], 2000000);
       expect(json['mode_changed'], true);
-      expect(json['round_trip'], contains('issue #1'));
+      expect(json['round_trip'], {
+        'measured': false,
+        'reason': 'echo not used (needs the FF15 echo, WMR_Bridge #13)',
+      });
       expect(json['counters'], {'incomplete_frames': 2});
       expect(json['link'], {
         'mtu': 517,
@@ -237,6 +257,103 @@ void main() {
       File('${dir.path}/latency/latency-20261022-120000.csv')
           .writeAsStringSync('x');
       expect(store.list().map((s) => s.name), ['latency-20261022-130509']);
+    });
+  });
+
+  group('round trip', () {
+    test('summary, JSON and echo CSV', () {
+      final r = _recorder();
+      r.addEcho(_echo(1, t1: 1100000, rtt: 6000));
+      r.addEcho(_echo(2, t1: 1350000, rtt: 8000, queue: 3));
+      r.addEcho(_echo(3, t1: 1600000, rtt: 20000));
+      r.addEchoTimeout();
+      r.addEchoFailure();
+      final rep = r.report(
+        nowUs: 2000000,
+        echoCounters: const {'late_or_duplicate_answers': 1},
+      );
+      final e = rep.echo!;
+      expect(e.answered, 3);
+      expect(e.sent, 5);
+      expect(e.timeouts, 1);
+      expect(e.failedWrites, 1);
+      expect(e.rtt.min, 6000);
+      expect(e.rtt.p50, 8000);
+      expect(e.rtt.p95, 20000);
+      expect(e.rtt.max, 20000);
+      expect(e.endToEnd.max, 20300);
+      expect(e.turnaround.p50, 300);
+      expect(e.maxQueueDepth, 3);
+
+      final json = jsonDecode(rep.toJsonString()) as Map<String, Object?>;
+      final rt = json['round_trip'] as Map<String, Object?>;
+      expect(rt['measured'], true);
+      expect(rt['source'], 'FF15 echo');
+      expect(rt['sent'], 5);
+      expect((rt['rtt'] as Map)['p50_us'], 8000);
+      expect(rt['counters'], {'late_or_duplicate_answers': 1});
+
+      final lines = r.toEchoCsv().split('\n');
+      expect(
+        lines.first,
+        'ping_id,t1_us,t1_done_us,t4_us,end_to_end_us,esp_rx_us,'
+        'turnaround_us,rtt_us,queue_depth,clock_offset_us',
+      );
+      // Phone times are relative to the run start (1000000).
+      expect(lines[1].split(',').take(9).toList(), [
+        '1',
+        '100000',
+        '100200',
+        '106300',
+        '6300',
+        '9001000',
+        '300',
+        '6000',
+        '0',
+      ]);
+      expect(lines, hasLength(5)); // header, 3 rows, trailing newline
+    });
+
+    test('without echo the report says it was not measured', () {
+      final r = _recorder()..addFrame(wmrHandLeft, 1, 1000000);
+      expect(r.echoUsed, isFalse);
+      expect(r.report(nowUs: 2000000).echo, isNull);
+    });
+
+    test('all pings timing out still gives a round-trip section', () {
+      final r = _recorder()..useEcho();
+      r.addEchoTimeout();
+      final e = r.report(nowUs: 2000000).echo!;
+      expect(e.answered, 0);
+      expect(e.timeouts, 1);
+      expect(e.rtt.count, 0);
+    });
+
+    test('store writes the echo CSV only for runs that used echo', () async {
+      final dir = Directory.systemTemp.createTempSync('latency_echo');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final store = LatencyStore(Directory('${dir.path}/latency'));
+      final plain = _recorder()..addFrame(wmrHandLeft, 1, 1000000);
+      final a = await store.save(plain, plain.report(nowUs: 2000000));
+      expect(a.echoCsvPath, isNull);
+      expect(a.paths, [a.csvPath, a.jsonPath]);
+
+      final withEcho = LatencyRecorder(
+        started: DateTime(2026, 10, 22, 14),
+        originUs: 1000000,
+        stream: 'decoded',
+      )..addEcho(_echo(1, t1: 1100000));
+      final b = await store.save(withEcho, withEcho.report(nowUs: 2000000));
+      expect(b.echoCsvPath, endsWith('latency-20261022-140000-echo.csv'));
+      expect(File(b.echoCsvPath!).readAsStringSync(), startsWith('ping_id,'));
+
+      final listed = store.list();
+      expect(listed.map((r) => r.name), [
+        'latency-20261022-140000',
+        'latency-20261022-130509',
+      ]);
+      expect(listed.first.echoCsvPath, b.echoCsvPath);
+      expect(listed.last.echoCsvPath, isNull);
     });
   });
 }

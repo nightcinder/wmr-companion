@@ -66,7 +66,7 @@ The firmware is a **raw pipe**: it does not decode, filter or time-stamp. What t
 - Device name `WMR Bridge`, service `0000FF10-0000-1000-8000-00805F9B34FB`, characteristic `0000FF11-...` (notify + read). A read of FF11 returns a 16-byte status, not stream data.
 - Notifications are **fragments**: 12-byte header (magic 0x52, hand u8, sequence u32 LE, total_len u16, offset u16, chunk_len u16) plus a chunk. Reassemble per hand using the receiver rules in the firmware doc. A frame is 46 bytes: 0xA1, report ID 0x01, 44 payload bytes (the raw WMR HID input report).
 - Per-hand sequence numbers (first frame is 1). Gaps mean loss before the BLE stack; they reset only when the ESP32 reboots; compare with modular arithmetic.
-- There is **no quaternion, no ESP32 timestamp and no echo characteristic** in the stream.
+- There is **no quaternion and no ESP32 timestamp** in the raw FF11 stream (FF12/FF14 records carry `rx_time_us`). Round trip is measured over the separate FF15 echo characteristic (WMR_Bridge #13).
 - Connection sequence (from the firmware's ANDROID.md): connect, requestMtu(247 or 517), wait for the negotiated MTU, request High connection priority, discover services, enable notifications (CCC 0x0001). Repeat all of it after every reconnect. Serialize GATT operations and do no heavy work in the notification callback. The bridge serves one phone at a time.
 
 ## Decoded stream (implemented: FF12; planned: FF14 batching)
@@ -96,12 +96,12 @@ WMR report decoding is done in the ESP32 firmware, not in the app. The layout is
 - Optional: record to CSV (`phone_ts_us, seq, esp_ts_us, quat..., buttons`) and share via the system share sheet.
 
 ## Latency and link-quality test screen
-Built; see [LATENCY.md](LATENCY.md). The firmware has no echo characteristic, so true round-trip latency is not measurable yet; FF12's `rx_time_us` gives one-way delay variation. From the phone alone, measure:
+Built; see [LATENCY.md](LATENCY.md). Round trip uses the firmware's FF15 echo; FF12's `rx_time_us` gives one-way delay variation. From the phone alone, measure:
 1. Inter-arrival time of complete frames per hand (p50 / p99 / max), against the controllers' roughly 150-180 reports per second per hand.
 2. Sequence gaps, out-of-order frames, and incomplete or abandoned frames from the reassembler. This is the "sequence-checking Android receiver" the firmware docs list as not yet provided.
 3. Negotiated MTU, requested connection priority, RSSI. Compare a run at MTU 23 (6 notifications per frame) with MTU 247 or more (one per frame).
 4. Export results as CSV/JSON.
-Real round-trip numbers need a firmware change (an echo characteristic or a device timestamp). Propose it as a WMR_Bridge issue once the numbers above show whether it is needed. If p99 jitter is bad, build a bare-Kotlin `BluetoothGattCallback` baseline to separate plugin overhead from radio and connection-parameter effects.
+Round trip comes from the FF15 echo (WMR_Bridge #13, merged, not run on hardware). If p99 jitter is bad, build a bare-Kotlin `BluetoothGattCallback` baseline to separate plugin overhead from radio and connection-parameter effects.
 ## Packages
 - `universal_ble` (BLE; maintained by Rohit, can raise issues upstream)
 - `flutter_riverpod` (state)
