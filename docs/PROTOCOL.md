@@ -39,8 +39,9 @@ the exact notifications the ESP32 sends.
   `sequenceDelta`: delta > 1 adds `delta - 1` to `gaps`; delta <= 0 counts as
   `outOfOrder` (duplicate, reorder, or ESP32 reboot). The first frame after
   subscribing sets the baseline and is not counted as a gap.
-- **Requested MTU** 247 (`wmrRequestedMtu`). The app must use the negotiated
-  value it gets back.
+- **Requested MTU** 517 (`wmrRequestedMtu`), on every connect. The app must
+  use the negotiated value it gets back. Not verified on hardware: Android 14+
+  drives the MTU itself, so the result may differ from the request.
 - **Reconnects.** `ControllerService.start()` must run again after every
   reconnect (the bridge forgets subscription, MTU and priority).
 - **Frame payload.** FF11 frames stay undecoded and feed the Capture screen
@@ -72,7 +73,7 @@ scan filter, permission prompts, reconnects and the interval callback.
 - `BleAdapter` (`lib/ble/ble_adapter.dart`) is the thin interface over the
   package; `UniversalBleAdapter` is the only file that imports
   `universal_ble`.
-- `connect()` runs: permissions, radio state, link, `requestMtu(247)` (record
+- `connect()` runs: permissions, radio state, link, `requestMtu(517)` (record
   the result), high priority if supported, service discovery, check for
   FF10/FF11. `subscribe()` then enables notifications; it is queued behind
   the setup, so it cannot run before the MTU result. All steps go through one
@@ -148,7 +149,7 @@ a hand above 1.
 - Sequence numbers are shared across the two streams; a switch shows up as a
   gap (frames received while unsubscribed), not a reset.
 - **Minimum ATT MTU 59.** Below it nothing is sent on FF12 and each report is
-  discarded (`mtu_skip`). The app requests 247 and shows a fault when the
+  discarded (`mtu_skip`). The app requests 517 and shows a fault when the
   negotiated MTU is below 59.
 
 ### Timing
@@ -309,8 +310,8 @@ version 1 records (oldest first, both hands mixed), length exactly
   six orders (`test/ble/stream_mode_transport_test.dart`). ATT `0x80` is
   reported as for FF12.
 - **MTU.** FF14 needs at least 61 (FF12 needs 59), so `mtuTooSmall` fires at
-  59 and 60 on FF14 only. The app still requests MTU 247, which allows at
-  most 4 records per batch; 9 needs MTU 517.
+  59 and 60 on FF14 only. The app requests MTU 517, which allows up to 9
+  records per batch (247 would allow 4); not run on hardware yet.
 - **Stats.** `DecodedStats` adds `batches`, `batchRecords`, `batchMean`,
   `batchMax` and `batchErrors`; the debug panel shows them as
   `FF14 batches  mean  max  rejected` while FF14 is active.

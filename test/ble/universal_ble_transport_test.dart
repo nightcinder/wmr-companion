@@ -23,7 +23,7 @@ class StepClock extends MonotonicClock {
 const id = fakeBridgeDeviceId;
 const sequence = [
   'connect',
-  'requestMtu 247',
+  'requestMtu 517',
   'mtuResult 185',
   'priorityHigh',
   'discoverServices',
@@ -84,7 +84,7 @@ void main() {
       t.subscribe(id, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid);
       await pump();
 
-      expect(adapter.calls, ['connect', 'requestMtu 247']);
+      expect(adapter.calls, ['connect', 'requestMtu 517']);
 
       adapter.mtuGate!.complete();
       await connected;
@@ -155,7 +155,7 @@ void main() {
 
       expect(adapter.calls, [
         'connect',
-        'requestMtu 247',
+        'requestMtu 517',
         'mtuResult 247',
         'priorityHigh',
         'discoverServices',
