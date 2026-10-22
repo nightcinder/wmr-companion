@@ -88,3 +88,90 @@ scan filter, permission prompts, reconnects and the interval callback.
   `connectionLost`.
 - Open question: the package's connect has its own 60 s default timeout and
   the command queue a 10 s default for other steps; neither was tuned.
+
+## FF12 decoded stream
+
+**Firmware status: not verified on hardware.** Read (read-only) from WMR_Bridge
+PR 5, branch `ff12-decoded-stream`, head `8fcb6a1`: `docs/PROTOCOL.md`,
+`docs/DECODING.md`, `src/wmr_decoded.{h,c}`, `src/wmr_decode.c`,
+`src/wmr_stream_mode.h`, `tests/test_protocol.c`. While this app was being
+written the PR was merged into WMR_Bridge `main` (merge commit `a0cba83`);
+the spec text on `main` matches. The firmware's own text still says it is
+host-tested and built but never run on hardware, and the app side has never
+seen a real FF12 notification either. Everything below is the spec as
+written, not a measurement. If the firmware changes, update
+`lib/protocol/decoded_record.dart`, its test and this section together.
+
+| Item | UUID | Properties |
+| --- | --- | --- |
+| Characteristic | `0000FF12-0000-1000-8000-00805F9B34FB` | notify only, in service FF10; no read value |
+
+### Record (version 1)
+
+One notification is one complete sample, exactly **56 bytes**, no
+fragmentation. Little-endian; floats are IEEE 754 binary32.
+
+| Offset | Size | Field | Meaning |
+| --- | --- | --- | --- |
+| 0 | u8 | `version` | `1`; ignore records with another version |
+| 1 | u8 | `hand` | 0 LEFT, 1 RIGHT |
+| 2 | u8 | `flags` | bit0 `CALIBRATED`, always 0 in version 1 |
+| 3 | u8 | `buttons` | bit0 stick click, 1 home, 2 menu, 3 squeeze, 4 trackpad click, 5 BT pairing, 6 trackpad touch |
+| 4 | u32 | `sequence` | same per-hand number as the raw FF11 frame it came from |
+| 8 | u64 | `rx_time_us` | ESP32 `esp_timer_get_time()` at receipt; diagnostics only |
+| 16 | u32 | `device_ticks` | controller timer, 100 ns/tick, wraps at 2^32; the sensor clock |
+| 20 | 3 x f32 | `gyro` | rad/s, uncalibrated, raw sensor axes |
+| 32 | 3 x f32 | `accel` | m/s^2 (about 10.0-10.1 at rest, not 9.81), uncalibrated, raw sensor axes |
+| 44 | i16 | `temperature_raw` | scale not established |
+| 46 | 2 x i16 | `stick` x, y | -32767..32767 |
+| 50 | 2 x i16 | `trackpad` x, y | -32767..32767, 0 when untouched |
+| 54 | u8 | `trigger` | 0..255 |
+| 55 | u8 | `battery` | raw, scale not established |
+
+Golden bytes: `decoded_golden` in the firmware's `tests/test_protocol.c`; the
+same array is in `test/protocol/decoded_record_test.dart`, so firmware and app
+are checked against identical bytes. Parser: `parseDecodedRecord`. It rejects,
+like `wmr_decoded_unpack`, any length other than 56, a version other than 1 and
+a hand above 1.
+
+### Subscription
+
+- FF11 and FF12 are **mutually exclusive**. While one CCC is enabled, a write
+  that would enable the other fails with ATT application error `0x80`. To
+  switch, write `0x0000` to the active CCC first, then enable the other.
+- CCC state is per connection and resets on disconnect, so after every
+  reconnect the app enables the wanted stream from scratch.
+- Sequence numbers are shared across the two streams; a switch shows up as a
+  gap (frames received while unsubscribed), not a reset.
+- **Minimum ATT MTU 59.** Below it nothing is sent on FF12 and each report is
+  discarded (`mtu_skip`). The app requests 247 and shows a fault when the
+  negotiated MTU is below 59.
+
+### Timing
+
+- `dt` comes from `device_ticks`: `(ticks - prev) mod 2^32` ticks of 100 ns,
+  valid while consecutive samples of one hand are less than 429.5 s apart.
+  Ticks keep counting through lost reports, so a sequence gap is not a
+  discontinuity and a larger `dt` is the true elapsed time.
+- The 100 ns unit is from Monado's code only, **not measured**.
+- The two hands have unrelated tick origins; never subtract across hands.
+- Discontinuity rule from the spec: compare `dt_ticks * 100 ns` with
+  `delta(rx_time_us) * 1000 ns`; if they differ by more than about 100 ms,
+  reset the filter for that hand (it is not known whether the timer restarts
+  when a controller reconnects).
+
+### Axes and units
+
+`src/wmr_decode.c` applies no axis remapping: gyro and accel are the three
+signed 24-bit words in report order, scaled (gyro `* 1e-5` rad/s, accel `/
+49000`, Monado's factors), so the FF12 axes are the same sensor axes that
+`tools/analyze_capture.py` reports from raw frames. Directions and signs of
+those axes are **unverified** in the firmware's own docs
+(`DECODING.md`, "Unknown"). Gyro scale in a real rotation is unconfirmed too.
+
+### Not in this app yet
+
+FF13 (controller config block: mix matrix, bias, pose) is a design only in the
+firmware docs. The app uses the uncalibrated values, estimates the gyro bias
+itself and ignores `temperature_raw`, `stick`, `trackpad`, `trigger` and
+`battery` apart from parsing them.
