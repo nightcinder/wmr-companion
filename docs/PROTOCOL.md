@@ -176,10 +176,39 @@ those axes are **unverified** in the firmware's own docs
 
 ### Not in this app yet
 
-FF13 (controller config block: mix matrix, bias, pose) is a design only in the
-firmware docs. The app uses the uncalibrated values, estimates the gyro bias
-itself and ignores `temperature_raw`, `trackpad`, `trigger` and `battery`
-apart from parsing them. `stick` is normalized (see "Stick centre").
+The app does not apply calibration. The uncalibrated values are used, the gyro
+bias is estimated by the app, and `temperature_raw`, `trackpad`, `trigger` and
+`battery` are ignored apart from parsing them. `stick` is normalized (see "Stick centre").
+
+## FF13 config block in the app
+
+Layout: WMR_Bridge `docs/PROTOCOL.md` "Controller config block, FF13"
+(approved 2026-10-22). Firmware merged (WMR_Bridge #17); both controllers'
+blocks read to READY on a bench run (user-reported: LEFT 7147 bytes crc32
+`8bc13223`, RIGHT 7148 bytes `75e8ab85`). **The app side has never run against
+the bridge, and no real block has been de-obfuscated or parsed.**
+
+| Piece | File |
+| --- | --- |
+| Wire format, CRC-32, cursor, golden bytes (cross-checked with the firmware's C code) | `lib/protocol/config_block.dart` |
+| De-obfuscation (skip 2 bytes, XOR `key[i % 1024]`) and JSON to calibration | `lib/protocol/config_decode.dart` |
+| Reads a hand's blob in 496-byte windows, checks CRC, polls while READING | `lib/services/config_client.dart` |
+| GATT read on the transport | `BleTransport.read` |
+| FF13 in the fake bridge | `FakeWmrBridge(configBlobs: ...)` |
+
+Not done, deliberately:
+
+- **The XOR key table is not in this repository.** It is Monado's
+  `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0). The
+  decoder takes it as an argument; tests use a synthetic key. Adding the real
+  table needs a decision on how to ship it (asset with Monado's notice, or a
+  fetch script), and it could not be fetched from the build container.
+- **Nothing calls the client yet** (no UI, no service wiring), and calibration
+  is **not applied** to the fusion. Applying it needs the pose composition from
+  Monado's `wmr_config_precompute_transforms`, which should be taken from that
+  function, not re-derived.
+- The JSON field names come from the firmware docs (from Monado); the real
+  document has not been seen.
 
 ## FF12 in the app
 

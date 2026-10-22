@@ -65,6 +65,13 @@ class FakeTransport implements BleTransport {
   /// Called for every write, after it is recorded in [writes].
   FutureOr<void> Function(FakeWrite write)? onWrite;
 
+  /// Every read received, oldest first, as `<deviceId> <uuid>`.
+  final List<String> reads = [];
+
+  /// Supplies the value of a read. Without it a read throws [StateError].
+  FutureOr<Uint8List> Function(String deviceId, String characteristicUuid)?
+  onRead;
+
   bool _scanning = false;
   bool get isScanning => _scanning;
 
@@ -144,6 +151,19 @@ class FakeTransport implements BleTransport {
     _requireConnected(deviceId);
     cccLog.add('off ${_norm(characteristicUuid)}');
     await _subscriptions.remove(_key(deviceId, characteristicUuid))?.close();
+  }
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    _requireConnected(deviceId);
+    reads.add('$deviceId ${_norm(characteristicUuid)}');
+    final handler = onRead;
+    if (handler == null) throw StateError('FakeTransport: no onRead handler');
+    return handler(deviceId, characteristicUuid);
   }
 
   @override

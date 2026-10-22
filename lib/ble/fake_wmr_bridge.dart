@@ -5,6 +5,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 
 import '../domain/orientation.dart';
 import '../domain/synthetic_motion.dart';
+import '../protocol/config_block.dart';
 import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
 import '../protocol/echo.dart';
@@ -27,6 +28,7 @@ const FakeDevice fakeBridgeDevice = FakeDevice(
         wmrBridgeDecodedCharUuid,
         wmrBridgeBatchedCharUuid,
         wmrBridgeEchoCharUuid,
+        wmrBridgeConfigCharUuid,
       ],
     ),
   ],
@@ -100,8 +102,41 @@ class FakeWmrBridge {
     this.echoDelay = Duration.zero,
     this.echoTurnaround = const Duration(microseconds: 300),
     this.echoEnabled = true,
-  }) : _ticks = List.of(startTicks ?? const [1000, 1000]) {
+    List<Uint8List?> configBlobs = const [null, null],
+    List<ConfigState>? configStates,
+  }) : _ticks = List.of(startTicks ?? const [1000, 1000]),
+       configBlobs = List.of(configBlobs),
+       configStates = List.of(
+         configStates ??
+             [
+               for (final b in configBlobs)
+                 b == null ? ConfigState.notRead : ConfigState.ready,
+             ],
+       ) {
     transport.onWrite = _onWrite;
+    transport.onRead = _onRead;
+  }
+
+  /// FF13: the block served per hand and the state reported for it. Change
+  /// them between reads to model a block that finishes reading.
+  final List<Uint8List?> configBlobs;
+  final List<ConfigState> configStates;
+  int _cfgHand = 0;
+  int _cfgOffset = 0;
+
+  Uint8List _onRead(String id, String characteristicUuid) {
+    if (id != deviceId ||
+        characteristicUuid.toLowerCase() != wmrBridgeConfigCharUuid) {
+      throw StateError(
+        'FakeWmrBridge: unsupported read of $characteristicUuid',
+      );
+    }
+    return encodeConfigWindow(
+      hand: _cfgHand,
+      state: configStates[_cfgHand],
+      blob: configBlobs[_cfgHand],
+      offset: _cfgOffset,
+    );
   }
 
   final FakeTransport transport;
@@ -127,6 +162,20 @@ class FakeWmrBridge {
   int echoesSent = 0;
 
   void _onWrite(FakeWrite w) {
+    if (w.deviceId == deviceId &&
+        w.characteristicUuid.toLowerCase() == wmrBridgeConfigCharUuid) {
+      if (w.value.length != wmrConfigCursorSize || w.value[0] > 1) {
+        throw const BleStreamException(
+          BleStreamFaultKind.enableFailed,
+          wmrBridgeConfigCharUuid,
+          'invalid FF13 cursor',
+          attError: 0x80,
+        );
+      }
+      _cfgHand = w.value[0];
+      _cfgOffset = ByteData.sublistView(w.value).getUint32(1, Endian.little);
+      return;
+    }
     if (!echoEnabled ||
         w.deviceId != deviceId ||
         w.characteristicUuid.toLowerCase() != wmrBridgeEchoCharUuid ||
