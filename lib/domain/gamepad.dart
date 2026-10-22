@@ -414,3 +414,91 @@ double _tiltAxis(double degrees, TiltConfig config) {
 double _larger(double a, double b) => a.abs() >= b.abs() ? a : b;
 
 double _finite(double v) => v.isFinite ? v.clamp(-1.0, 1.0) : 0;
+
+/// Version of the stored settings format; bump when a field changes meaning.
+const int gamepadSettingsVersion = 1;
+
+/// [config] as a JSON-encodable map, for [GamepadSettingsStore]. Enums are
+/// stored by name so a reordered enum cannot change a saved setting.
+Map<String, Object?> gamepadConfigToJson(GamepadConfig config) => {
+  'version': gamepadSettingsVersion,
+  'triggerFullScale': config.triggerFullScale,
+  'triggerDeadZone': config.triggerDeadZone,
+  'triggerPressThreshold': config.triggerPressThreshold,
+  'trackpadCentreRadius': config.trackpadCentreRadius,
+  'leftTrackpad': config.leftTrackpad.name,
+  'rightTrackpad': config.rightTrackpad.name,
+  'invertStickY': config.invertStickY,
+  'invertTrackpadY': config.invertTrackpadY,
+  'tilt': {
+    'target': config.tilt.target.name,
+    'hand': config.tilt.hand,
+    'maxDegrees': config.tilt.maxDegrees,
+    'deadZoneDegrees': config.tilt.deadZoneDegrees,
+    'invertX': config.tilt.invertX,
+    'invertY': config.tilt.invertY,
+  },
+};
+
+/// Reads [gamepadConfigToJson] output. Tolerant: a missing, mistyped,
+/// unknown or out-of-range field falls back to its default (numbers are
+/// clamped to what the screen's sliders allow), so an old or hand-edited file
+/// never breaks startup. Null if [json] is not a map or has a newer version.
+GamepadConfig? gamepadConfigFromJson(Object? json) {
+  if (json is! Map) return null;
+  final version = json['version'];
+  if (version is int && version > gamepadSettingsVersion) return null;
+  const d = GamepadConfig();
+  const dt = TiltConfig();
+
+  double num_(Object? v, double def, double lo, double hi) =>
+      v is num && v.isFinite ? v.toDouble().clamp(lo, hi) : def;
+  int int_(Object? v, int def, int lo, int hi) =>
+      v is num && v.isFinite ? v.round().clamp(lo, hi) : def;
+  bool bool_(Object? v, bool def) => v is bool ? v : def;
+  T enum_<T extends Enum>(List<T> values, Object? v, T def) =>
+      values.asNameMap()[v] ?? def;
+
+  final t = json['tilt'] is Map ? json['tilt'] as Map : const {};
+  return GamepadConfig(
+    triggerFullScale: int_(
+      json['triggerFullScale'],
+      d.triggerFullScale,
+      64,
+      255,
+    ),
+    triggerDeadZone: num_(json['triggerDeadZone'], d.triggerDeadZone, 0, 0.3),
+    triggerPressThreshold: num_(
+      json['triggerPressThreshold'],
+      d.triggerPressThreshold,
+      0.05,
+      1,
+    ),
+    trackpadCentreRadius: num_(
+      json['trackpadCentreRadius'],
+      d.trackpadCentreRadius,
+      0,
+      0.8,
+    ),
+    leftTrackpad: enum_(
+      TrackpadRole.values,
+      json['leftTrackpad'],
+      d.leftTrackpad,
+    ),
+    rightTrackpad: enum_(
+      TrackpadRole.values,
+      json['rightTrackpad'],
+      d.rightTrackpad,
+    ),
+    invertStickY: bool_(json['invertStickY'], d.invertStickY),
+    invertTrackpadY: bool_(json['invertTrackpadY'], d.invertTrackpadY),
+    tilt: TiltConfig(
+      target: enum_(TiltTarget.values, t['target'], dt.target),
+      hand: int_(t['hand'], dt.hand, 0, 1),
+      maxDegrees: num_(t['maxDegrees'], dt.maxDegrees, 10, 90),
+      deadZoneDegrees: num_(t['deadZoneDegrees'], dt.deadZoneDegrees, 0, 15),
+      invertX: bool_(t['invertX'], dt.invertX),
+      invertY: bool_(t['invertY'], dt.invertY),
+    ),
+  );
+}

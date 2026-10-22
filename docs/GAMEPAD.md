@@ -48,7 +48,7 @@ Every number is a guess. The trigger and trackpad ranges have not been measured 
 | Invert stick Y, invert trackpad Y | off | For when the wire's y grows downwards |
 | Tilt target, hand, full deflection, dead zone, invert X/Y | off, RIGHT, 35°, 3°, off | Signs follow the view frame; the vertical-axis sign of the axis table is itself unverified |
 
-Settings are not saved between app runs yet.
+The mapping settings are saved to `gamepad_settings.json` in the app documents directory (about 0.4 s after the last change) and loaded at startup; values outside the slider ranges are clamped and unknown ones fall back to the defaults. The stick dead zone and centre on the debug screen, and the HID output state, are not saved.
 
 ## To check on hardware (not yet run)
 
