@@ -1,0 +1,190 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:vector_math/vector_math_64.dart' as vm;
+import 'package:wmr_companion/domain/hand_pipeline.dart';
+import 'package:wmr_companion/domain/orientation.dart';
+import 'package:wmr_companion/domain/tick_timer.dart';
+
+import 'sim.dart';
+
+/// Stationary samples with a constant gyro offset.
+Iterable<int> still(
+  HandPipeline p,
+  int from,
+  int count, {
+  List<double>? gyro,
+}) sync* {
+  for (var i = 0; i < count; i++) {
+    final ticks = from + i * nominalPeriodTicks;
+    p.add(record(ticks: ticks, gyro: gyro ?? const [0, 0, 0]), 0);
+    yield ticks;
+  }
+}
+
+double yawDeg(HandPipeline p) => eulerFromQuaternion(p.orientation).yawDeg;
+
+void main() {
+  test('gyro bias is estimated in the first second and stops the drift', () {
+    final p = HandPipeline();
+    const bias = [0.02, -0.03, 0.04];
+    final ticks = still(p, 0, 600, gyro: bias).last; // ~3.5 s
+    expect(p.bias.calibrated, isTrue);
+    expect(p.bias.bias[0], closeTo(0.02, 1e-6));
+    // Sensor X is up: bias[0] is the yaw rate, would be ~4 deg over 3.5 s.
+    // The first second runs with the bias still unknown (about 1.1 deg here);
+    // the remaining 2.5 s add nothing.
+    expect(yawDeg(p).abs(), lessThan(1.5));
+    expect(ticks, greaterThan(0));
+  });
+
+  test('without calibration the same bias drifts the yaw', () {
+    final p = HandPipeline();
+    // Never stationary-looking: noisy accel magnitude keeps it uncalibrated.
+    for (var i = 0; i < 600; i++) {
+      p.add(
+        record(
+          ticks: i * nominalPeriodTicks,
+          gyro: const [0.2, 0, 0],
+          accel: [gravity + (i.isEven ? 1.5 : -1.5), 0, 0],
+        ),
+        0,
+      );
+    }
+    expect(p.bias.calibrated, isFalse);
+    expect(yawDeg(p).abs(), greaterThan(10));
+  });
+
+  test('recalibrate starts over', () {
+    final p = HandPipeline();
+    still(p, 0, 300, gyro: const [0.02, 0, 0]).last;
+    expect(p.bias.calibrated, isTrue);
+    p.recalibrate();
+    expect(p.bias.calibrated, isFalse);
+    still(p, 400 * nominalPeriodTicks, 300, gyro: const [-0.05, 0, 0]).last;
+    expect(p.bias.bias[0], closeTo(-0.05, 1e-6));
+  });
+
+  test('a dt above 100 ms skips the filter step and is counted', () {
+    final p = HandPipeline();
+    still(p, 0, 50).last;
+    final before = p.samples;
+    // 300 ms gap: same on the tick and the receive clock, no discontinuity.
+    final s = p.add(
+      record(ticks: 49 * nominalPeriodTicks + 3000000, gyro: const [0, 0, 5]),
+      0,
+    );
+    expect(s.step.kind, TickStepKind.step);
+    expect(s.step.dtSeconds, closeTo(0.3, 0.001));
+    expect(s.fused, isFalse);
+    expect(p.largeDtSkips, 1);
+    expect(p.samples, before + 1);
+    expect(yawDeg(p).abs(), lessThan(0.5)); // the 5 rad/s was not integrated
+  });
+
+  test(
+    'a dt of a few periods (lost reports) is integrated with the real dt',
+    () {
+      final p = HandPipeline();
+      still(p, 0, 400).last; // calibrate
+      final q0 = p.orientation.clone();
+      // 40 ms gap carrying 1 rad/s about the vertical axis.
+      final s = p.add(
+        record(ticks: 399 * nominalPeriodTicks + 400000, gyro: const [1, 0, 0]),
+        0,
+      );
+      expect(s.fused, isTrue);
+      expect(s.step.dtSeconds, closeTo(0.04, 1e-6));
+      final dyaw =
+          (eulerFromQuaternion(s.orientation).yaw - eulerFromQuaternion(q0).yaw)
+              .abs();
+      expect(dyaw, closeTo(s.step.dtSeconds, 0.002));
+    },
+  );
+
+  test('a tick discontinuity keeps the orientation and does not integrate', () {
+    final p = HandPipeline();
+    still(p, 0, 400).last;
+    final q = p.orientation.clone();
+    // Ticks jump back by a lot while the ESP32 clock moves normally.
+    final s = p.add(
+      record(
+        ticks: 100,
+        rxTimeUs: 1000000 + 400 * nominalPeriodTicks ~/ 10,
+        gyro: const [3, 0, 0],
+      ),
+      0,
+    );
+    expect(s.step.kind, TickStepKind.discontinuity);
+    expect(s.fused, isFalse);
+    expect((p.orientation.x - q.x).abs(), lessThan(1e-9));
+    expect((p.orientation.y - q.y).abs(), lessThan(1e-9));
+  });
+
+  test('non-finite input is counted and ignored', () {
+    final p = HandPipeline();
+    still(p, 0, 10).last;
+    final s = p.add(
+      record(ticks: 10 * nominalPeriodTicks, gyro: const [double.nan, 0, 0]),
+      0,
+    );
+    expect(s.fused, isFalse);
+    expect(p.nonFiniteSkips, 1);
+    expect(p.orientation.length, closeTo(1, 1e-9));
+  });
+
+  test('Mahony can be selected and keeps the orientation', () {
+    final p = HandPipeline();
+    for (final r in sensorTurn(
+      axis: 1,
+      rate: 1.0,
+      stillSeconds: 1.2,
+      turnSeconds: 0.5,
+    )) {
+      p.add(r, 0);
+    }
+    final q = p.orientation.clone();
+    p.setFilter(FilterKind.mahony);
+    expect(p.kind, FilterKind.mahony);
+    final d =
+        (p.orientation.x * q.x +
+                p.orientation.y * q.y +
+                p.orientation.z * q.z +
+                p.orientation.w * q.w)
+            .abs();
+    expect(d, greaterThan(0.9999));
+    for (final r in sensorTurn(
+      axis: 0,
+      rate: 0,
+      stillSeconds: 0.5,
+      turnSeconds: 0,
+      startTicks: 5000000,
+    )) {
+      p.add(r, 0);
+    }
+    expect(p.orientation.length, closeTo(1, 1e-9));
+  });
+
+  test('resetYaw zeroes heading and keeps tilt', () {
+    final p = HandPipeline();
+    for (final r in sensorTurn(
+      axis: 0,
+      rate: 1.0,
+      stillSeconds: 1.2,
+      turnSeconds: 1.0,
+    )) {
+      p.add(r, 0);
+    }
+    expect(yawDeg(p).abs(), greaterThan(30));
+    p.resetYaw();
+    expect(yawDeg(p).abs(), lessThan(0.01));
+  });
+
+  test('view-frame output is a unit quaternion', () {
+    final p = HandPipeline();
+    for (final r in sensorTurn(axis: 2, rate: 2.0)) {
+      p.add(r, 0);
+    }
+    final q = p.orientation;
+    expect(q, isA<vm.Quaternion>());
+    expect(q.length, closeTo(1, 1e-9));
+  });
+}
