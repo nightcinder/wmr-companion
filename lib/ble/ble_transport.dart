@@ -116,10 +116,10 @@ abstract class BleTransport {
     String characteristicUuid,
   );
 
-  /// Writes 0x0000 to the characteristic's CCC. The bridge's FF11 and FF12
-  /// streams are mutually exclusive, so [subscribe] to one disables the other
-  /// first (in that order); this is for turning a stream off without
-  /// enabling another.
+  /// Writes 0x0000 to the characteristic's CCC. The bridge's FF11, FF12 and
+  /// FF14 streams are mutually exclusive, so [subscribe] to one disables the
+  /// active one first (in that order); this is for turning a stream off
+  /// without enabling another.
   Future<void> unsubscribe(
     String deviceId,
     String serviceUuid,

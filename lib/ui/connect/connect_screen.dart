@@ -85,8 +85,8 @@ class RealPanel extends ConsumerWidget {
       children: [
         Text(
           'Not verified on hardware. Raw FF11 feeds the Capture screen; '
-          'decoded FF12 feeds the 3D view. The bridge allows one at a time. '
-          'The FF12 firmware has not been run on hardware either.',
+          'decoded FF12 or batched FF14 feeds the 3D view. The bridge allows '
+          'one at a time. FF14 has not been run on hardware.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),

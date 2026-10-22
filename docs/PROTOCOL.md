@@ -13,7 +13,8 @@ This file records only what the app does with it.
 firmware protocol changes, update `lib/protocol/`, the tests and this line
 together. The FF12 parts (`decoded_record.dart`, the FF12 UUID) mirror the
 `ff12-decoded-stream` branch at `8fcb6a1` (merged as `a0cba83`); see the FF12
-section.
+section. The FF14 parts (`decoded_batch.dart`, the FF14 UUID and minimum MTU)
+mirror `main` at `8f5921a`; see the FF14 section.
 
 | Firmware | App |
 | --- | --- |
@@ -22,6 +23,8 @@ section.
 | `wmr_proto_notification_capacity`, `wmr_proto_encode_fragment` | `notificationCapacity`, `encodeFragment`, `encodeFrame` |
 | `wmr_reassembler_push` and its counters | `WmrReassembler.push` (`lib/protocol/wmr_fragment.dart`) |
 | `tests/test_protocol.c` | `test/protocol/wmr_fragment_test.dart` (ported case by case) |
+| `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`lib/protocol/decoded_batch.dart`) |
+| `tests/test_batch.c` golden bytes and MTU table | `test/protocol/decoded_batch_test.dart` |
 | `samples/controller_frames.txt` | `test/fixtures/controller_frames.txt` (copy) |
 
 The encoder is in the app only so `FakeWmrBridge` and the tests can produce
@@ -185,7 +188,8 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
 
 ### Stream mode and the CCC rule
 
-- `ControllerService` has a `StreamMode` (`raw` = FF11, `decoded` = FF12).
+- `ControllerService` has a `StreamMode` (`raw` = FF11, `decoded` = FF12,
+  `batched` = FF14; see the FF14 section).
   `setMode` is a re-subscribe; `start()` repeats it after every reconnect.
 - `UniversalBleTransport.subscribe` knows the two bridge streams are
   exclusive: it forgets the other one from the wanted set at once and, in its
@@ -280,6 +284,39 @@ for the hardware in general.
 - **Debug UI.** The learned or set centre and the normalized output are shown
   per hand; "Re-centre stick" takes the current reading of the selected hand
   as centre; a switch turns learning off.
+
+## FF14 batched stream in the app
+
+**Not verified on hardware; the firmware side has not been run on hardware
+either.** Spec: WMR_Bridge docs/PROTOCOL.md, "Batched decoded stream, FF14".
+One notification is `version` = 2, `count`, then `count` unchanged FF12
+version 1 records (oldest first, both hands mixed), length exactly
+`2 + 56 x count`.
+
+- **Parsing.** `parseDecodedBatch` checks the header like `wmr_batch_parse`
+  (too short, version not 2, count 0, length not `2 + 56 x count`) and then
+  parses each record with `parseDecodedRecord`. A rejected batch counts in
+  `DecodedStats.batchErrors` and nothing from it is fused. A bad record inside
+  a good batch counts as a record error (length / version / hand) and the
+  other records of that batch are still used.
+- **Same pipeline.** Each record goes through exactly the FF12 path: per-hand
+  sequence gaps, tick timing, fusion. Every record of a batch carries the
+  batch's phone arrival time; `dt` comes from `device_ticks` and the jitter
+  diagnostics from `rx_time_us`, so batching does not change the time step.
+  The phone-side `rate` is computed from arrival times and is lumpier on FF14.
+- **Exclusion.** FF11, FF12 and FF14 share the one-stream rule: switching
+  writes `0x0000` to whichever is enabled before enabling the new one, in all
+  six orders (`test/ble/stream_mode_transport_test.dart`). ATT `0x80` is
+  reported as for FF12.
+- **MTU.** FF14 needs at least 61 (FF12 needs 59), so `mtuTooSmall` fires at
+  59 and 60 on FF14 only. The app still requests MTU 247, which allows at
+  most 4 records per batch; 9 needs MTU 517.
+- **Stats.** `DecodedStats` adds `batches`, `batchRecords`, `batchMean`,
+  `batchMax` and `batchErrors`; the debug panel shows them as
+  `FF14 batches  mean  max  rejected` while FF14 is active.
+- **Fake bridge.** `FakeWmrBridge` sends FF14 with the firmware's flush rule:
+  a full batch for `attMtu` at once, otherwise when the oldest queued record
+  has waited `batchHold` (default 15 ms, the bridge's default hold).
 
 ## Axis mapping
 

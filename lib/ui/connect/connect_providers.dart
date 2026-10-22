@@ -160,7 +160,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     );
   }
 
-  /// Switches between the raw FF11 and decoded FF12 streams (CCC order is
+  /// Switches between the FF11, FF12 and FF14 streams (CCC order is
   /// the transport's job). The choice is remembered for the next connect.
   /// A refusal shows up in [RealDeviceState.mode], never silently.
   Future<void> setStreamMode(StreamMode mode) async {

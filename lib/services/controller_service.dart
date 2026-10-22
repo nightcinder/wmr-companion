@@ -5,6 +5,7 @@ import '../domain/axis_mapping.dart';
 import '../domain/hand_pipeline.dart';
 import '../domain/stick_centre.dart';
 import '../domain/tick_timer.dart';
+import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
 import '../protocol/gatt.dart';
 import '../protocol/wmr_fragment.dart';
@@ -53,15 +54,28 @@ enum StreamMode {
 
   /// FF12: decoded 56-byte records (orientation needs this).
   decoded,
+
+  /// FF14: the same FF12 records, several per notification.
+  batched;
+
+  /// FF12 and FF14 both deliver decoded records to the same pipeline.
+  bool get carriesRecords => this != StreamMode.raw;
+
+  String get characteristicUuid => switch (this) {
+    StreamMode.raw => wmrBridgeStreamCharUuid,
+    StreamMode.decoded => wmrBridgeDecodedCharUuid,
+    StreamMode.batched => wmrBridgeBatchedCharUuid,
+  };
 }
 
 enum ModeFaultKind {
-  /// ATT 0x80: the bridge says the other stream is still enabled.
+  /// ATT 0x80: the bridge says another stream is still enabled.
   otherStreamActive,
   enableFailed,
   disableFailed,
 
-  /// Negotiated ATT MTU below 59: the bridge sends nothing on FF12.
+  /// Negotiated ATT MTU below 59 (FF12) or 61 (FF14): the bridge sends
+  /// nothing on that stream.
   mtuTooSmall,
 }
 
@@ -153,14 +167,34 @@ class DecodedStats {
     this.wrongLength = 0,
     this.unknownVersion = 0,
     this.badHand = 0,
+    this.batches = 0,
+    this.batchRecords = 0,
+    this.batchMax = 0,
+    this.batchErrors = 0,
   });
 
   final List<DecodedHandStats> hands;
+
+  /// Record errors, FF12 and FF14 alike.
   final int wrongLength;
   final int unknownVersion;
   final int badHand;
 
-  int get parseErrors => wrongLength + unknownVersion + badHand;
+  /// FF14 notifications that parsed, and the records they carried (good or
+  /// not). Zero on FF12.
+  final int batches;
+  final int batchRecords;
+
+  /// Most records seen in one batch.
+  final int batchMax;
+
+  /// FF14 notifications rejected as a whole (header or length wrong).
+  final int batchErrors;
+
+  /// Records per batch, or null before the first batch.
+  double? get batchMean => batches == 0 ? null : batchRecords / batches;
+
+  int get parseErrors => wrongLength + unknownVersion + badHand + batchErrors;
 }
 
 /// Records per second over a sliding window of about a second.
@@ -187,7 +221,7 @@ class _RateMeter {
 }
 
 /// Subscribes to the bridge stream and turns it into frames (FF11) or fused
-/// samples (FF12).
+/// samples (FF12 and FF14).
 class ControllerService {
   ControllerService(
     this.transport,
@@ -214,7 +248,7 @@ class ControllerService {
   final StreamController<ReceivedFrame> _frames = StreamController.broadcast();
   StreamSubscription<BleNotification>? _subscription;
 
-  // Decoded (FF12) side.
+  // Decoded (FF12 and FF14) side.
   final List<HandPipeline> _pipelines = [
     for (var h = 0; h < wmrNumControllers; h++) HandPipeline(),
   ];
@@ -228,6 +262,10 @@ class ControllerService {
   int _wrongLength = 0;
   int _unknownVersion = 0;
   int _badHand = 0;
+  int _batches = 0;
+  int _batchRecords = 0;
+  int _batchMax = 0;
+  int _batchErrors = 0;
   final StreamController<DecodedSample> _samples = StreamController.broadcast();
 
   StreamMode _mode;
@@ -293,28 +331,27 @@ class ControllerService {
       p.streamRestarted();
     }
     _fault = null;
-    final decoded = _mode == StreamMode.decoded;
     _subscription = transport
-        .subscribe(
-          deviceId,
-          wmrBridgeServiceUuid,
-          decoded ? wmrBridgeDecodedCharUuid : wmrBridgeStreamCharUuid,
-        )
-        .listen(
-          decoded ? _onDecoded : _onNotification,
-          onError: _onStreamError,
-        );
-    if (decoded) await _checkMtu();
+        .subscribe(deviceId, wmrBridgeServiceUuid, _mode.characteristicUuid)
+        .listen(switch (_mode) {
+          StreamMode.raw => _onNotification,
+          StreamMode.decoded => _onDecoded,
+          StreamMode.batched => _onBatched,
+        }, onError: _onStreamError);
+    if (_mode.carriesRecords) await _checkMtu();
     _emitMode();
   }
 
   Future<void> _checkMtu() async {
+    final (name, min) = _mode == StreamMode.batched
+        ? ('FF14', wmrBatchedMinMtu)
+        : ('FF12', wmrDecodedMinMtu);
     try {
       final mtu = (await transport.connectionInfo(deviceId)).mtu;
-      if (mtu != null && mtu < wmrDecodedMinMtu && _fault == null) {
+      if (mtu != null && mtu < min && _fault == null) {
         _fault = ModeFault(
           ModeFaultKind.mtuTooSmall,
-          'ATT MTU is $mtu; FF12 needs at least $wmrDecodedMinMtu, so the '
+          'ATT MTU is $mtu; $name needs at least $min, so the '
           'bridge sends nothing.',
         );
       }
@@ -359,8 +396,27 @@ class ControllerService {
     _frames.add(ReceivedFrame(frame, n.receivedAtUs));
   }
 
-  void _onDecoded(BleNotification n) {
-    final parsed = parseDecodedRecord(n.value);
+  void _onDecoded(BleNotification n) =>
+      _onRecord(parseDecodedRecord(n.value), n.receivedAtUs);
+
+  /// Every record of a batch gets the batch's arrival time. Timing and
+  /// fusion use `device_ticks`, so that does not change the time step.
+  void _onBatched(BleNotification n) {
+    final parsed = parseDecodedBatch(n.value);
+    final records = parsed.records;
+    if (records == null) {
+      _batchErrors++;
+      return;
+    }
+    _batches++;
+    _batchRecords += records.length;
+    if (records.length > _batchMax) _batchMax = records.length;
+    for (final r in records) {
+      _onRecord(r, n.receivedAtUs);
+    }
+  }
+
+  void _onRecord(DecodedParseResult parsed, int receivedAtUs) {
     final r = parsed.record;
     if (r == null) {
       switch (parsed.error!) {
@@ -385,8 +441,8 @@ class ControllerService {
     }
     _dLastSeq[hand] = r.sequence;
     _dRecords[hand]++;
-    _rates[hand].add(n.receivedAtUs);
-    final sample = _pipelines[hand].add(r, n.receivedAtUs);
+    _rates[hand].add(receivedAtUs);
+    final sample = _pipelines[hand].add(r, receivedAtUs);
     _lastStick[hand] = sample.stick;
     _samples.add(sample);
   }
@@ -469,6 +525,10 @@ class ControllerService {
       wrongLength: _wrongLength,
       unknownVersion: _unknownVersion,
       badHand: _badHand,
+      batches: _batches,
+      batchRecords: _batchRecords,
+      batchMax: _batchMax,
+      batchErrors: _batchErrors,
     );
   }
 

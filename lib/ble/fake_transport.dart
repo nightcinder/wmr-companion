@@ -173,6 +173,10 @@ class FakeTransport implements BleTransport {
     return BleConnectionInfo(mtu: d.mtu, rssi: d.rssi);
   }
 
+  /// True while someone listens to [characteristicUuid] of [deviceId].
+  bool isSubscribed(String deviceId, String characteristicUuid) =>
+      _subscriptions[_key(deviceId, characteristicUuid)]?.hasListener ?? false;
+
   /// Delivers [value] as a notification on [characteristicUuid], stamped with
   /// [clock]. Returns false if nobody is subscribed.
   bool emit(String deviceId, String characteristicUuid, List<int> value) {

@@ -12,6 +12,7 @@ import 'fake_adapter.dart';
 const id = fakeBridgeDeviceId;
 const ff11 = wmrBridgeStreamCharUuid;
 const ff12 = wmrBridgeDecodedCharUuid;
+const ff14 = wmrBridgeBatchedCharUuid;
 
 Future<void> pump() => Future<void>.delayed(Duration.zero);
 
@@ -239,5 +240,55 @@ void main() {
 
     expect(got.single.receivedAtUs, 1234);
     expect(got.single.value, hasLength(56));
+  });
+
+  group('FF14 joins the exclusion', () {
+    String short(String uuid) => uuid.substring(4, 8);
+
+    for (final (from, to) in [
+      (ff11, ff12),
+      (ff11, ff14),
+      (ff12, ff11),
+      (ff12, ff14),
+      (ff14, ff11),
+      (ff14, ff12),
+    ]) {
+      test('${short(from)} to ${short(to)} writes 0x0000 first', () async {
+        await t.connect(id);
+        sub(from);
+        await pump();
+        final f = faults(sub(to));
+        await pump();
+        expect(adapter.ccc, [
+          'on ${short(from)}',
+          'off ${short(from)}',
+          'on ${short(to)}',
+        ]);
+        expect(f, isEmpty);
+      });
+    }
+
+    test(
+      'a stale FF12 on the bridge makes the FF14 enable fail with 0x80',
+      () async {
+        await t.connect(id);
+        await adapter.enableNotifications(id, wmrBridgeServiceUuid, ff12);
+        final f = faults(sub(ff14));
+        await pump();
+        expect(f.single.kind, BleStreamFaultKind.otherStreamActive);
+        expect(f.single.characteristicUuid, ff14);
+        expect(t.status.phase, BleLinkPhase.ready);
+      },
+    );
+
+    test('switching while connecting enables only FF14', () async {
+      final connecting = t.connect(id);
+      sub(ff12);
+      sub(ff11);
+      sub(ff14);
+      await connecting;
+      await pump();
+      expect(adapter.ccc, ['on ff14']);
+    });
   });
 }

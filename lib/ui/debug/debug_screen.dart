@@ -41,7 +41,7 @@ class DebugScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(streamModeProvider);
-    final decoded = mode == StreamMode.decoded;
+    final decoded = mode.carriesRecords;
     final synthetic = !decoded && source == DebugSource.fake;
     final hand = ref.watch(selectedHandProvider);
     final view = decoded ? ref.watch(decodedViewProvider(source)).value : null;
@@ -68,7 +68,7 @@ class DebugScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(_note(decoded), style: theme.textTheme.bodySmall),
+          Text(_note(mode), style: theme.textTheme.bodySmall),
           const SizedBox(height: 8),
           StreamModeSelector(mode: mode, onChanged: (m) => _setMode(ref, m)),
           if (modeState?.fault != null) ...[
@@ -176,12 +176,15 @@ class DebugScreen extends ConsumerWidget {
     await ref.read(controllerServiceProvider(source))?.setMode(m);
   }
 
-  String _note(bool decoded) {
+  String _note(StreamMode mode) {
     final where = source == DebugSource.fake
         ? 'the fake bridge'
         : 'the real bridge';
-    if (decoded) {
-      return 'Fused orientation from the FF12 decoded records of $where '
+    if (mode.carriesRecords) {
+      final from = mode == StreamMode.batched
+          ? 'FF12 records batched on FF14'
+          : 'FF12 decoded records';
+      return 'Fused orientation from the $from of $where '
           '(gyro + accelerometer only). Yaw drifts: there is no '
           'magnetometer, use Reset orientation to re-zero it. The gyro bias '
           'is taken from the first stationary second, so hold the '
@@ -198,7 +201,8 @@ class DebugScreen extends ConsumerWidget {
   static String _deg(double v) => '${v.toStringAsFixed(1).padLeft(6)}°';
 }
 
-/// Raw FF11 or decoded FF12. The app listens to one at a time.
+/// Raw FF11, decoded FF12 or batched FF14. The app listens to one at a
+/// time.
 class StreamModeSelector extends StatelessWidget {
   const StreamModeSelector({
     super.key,
@@ -225,6 +229,11 @@ class StreamModeSelector extends StatelessWidget {
           label: const Text('Decoded FF12'),
           enabled: enabled,
         ),
+        ButtonSegment(
+          value: StreamMode.batched,
+          label: const Text('Batched FF14'),
+          enabled: enabled,
+        ),
       ],
       selected: {mode},
       onSelectionChanged: (s) => onChanged(s.first),
@@ -240,11 +249,11 @@ class ModeFaultBanner extends StatelessWidget {
 
   static String title(ModeFaultKind kind) => switch (kind) {
     ModeFaultKind.otherStreamActive =>
-      'The bridge refused: the other stream is still enabled (ATT 0x80)',
+      'The bridge refused: another stream is still enabled (ATT 0x80)',
     ModeFaultKind.enableFailed => 'Could not enable the stream',
     ModeFaultKind.disableFailed =>
       'Could not turn the previous stream off, so nothing was switched',
-    ModeFaultKind.mtuTooSmall => 'ATT MTU too small for FF12',
+    ModeFaultKind.mtuTooSmall => 'ATT MTU too small for this stream',
   };
 
   @override
@@ -288,6 +297,13 @@ class DecodedStatsView extends StatelessWidget {
           'version ${stats.unknownVersion}  hand ${stats.badHand}',
           style: style,
         ),
+        if (stats.batches > 0 || stats.batchErrors > 0)
+          Text(
+            'FF14 batches ${stats.batches}  '
+            'mean ${stats.batchMean?.toStringAsFixed(2) ?? '-'}  '
+            'max ${stats.batchMax}  rejected ${stats.batchErrors}',
+            style: style,
+          ),
       ],
     );
   }
