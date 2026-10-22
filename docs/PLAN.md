@@ -41,7 +41,7 @@ wmr-companion/
     app.dart
     ble/            # BleTransport, universal_ble impl, fake transport
     protocol/       # GATT UUIDs, packet models, parser
-    domain/         # tick timing, gyro bias, axis mapping, per-hand pipeline, orientation helpers
+    domain/         # tick timing, gyro bias, axis mapping, per-hand pipeline, orientation helpers, gamepad mapping
     services/       # ControllerService, LatencyService, LogRecorder
     ui/
       scan/         # scan + connect screen
@@ -49,6 +49,7 @@ wmr-companion/
       debug/        # 3DoF view + stats panel + stream settings
       capture/      # guided raw capture (FF11)
       latency/      # latency test screen and CSV/JSON export (docs/LATENCY.md)
+      gamepad/      # gamepad mapping debug screen (docs/GAMEPAD.md)
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
   test/
   docs/STATUS.md    # current state and roadmap

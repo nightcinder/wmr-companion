@@ -8,6 +8,7 @@ import '../../domain/hand_pipeline.dart';
 import '../../domain/orientation.dart';
 import '../../services/controller_service.dart';
 import '../connect/connect_providers.dart';
+import '../gamepad/gamepad_screen.dart';
 import 'debug_providers.dart';
 import 'orientation_painter.dart';
 import 'stream_settings.dart';
@@ -64,7 +65,20 @@ class DebugScreen extends ConsumerWidget {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Debug: 3DoF')),
+      appBar: AppBar(
+        title: const Text('Debug: 3DoF'),
+        actions: [
+          IconButton(
+            tooltip: 'Gamepad mapping',
+            icon: const Icon(Icons.sports_esports),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => GamepadScreen(source: source),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

@@ -37,7 +37,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | In review; tests only, not run on hardware. Firmware FF14 not run on hardware either |
 | 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from FF12 `rx_time_us`), CSV + JSON export ([LATENCY.md](LATENCY.md)). No true round trip (needs firmware issue #1) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
-| 6 | iOS build, then gamepad-style mapping | Not started |
+| 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer and Gamepad screen built, not run on hardware ([GAMEPAD.md](GAMEPAD.md)); output to the OS or another device not decided |
 
 ### What has been checked on hardware (user-reported)
 
@@ -99,7 +99,7 @@ Then:
 4. Latency runs on hardware with the latency screen (milestone 4, built); firmware echo (issue #1) for true round trip.
 5. Calibration (FF13 or phone side), fusion tuning, optional magnetometer-free yaw handling.
 6. Controller discovery by name (issue #2), bridge security.
-7. iOS build; gamepad-style mapping (buttons, stick, trackpad, 3DoF pose to input).
+7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then the chosen output stage (Bluetooth HID device, Wi-Fi/DSU, ...; see GAMEPAD.md).
 
 ## Where things are
 
@@ -109,6 +109,7 @@ Then:
 | App-side protocol decisions, FF12 in the app, axis mapping | [PROTOCOL.md](PROTOCOL.md) |
 | Raw capture format and screen | [CAPTURE.md](CAPTURE.md) |
 | Latency screen, CSV/JSON export format | [LATENCY.md](LATENCY.md) |
+| Gamepad mapping, settings, output options | [GAMEPAD.md](GAMEPAD.md) |
 | Firmware wire protocol (source of truth) | WMR_Bridge `docs/PROTOCOL.md` |
 | Decoding, timing, loss investigation, unknowns | WMR_Bridge `docs/DECODING.md` |
 | Firmware counters and log lines | WMR_Bridge `docs/COUNTERS.md` |

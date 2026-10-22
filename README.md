@@ -2,7 +2,7 @@
 
 Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to the [WMR_Bridge](https://github.com/nightcinder/WMR_Bridge) firmware over BLE GATT, fuses controller orientation on the phone (3DoF, Madgwick/Mahony), shows a debug 3D view with link statistics, and records raw captures. Android first, iOS later; the end goal is gamepad-style 3DoF input.
 
-**Status:** milestones 1 to 3 and the Capture screen are done; the decoded-stream (FF12) pipeline and 3D view work on hardware (orientation checked visually, user-reported). Latency/CSV export, iOS and gamepad mapping are not started. Controller-to-ESP32 report loss is the main open problem. See [docs/STATUS.md](docs/STATUS.md) for the current state, hardware results and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
+**Status:** milestones 1 to 3 and the Capture screen are done; the decoded-stream (FF12) pipeline and 3D view work on hardware (orientation checked visually, user-reported). The latency screen with CSV/JSON export and an in-app gamepad mapping layer ([docs/GAMEPAD.md](docs/GAMEPAD.md)) are built but not run on hardware; iOS is not started. Controller-to-ESP32 report loss is the main open problem. See [docs/STATUS.md](docs/STATUS.md) for the current state, hardware results and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
 
 ## What is in the app
 
