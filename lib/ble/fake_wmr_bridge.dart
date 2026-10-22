@@ -5,6 +5,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 
 import '../domain/orientation.dart';
 import '../domain/synthetic_motion.dart';
+import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
 import '../protocol/gatt.dart';
 import '../protocol/wmr_fragment.dart';
@@ -20,7 +21,11 @@ const FakeDevice fakeBridgeDevice = FakeDevice(
   services: [
     BleServiceInfo(
       uuid: wmrBridgeServiceUuid,
-      characteristicUuids: [wmrBridgeStreamCharUuid, wmrBridgeDecodedCharUuid],
+      characteristicUuids: [
+        wmrBridgeStreamCharUuid,
+        wmrBridgeDecodedCharUuid,
+        wmrBridgeBatchedCharUuid,
+      ],
     ),
   ],
 );
@@ -59,14 +64,20 @@ WmrFrame syntheticFrame(int hand, int sequence, {int length = 46}) {
 
 /// Drives a [FakeTransport] like the ESP32 does: both hands at [rateHz],
 /// each frame fragmented for [attMtu] on FF11, and one 56-byte record per
-/// report on FF12. The transport only delivers to whichever characteristic
+/// report on FF12, and on FF14 the same records in batches. The transport
+/// only delivers to whichever characteristic
 /// is subscribed, as the firmware sends only the active stream. Sequence
 /// numbers advance even when nobody is subscribed, as on the firmware.
 ///
 /// FF12 content is deterministic: simulated time advances by one period per
 /// [tick], device ticks follow at 100 ns, and the IMU values come from
 /// [motion]. [dropRecord] simulates reports lost before the ESP32 (sequence
-/// and ticks still advance, nothing is emitted on either stream).
+/// and ticks still advance, nothing is emitted on any stream).
+///
+/// FF14 follows the firmware's flush rule: a batch goes out as soon as
+/// [batchMaxCount] records for [attMtu] are queued, or when the oldest queued
+/// record has waited [batchHold] (one connection interval on the bridge).
+/// Records of both hands share a batch, oldest first.
 class FakeWmrBridge {
   FakeWmrBridge(
     this.transport, {
@@ -77,6 +88,7 @@ class FakeWmrBridge {
     this.dropRecord,
     List<int>? startTicks,
     this.espBootUs = 1000000,
+    this.batchHold = const Duration(milliseconds: 15),
   }) : _ticks = List.of(startTicks ?? const [1000, 1000]);
 
   final FakeTransport transport;
@@ -91,10 +103,18 @@ class FakeWmrBridge {
   /// `rx_time_us` of the first report: ESP32 microseconds since boot.
   final int espBootUs;
 
+  /// How long the oldest record may wait for its FF14 batch.
+  final Duration batchHold;
+
   final List<int> _sequence = List.filled(wmrNumControllers, 0);
   final List<int> _ticks;
   int _elapsedUs = 0;
   Timer? _timer;
+  final List<Uint8List> _batch = [];
+  int _batchOldestUs = 0;
+
+  /// FF14 notifications sent so far.
+  int batchesSent = 0;
 
   /// Controller ticks (100 ns) per report.
   int get periodTicks => 10000000 ~/ rateHz;
@@ -127,21 +147,47 @@ class FakeWmrBridge {
       }
 
       final imu = syntheticImu(motion, t);
-      transport.emit(
-        deviceId,
-        wmrBridgeDecodedCharUuid,
-        encodeDecodedRecord(
-          DecodedRecord(
-            hand: hand,
-            sequence: _sequence[hand],
-            rxTimeUs: espBootUs + _elapsedUs,
-            deviceTicks: ticks,
-            gyro: imu.gyro,
-            accel: imu.accel,
-          ),
+      final record = encodeDecodedRecord(
+        DecodedRecord(
+          hand: hand,
+          sequence: _sequence[hand],
+          rxTimeUs: espBootUs + _elapsedUs,
+          deviceTicks: ticks,
+          gyro: imu.gyro,
+          accel: imu.accel,
         ),
       );
+      transport.emit(deviceId, wmrBridgeDecodedCharUuid, record);
+      _queueBatched(record);
     }
     _elapsedUs += 1000000 ~/ rateHz;
+    if (_batch.isNotEmpty &&
+        _elapsedUs - _batchOldestUs >= batchHold.inMicroseconds) {
+      _flushBatch();
+    }
+  }
+
+  void _queueBatched(Uint8List record) {
+    // The firmware only queues for the active stream.
+    if (!transport.isSubscribed(deviceId, wmrBridgeBatchedCharUuid)) {
+      _batch.clear();
+      return;
+    }
+    final max = batchMaxCount(attMtu);
+    if (max == 0) return; // MTU below 61: discarded, as on the bridge.
+    if (_batch.isEmpty) _batchOldestUs = _elapsedUs;
+    _batch.add(record);
+    if (_batch.length >= max) _flushBatch();
+  }
+
+  void _flushBatch() {
+    if (transport.emit(
+      deviceId,
+      wmrBridgeBatchedCharUuid,
+      encodeDecodedBatch(_batch),
+    )) {
+      batchesSent++;
+    }
+    _batch.clear();
   }
 }

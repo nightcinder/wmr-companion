@@ -113,8 +113,8 @@ class FakeAdapter implements BleAdapter {
     return services;
   }
 
-  /// Mirrors the firmware: while one of FF11/FF12 is enabled, enabling the
-  /// other fails with ATT error 0x80. State resets when the link drops or
+  /// Mirrors the firmware: while one of FF11/FF12/FF14 is enabled, enabling
+  /// another fails with ATT error 0x80. State resets when the link drops or
   /// reconnects.
   bool bridgeExclusion = true;
 
@@ -128,6 +128,7 @@ class FakeAdapter implements BleAdapter {
   final Map<String, Object> disableErrors = {};
 
   static String _short(String uuid) => uuid.substring(4, 8);
+  static const _bridgeStreams = {'ff11', 'ff12', 'ff14'};
 
   @override
   Future<void> enableNotifications(
@@ -143,8 +144,8 @@ class FakeAdapter implements BleAdapter {
       throw error;
     }
     if (bridgeExclusion &&
-        _enabled.any((c) => c != name && (c == 'ff11' || c == 'ff12')) &&
-        (name == 'ff11' || name == 'ff12')) {
+        _enabled.any((c) => c != name && _bridgeStreams.contains(c)) &&
+        _bridgeStreams.contains(name)) {
       ccc.add('FAIL on $name');
       throw const BleAdapterException('other stream active', attError: 0x80);
     }

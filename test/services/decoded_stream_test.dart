@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ import 'package:wmr_companion/ble/universal_ble_transport.dart';
 import 'package:wmr_companion/domain/axis_mapping.dart';
 import 'package:wmr_companion/domain/hand_pipeline.dart';
 import 'package:wmr_companion/domain/synthetic_motion.dart';
+import 'package:wmr_companion/protocol/decoded_batch.dart';
 import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/services/controller_service.dart';
 
@@ -37,6 +39,160 @@ void main() {
   tearDown(() async {
     await service.dispose();
     await t.dispose();
+  });
+
+  group('batched stream (FF14) from the fake bridge', () {
+    test(
+      'subscribes to FF14 only and every record reaches the pipeline',
+      () async {
+        await setUpService(mode: StreamMode.batched);
+        expect(t.cccLog, ['on $wmrBridgeBatchedCharUuid']);
+
+        final left = <DecodedSample>[];
+        final right = <DecodedSample>[];
+        service.samplesFor(0).listen(left.add);
+        service.samplesFor(1).listen(right.add);
+        // 100 Hz and a 15 ms hold: a batch every 2 ticks, 4 records each,
+        // which is also the most MTU 247 allows.
+        final bridge = FakeWmrBridge(t);
+        for (var i = 0; i < 100; i++) {
+          bridge.tick();
+        }
+        await pump();
+
+        expect(left, hasLength(100));
+        expect(right, hasLength(100));
+        final stats = service.decodedStats;
+        expect(stats.batches, bridge.batchesSent);
+        expect(stats.batches, 50);
+        expect(stats.batchRecords, 200);
+        expect(stats.batchMax, 4);
+        expect(stats.batchMean, 4);
+        expect(stats.batchErrors, 0);
+        expect(stats.parseErrors, 0);
+        for (final h in stats.hands) {
+          expect(h.records, 100);
+          expect(h.sequenceGaps, 0);
+          expect(h.outOfOrder, 0);
+          expect(h.missingFromTicks, 0);
+          // dt from device ticks, not from the batch arrival time.
+          expect(h.dt.p50, closeTo(0.01, 1e-9));
+          expect(h.dt.max, closeTo(0.01, 1e-9));
+        }
+      },
+    );
+
+    test('a short hold sends partial batches', () async {
+      await setUpService(mode: StreamMode.batched);
+      final bridge = FakeWmrBridge(t, batchHold: Duration.zero);
+      for (var i = 0; i < 10; i++) {
+        bridge.tick();
+      }
+      await pump();
+      final stats = service.decodedStats;
+      expect(stats.batches, 10);
+      expect(stats.batchMax, 2);
+      expect(stats.hands[0].records, 10);
+    });
+
+    test('at MTU 517 a batch holds up to 9 records', () async {
+      await setUpService(
+        mode: StreamMode.batched,
+        device: const FakeDevice(
+          id: fakeBridgeDeviceId,
+          mtu: 517,
+          services: [
+            BleServiceInfo(
+              uuid: wmrBridgeServiceUuid,
+              characteristicUuids: [wmrBridgeBatchedCharUuid],
+            ),
+          ],
+        ),
+      );
+      final bridge = FakeWmrBridge(
+        t,
+        attMtu: 517,
+        batchHold: const Duration(seconds: 1),
+      );
+      for (var i = 0; i < 45; i++) {
+        bridge.tick();
+      }
+      await pump();
+      final stats = service.decodedStats;
+      expect(stats.batchMax, 9);
+      expect(stats.batches, 10);
+      expect(stats.hands[1].records, 45);
+    });
+
+    test('lost reports still show as gaps, batching adds none', () async {
+      await setUpService(mode: StreamMode.batched);
+      final bridge = FakeWmrBridge(
+        t,
+        dropRecord: (hand, seq) => hand == 1 && seq % 5 == 0,
+      );
+      for (var i = 0; i < 100; i++) {
+        bridge.tick();
+      }
+      await pump();
+      final stats = service.decodedStats;
+      expect(stats.hands[0].sequenceGaps, 0);
+      // Sequences 5, 10, ..., 100 lost; the last one is not a gap yet.
+      expect(stats.hands[1].sequenceGaps, 19);
+      expect(stats.hands[1].missingFromTicks, 19);
+    });
+
+    test('a malformed batch is counted and nothing is fused', () async {
+      await setUpService(mode: StreamMode.batched);
+      final got = <DecodedSample>[];
+      service.decodedSamples.listen(got.add);
+      final good = encodeDecodedBatch([Uint8List(56)..[0] = 1]);
+      t.emit(fakeBridgeDeviceId, wmrBridgeBatchedCharUuid, good.sublist(0, 57));
+      t.emit(fakeBridgeDeviceId, wmrBridgeBatchedCharUuid, [...good]..[0] = 1);
+      // A single FF12 record sent where a batch is expected.
+      t.emit(fakeBridgeDeviceId, wmrBridgeBatchedCharUuid, good.sublist(2));
+      await pump();
+      expect(got, isEmpty);
+      expect(service.decodedStats.batchErrors, 3);
+      expect(service.decodedStats.batches, 0);
+    });
+
+    test('MTU 60 is enough for FF12 but not FF14', () async {
+      const device = FakeDevice(
+        id: fakeBridgeDeviceId,
+        mtu: 60,
+        services: [
+          BleServiceInfo(
+            uuid: wmrBridgeServiceUuid,
+            characteristicUuids: [
+              wmrBridgeDecodedCharUuid,
+              wmrBridgeBatchedCharUuid,
+            ],
+          ),
+        ],
+      );
+      await setUpService(device: device);
+      expect(service.fault, isNull);
+      await service.setMode(StreamMode.batched);
+      expect(service.fault?.kind, ModeFaultKind.mtuTooSmall);
+      expect(service.fault?.message, contains('FF14 needs at least 61'));
+    });
+
+    test('switching FF12 to FF14 starts a fresh baseline', () async {
+      await setUpService();
+      final bridge = FakeWmrBridge(t);
+      for (var i = 0; i < 10; i++) {
+        bridge.tick();
+      }
+      await service.setMode(StreamMode.batched);
+      for (var i = 0; i < 10; i++) {
+        bridge.tick();
+      }
+      await pump();
+      final h = service.decodedStats.hands[0];
+      expect(h.sequenceGaps, 0);
+      expect(h.outOfOrder, 0);
+      expect(t.cccLog.last, 'on $wmrBridgeBatchedCharUuid');
+    });
   });
 
   group('decoded stream from the fake bridge', () {

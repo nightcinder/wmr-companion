@@ -135,6 +135,30 @@ void main() {
       await close(tester);
     });
 
+    testWidgets('batched FF14 feeds the same view and shows batch stats', (
+      tester,
+    ) async {
+      await open(tester, service);
+      await tester.tap(find.text('Batched FF14'));
+      await settle(tester);
+      expect(service.mode, StreamMode.batched);
+      expect(transport.cccLog.last, 'on $wmrBridgeBatchedCharUuid');
+      expect(find.text('Recalibrate gyro bias'), findsOneWidget);
+      expect(find.textContaining('batched on FF14'), findsOneWidget);
+
+      final bridge = FakeWmrBridge(transport);
+      for (var i = 0; i < 40; i++) {
+        bridge.tick();
+      }
+      await settle(tester);
+      expect(find.textContaining('records 40'), findsNWidgets(2));
+      expect(
+        find.textContaining('FF14 batches 20  mean 4.00  max 4'),
+        findsOneWidget,
+      );
+      await close(tester);
+    });
+
     testWidgets('decoded mode shows the packet numbers', (tester) async {
       await open(tester, service);
       await tester.tap(find.text('Decoded FF12'));

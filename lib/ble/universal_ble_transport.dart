@@ -470,10 +470,11 @@ class UniversalBleTransport implements BleTransport {
     );
   }
 
-  /// FF11 and FF12 share one CCC slot on the bridge.
+  /// FF11, FF12 and FF14 share one CCC slot on the bridge.
   static bool _isBridgeStream(String key) =>
       key.endsWith('|$wmrBridgeStreamCharUuid') ||
-      key.endsWith('|$wmrBridgeDecodedCharUuid');
+      key.endsWith('|$wmrBridgeDecodedCharUuid') ||
+      key.endsWith('|$wmrBridgeBatchedCharUuid');
 
   @override
   Future<void> disconnect(String deviceId) async {
@@ -538,8 +539,8 @@ class UniversalBleTransport implements BleTransport {
         ctl.add(BleNotification(value: v, receivedAtUs: t));
       }),
     );
-    // FF11 and FF12 are mutually exclusive on the bridge. Forget the other
-    // one now, so a setup that is already queued enables only this one.
+    // FF11, FF12 and FF14 are mutually exclusive on the bridge. Forget the
+    // others now, so a setup that is already queued enables only this one.
     if (_isBridgeStream(key)) {
       _wanted.removeWhere(
         (k, _) => k != key && k.startsWith('$deviceId|') && _isBridgeStream(k),
