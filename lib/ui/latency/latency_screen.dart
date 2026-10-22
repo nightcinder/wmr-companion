@@ -20,6 +20,11 @@ class LatencyScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodyMedium?.copyWith(fontFamily: 'monospace');
     final running = s.stage == LatencyStage.running;
+    final service = ref.watch(controllerServiceProvider(source));
+    final active = service == null
+        ? null
+        : LatencyStream.fromMode(service.mode);
+    final selected = s.streamChoice ?? active ?? LatencyStream.batched;
 
     return PopScope(
       canPop: !running,
@@ -32,8 +37,8 @@ class LatencyScreen extends ConsumerWidget {
               'Not verified on hardware. Measures what the phone sees: '
               'inter-arrival, sequence gaps, tick-based loss and (decoded '
               'streams) one-way delay variation from the ESP32 receive time. '
-              'Round trip uses the bridge\'s FF15 echo (WMR_Bridge #13); the '
-              'firmware has not been run on hardware either.',
+              'Round trip uses the bridge\'s FF15 echo (WMR_Bridge #13). '
+              'None runs with FF11, FF12 and FF14 off, so only FF15 pings.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -54,14 +59,66 @@ class LatencyScreen extends ConsumerWidget {
                   ? null
                   : (v) => c.selectDuration(v.first),
             ),
+            const SizedBox(height: 12),
+            Text('Stream', style: theme.textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final choice in LatencyStream.values)
+                  ChoiceChip(
+                    label: Text(choice.label),
+                    selected: selected == choice,
+                    onSelected: running || service == null
+                        ? null
+                        : (_) => c.selectStream(source, choice),
+                  ),
+              ],
+            ),
+            if (selected.isNone)
+              Text(
+                'The active stream is turned off through the service and '
+                'restored when the run ends.',
+                style: theme.textTheme.bodySmall,
+              ),
+            const SizedBox(height: 8),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Measure round trip (FF15 echo)'),
-              subtitle: const Text(
-                'A small ping four times a second: about 480 in a 120 s run.',
+              subtitle: Text(
+                s.durationSeconds == null
+                    ? 'One ping at a time, ${s.echoInterval.inMilliseconds} '
+                          'ms apart.'
+                    : 'One ping at a time, ${s.echoInterval.inMilliseconds} '
+                          'ms apart: about '
+                          '${(s.durationSeconds! * 1000 / s.echoInterval.inMilliseconds).round()} '
+                          'pings in a ${s.durationSeconds} s run.',
               ),
               value: s.echoEnabled,
               onChanged: running ? null : c.setEchoEnabled,
+            ),
+            Text('Ping interval', style: theme.textTheme.labelLarge),
+            const SizedBox(height: 4),
+            SegmentedButton<Duration>(
+              segments: const [
+                ButtonSegment(
+                  value: Duration(milliseconds: 50),
+                  label: Text('50 ms'),
+                ),
+                ButtonSegment(
+                  value: Duration(milliseconds: 250),
+                  label: Text('250 ms'),
+                ),
+                ButtonSegment(
+                  value: Duration(seconds: 1),
+                  label: Text('1000 ms'),
+                ),
+              ],
+              selected: {s.echoInterval},
+              onSelectionChanged: running
+                  ? null
+                  : (v) => c.selectEchoInterval(v.first),
             ),
             if (s.echoNote != null)
               Text(
@@ -184,7 +241,18 @@ class LatencyReportView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Stream: ${report.stream}', style: style),
+        if (report.stream == 'none') ...[
+          Text(
+            'Stream: no stream',
+            style: style?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          Text(
+            'No stream figures: FF11, FF12 and FF14 were off, so this run '
+            'reports only the FF15 round trip.',
+            style: style,
+          ),
+        ] else
+          Text('Stream: ${report.stream}', style: style),
         Text(
           'MTU ${link.mtu ?? '-'}   RSSI ${link.rssiStart ?? '-'}'
           '${link.rssiEnd == null ? '' : ' -> ${link.rssiEnd}'} dBm   '

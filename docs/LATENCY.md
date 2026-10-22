@@ -4,7 +4,11 @@ Milestone 4, plus the FF15 round trip. Screen: "Latency test" on the connect scr
 
 ## What it measures
 
-A run listens to whichever stream the service has active (raw FF11 frames or decoded FF12 records) for 30 s, 60 s, 120 s or until Stop. It shares the service's streams; it does not subscribe again.
+Before a run the screen selects **None / FF11 raw / FF12 decoded / FF14 batched** and applies it through `ControllerService.setMode` (the same API the Connect and Debug screens use; the UI never writes CCCDs). The default selection is the stream the service already has active, so a run started without touching the selector behaves as before. It shares the service's streams; it does not subscribe again.
+
+**None** turns the active stream off through the service (FF11, FF12 and FF14 all off) and leaves only FF15 pings. The stream figures section then says "no stream" and reports no stream numbers. The mode that was active before the screen turned it off is restored when the run ends, when it is stopped, or when the screen is left mid-run. Selecting a stream again cancels that restore.
+
+A run lasts 30 s, 60 s, 120 s or until Stop. The ping interval is 50, 250 (default) or 1000 ms; one ping is outstanding at a time. A 120 s run is about 2400, 480 or 120 pings. Intervals other than 250 ms are new and not yet run on hardware.
 
 | Figure | Streams | Meaning |
 |---|---|---|
@@ -20,7 +24,7 @@ The ESP32 and phone clocks have unrelated origins and drift apart (tens of ppm),
 
 ## Round trip (FF15 echo)
 
-With "Measure round trip" on (the default) and a bridge that has FF15 (WMR_Bridge #13; spec in its `docs/PROTOCOL.md`, "Echo, FF15"), the run also pings the echo characteristic about four times a second (250 ms apart, one ping outstanding at a time, 1 s timeout): about 480 pings in a 120 s run, about 120 in 30 s. It works while any stream is active, because FF15 is outside the FF11/FF12/FF14 exclusion.
+With "Measure round trip" on (the default) and a bridge that has FF15 (WMR_Bridge #13; spec in its `docs/PROTOCOL.md`, "Echo, FF15"), the run also pings the echo characteristic (250 ms apart by default; 50, 250 or 1000 ms can be selected, one ping outstanding at a time, 1 s timeout): about 480 pings in a 120 s run at 250 ms. It works while any stream is active and in no-stream mode, because FF15 is outside the FF11/FF12/FF14 exclusion.
 
 | Figure | Meaning |
 |---|---|
@@ -42,7 +46,7 @@ One earlier data point, a single 24 ms turnaround seen in nRF Connect (user-repo
 
 Each run is saved when it ends to `latency/` under the app documents directory, as `latency-YYYYMMDD-HHMMSS.csv` and `.json`, plus `latency-YYYYMMDD-HHMMSS-echo.csv` when the run used the echo. "Export" opens the share sheet with all of them.
 
-CSV, one row per frame or record (up to 250 000 rows; more are counted in `rows_dropped` but still in the summary):
+CSV, one row per frame or record (up to 250 000 rows; more are counted in `rows_dropped` but still in the summary). The format is unchanged; a no-stream run has only the header:
 
 ```
 hand,sequence,arrival_us,inter_arrival_us,seq_delta,device_ticks,device_dt_us,esp_rx_us
@@ -63,7 +67,9 @@ ping_id,t1_us,t1_done_us,t4_us,end_to_end_us,esp_rx_us,turnaround_us,rtt_us,queu
 
 `t1_us`, `t1_done_us` (write call returned) and `t4_us` are phone time since the run started; `esp_rx_us` is the raw ESP32 clock; `clock_offset_us` is the per-ping estimate above.
 
-JSON (format `wmr-latency`, version 2: `round_trip` is an object, percentiles gained `min_us` and `p95_us`): run metadata (`started`, `stream`, `duration_us`), `round_trip` (`measured`, and when true `rtt`, `end_to_end`, `turnaround`, `max_queue_depth`, `sent`, `answered`, `timeouts`, `failed_writes`, `counters`), `link`, `counters`, `rows_dropped`, `mode_changed`, and per hand `records`, `arrivals`, `span_us`, `rate_per_s`, `inter_arrival` and (decoded) `delay_above_window_min` / `delay_variation` as `{count, min_us, p50_us, p90_us, p95_us, p99_us, max_us}`, `stalls_over_50000us`, `sequence_gaps`, `sequence_loss`, `out_of_order`, `missing_from_ticks`, `tick_loss`, `period_us`. Fields that do not apply are `null`.
+JSON (format `wmr-latency`, version 2: `round_trip` is an object, percentiles gained `min_us` and `p95_us`): run metadata (`started`, `stream`, `duration_us`), `round_trip` (`measured`, and when true `rtt`, `end_to_end`, `turnaround`, `max_queue_depth`, `sent`, `answered`, `timeouts`, `failed_writes`, `counters`, `ping_interval_us`), `link`, `counters`, `rows_dropped`, `mode_changed`, and per hand `records`, `arrivals`, `span_us`, `rate_per_s`, `inter_arrival` and (decoded) `delay_above_window_min` / `delay_variation` as `{count, min_us, p50_us, p90_us, p95_us, p99_us, max_us}`, `stalls_over_50000us`, `sequence_gaps`, `sequence_loss`, `out_of_order`, `missing_from_ticks`, `tick_loss`, `period_us`. Fields that do not apply are `null`.
+
+`stream` is `"none"`, `"raw"`, `"decoded"` or `"batched"`. A no-stream run still has the `hands` array (all counters zero), so the schema is the same for every mode. `link` keeps the existing fields (MTU, RSSI at start and end, connection interval and PHY where the platform reports them, high priority requested).
 
 ## First hardware run (user-reported)
 
@@ -105,8 +111,46 @@ No incomplete frames, reassembly errors or parse errors. The tick loss figures a
 
 **What this does not show:**
 - Where the 41 ms is spent. The rtt includes the app's write call (median 11 ms), the plugin and platform channel in both directions, the phone's and the ESP32's Bluetooth stacks, and the air. It is not a controller-to-screen latency, and not the latency of the stream records.
-- Whether the FF14 traffic causes it. Every ping here competed with a running stream. A run with the stream off, and runs on FF12 and FF11, at the same position, are needed. The app has no stream-off mode yet.
+- Whether the FF14 traffic causes it. Every ping here competed with a running stream. Runs with no stream, FF11, FF12 and FF14 at one fixed position are now possible from this screen (selector and no-stream mode built, **not yet run on hardware**); the run sheet below is for them.
 - Anything about other phones, positions or distances; the RSSI moved by 21 dB during the run.
+
+## Run sheet: no stream, FF11, FF12, FF14 at a fixed position (**not yet run**)
+
+Status: **not yet run on hardware.** This is the procedure for the comparison; nothing below is a hardware result. The screen and exports are built and unit/widget tested only.
+
+**Setup, once per session**
+
+- Same bridge firmware for every run; write down its commit hash. Same phone and app build (the CI debug APK's commit). Note the phone model and Android version.
+- Phone and ESP32 **fixed about 1.0 m apart**, phone on a stand, not moved between runs. Put both controllers on marked spots on the table, about 0.5 m from the bridge and not moved between runs; keep them awake and connected.
+- Connect, then check the Connect screen: MTU (expect 517), high connection priority, and any connection-interval readout. Note RSSI at the start of each run; if it moves more than a few dB, say so.
+- Latency screen: echo on, **250 ms** ping interval, **120 s** run length, select the stream, start, leave the phone alone, let it stop by itself.
+
+**Runs, in this order**
+
+| # | Stream | Purpose |
+|---|---|---|
+| 1 | None | FF15 only: no stream load at all |
+| 2 | FF11 raw | Raw fragmented frames |
+| 3 | FF12 decoded | One record per notification |
+| 4 | FF14 batched | Several records per notification (app default) |
+| 5 | None (repeat) | Run-to-run spread and RSSI drift |
+| 6 | FF14 batched (repeat) | Run-to-run spread for the busiest stream |
+
+For each run: wait for the mode switch to finish before Start; at the end use **Export CSV + JSON + echo**; note the run number and the stream next to the exported files. Do not change the selector during a run (the screen disables it).
+
+**What to send back**
+
+- All three files per run (`.csv`, `.json`, `-echo.csv`), or at least the JSON and echo CSV. The JSON `stream` field says which mode it was; the timestamped filename keeps the order.
+- Firmware hash, app commit, phone model/Android version, MTU, connection interval and high-priority result from the report, and RSSI at start/end.
+- Any mode fault shown on screen, and anything that moved during the session.
+
+**What the runs can show, if they work**
+
+- `rtt` with no stream against each stream: whether the ~40 ms is caused by stream load or is there even with FF15 alone.
+- Whether `rtt` changes with the notification count (FF12 against FF14) at the same position.
+- The optional 50 ms and 1000 ms ping intervals, if run, whether `rtt` is quantised to the connection interval. They are not part of the six runs above.
+
+Six runs is one position, one phone, one session. The two repeats are there so a difference smaller than the run-to-run spread is not called a result. Nothing here is "verified" until Nick reports it.
 
 ## Known limits
 

@@ -82,6 +82,20 @@ void main() {
     service.setFf13Calibration(0, cal, apply: false);
     expect(service.pipeline(0).calibration, isNull);
   });
+
+  test('none turns the active stream off and enables nothing', () async {
+    expect(t.cccLog, ['on $wmrBridgeStreamCharUuid']);
+    await service.setMode(StreamMode.none);
+    expect(service.mode, StreamMode.none);
+    expect(t.cccLog, [
+      'on $wmrBridgeStreamCharUuid',
+      'off $wmrBridgeStreamCharUuid',
+    ]);
+
+    await service.setMode(StreamMode.decoded);
+    expect(service.mode, StreamMode.decoded);
+    expect(t.cccLog.last, 'on $wmrBridgeDecodedCharUuid');
+  });
 }
 
 ImuCalibration _calibration() {

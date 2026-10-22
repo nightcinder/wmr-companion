@@ -11,6 +11,7 @@ import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/protocol/wmr_fragment.dart';
 import 'package:wmr_companion/services/controller_service.dart';
 import 'package:wmr_companion/services/latency_files.dart';
+import 'package:wmr_companion/services/latency_recorder.dart';
 import 'package:wmr_companion/ui/debug/debug_providers.dart';
 import 'package:wmr_companion/ui/latency/latency_providers.dart';
 
@@ -140,7 +141,7 @@ void main() {
         samples: const Stream<DecodedSample>.empty(),
         modeChanges: const Stream<ModeState>.empty(),
         clock: clock,
-        stream: 'raw',
+        mode: StreamMode.raw,
         linkInfo: () async => const BleConnectionInfo(mtu: 23, rssi: -70),
         counters: () => {'incomplete_frames': incomplete},
       ),
@@ -177,6 +178,117 @@ void main() {
     await controller().start(DebugSource.real);
     expect(state().stage, LatencyStage.idle);
     expect(state().error, 'Not connected to the bridge.');
+  });
+
+  group('stream choice', () {
+    late FakeTransport transport;
+    late ControllerService service;
+    late FakeWmrBridge bridge;
+
+    Future<void> setUpStream({StreamMode mode = StreamMode.decoded}) async {
+      transport = FakeTransport(
+        devices: const [fakeBridgeDevice],
+        clock: clock,
+      );
+      service = ControllerService(transport, fakeBridgeDeviceId, mode: mode);
+      await service.start();
+      bridge = FakeWmrBridge(transport);
+      addTearDown(() async {
+        await service.dispose();
+        await transport.dispose();
+      });
+      setUpContainer((_) async => LatencyInput.fromService(service));
+    }
+
+    test('each selector value applies its mode through the service', () async {
+      await setUpStream();
+      const choices = [
+        (LatencyStream.raw, StreamMode.raw),
+        (LatencyStream.decoded, StreamMode.decoded),
+        (LatencyStream.batched, StreamMode.batched),
+        (LatencyStream.none, StreamMode.none),
+      ];
+      for (final (choice, mode) in choices) {
+        await controller().selectStream(DebugSource.fake, choice);
+        expect(state().streamChoice, choice);
+        expect(service.mode, mode);
+      }
+      // Turning off goes through ControllerService -> transport.unsubscribe.
+      expect(transport.cccLog.last, 'off $wmrBridgeBatchedCharUuid');
+    });
+
+    test('no-stream run reports round trip, no stream figures, and restores '
+        'after Stop', () async {
+      await setUpStream();
+      await controller().selectStream(DebugSource.fake, LatencyStream.none);
+      expect(service.mode, StreamMode.none);
+
+      controller().selectDuration(null);
+      await controller().start(DebugSource.fake);
+      expect(state().stage, LatencyStage.running);
+      await until(() => (state().report?.echo?.answered ?? 0) >= 2);
+      for (var i = 0; i < 20; i++) {
+        clock.now += 10000;
+        bridge.tick();
+      }
+      await Future<void>.delayed(Duration.zero);
+      await controller().stop();
+
+      final report = state().report!;
+      expect(report.stream, 'none');
+      expect(report.echo, isNotNull);
+      expect(report.echo!.answered, greaterThanOrEqualTo(2));
+      expect(report.echo!.timeouts, 0);
+      for (final hand in report.hands) {
+        expect(hand.records, 0);
+        expect(hand.arrivals, 0);
+        expect(hand.missingFromTicks, isNull);
+      }
+      expect(state().error, isNull);
+
+      // The mode the screen turned off comes back at the end.
+      expect(service.mode, StreamMode.decoded);
+      expect(state().streamChoice, LatencyStream.decoded);
+
+      final saved = state().saved!;
+      expect(File(saved.csvPath).readAsLinesSync(), [LatencyRow.csvHeader]);
+      final json = File(saved.jsonPath).readAsStringSync();
+      expect(json, contains('"stream": "none"'));
+      expect(json, contains('"ping_interval_us": 5000'));
+      expect(saved.echoCsvPath, isNotNull);
+    });
+
+    test('a timed no-stream run restores the mode when it ends', () async {
+      await setUpStream(mode: StreamMode.raw);
+      await controller().selectStream(DebugSource.fake, LatencyStream.none);
+      controller().selectDuration(1);
+      await controller().start(DebugSource.fake);
+      expect(service.mode, StreamMode.none);
+
+      clock.now += 2000000;
+      await until(() => state().stage == LatencyStage.finished);
+
+      expect(state().report!.stream, 'none');
+      expect(service.mode, StreamMode.raw);
+      expect(state().streamChoice, LatencyStream.raw);
+    });
+
+    test('leaving during a no-stream run restores the mode', () async {
+      await setUpStream();
+      await controller().selectStream(DebugSource.fake, LatencyStream.none);
+      await controller().start(DebugSource.fake);
+      await until(() => (state().report?.echo?.answered ?? 0) >= 1);
+      expect(service.mode, StreamMode.none);
+
+      container.dispose();
+      // The restore is fired without waiting; give it a turn.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.mode, StreamMode.decoded);
+      // The tear-down disposes the container again; that is harmless.
+      container = ProviderContainer();
+    });
   });
 
   group('round trip', () {

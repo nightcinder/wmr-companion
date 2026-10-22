@@ -275,11 +275,13 @@ class LatencyReport {
     this.rowsDropped = 0,
     this.modeChanged = false,
     this.echo,
+    this.echoIntervalUs,
   });
 
   final DateTime started;
 
-  /// The stream mode the run listened to, as the service names it.
+  /// The stream mode the run listened to, as the service names it
+  /// (`raw`, `decoded`, `batched`, or `none` for an FF15-only run).
   final String stream;
   final int durationUs;
   final List<LatencyHandSummary> hands;
@@ -300,6 +302,9 @@ class LatencyReport {
   /// Null when no echo was used: the round trip was not measured.
   final EchoSummary? echo;
 
+  /// Time between echo pings, when a round trip was measured.
+  final int? echoIntervalUs;
+
   Map<String, Object?> toJson() => {
     'format': latencyFormatName,
     'version': latencyFormatVersion,
@@ -307,12 +312,15 @@ class LatencyReport {
     'started': started.toIso8601String(),
     'stream': stream,
     'duration_us': durationUs,
-    'round_trip':
-        echo?.toJson() ??
-        {
-          'measured': false,
-          'reason': 'echo not used (needs the FF15 echo, WMR_Bridge #13)',
-        },
+    'round_trip': echo == null
+        ? {
+            'measured': false,
+            'reason': 'echo not used (needs the FF15 echo, WMR_Bridge #13)',
+          }
+        : {
+            ...echo!.toJson(),
+            if (echoIntervalUs != null) 'ping_interval_us': echoIntervalUs,
+          },
     'link': link.toJson(),
     'counters': counters,
     'rows_dropped': rowsDropped,
@@ -608,9 +616,11 @@ class LatencyRecorder {
     LatencyLink link = const LatencyLink(),
     Map<String, int> counters = const {},
     Map<String, int> echoCounters = const {},
+    int? echoIntervalUs,
   }) {
     return LatencyReport(
       echo: _echoUsed ? _echoSummary(echoCounters) : null,
+      echoIntervalUs: _echoUsed ? echoIntervalUs : null,
       started: started,
       stream: stream,
       durationUs: nowUs - originUs,
