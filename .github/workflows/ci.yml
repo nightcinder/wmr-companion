@@ -37,6 +37,15 @@ jobs:
           dart pub get
           dart analyze
           dart test
+      # Monado's config key (BSL-1.0) is not committed. It is fetched here so the
+      # test APK can decode a controller config block; it ends up only inside the
+      # APK artifact, together with assets/monado/NOTICE.txt. A failed download
+      # must not fail CI: the app reports a missing key.
+      - name: Fetch Monado config key
+        continue-on-error: true
+        run: dart run tool/fetch_wmr_config_key.dart
+      - name: Show whether the key is in the build
+        run: ls -l assets/monado/
       - run: flutter build apk --debug
 
       - uses: actions/upload-artifact@v4

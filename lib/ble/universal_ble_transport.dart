@@ -630,6 +630,17 @@ class UniversalBleTransport implements BleTransport {
   }
 
   @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    return _serial(
+      () => _adapter.read(deviceId, serviceUuid, characteristicUuid),
+    );
+  }
+
+  @override
   Future<void> write(
     String deviceId,
     String serviceUuid,

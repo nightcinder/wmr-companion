@@ -30,6 +30,14 @@ const String wmrBridgeBatchedCharUuid = '0000ff14-0000-1000-8000-00805f9b34fb';
 /// not run on hardware.
 const String wmrBridgeEchoCharUuid = '0000ff15-0000-1000-8000-00805f9b34fb';
 
+/// Controller config block (calibration): write a 5-byte cursor (hand, offset),
+/// read a 16-byte header plus up to 496 data bytes, notify carries the header
+/// when a hand's state changes. Independent of the stream exclusion. Layout
+/// approved 2026-10-22; firmware merged (WMR_Bridge #17), reads of both
+/// controllers' block reported working (user-reported). docs/PROTOCOL.md
+/// "Controller config block, FF13".
+const String wmrBridgeConfigCharUuid = '0000ff13-0000-1000-8000-00805f9b34fb';
+
 /// ATT application error the bridge returns when a CCC write would enable a
 /// second stream. Write 0x0000 to the active CCC first.
 const int attErrorOtherStreamActive = 0x80;

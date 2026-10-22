@@ -126,6 +126,14 @@ abstract class BleTransport {
     String characteristicUuid,
   );
 
+  /// Reads a characteristic value (long values included). Used for the FF13
+  /// config window and the FF11 status; never at stream rate.
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  );
+
   Future<void> write(
     String deviceId,
     String serviceUuid,
