@@ -41,6 +41,7 @@ class FakeAdapter implements BleAdapter {
   /// Simulates the bridge dropping the link.
   void dropLink() {
     calls.add('link-dropped');
+    _enabled.clear();
     _links.add(const AdapterConnectionEvent(connected: false, error: 'gone'));
   }
 
@@ -78,12 +79,16 @@ class FakeAdapter implements BleAdapter {
   @override
   Future<void> connect(String deviceId) async {
     calls.add('connect');
+    _enabled.clear();
     if (connectError != null) throw connectError!;
     _links.add(const AdapterConnectionEvent(connected: true));
   }
 
   @override
-  Future<void> disconnect(String deviceId) async => calls.add('disconnect');
+  Future<void> disconnect(String deviceId) async {
+    calls.add('disconnect');
+    _enabled.clear();
+  }
 
   @override
   Stream<AdapterConnectionEvent> connectionEvents(String deviceId) =>
@@ -108,12 +113,60 @@ class FakeAdapter implements BleAdapter {
     return services;
   }
 
+  /// Mirrors the firmware: while one of FF11/FF12 is enabled, enabling the
+  /// other fails with ATT error 0x80. State resets when the link drops or
+  /// reconnects.
+  bool bridgeExclusion = true;
+
+  /// CCC writes in order, as `on <char>` / `off <char>`; `FAIL` entries mark
+  /// refused writes.
+  final List<String> ccc = [];
+  final Set<String> _enabled = {};
+
+  /// Characteristics whose enable or disable throws this.
+  final Map<String, Object> enableErrors = {};
+  final Map<String, Object> disableErrors = {};
+
+  static String _short(String uuid) => uuid.substring(4, 8);
+
   @override
   Future<void> enableNotifications(
     String deviceId,
     String serviceUuid,
     String characteristicUuid,
-  ) async => calls.add('enableNotifications');
+  ) async {
+    calls.add('enableNotifications');
+    final name = _short(characteristicUuid);
+    final error = enableErrors[characteristicUuid];
+    if (error != null) {
+      ccc.add('FAIL on $name');
+      throw error;
+    }
+    if (bridgeExclusion &&
+        _enabled.any((c) => c != name && (c == 'ff11' || c == 'ff12')) &&
+        (name == 'ff11' || name == 'ff12')) {
+      ccc.add('FAIL on $name');
+      throw const BleAdapterException('other stream active', attError: 0x80);
+    }
+    _enabled.add(name);
+    ccc.add('on $name');
+  }
+
+  @override
+  Future<void> disableNotifications(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    calls.add('disableNotifications');
+    final error = disableErrors[characteristicUuid];
+    if (error != null) {
+      ccc.add('FAIL off ${_short(characteristicUuid)}');
+      throw error;
+    }
+    _enabled.remove(_short(characteristicUuid));
+    ccc.add('off ${_short(characteristicUuid)}');
+  }
 
   @override
   Stream<Uint8List> notifications(String deviceId, String characteristicUuid) =>

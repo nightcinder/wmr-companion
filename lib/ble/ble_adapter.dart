@@ -34,6 +34,46 @@ class AdapterConnectionParams {
   final int intervalUs;
 }
 
+/// A failed adapter call that carries the ATT error code when the platform
+/// reported one. [attError] is best effort: platforms word GATT failures
+/// differently (Android reports status 128 for 0x80) and the real wording has
+/// not been seen on hardware.
+class BleAdapterException implements Exception {
+  const BleAdapterException(this.message, {this.attError});
+
+  final String message;
+  final int? attError;
+
+  @override
+  String toString() => attError == null
+      ? 'BleAdapterException: $message'
+      : 'BleAdapterException(ATT 0x${attError!.toRadixString(16)}): $message';
+}
+
+/// Pulls an ATT error code out of a platform error message, or null. Matches
+/// BlueZ's "ATT error: 0x80", Android's "status 128" / "status=128" and a
+/// bare two-digit hex value such as "0x80". Guesses at wordings nobody has
+/// seen from this bridge; the caller must treat null as "unknown", not "not
+/// an ATT error".
+int? parseAttError(String text) {
+  final bluez = RegExp(
+    r'ATT error:\s*0x([0-9a-f]+)',
+    caseSensitive: false,
+  ).firstMatch(text);
+  if (bluez != null) return int.parse(bluez.group(1)!, radix: 16);
+  final status = RegExp(
+    r'status\D{0,3}(\d{1,3})\b',
+    caseSensitive: false,
+  ).firstMatch(text);
+  if (status != null) return int.parse(status.group(1)!);
+  final hex = RegExp(
+    r'\b0x([0-9a-f]{2})\b',
+    caseSensitive: false,
+  ).firstMatch(text);
+  if (hex != null) return int.parse(hex.group(1)!, radix: 16);
+  return null;
+}
+
 /// The thin layer between [UniversalBleTransport] and a BLE package.
 ///
 /// Every method maps to one package call, so the transport's sequencing can
@@ -72,8 +112,16 @@ abstract class BleAdapter {
 
   Future<List<BleServiceInfo>> discoverServices(String deviceId);
 
-  /// Writes the CCC descriptor to enable notifications.
+  /// Writes the CCC descriptor to enable notifications. Throws a
+  /// [BleAdapterException] with the ATT error where the platform gives one.
   Future<void> enableNotifications(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  );
+
+  /// Writes 0x0000 to the CCC descriptor.
+  Future<void> disableNotifications(
     String deviceId,
     String serviceUuid,
     String characteristicUuid,

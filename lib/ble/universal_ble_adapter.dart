@@ -112,11 +112,36 @@ class UniversalBleAdapter implements BleAdapter {
     String deviceId,
     String serviceUuid,
     String characteristicUuid,
-  ) => ub.UniversalBle.subscribeNotifications(
-    deviceId,
-    serviceUuid,
-    characteristicUuid,
+  ) => _translate(
+    () => ub.UniversalBle.subscribeNotifications(
+      deviceId,
+      serviceUuid,
+      characteristicUuid,
+    ),
   );
+
+  @override
+  Future<void> disableNotifications(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => _translate(
+    () =>
+        ub.UniversalBle.unsubscribe(deviceId, serviceUuid, characteristicUuid),
+  );
+
+  /// Rethrows package errors as [BleAdapterException], with the ATT code when
+  /// the message carries one. Untested against a real ATT 0x80.
+  static Future<void> _translate(Future<void> Function() call) async {
+    try {
+      await call();
+    } catch (e) {
+      final text = e is ub.UniversalBleException
+          ? '${e.message} ${e.details}'
+          : '$e';
+      throw BleAdapterException(text, attError: parseAttError(text));
+    }
+  }
 
   @override
   Stream<Uint8List> notifications(String deviceId, String characteristicUuid) =>

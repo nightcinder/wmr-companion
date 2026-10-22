@@ -63,6 +63,39 @@ class MonotonicClock {
   int get nowUs => _stopwatch.elapsedMicroseconds;
 }
 
+enum BleStreamFaultKind {
+  /// The bridge refused to enable a stream because the other one is active
+  /// (ATT error 0x80).
+  otherStreamActive,
+
+  /// Enabling notifications failed for another reason.
+  enableFailed,
+
+  /// Writing 0x0000 to the previously active characteristic failed, so the
+  /// new one was not enabled.
+  disableFailed,
+}
+
+/// Delivered as an error on the stream returned by [BleTransport.subscribe]
+/// when the CCC write behind it failed. Never swallowed: the consumer must
+/// surface it.
+class BleStreamException implements Exception {
+  const BleStreamException(
+    this.kind,
+    this.characteristicUuid,
+    this.message, {
+    this.attError,
+  });
+
+  final BleStreamFaultKind kind;
+  final String characteristicUuid;
+  final String message;
+  final int? attError;
+
+  @override
+  String toString() => 'BleStreamException(${kind.name}): $message';
+}
+
 /// BLE GATT central operations used by the app. Implementations must stamp
 /// every notification with [clock] as early as possible.
 abstract class BleTransport {
@@ -78,6 +111,16 @@ abstract class BleTransport {
   Future<List<BleServiceInfo>> discoverServices(String deviceId);
 
   Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  );
+
+  /// Writes 0x0000 to the characteristic's CCC. The bridge's FF11 and FF12
+  /// streams are mutually exclusive, so [subscribe] to one disables the other
+  /// first (in that order); this is for turning a stream off without
+  /// enabling another.
+  Future<void> unsubscribe(
     String deviceId,
     String serviceUuid,
     String characteristicUuid,
