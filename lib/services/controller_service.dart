@@ -3,6 +3,7 @@ import 'dart:async';
 import '../ble/ble_transport.dart';
 import '../domain/axis_mapping.dart';
 import '../domain/hand_pipeline.dart';
+import '../domain/imu_calibration.dart';
 import '../domain/stick_centre.dart';
 import '../domain/tick_timer.dart';
 import '../protocol/decoded_batch.dart';
@@ -453,6 +454,18 @@ class ControllerService {
     for (final p in _pipelines) {
       p.mapping = m;
     }
+  }
+
+  /// Applies [calibration] to [hand]'s samples when [apply] is true, and
+  /// clears it otherwise. The pipeline ignores it for CALIBRATED-flagged
+  /// records. A null [calibration] is the same as [apply] false: there is
+  /// nothing to apply.
+  void setFf13Calibration(
+    int hand,
+    ImuCalibration? calibration, {
+    required bool apply,
+  }) {
+    _pipelines[hand].calibration = apply ? calibration : null;
   }
 
   /// Applies [c] to both hands from the next sample on.

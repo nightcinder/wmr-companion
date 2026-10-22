@@ -1,8 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 import 'package:wmr_companion/domain/hand_pipeline.dart';
+import 'package:wmr_companion/domain/imu_calibration.dart';
 import 'package:wmr_companion/domain/orientation.dart';
 import 'package:wmr_companion/domain/tick_timer.dart';
+import 'package:wmr_companion/protocol/config_decode.dart';
+import 'package:wmr_companion/protocol/decoded_record.dart';
 
 import 'sim.dart';
 
@@ -187,4 +192,119 @@ void main() {
     expect(q, isA<vm.Quaternion>());
     expect(q.length, closeTo(1, 1e-9));
   });
+
+  group('FF13 calibration', () {
+    test('identity calibration leaves the fused orientation unchanged', () {
+      final off = HandPipeline();
+      final on = HandPipeline()..calibration = _calibration();
+      for (final r in sensorTurn(axis: 2, rate: 1.5)) {
+        off.add(r, 0);
+        on.add(r, 0);
+      }
+      _expectSameOrientation(on.orientation, off.orientation);
+    });
+
+    test('a 90 deg Rt turns the motion from view roll to view pitch', () {
+      // Rt = +90 deg about sensor X. The calibration applies its inverse
+      // (-90 deg about X), so a sensor Z rotation (view roll with the default
+      // axis map) becomes a rotation about sensor Y (view pitch). The accel
+      // in sensorTurn is consistent with that motion, so the filter can
+      // follow; the point is that the calibrated and uncalibrated paths see
+      // different, but each internally consistent, body motions.
+      final off = HandPipeline();
+      final on = HandPipeline()
+        ..calibration = _calibration(
+          rotation: const [1, 0, 0, 0, 0, -1, 0, 1, 0],
+        );
+      for (final r in sensorTurn(
+        axis: 2,
+        rate: math.pi / 2,
+        stillSeconds: 1.2,
+        turnSeconds: 1.0,
+      )) {
+        off.add(r, 0);
+        on.add(r, 0);
+      }
+      final eOff = eulerFromQuaternion(off.orientation);
+      final eOn = eulerFromQuaternion(on.orientation);
+      expect(eOff.rollDeg.abs(), greaterThan(60));
+      expect(eOn.pitchDeg.abs(), greaterThan(60));
+      expect(eOn.rollDeg.abs(), lessThan(20));
+    });
+
+    test('CALIBRATED-flagged records are not calibrated twice', () {
+      final off = HandPipeline();
+      final on = HandPipeline()
+        ..calibration = _calibration(
+          rotation: const [0, -1, 0, 1, 0, 0, 0, 0, 1],
+          bias: const [0.1, 0.2, 0.3],
+        );
+      final records = sensorTurn(
+        axis: 0,
+        rate: 1.0,
+        flags: wmrDecodedFlagCalibrated,
+      ).toList();
+      for (final r in records) {
+        off.add(r, 0);
+        on.add(r, 0);
+      }
+      expect(on.calibratedFlagged, records.length);
+      _expectSameOrientation(on.orientation, off.orientation);
+    });
+
+    test('clearing the calibration (switch off) is the old path', () {
+      final off = HandPipeline();
+      final on = HandPipeline()
+        ..calibration = _calibration(
+          rotation: const [0, -1, 0, 1, 0, 0, 0, 0, 1],
+        );
+      on.calibration = null;
+      expect(on.calibration, isNull);
+      for (final r in sensorTurn(axis: 1, rate: 1.0)) {
+        off.add(r, 0);
+        on.add(r, 0);
+      }
+      _expectSameOrientation(on.orientation, off.orientation);
+    });
+
+    test('changing the calibration restarts the runtime gyro bias', () {
+      final p = HandPipeline();
+      still(p, 0, 600).last;
+      expect(p.bias.calibrated, isTrue);
+      p.calibration = _calibration();
+      expect(p.bias.calibrated, isFalse);
+    });
+  });
+}
+
+ImuCalibration _calibration({
+  List<double> rotation = const [1, 0, 0, 0, 1, 0, 0, 0, 1],
+  List<double> mix = const [1, 0, 0, 0, 1, 0, 0, 0, 1],
+  List<double> bias = const [0, 0, 0],
+}) => ImuCalibration.fromSensors(
+  accel: _sensor(InertialSensorType.accelerometer, rotation, mix, bias),
+  gyro: _sensor(InertialSensorType.gyro, rotation, mix, bias),
+);
+
+InertialSensorCalibration _sensor(
+  InertialSensorType type,
+  List<double> rotation,
+  List<double> mix,
+  List<double> bias,
+) => InertialSensorCalibration(
+  type: type,
+  typeName: type == InertialSensorType.gyro
+      ? 'CALIBRATION_InertialSensorType_Gyro'
+      : 'CALIBRATION_InertialSensorType_Accelerometer',
+  rotation: rotation,
+  translation: const [0, 0, 0],
+  mixMatrix: mix,
+  bias: bias,
+  biasUncertainty: const [0, 0, 0],
+  noise: const [0, 0, 0],
+);
+
+void _expectSameOrientation(vm.Quaternion a, vm.Quaternion b) {
+  final d = (a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w).abs();
+  expect(d, greaterThan(1 - 1e-9));
 }
