@@ -205,7 +205,11 @@ Not done, deliberately:
   `assets/monado/wmr_config_key.bin`, which the app bundles on the next build.
   `loadConfigKey` reports a missing or wrong-size key as a status, never an
   exception. The decoder takes the key as an argument; tests use a synthetic
-  one.
+  one. CI runs the same script before building the debug APK (a failed
+  download does not fail CI), so the CI APK carries the key and decodes a
+  block; the key is in that build artifact only, never in git. The BSL-1.0
+  notice ships with it as `assets/monado/NOTICE.txt`. This is the project's
+  reading of the licence, not legal advice.
 - **Nothing calls the client yet** (no UI, no service wiring), and calibration
   is **not applied** to the fusion. Applying it needs the pose composition from
   Monado's `wmr_config_precompute_transforms`, which should be taken from that
