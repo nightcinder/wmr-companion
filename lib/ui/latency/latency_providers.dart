@@ -204,8 +204,11 @@ class LatencyController extends Notifier<LatencyState> {
     return const LatencyState();
   }
 
+  /// Also runs from [build] a turn later, so the notifier may be gone.
   Future<void> refreshRuns() async {
+    if (!ref.mounted) return;
     final store = await ref.read(latencyStoreProvider.future);
+    if (!ref.mounted) return;
     state = state.copyWith(runs: store.list());
   }
 
