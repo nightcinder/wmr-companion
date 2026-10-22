@@ -185,8 +185,9 @@ bias is estimated by the app, and `temperature_raw`, `trackpad`, `trigger` and
 Layout: WMR_Bridge `docs/PROTOCOL.md` "Controller config block, FF13"
 (approved 2026-10-22). Firmware merged (WMR_Bridge #17); both controllers'
 blocks read to READY on a bench run (user-reported: LEFT 7147 bytes crc32
-`8bc13223`, RIGHT 7148 bytes `75e8ab85`). **The app side has never run against
-the bridge, and no real block has been de-obfuscated or parsed.**
+`8bc13223`, RIGHT 7148 bytes `75e8ab85`). The debug screen has read both
+blocks (user-reported 2026-10-22, see STATUS); before this change the
+calibration was parsed and shown but not applied to the fusion.
 
 | Piece | File |
 | --- | --- |
@@ -210,12 +211,58 @@ Not done, deliberately:
   block; the key is in that build artifact only, never in git. The BSL-1.0
   notice ships with it as `assets/monado/NOTICE.txt`. This is the project's
   reading of the licence, not legal advice.
-- **Nothing calls the client yet** (no UI, no service wiring), and calibration
-  is **not applied** to the fusion. Applying it needs the pose composition from
-  Monado's `wmr_config_precompute_transforms`, which should be taken from that
-  function, not re-derived.
+- **The debug screen now applies the calibration behind a switch** (default
+  off), described in "Applying the calibration" below. It was not applied
+  before that change.
 - The JSON field names come from the firmware docs (from Monado); the real
   document has not been seen.
+
+### Applying the calibration
+
+The debug screen has a per-hand "Apply FF13 calibration" switch. It is
+**default off**, is enabled only after a successful "Read config" for that
+hand, and is not persisted (like the other debug-screen settings; only the
+gamepad settings are saved). When it is on, `lib/domain/imu_calibration.dart`
+maps each raw sample before fusion:
+
+```text
+raw sensor axes
+  -> mix matrix          M * v        (MixingMatrixTemperatureModel, model[4*i])
+  -> add bias            + bias       (BiasTemperatureModel, model[0/4/8])
+  -> inverse Rt          R^T * v      (Rt.Rotation, row major)
+  -> axis mapping        sensor/body -> view (X right, Y up, Z toward viewer)
+  -> runtime gyro bias   estimated and subtracted in the view frame
+  -> wmr_fusion filter
+```
+
+The first three steps are Monado's per-sample order, from
+`src/xrt/drivers/wmr/wmr_controller_hp.c` (`wmr_controller_hp_packet_parse`;
+the same code is in `wmr_controller_og.c`), read at commit
+`aa635fa755a779f8aee717647c44aa7282e6ca45`:
+`math_matrix_3x3_transform_vec3` (mix), `math_vec3_accum` (the bias is
+**added**), then `math_quat_rotate_vec3` with `P_oxr_acc.orientation` /
+`P_oxr_gyr.orientation` from `wmr_config_precompute_transforms`
+(`wmr_config.c`). Those poses are `P_oxr_wmr * inv(P_*_ht0)`; this port takes
+the `inv(P_*_ht0)` part (the transpose of `Rt.Rotation`) and leaves the
+WMR-to-OpenXR flip to the existing axis table, so the frame conversion is not
+applied twice. Monado is BSL-1.0 (WMR driver files Copyright 2021 Jan
+Schmidt); the port re-implements the arithmetic and copies neither Monado
+source nor the config key.
+
+CALIBRATED-flagged records (firmware already calibrated) are passed through
+without FF13 calibration. The switch is off by default and has **not been run
+on hardware**; whether the composed axis mapping is right for real blocks
+(user-reported: mix matrices near identity, Rt rotations mirrored between
+hands) is an open hardware question.
+
+The runtime gyro bias is restarted when the calibration is turned on or off or
+a new block is read, because the estimate is in the frame the gyro was in.
+With the switch off, the old path is unchanged: sensor-frame bias subtraction,
+then the axis table.
+
+The calibration has no scale factor. Synthetic tests show that a pure rotation
+preserves the accel magnitude, so it neither explains nor corrects the
+about-10 vs 9.81 accel scale (WMR_Bridge #19).
 
 ## FF12 in the app
 

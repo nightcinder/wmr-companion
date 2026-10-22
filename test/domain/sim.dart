@@ -22,9 +22,11 @@ DecodedRecord record({
   int? rxTimeUs,
   List<int> stick = const [0, 0],
   int buttons = 0,
+  int flags = 0,
 }) => DecodedRecord(
   stick: stick,
   buttons: buttons,
+  flags: flags,
   hand: hand,
   sequence: sequence,
   rxTimeUs: rxTimeUs ?? rxOriginUs + ticks * wmrTickNanoseconds ~/ 1000,
@@ -48,6 +50,7 @@ Iterable<DecodedRecord> sensorTurn({
   int periodTicks = nominalPeriodTicks,
   int startTicks = 1000,
   int hand = 0,
+  int flags = 0,
 }) sync* {
   final n = ((stillSeconds + turnSeconds) / (periodTicks * wmrTickSeconds))
       .round();
@@ -67,6 +70,7 @@ Iterable<DecodedRecord> sensorTurn({
       ticks: ticks,
       hand: hand,
       sequence: i + 1,
+      flags: flags,
       gyro: [for (var k = 0; k < 3; k++) k == axis && turning ? rate : 0.0],
       accel: [accel.x, accel.y, accel.z],
     );

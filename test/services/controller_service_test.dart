@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion/ble/fake_transport.dart';
 import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
+import 'package:wmr_companion/domain/imu_calibration.dart';
+import 'package:wmr_companion/protocol/config_decode.dart';
 import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/protocol/wmr_fragment.dart';
 import 'package:wmr_companion/services/controller_service.dart';
@@ -66,6 +68,21 @@ void main() {
     expect(s.hands[1].lastSequence, 0);
   });
 
+  test('FF13 calibration is applied only when the switch is on', () {
+    final cal = _calibration();
+    expect(service.pipeline(0).calibration, isNull);
+
+    service.setFf13Calibration(0, cal, apply: false);
+    expect(service.pipeline(0).calibration, isNull);
+
+    service.setFf13Calibration(0, cal, apply: true);
+    expect(service.pipeline(0).calibration, same(cal));
+    expect(service.pipeline(1).calibration, isNull);
+
+    service.setFf13Calibration(0, cal, apply: false);
+    expect(service.pipeline(0).calibration, isNull);
+  });
+
   test('none turns the active stream off and enables nothing', () async {
     expect(t.cccLog, ['on $wmrBridgeStreamCharUuid']);
     await service.setMode(StreamMode.none);
@@ -79,4 +96,24 @@ void main() {
     expect(service.mode, StreamMode.decoded);
     expect(t.cccLog.last, 'on $wmrBridgeDecodedCharUuid');
   });
+}
+
+ImuCalibration _calibration() {
+  InertialSensorCalibration sensor(InertialSensorType type) =>
+      InertialSensorCalibration(
+        type: type,
+        typeName: type == InertialSensorType.gyro
+            ? 'CALIBRATION_InertialSensorType_Gyro'
+            : 'CALIBRATION_InertialSensorType_Accelerometer',
+        rotation: const [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        translation: const [0, 0, 0],
+        mixMatrix: const [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        bias: const [0, 0, 0],
+        biasUncertainty: const [0, 0, 0],
+        noise: const [0, 0, 0],
+      );
+  return ImuCalibration.fromSensors(
+    accel: sensor(InertialSensorType.accelerometer),
+    gyro: sensor(InertialSensorType.gyro),
+  );
 }

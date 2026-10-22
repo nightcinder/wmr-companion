@@ -6,6 +6,7 @@ import 'package:wmr_fusion/wmr_fusion.dart' as fusion;
 import '../protocol/decoded_record.dart';
 import 'axis_mapping.dart';
 import 'gyro_bias.dart';
+import 'imu_calibration.dart';
 import 'stick_centre.dart';
 import 'tick_timer.dart';
 
@@ -39,13 +40,33 @@ class DecodedSample {
   final List<double> stick;
 }
 
-/// Timing, gyro bias, axis mapping and the orientation filter for one hand.
+/// Timing, FF13 calibration, gyro bias, axis mapping and the orientation
+/// filter for one hand.
 ///
 /// dt comes from the device ticks (see [TickTimer]), never from arrival
 /// time. A dt above [maxDt] skips the filter step (and counts it in
 /// [largeDtSkips]): after a long gap the gyro rate over the gap is unknown. A
 /// timer discontinuity resets the filter's internal state but keeps its
 /// orientation.
+///
+/// Order of operations for a sample:
+///
+/// 1. FF13 calibration ([calibration], optional): mix matrix, add bias,
+///    inverse Rt (see `ImuCalibration`). Skipped when the record has the
+///    CALIBRATED flag set: the firmware already did it.
+/// 2. `AxisMapping`: sensor/body axes -> view axes (X right, Y up, Z toward
+///    the viewer).
+/// 3. Runtime gyro bias estimator (`GyroBiasEstimator`): estimated and
+///    subtracted in the frame the gyro is in after step 2 when calibration is
+///    on, so the bias and the sample are in the same frame. With calibration
+///    off it stays in the sensor frame, exactly as before, and the subtraction
+///    happens before the axis map.
+///
+/// Monado feeds its fusion the calibrated sample in OpenXR coordinates
+/// (`P_oxr_*`), which is the app's view frame. This port keeps the existing
+/// axis table as the body->view conversion instead of applying Monado's
+/// `P_oxr_wmr` flip and then the table (which would rotate twice); see
+/// `imu_calibration.dart` for the Monado reference.
 class HandPipeline {
   HandPipeline({
     FilterKind kind = FilterKind.madgwick,
@@ -70,6 +91,22 @@ class HandPipeline {
   /// Live-editable: the next sample uses the new settings.
   StickConfig stickConfig = const StickConfig();
 
+  /// FF13 calibration for this hand, or null when it is not applied: the
+  /// debug switch is off, no block has been read, or the hand has no
+  /// accelerometer/gyro entry. CALIBRATED-flagged records ignore it either
+  /// way (the firmware already applied its own calibration).
+  ///
+  /// Changing it restarts the runtime gyro bias: the estimate is in the frame
+  /// the gyro was in, so it does not carry across a frame change.
+  ImuCalibration? get calibration => _calibration;
+  set calibration(ImuCalibration? value) {
+    if (identical(value, _calibration)) return;
+    _calibration = value;
+    bias.restart();
+  }
+
+  ImuCalibration? _calibration;
+
   /// Gyro magnitude (rad/s, bias removed) above which the controller counts
   /// as being moved, so the stick centre is not learned. A guess.
   static const double stickBusyGyro = 0.3;
@@ -81,8 +118,9 @@ class HandPipeline {
   int largeDtSkips = 0;
   int nonFiniteSkips = 0;
 
-  /// Records with the CALIBRATED flag set: the axis table does not apply to
-  /// those (version 1 never sets it).
+  /// Records with the CALIBRATED flag set: the firmware already calibrated
+  /// them, so the FF13 calibration is not applied again (version 1 never sets
+  /// the flag). The axis table is still applied as before.
   int calibratedFlagged = 0;
 
   FilterKind get kind => _kind;
@@ -133,20 +171,26 @@ class HandPipeline {
     final step = timer.advance(r.deviceTicks, r.rxTimeUs);
     var fused = false;
 
+    // CALIBRATED-flagged records are already calibrated by the firmware.
+    final cal = r.calibrated ? null : _calibration;
+    final gyroSensor = cal == null ? r.gyro : cal.calibrateGyro(r.gyro);
+    final accelSensor = cal == null ? r.accel : cal.calibrateAccel(r.accel);
+
     final finite =
-        r.gyro.every((v) => v.isFinite) && r.accel.every((v) => v.isFinite);
+        gyroSensor.every((v) => v.isFinite) &&
+        accelSensor.every((v) => v.isFinite);
     if (!finite) {
       nonFiniteSkips++;
     } else {
       switch (step.kind) {
         case TickStepKind.baseline:
           bias.breakWindow();
-          _seedIfNeeded(r);
+          _seedIfNeeded(r, cal);
         case TickStepKind.discontinuity:
           bias.breakWindow();
           final q = _filter.isInitialized ? _filter.orientation : null;
           _filter.reset(orientation: q);
-          _seedIfNeeded(r);
+          _seedIfNeeded(r, cal);
         case TickStepKind.step:
           final dt = step.dtSeconds;
           if (dt <= 0) break;
@@ -155,14 +199,35 @@ class HandPipeline {
             bias.breakWindow();
             break;
           }
-          bias.add(r.gyro, r.accel, dt);
-          final b = bias.bias;
-          final gyro = mapping.gyroToView([
-            r.gyro[0] - b[0],
-            r.gyro[1] - b[1],
-            r.gyro[2] - b[2],
-          ]);
-          final accel = mapping.accelToView(r.accel);
+          final vm.Vector3 gyro;
+          if (cal == null) {
+            // Existing path, unchanged: subtract the sensor-frame bias, then
+            // map to the view frame.
+            bias.add(gyroSensor, accelSensor, dt);
+            final b = bias.bias;
+            gyro = mapping.gyroToView([
+              gyroSensor[0] - b[0],
+              gyroSensor[1] - b[1],
+              gyroSensor[2] - b[2],
+            ]);
+          } else {
+            // Calibration -> axis map -> runtime bias: the estimator and the
+            // subtraction are in the view frame, the frame the filter uses.
+            final gyroView = mapping.gyroToView(gyroSensor);
+            final accelView = mapping.accelToView(accelSensor);
+            bias.add(
+              [gyroView.x, gyroView.y, gyroView.z],
+              [accelView.x, accelView.y, accelView.z],
+              dt,
+            );
+            final b = bias.bias;
+            gyro = vm.Vector3(
+              gyroView.x - b[0],
+              gyroView.y - b[1],
+              gyroView.z - b[2],
+            );
+          }
+          final accel = mapping.accelToView(accelSensor);
           _filter.update(
             gyro: viewToFilter(gyro),
             accel: viewToFilter(accel),
@@ -182,8 +247,14 @@ class HandPipeline {
   }
 
   List<double> _stick(DecodedRecord r, TickStep step) {
+    // With FF13 calibration on, the runtime bias is in the view frame, so it
+    // cannot be subtracted from the raw sensor gyro here. The threshold is
+    // only a motion/no-motion test; the raw bias is small compared to it.
+    final useBias = _calibration == null || r.calibrated;
     final b = bias.bias;
-    final g = [for (var i = 0; i < 3; i++) r.gyro[i] - b[i]];
+    final g = [
+      for (var i = 0; i < 3; i++) useBias ? r.gyro[i] - b[i] : r.gyro[i],
+    ];
     final rate = math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
     // Moved or pressed in any other way: buttons, trigger, trackpad, or a
     // gyro rate above the threshold (non-finite counts as moving).
@@ -203,11 +274,12 @@ class HandPipeline {
 
   /// The filter seeds its tilt from the first usable accel sample and ignores
   /// dt for it.
-  void _seedIfNeeded(DecodedRecord r) {
+  void _seedIfNeeded(DecodedRecord r, ImuCalibration? cal) {
     if (_filter.isInitialized) return;
+    final accel = cal == null ? r.accel : cal.calibrateAccel(r.accel);
     _filter.update(
       gyro: fusion.Vector3.zero,
-      accel: viewToFilter(mapping.accelToView(r.accel)),
+      accel: viewToFilter(mapping.accelToView(accel)),
       dt: 0,
     );
   }

@@ -77,6 +77,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
     ref.listen(filterKindProvider, (_, k) => _service?.setFilterKind(k));
     ref.listen(stickConfigProvider, (_, c) => _service?.setStickConfig(c));
+    ref.listen(ff13SettingsProvider, (_, s) {
+      final service = _service;
+      if (service != null) applyFf13Settings(service, s);
+    });
     ref.onDispose(() {
       _scanSub?.cancel();
       _statusSub?.cancel();
@@ -138,6 +142,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       filterKind: ref.read(filterKindProvider),
       stickConfig: ref.read(stickConfigProvider),
     );
+    applyFf13Settings(service, ref.read(ff13SettingsProvider));
     try {
       await service.start();
     } on BleTransportException {

@@ -61,41 +61,41 @@ void main() {
         'InertialSensors': [_sensor],
       },
     });
-    final lines = await readConfigReport(
+    final lines = (await readConfigReport(
       await client(_block(text)),
       0,
       keyLoader: () async => ConfigKeyResult.ok(_key),
-    );
+    )).lines;
     expect(lines.first, contains('CRC-32'));
     expect(lines, contains('CALIBRATION_InertialSensorType_Gyro'));
     expect(lines.any((l) => l.contains('bias   0.5000, 0.5000')), isTrue);
   });
 
   test('a missing key still reports the read and says what to do', () async {
-    final lines = await readConfigReport(
+    final lines = (await readConfigReport(
       await client(Uint8List.fromList([1, 2, 3, 4])),
       0,
       keyLoader: () async =>
           const ConfigKeyResult.problem(ConfigKeyStatus.missing),
-    );
+    )).lines;
     expect(lines.first, contains('Read 4 bytes'));
     expect(lines.last, contains('fetch_wmr_config_key'));
   });
 
   test('a wrong key is a decode failure, not a throw', () async {
-    final lines = await readConfigReport(
+    final lines = (await readConfigReport(
       await client(Uint8List.fromList(List.filled(40, 0xff))),
       0,
       keyLoader: () async => ConfigKeyResult.ok(_key),
-    );
+    )).lines;
     expect(lines.last, startsWith('Decode failed'));
   });
 
   test('a bridge failure is reported', () async {
-    final lines = await readConfigReport(
+    final lines = (await readConfigReport(
       await client(null, states: [ConfigState.failed, ConfigState.failed]),
       0,
-    );
+    )).lines;
     expect(lines.first, contains('bridgeFailed'));
   });
 }

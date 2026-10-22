@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/axis_mapping.dart';
 import '../../domain/hand_pipeline.dart';
+import '../../domain/imu_calibration.dart';
 import '../../domain/stick_centre.dart';
 import '../../services/controller_service.dart';
 
@@ -74,4 +75,56 @@ class StickConfigNotifier extends Notifier<StickConfig> {
   void setDeadZone(double v) => state = state.copyWith(deadZone: v);
 
   void setLearn(bool v) => state = state.copyWith(learn: v);
+}
+
+/// FF13 calibration per hand (index 0 LEFT, 1 RIGHT), and whether the debug
+/// switch applies it. Default off: it has not been run on hardware. Not
+/// persisted, like the other debug-screen settings (only the gamepad settings
+/// are saved).
+class Ff13Settings {
+  const Ff13Settings({required this.calibrations, required this.apply});
+
+  final List<ImuCalibration?> calibrations;
+  final List<bool> apply;
+}
+
+final ff13SettingsProvider =
+    NotifierProvider<Ff13SettingsNotifier, Ff13Settings>(
+      Ff13SettingsNotifier.new,
+    );
+
+class Ff13SettingsNotifier extends Notifier<Ff13Settings> {
+  @override
+  Ff13Settings build() => Ff13Settings(
+    calibrations: List<ImuCalibration?>.filled(2, null),
+    apply: List<bool>.filled(2, false),
+  );
+
+  /// Stores the calibration decoded from a successful read. A failed read or
+  /// a missing key clears it and turns the switch off for that hand: a stale
+  /// block is not silently kept in use.
+  void setCalibration(int hand, ImuCalibration? calibration) {
+    final calibrations = [...state.calibrations]..[hand] = calibration;
+    final apply = [...state.apply];
+    if (calibration == null) apply[hand] = false;
+    state = Ff13Settings(calibrations: calibrations, apply: apply);
+  }
+
+  /// Ignored until a calibration has been read for [hand].
+  void setApply(int hand, bool value) {
+    if (state.calibrations[hand] == null) return;
+    final apply = [...state.apply]..[hand] = value;
+    state = Ff13Settings(calibrations: state.calibrations, apply: apply);
+  }
+}
+
+/// Pushes the current FF13 settings into [service], both hands.
+void applyFf13Settings(ControllerService service, Ff13Settings settings) {
+  for (var h = 0; h < settings.calibrations.length; h++) {
+    service.setFf13Calibration(
+      h,
+      settings.calibrations[h],
+      apply: settings.apply[h],
+    );
+  }
 }
