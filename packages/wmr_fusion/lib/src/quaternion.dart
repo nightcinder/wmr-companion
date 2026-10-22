@@ -26,8 +26,11 @@ class Quaternion {
 
   /// Intrinsic Z-Y-X (yaw, pitch, roll) angles in radians: yaw about z, then
   /// pitch about the new y, then roll about the new x.
-  factory Quaternion.fromEuler(
-      {required double yaw, required double pitch, required double roll}) {
+  factory Quaternion.fromEuler({
+    required double yaw,
+    required double pitch,
+    required double roll,
+  }) {
     final cy = math.cos(yaw / 2), sy = math.sin(yaw / 2);
     final cp = math.cos(pitch / 2), sp = math.sin(pitch / 2);
     final cr = math.cos(roll / 2), sr = math.sin(roll / 2);
@@ -54,11 +57,11 @@ class Quaternion {
 
   /// Hamilton product `this * o` (apply [o] first, then this).
   Quaternion operator *(Quaternion o) => Quaternion(
-        w * o.w - x * o.x - y * o.y - z * o.z,
-        w * o.x + x * o.w + y * o.z - z * o.y,
-        w * o.y - x * o.z + y * o.w + z * o.x,
-        w * o.z + x * o.y - y * o.x + z * o.w,
-      );
+    w * o.w - x * o.x - y * o.y - z * o.z,
+    w * o.x + x * o.w + y * o.z - z * o.y,
+    w * o.y - x * o.z + y * o.w + z * o.x,
+    w * o.z + x * o.y - y * o.x + z * o.w,
+  );
 
   /// Rotates [v] by this (unit) quaternion.
   Vector3 rotate(Vector3 v) {

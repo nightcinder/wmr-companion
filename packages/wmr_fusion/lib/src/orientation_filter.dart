@@ -55,8 +55,8 @@ abstract class OrientationFilterBase implements OrientationFilter {
   int _skipped = 0;
 
   OrientationFilterBase({this.maxDt = 0.1, this.minAccelNorm = 0.1})
-      : assert(maxDt > 0),
-        assert(minAccelNorm > 0);
+    : assert(maxDt > 0),
+      assert(minAccelNorm > 0);
 
   @override
   Quaternion get orientation => Quaternion(_w, _x, _y, _z);
@@ -151,7 +151,13 @@ abstract class OrientationFilterBase implements OrientationFilter {
 
 /// First-order quaternion integration of body rate [g] (rad/s) over [dt].
 Quaternion integrateRate(
-    double w, double x, double y, double z, Vector3 g, double dt) {
+  double w,
+  double x,
+  double y,
+  double z,
+  Vector3 g,
+  double dt,
+) {
   final h = 0.5 * dt;
   return Quaternion(
     w + h * (-x * g.x - y * g.y - z * g.z),
