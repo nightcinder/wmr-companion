@@ -32,8 +32,8 @@ class LatencyScreen extends ConsumerWidget {
               'Not verified on hardware. Measures what the phone sees: '
               'inter-arrival, sequence gaps, tick-based loss and (decoded '
               'streams) one-way delay variation from the ESP32 receive time. '
-              'No true round trip: that needs the firmware echo (WMR_Bridge '
-              'issue #1).',
+              'Round trip uses the bridge\'s FF15 echo (WMR_Bridge #13); the '
+              'firmware has not been run on hardware either.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -54,6 +54,20 @@ class LatencyScreen extends ConsumerWidget {
                   ? null
                   : (v) => c.selectDuration(v.first),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Measure round trip (FF15 echo)'),
+              subtitle: const Text(
+                'A small ping four times a second: about 480 in a 120 s run.',
+              ),
+              value: s.echoEnabled,
+              onChanged: running ? null : c.setEchoEnabled,
+            ),
+            if (s.echoNote != null)
+              Text(
+                s.echoNote!,
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -71,7 +85,11 @@ class LatencyScreen extends ConsumerWidget {
                     FilledButton.icon(
                       onPressed: () => c.share(s.saved!),
                       icon: const Icon(Icons.share),
-                      label: const Text('Export CSV + JSON'),
+                      label: Text(
+                        s.saved!.echoCsvPath == null
+                            ? 'Export CSV + JSON'
+                            : 'Export CSV + JSON + echo',
+                      ),
                     ),
                   OutlinedButton(
                     onPressed: c.reset,
@@ -103,7 +121,11 @@ class LatencyScreen extends ConsumerWidget {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(r.name),
-                subtitle: const Text('CSV + JSON'),
+                subtitle: Text(
+                  r.echoCsvPath == null
+                      ? 'CSV + JSON'
+                      : 'CSV + JSON + echo CSV',
+                ),
                 trailing: IconButton(
                   tooltip: 'Share ${r.name}',
                   icon: const Icon(Icons.share),
@@ -126,6 +148,33 @@ class LatencyReportView extends StatelessWidget {
 
   static String _ms(int us) => (us / 1000).toStringAsFixed(1);
   static String _pct(double v) => '${(v * 100).toStringAsFixed(1)} %';
+
+  List<Widget> _echo(EchoSummary e, ThemeData theme) {
+    return [
+      const SizedBox(height: 8),
+      Text('Round trip (FF15)', style: theme.textTheme.titleSmall),
+      Text(
+        '${e.answered} answered of ${e.sent}  timeouts ${e.timeouts}'
+        '${e.failedWrites == 0 ? '' : '  failed writes ${e.failedWrites}'}',
+        style: style,
+      ),
+      if (e.answered > 0) ...[
+        Text(
+          'rtt ms  min ${_ms(e.rtt.min)}  p50 ${_ms(e.rtt.p50)}  '
+          'p95 ${_ms(e.rtt.p95)}  p99 ${_ms(e.rtt.p99)}  '
+          'max ${_ms(e.rtt.max)}',
+          style: style,
+        ),
+        Text(
+          'write to answer ms  p50 ${_ms(e.endToEnd.p50)}  '
+          'p99 ${_ms(e.endToEnd.p99)}   ESP32 turnaround ms  '
+          'p50 ${_ms(e.turnaround.p50)}  max ${_ms(e.turnaround.max)}   '
+          'queue depth max ${e.maxQueueDepth}',
+          style: style,
+        ),
+      ],
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -153,6 +202,7 @@ class LatencyReportView extends StatelessWidget {
             'streams.',
             style: TextStyle(color: theme.colorScheme.error),
           ),
+        if (report.echo != null) ..._echo(report.echo!, theme),
         for (final h in report.hands)
           if (h.records > 0) ...[
             const SizedBox(height: 8),

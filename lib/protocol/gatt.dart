@@ -24,6 +24,12 @@ const String wmrBridgeDecodedCharUuid = '0000ff12-0000-1000-8000-00805f9b34fb';
 /// run on hardware.
 const String wmrBridgeBatchedCharUuid = '0000ff14-0000-1000-8000-00805f9b34fb';
 
+/// Echo characteristic for BLE round-trip time: write without response (4-byte
+/// ping) and notify (20-byte answer). Independent of the FF11/FF12/FF14
+/// exclusion. Firmware merged (WMR_Bridge #13, docs/PROTOCOL.md "Echo, FF15"),
+/// not run on hardware.
+const String wmrBridgeEchoCharUuid = '0000ff15-0000-1000-8000-00805f9b34fb';
+
 /// ATT application error the bridge returns when a CCC write would enable a
 /// second stream. Write 0x0000 to the active CCC first.
 const int attErrorOtherStreamActive = 0x80;

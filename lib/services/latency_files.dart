@@ -2,13 +2,23 @@ import 'dart:io';
 
 import 'latency_recorder.dart';
 
-/// One saved run: a CSV of every row and a JSON summary with the same stem.
+/// One saved run: a CSV of every row and a JSON summary with the same stem,
+/// plus `<stem>-echo.csv` when the run measured a round trip.
 class SavedLatencyRun {
-  const SavedLatencyRun(this.csvPath, this.jsonPath, this.modified);
+  const SavedLatencyRun(
+    this.csvPath,
+    this.jsonPath,
+    this.modified, {
+    this.echoCsvPath,
+  });
 
   final String csvPath;
   final String jsonPath;
   final DateTime modified;
+  final String? echoCsvPath;
+
+  /// Every file of the run.
+  List<String> get paths => [csvPath, jsonPath, ?echoCsvPath];
 
   String get name =>
       csvPath.split(RegExp(r'[\\/]')).last.replaceAll('.csv', '');
@@ -42,7 +52,17 @@ class LatencyStore {
     final json = File('$base.json');
     await csv.writeAsString(recorder.toCsv(), flush: true);
     await json.writeAsString(report.toJsonString(), flush: true);
-    return SavedLatencyRun(csv.path, json.path, csv.statSync().modified);
+    File? echo;
+    if (recorder.echoUsed) {
+      echo = File('$base-echo.csv');
+      await echo.writeAsString(recorder.toEchoCsv(), flush: true);
+    }
+    return SavedLatencyRun(
+      csv.path,
+      json.path,
+      csv.statSync().modified,
+      echoCsvPath: echo?.path,
+    );
   }
 
   /// Newest first; only runs whose JSON is there too.
@@ -54,9 +74,21 @@ class LatencyStore {
       if (!_csvName.hasMatch(e.uri.pathSegments.last)) continue;
       final json = '${e.path.substring(0, e.path.length - 4)}.json';
       if (!File(json).existsSync()) continue;
-      out.add(SavedLatencyRun(e.path, json, e.statSync().modified));
+      final stemPath = e.path.substring(0, e.path.length - 4);
+      final echo = File('$stemPath-echo.csv');
+      out.add(
+        SavedLatencyRun(
+          e.path,
+          json,
+          e.statSync().modified,
+          echoCsvPath: echo.existsSync() ? echo.path : null,
+        ),
+      );
     }
-    out.sort((a, b) => b.modified.compareTo(a.modified));
+    out.sort((a, b) {
+      final byTime = b.modified.compareTo(a.modified);
+      return byTime != 0 ? byTime : b.csvPath.compareTo(a.csvPath);
+    });
     return out;
   }
 }

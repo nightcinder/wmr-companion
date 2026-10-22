@@ -25,7 +25,10 @@ final transportProvider = Provider<BleTransport>(
 );
 
 final fakeBridgeProvider = Provider<FakeWmrBridge>((ref) {
-  final bridge = FakeWmrBridge(ref.watch(fakeTransportProvider))..start();
+  final bridge = FakeWmrBridge(
+    ref.watch(fakeTransportProvider),
+    echoDelay: const Duration(milliseconds: 6),
+  )..start();
   ref.onDispose(bridge.stop);
   return bridge;
 });

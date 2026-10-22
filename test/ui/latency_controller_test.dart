@@ -7,6 +7,7 @@ import 'package:wmr_companion/ble/ble_transport.dart';
 import 'package:wmr_companion/ble/fake_transport.dart';
 import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
 import 'package:wmr_companion/domain/hand_pipeline.dart';
+import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/protocol/wmr_fragment.dart';
 import 'package:wmr_companion/services/controller_service.dart';
 import 'package:wmr_companion/services/latency_files.dart';
@@ -45,6 +46,8 @@ void main() {
           (ref) => LatencyStore(Directory('${dir.path}/latency')),
         ),
         latencyTickProvider.overrideWithValue(const Duration(milliseconds: 1)),
+        echoIntervalProvider.overrideWithValue(const Duration(milliseconds: 5)),
+        echoTimeoutProvider.overrideWithValue(const Duration(milliseconds: 50)),
         shareLatencyProvider.overrideWithValue((r) async => shared.add(r)),
       ],
     );
@@ -174,5 +177,123 @@ void main() {
     await controller().start(DebugSource.real);
     expect(state().stage, LatencyStage.idle);
     expect(state().error, 'Not connected to the bridge.');
+  });
+
+  group('round trip', () {
+    late FakeTransport transport;
+    late ControllerService service;
+    late FakeWmrBridge bridge;
+
+    Future<void> setUpBridge({
+      FakeDevice device = fakeBridgeDevice,
+      bool echoEnabled = true,
+    }) async {
+      transport = FakeTransport(devices: [device], clock: clock);
+      service = ControllerService(
+        transport,
+        device.id,
+        mode: StreamMode.decoded,
+      );
+      await service.start();
+      bridge = FakeWmrBridge(transport, echoEnabled: echoEnabled);
+      // Every ping takes 4 ms of phone time between write and answer.
+      final inner = transport.onWrite!;
+      transport.onWrite = (w) {
+        clock.now += 4000;
+        return inner(w);
+      };
+      addTearDown(() async {
+        await service.dispose();
+        await transport.dispose();
+      });
+      setUpContainer((_) async => LatencyInput.fromService(service));
+      controller().selectDuration(null);
+    }
+
+    test('pings during a run; the report and an echo CSV have them', () async {
+      await setUpBridge();
+      await controller().start(DebugSource.fake);
+      expect(state().echoNote, isNull);
+      await until(() => (state().report?.echo?.answered ?? 0) >= 3);
+      bridge.tick();
+      await controller().stop();
+
+      final echo = state().report!.echo!;
+      expect(echo.answered, greaterThanOrEqualTo(3));
+      expect(echo.timeouts, 0);
+      expect(
+        echo.rtt.p50,
+        3700,
+      ); // 4000 us write to answer, minus 300 turnaround
+      expect(echo.endToEnd.p50, 4000);
+      expect(echo.turnaround.p50, 300);
+      expect(transport.cccLog, contains('on $wmrBridgeEchoCharUuid'));
+      expect(transport.cccLog.last, 'off $wmrBridgeEchoCharUuid');
+
+      final saved = state().saved!;
+      expect(saved.echoCsvPath, isNotNull);
+      final lines = File(saved.echoCsvPath!).readAsLinesSync();
+      expect(lines.first, startsWith('ping_id,t1_us'));
+      expect(lines.length - 1, echo.answered);
+      expect(
+        File(saved.jsonPath).readAsStringSync(),
+        contains('"measured": true'),
+      );
+
+      await controller().share(saved);
+      expect(shared.single.paths, hasLength(3));
+    });
+
+    test('ignored pings are timeouts, not hangs', () async {
+      await setUpBridge(echoEnabled: false);
+      await controller().start(DebugSource.fake);
+      await until(() => (state().report?.echo?.timeouts ?? 0) >= 1);
+      await controller().stop();
+      final echo = state().report!.echo!;
+      expect(echo.answered, 0);
+      expect(echo.timeouts, greaterThanOrEqualTo(1));
+      expect(state().saved!.echoCsvPath, isNotNull);
+    });
+
+    test(
+      'a bridge without FF15 runs without a round trip and says so',
+      () async {
+        await setUpBridge(
+          device: const FakeDevice(
+            id: fakeBridgeDeviceId,
+            name: wmrBridgeDeviceName,
+            services: [
+              BleServiceInfo(
+                uuid: wmrBridgeServiceUuid,
+                characteristicUuids: [
+                  wmrBridgeStreamCharUuid,
+                  wmrBridgeDecodedCharUuid,
+                  wmrBridgeBatchedCharUuid,
+                ],
+              ),
+            ],
+          ),
+        );
+        await controller().start(DebugSource.fake);
+        expect(state().stage, LatencyStage.running);
+        expect(state().echoNote, contains('no FF15'));
+        await controller().stop();
+        expect(state().report!.echo, isNull);
+        expect(state().saved!.echoCsvPath, isNull);
+        expect(transport.writes, isEmpty);
+      },
+    );
+
+    test('switched off: no FF15 traffic at all', () async {
+      await setUpBridge();
+      controller().setEchoEnabled(false);
+      await controller().start(DebugSource.fake);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await controller().stop();
+      expect(transport.writes, isEmpty);
+      expect(transport.cccLog.where((l) => l.contains('ff15')), isEmpty);
+      expect(state().report!.echo, isNull);
+      expect(state().echoEnabled, isFalse);
+    });
   });
 }

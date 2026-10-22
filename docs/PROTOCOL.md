@@ -374,3 +374,33 @@ The filter works in a z-up frame; `viewToFilter` maps view (X, Y, Z) to
 9. The task brief called the firmware PR unmerged; PR 5 was merged into
    WMR_Bridge `main` while this was written (`a0cba83`). The spec text did not
    change, and it still says nothing has run on hardware.
+
+## FF15 echo in the app
+
+**Not verified on hardware; the firmware side has not been run on hardware
+either.** Spec: WMR_Bridge docs/PROTOCOL.md, "Echo, FF15" (merged in #13).
+Code: `lib/protocol/echo.dart` (pure Dart, golden bytes from the spec),
+`lib/services/echo_client.dart`.
+
+- **Request** is 4 bytes (`version` 1, reserved, `ping_id` u16), written
+  *without response*; the **answer** is a 20-byte notification with the
+  ping id, the ESP32 `rx_time_us` (same clock as FF12), `turnaround_us` and
+  `queue_depth`. An answer of another length or version is dropped and
+  counted.
+- **Independent of the stream rule.** Enabling FF15 never conflicts with FF11,
+  FF12 or FF14, so `EchoClient` subscribes on its own and never touches
+  `ControllerService`'s subscription. The transport's exclusion handling only
+  covers the three streams.
+- **Detection.** The client looks for FF15 in service discovery before it
+  subscribes, so an older bridge never gets a CCC write for a characteristic
+  it does not have (a failed enable would mark the link failed).
+- **One ping at a time**, as the firmware allows (a second is `busy`). No
+  answer within 1 s is a timeout. A late answer is counted as stale.
+- **Times.** `t1` is stamped just before the write is handed to the transport
+  (GATT operations are serialized there, so any wait behind them counts) and
+  `t4` is the transport's own stamp of the notification. `rtt = (t4 - t1) -
+  turnaround_us`. The clock offset formula is computed per ping and only
+  exported, never applied.
+- **Fake bridge.** `FakeWmrBridge` answers valid pings while FF15 is
+  subscribed (`echoDelay`, `echoTurnaround`, `echoEnabled` to ignore them).
+
