@@ -3,6 +3,7 @@ import 'dart:async';
 import '../ble/ble_transport.dart';
 import '../domain/axis_mapping.dart';
 import '../domain/hand_pipeline.dart';
+import '../domain/stick_centre.dart';
 import '../domain/tick_timer.dart';
 import '../protocol/decoded_record.dart';
 import '../protocol/gatt.dart';
@@ -98,6 +99,10 @@ class DecodedHandStats {
     this.biasProgress = 0,
     this.bias = const [0, 0, 0],
     this.calibratedFlagged = 0,
+    this.stickCentre = const [0, 0],
+    this.stickLearned = false,
+    this.stickCentreUpdates = 0,
+    this.stick = const [0, 0],
   });
 
   final int records;
@@ -130,6 +135,16 @@ class DecodedHandStats {
 
   /// Records that had the CALIBRATED flag set (version 1 never sets it).
   final int calibratedFlagged;
+
+  /// Stick rest centre, fraction of full scale (raw axes); zero until set.
+  final List<double> stickCentre;
+
+  /// Whether [stickCentre] was learned or set by hand.
+  final bool stickLearned;
+  final int stickCentreUpdates;
+
+  /// Last normalized stick output (x, y).
+  final List<double> stick;
 }
 
 class DecodedStats {
@@ -180,10 +195,12 @@ class ControllerService {
     this._mode = StreamMode.raw,
     this._mapping = AxisMapping.defaultMapping,
     this._filterKind = FilterKind.madgwick,
-  }) {
+    StickConfig stickConfig = const StickConfig(),
+  }) : _stickConfig = stickConfig {
     for (final p in _pipelines) {
       p.mapping = _mapping;
       p.setFilter(_filterKind);
+      p.stickConfig = stickConfig;
     }
   }
 
@@ -217,6 +234,10 @@ class ControllerService {
   ModeFault? _fault;
   AxisMapping _mapping;
   FilterKind _filterKind;
+  StickConfig _stickConfig;
+  final List<List<double>> _lastStick = [
+    for (var h = 0; h < wmrNumControllers; h++) const [0.0, 0.0],
+  ];
   final StreamController<ModeState> _modeChanges = StreamController.broadcast();
   bool _started = false;
 
@@ -365,7 +386,9 @@ class ControllerService {
     _dLastSeq[hand] = r.sequence;
     _dRecords[hand]++;
     _rates[hand].add(n.receivedAtUs);
-    _samples.add(_pipelines[hand].add(r, n.receivedAtUs));
+    final sample = _pipelines[hand].add(r, n.receivedAtUs);
+    _lastStick[hand] = sample.stick;
+    _samples.add(sample);
   }
 
   /// Applies [m] to both hands from the next sample on.
@@ -375,6 +398,19 @@ class ControllerService {
       p.mapping = m;
     }
   }
+
+  /// Applies [c] to both hands from the next sample on.
+  void setStickConfig(StickConfig c) {
+    _stickConfig = c;
+    for (final p in _pipelines) {
+      p.stickConfig = c;
+    }
+  }
+
+  StickConfig get stickConfig => _stickConfig;
+
+  /// Takes the current stick position of [hand] as its rest centre.
+  void recentreStick(int hand) => _pipelines[hand].recentreStick();
 
   void setFilterKind(FilterKind k) {
     _filterKind = k;
@@ -424,6 +460,10 @@ class ControllerService {
             biasProgress: _pipelines[h].bias.progress,
             bias: _pipelines[h].bias.bias,
             calibratedFlagged: _pipelines[h].calibratedFlagged,
+            stickCentre: _pipelines[h].stickNormalizer.centre,
+            stickLearned: _pipelines[h].stickNormalizer.hasCentre,
+            stickCentreUpdates: _pipelines[h].stickNormalizer.centreUpdates,
+            stick: _lastStick[h],
           ),
       ],
       wrongLength: _wrongLength,

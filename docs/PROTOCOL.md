@@ -174,8 +174,8 @@ those axes are **unverified** in the firmware's own docs
 
 FF13 (controller config block: mix matrix, bias, pose) is a design only in the
 firmware docs. The app uses the uncalibrated values, estimates the gyro bias
-itself and ignores `temperature_raw`, `stick`, `trackpad`, `trigger` and
-`battery` apart from parsing them.
+itself and ignores `temperature_raw`, `trackpad`, `trigger` and `battery`
+apart from parsing them. `stick` is normalized (see "Stick centre").
 
 ## FF12 in the app
 
@@ -244,6 +244,30 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
   `ki = 0` because the bias is estimated here.
 - No magnetometer: **yaw drifts**. "Reset orientation" zeroes the heading of
   the fused filter (`resetYaw`).
+
+### Stick centre
+
+**Not verified on hardware.** `StickNormalizer` (`lib/domain/stick_centre.dart`,
+one per hand inside `HandPipeline`) turns the raw `stick` i16 pair into -1..1.
+A stick can rest off-centre; the only figure we have is one user-reported
+measurement (RIGHT y about 0.148 of full scale), not a property established
+for the hardware in general.
+
+- **Learned centre.** With learning on, a sample is a rest candidate when the
+  stick is within 0.25 of full scale of zero and the controller is not being
+  used otherwise: no button bit set, trigger 0, trackpad 0, and bias-corrected
+  gyro magnitude at most 0.3 rad/s (a guess). If the stick then stays within
+  0.02 of where the candidate began for 1.0 s of tick time, the mean of that
+  stretch becomes the centre. A step above 100 ms or a stream restart drops
+  the candidate. The stick held still and slightly deflected inside the window
+  for a second is therefore taken as rest; use "Re-centre stick" or switch
+  learning off if that is wrong.
+- **Output.** Centre subtracted, each half-axis rescaled so the end stop still
+  reaches +-1, clamped, then a radial dead zone (default 0.05, debug settings
+  slider 0 to 0.3) rescaled so the zone edge is 0 and full deflection is 1.
+- **Debug UI.** The learned or set centre and the normalized output are shown
+  per hand; "Re-centre stick" takes the current reading of the selected hand
+  as centre; a switch turns learning off.
 
 ## Axis mapping
 

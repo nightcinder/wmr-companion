@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/axis_mapping.dart';
 import '../../domain/hand_pipeline.dart';
+import '../../domain/stick_centre.dart';
 import '../../services/controller_service.dart';
 
 /// Which bridge stream the app wants. Applied to the service when it is
@@ -56,4 +57,18 @@ class FilterKindNotifier extends Notifier<FilterKind> {
   FilterKind build() => FilterKind.madgwick;
 
   void set(FilterKind kind) => state = kind;
+}
+
+/// Stick dead zone and rest-centre learning, applied to both hands.
+final stickConfigProvider = NotifierProvider<StickConfigNotifier, StickConfig>(
+  StickConfigNotifier.new,
+);
+
+class StickConfigNotifier extends Notifier<StickConfig> {
+  @override
+  StickConfig build() => const StickConfig();
+
+  void setDeadZone(double v) => state = state.copyWith(deadZone: v);
+
+  void setLearn(bool v) => state = state.copyWith(learn: v);
 }
