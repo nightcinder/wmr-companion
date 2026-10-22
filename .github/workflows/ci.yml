@@ -44,6 +44,8 @@ jobs:
       - name: Fetch Monado config key
         continue-on-error: true
         run: dart run tool/fetch_wmr_config_key.dart
+      - name: Show whether the key is in the build
+        run: ls -l assets/monado/
       - run: flutter build apk --debug
 
       - uses: actions/upload-artifact@v4
