@@ -57,11 +57,11 @@ class Quaternion {
 
   /// Hamilton product `this * o` (apply [o] first, then this).
   Quaternion operator *(Quaternion o) => Quaternion(
-    w * o.w - x * o.x - y * o.y - z * o.z,
-    w * o.x + x * o.w + y * o.z - z * o.y,
-    w * o.y - x * o.z + y * o.w + z * o.x,
-    w * o.z + x * o.y - y * o.x + z * o.w,
-  );
+        w * o.w - x * o.x - y * o.y - z * o.z,
+        w * o.x + x * o.w + y * o.z - z * o.y,
+        w * o.y - x * o.z + y * o.w + z * o.x,
+        w * o.z + x * o.y - y * o.x + z * o.w,
+      );
 
   /// Rotates [v] by this (unit) quaternion.
   Vector3 rotate(Vector3 v) {

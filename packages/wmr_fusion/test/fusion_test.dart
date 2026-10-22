@@ -28,8 +28,8 @@ Quaternion simulate(
     dt: dt,
   );
   for (var i = 0; i < n; i++) {
-    truth = (truth * Quaternion.fromAxisAngle(rate, rate.length * dt))
-        .normalized();
+    truth =
+        (truth * Quaternion.fromAxisAngle(rate, rate.length * dt)).normalized();
     f.update(
       gyro: rate,
       accel: truth.conjugate().rotate(const Vector3(0, 0, g)),

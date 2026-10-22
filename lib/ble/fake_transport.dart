@@ -58,6 +58,10 @@ class FakeTransport implements BleTransport {
   /// Every write received, oldest first.
   final List<FakeWrite> writes = [];
 
+  /// CCC changes in order: `on <uuid>` per [subscribe], `off <uuid>` per
+  /// [unsubscribe].
+  final List<String> cccLog = [];
+
   /// Called for every write, after it is recorded in [writes].
   FutureOr<void> Function(FakeWrite write)? onWrite;
 
@@ -122,12 +126,24 @@ class FakeTransport implements BleTransport {
     String characteristicUuid,
   ) {
     _requireConnected(deviceId);
+    cccLog.add('on ${_norm(characteristicUuid)}');
     return _subscriptions
         .putIfAbsent(
           _key(deviceId, characteristicUuid),
           StreamController<BleNotification>.broadcast,
         )
         .stream;
+  }
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    _requireConnected(deviceId);
+    cccLog.add('off ${_norm(characteristicUuid)}');
+    await _subscriptions.remove(_key(deviceId, characteristicUuid))?.close();
   }
 
   @override

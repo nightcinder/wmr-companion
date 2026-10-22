@@ -12,6 +12,20 @@ const String wmrBridgeServiceUuid = '0000ff10-0000-1000-8000-00805f9b34fb';
 /// Read returns a 16-byte status value; notify carries frame fragments.
 const String wmrBridgeStreamCharUuid = '0000ff11-0000-1000-8000-00805f9b34fb';
 
+/// Decoded stream: one 56-byte record per notification, notify only. Mutually
+/// exclusive with [wmrBridgeStreamCharUuid]: enabling one while the other is
+/// enabled fails with ATT error [attErrorOtherStreamActive]. Firmware side
+/// merged but not run on hardware (docs/PROTOCOL.md, "FF12 decoded stream").
+const String wmrBridgeDecodedCharUuid = '0000ff12-0000-1000-8000-00805f9b34fb';
+
+/// ATT application error the bridge returns when a CCC write would enable a
+/// second stream. Write 0x0000 to the active CCC first.
+const int attErrorOtherStreamActive = 0x80;
+
+/// Smallest ATT MTU that carries one FF12 record (56 + 3 bytes of ATT opcode
+/// and handle). Below it the bridge sends nothing on FF12.
+const int wmrDecodedMinMtu = 59;
+
 /// Client Characteristic Configuration descriptor. Write 0x0001 after every
 /// connect; the bridge does not persist the subscription.
 const String cccDescriptorUuid = '00002902-0000-1000-8000-00805f9b34fb';

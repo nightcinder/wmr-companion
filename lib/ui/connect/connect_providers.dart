@@ -6,6 +6,7 @@ import '../../ble/ble_transport.dart';
 import '../../ble/universal_ble_adapter.dart';
 import '../../ble/universal_ble_transport.dart';
 import '../../services/controller_service.dart';
+import '../debug/stream_settings.dart';
 
 /// The real BLE transport. Created on first use, so the fake-bridge path
 /// never touches the Bluetooth plugin. Tests override it with a transport on
@@ -22,9 +23,13 @@ class RealDeviceState {
     this.results = const [],
     this.deviceId,
     this.stats,
+    this.mode,
   });
 
   final BleLinkStatus status;
+
+  /// Requested stream and its fault, from the service. Null before connect.
+  final ModeState? mode;
 
   /// Latest sighting per device, strongest signal first.
   final List<BleScanResult> results;
@@ -66,8 +71,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         results: state.results,
         deviceId: state.deviceId,
         stats: state.stats,
+        mode: state.mode,
       );
     });
+    ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
+    ref.listen(filterKindProvider, (_, k) => _service?.setFilterKind(k));
     ref.onDispose(() {
       _scanSub?.cancel();
       _statusSub?.cancel();
@@ -89,6 +97,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       results: results ?? state.results,
       deviceId: deviceId ?? state.deviceId,
       stats: state.stats,
+      mode: state.mode,
     );
   }
 
@@ -120,7 +129,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     await stopScan();
     _update(deviceId: deviceId);
     await _service?.dispose();
-    final service = _service = ControllerService(_transport, deviceId);
+    final service = _service = ControllerService(
+      _transport,
+      deviceId,
+      mode: ref.read(streamModeProvider),
+      mapping: ref.read(axisMappingProvider),
+      filterKind: ref.read(filterKindProvider),
+    );
     try {
       await service.start();
     } on BleTransportException {
@@ -133,12 +148,30 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       results: state.results,
       deviceId: state.deviceId,
       stats: service.stats,
+      mode: service.modeState,
     );
     publish();
     _statsTimer?.cancel();
     _statsTimer = Timer.periodic(
       const Duration(milliseconds: 250),
       (_) => publish(),
+    );
+  }
+
+  /// Switches between the raw FF11 and decoded FF12 streams (CCC order is
+  /// the transport's job). The choice is remembered for the next connect.
+  /// A refusal shows up in [RealDeviceState.mode], never silently.
+  Future<void> setStreamMode(StreamMode mode) async {
+    ref.read(streamModeProvider.notifier).set(mode);
+    final service = _service;
+    if (service == null) return;
+    await service.setMode(mode);
+    state = RealDeviceState(
+      status: _transport.status,
+      results: state.results,
+      deviceId: state.deviceId,
+      stats: service.stats,
+      mode: service.modeState,
     );
   }
 

@@ -390,7 +390,15 @@ class UniversalBleTransport implements BleTransport {
       session.ready = true;
       for (final key in _wanted.keys.toList()) {
         final w = _wanted[key]!;
-        if (w.deviceId == deviceId) await _enable(session, key, w);
+        if (w.deviceId != deviceId) continue;
+        try {
+          await _enable(session, key, w);
+        } on BleAdapterException catch (e) {
+          // A refused second stream is reported on that stream, not as a
+          // failed connection. Anything else keeps failing the setup.
+          if (e.attError != attErrorOtherStreamActive) rethrow;
+          _streams[key]?.addError(_streamFault(w, e));
+        }
       }
       _setState(deviceId, BleConnectionState.connected);
       _emit(BleLinkPhase.ready);
@@ -433,6 +441,39 @@ class UniversalBleTransport implements BleTransport {
     );
     session.enabled.add(key);
   }
+
+  Future<void> _disable(_Session session, String key, _Wanted w) async {
+    if (!session.enabled.contains(key)) return;
+    await _adapter.disableNotifications(
+      w.deviceId,
+      w.serviceUuid,
+      w.characteristicUuid,
+    );
+    session.enabled.remove(key);
+  }
+
+  static BleStreamException _streamFault(
+    _Wanted w,
+    BleAdapterException e, {
+    bool disabling = false,
+  }) {
+    final kind = disabling
+        ? BleStreamFaultKind.disableFailed
+        : e.attError == attErrorOtherStreamActive
+        ? BleStreamFaultKind.otherStreamActive
+        : BleStreamFaultKind.enableFailed;
+    return BleStreamException(
+      kind,
+      w.characteristicUuid,
+      e.message,
+      attError: e.attError,
+    );
+  }
+
+  /// FF11 and FF12 share one CCC slot on the bridge.
+  static bool _isBridgeStream(String key) =>
+      key.endsWith('|$wmrBridgeStreamCharUuid') ||
+      key.endsWith('|$wmrBridgeDecodedCharUuid');
 
   @override
   Future<void> disconnect(String deviceId) async {
@@ -497,6 +538,13 @@ class UniversalBleTransport implements BleTransport {
         ctl.add(BleNotification(value: v, receivedAtUs: t));
       }),
     );
+    // FF11 and FF12 are mutually exclusive on the bridge. Forget the other
+    // one now, so a setup that is already queued enables only this one.
+    if (_isBridgeStream(key)) {
+      _wanted.removeWhere(
+        (k, _) => k != key && k.startsWith('$deviceId|') && _isBridgeStream(k),
+      );
+    }
     final w = _wanted[key] = _Wanted(deviceId, serviceUuid, characteristicUuid);
     // Queued behind any setup in progress, so it only runs after the MTU
     // result, priority and discovery. A no-op if setup already enabled it.
@@ -506,7 +554,49 @@ class UniversalBleTransport implements BleTransport {
         if (session == null || session.deviceId != deviceId || !session.ready) {
           return;
         }
-        await _enable(session, key, w);
+        // Superseded by a later subscribe or unsubscribe while queued.
+        if (_wanted[key] != w) return;
+        // Switching: 0x0000 to the active CCC first, then enable this one.
+        if (_isBridgeStream(key)) {
+          final active = session.enabled
+              .where((k) => k != key && _isBridgeStream(k))
+              .toList();
+          for (final k in active) {
+            final other = _Wanted(
+              deviceId,
+              wmrBridgeServiceUuid,
+              k.substring(deviceId.length + 1),
+            );
+            try {
+              await _disable(session, k, other);
+            } catch (e) {
+              if (!ctl.isClosed) {
+                ctl.addError(
+                  _streamFault(
+                    other,
+                    e is BleAdapterException ? e : BleAdapterException('$e'),
+                    disabling: true,
+                  ),
+                );
+              }
+              return;
+            }
+          }
+        }
+        try {
+          await _enable(session, key, w);
+        } on BleAdapterException catch (e) {
+          if (!ctl.isClosed) ctl.addError(_streamFault(w, e));
+          if (e.attError != attErrorOtherStreamActive) {
+            _fail(
+              BleLinkPhase.connectFailed,
+              'Enable notifications failed: $e',
+            );
+          } else if (_status.phase == BleLinkPhase.subscribing) {
+            _emit(BleLinkPhase.ready);
+          }
+          return;
+        }
         if (_status.phase == BleLinkPhase.subscribing) {
           _emit(BleLinkPhase.ready);
         }
@@ -516,6 +606,26 @@ class UniversalBleTransport implements BleTransport {
       }),
     );
     return ctl.stream;
+  }
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final key = '$deviceId|${characteristicUuid.toLowerCase()}';
+    final w = _wanted.remove(key);
+    return _serial(() async {
+      final session = _session;
+      if (w == null ||
+          session == null ||
+          session.deviceId != deviceId ||
+          !session.ready) {
+        return;
+      }
+      await _disable(session, key, w);
+    });
   }
 
   @override
