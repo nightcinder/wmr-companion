@@ -21,7 +21,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 ## How the work is run
 
 - Two repos, small PRs, squash merges, CI on both (app: format, analyze, test, package tests, debug APK artifact; firmware: host tests).
-- Firmware work needing the real ESP setup is done by a session on the desktop machine, directed through the "Director" issue (WMR_Bridge issue #3). App work is done by headless agent sessions in git worktrees.
+- Firmware work needing the real ESP setup is done by a session on the desktop machine, directed through project threads (the "Director" issue, WMR_Bridge #3, was closed on 2026-10-22; reopen it if a session on that machine is needed again). App work is done by headless agent sessions in git worktrees.
 - Hardware runs (flashing, controllers, phone) are done by the project owner, who pastes serial and app output; results are recorded in the docs as "user-reported". Agents do not flash and do not describe anything as verified unless a hardware result was reported.
 
 ## Current state
