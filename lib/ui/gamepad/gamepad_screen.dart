@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/gamepad.dart';
+import '../../hid/hid_gamepad_transport.dart';
+import '../../hid/hid_output.dart';
 import '../debug/debug_providers.dart';
 import '../debug/stream_settings.dart';
 import 'gamepad_providers.dart';
@@ -35,6 +37,7 @@ class GamepadScreen extends ConsumerWidget {
           const SizedBox(height: 12),
           GamepadView(state),
           const SizedBox(height: 16),
+          HidOutputPanel(source: source),
           const GamepadSettingsPanel(),
         ],
       ),
@@ -389,4 +392,98 @@ class GamepadSettingsPanel extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// Starts and stops the Bluetooth HID gamepad output and shows its state.
+class HidOutputPanel extends ConsumerWidget {
+  const HidOutputPanel({super.key, required this.source});
+
+  final DebugSource source;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final out = ref.watch(hidOutputProvider);
+    final n = ref.read(hidOutputProvider.notifier);
+    final status = out.status;
+    final small = Theme.of(context).textTheme.bodySmall;
+    final unsupported = status.state == HidState.unsupported;
+    return ExpansionTile(
+      title: const Text('Bluetooth HID output'),
+      subtitle: Text(_describe(status)),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Makes this phone appear as a Bluetooth gamepad to a PC, TV or '
+          'tablet (Android 9 or newer). Experimental, not tested on any '
+          'phone or host. Reports are sent only while the app is open.',
+          style: small,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (!out.running)
+              FilledButton(
+                onPressed: unsupported ? null : () => n.start(source),
+                child: const Text('Start'),
+              )
+            else
+              FilledButton.tonal(onPressed: n.stop, child: const Text('Stop')),
+            FilledButton.tonal(
+              onPressed: out.running ? n.requestDiscoverable : null,
+              child: const Text('Make discoverable'),
+            ),
+            if (status.state == HidState.connected)
+              OutlinedButton(
+                onPressed: n.disconnect,
+                child: const Text('Disconnect'),
+              ),
+          ],
+        ),
+        if (out.running && status.state != HidState.connected) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Pair from the host (Bluetooth settings, "add device") while '
+            'discoverable, or connect to a device this phone is already '
+            'paired with:',
+            style: small,
+          ),
+          for (final h in out.hosts)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text(h.name.isEmpty ? h.address : h.name),
+              subtitle: Text(h.address),
+              trailing: TextButton(
+                onPressed: () => n.connect(h.address),
+                child: const Text('Connect'),
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: n.refreshHosts,
+              child: const Text('Refresh paired devices'),
+            ),
+          ),
+        ],
+        if (out.running)
+          Text(
+            'reports sent ${out.reportsSent}  errors ${out.sendErrors}',
+            style: small?.copyWith(fontFamily: 'monospace'),
+          ),
+      ],
+    );
+  }
+
+  static String _describe(HidStatus s) => switch (s.state) {
+    HidState.unsupported => 'Not available on this device',
+    HidState.idle => 'Off',
+    HidState.registered => 'Ready, no host connected',
+    HidState.connected => 'Connected to ${s.deviceName ?? 'a host'}',
+    HidState.error => 'Error: ${s.message ?? 'unknown'}',
+  };
 }

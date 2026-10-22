@@ -37,7 +37,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8); tests only, the app has not been run against FF14 on hardware. Firmware FF14 was run with nRF Connect (see the A/B/A below) |
 | 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from FF12 `rx_time_us`), CSV + JSON export ([LATENCY.md](LATENCY.md)). No true round trip (needs firmware issue #1) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
-| 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer and Gamepad screen built, not run on hardware ([GAMEPAD.md](GAMEPAD.md)); output to the OS or another device not decided |
+| 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer, Gamepad screen and Bluetooth HID output (phone as a gamepad) built, not run on hardware or on a phone ([GAMEPAD.md](GAMEPAD.md)) |
 
 ### What has been checked on hardware (user-reported)
 
@@ -115,7 +115,7 @@ Then:
 4. Latency runs on hardware with the latency screen (milestone 4, built); firmware echo (issue #1) for true round trip.
 5. Calibration (FF13 or phone side), fusion tuning, optional magnetometer-free yaw handling.
 6. Controller discovery by name (issue #2), bridge security.
-7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then the chosen output stage (Bluetooth HID device, Wi-Fi/DSU, ...; see GAMEPAD.md).
+7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then try the Bluetooth HID output on a phone and a host (GAMEPAD.md checklist).
 
 ## Where things are
 
