@@ -118,7 +118,7 @@ void main() {
       final t = TickTimer();
       // Drop at index 2 and 4, while still in warm-up.
       final ticks = [
-        for (var i = 0; i < 30; i++)
+        for (var i = 0; i < 60; i++)
           if (i != 2 && i != 4) i * p,
       ];
       feed(t, ticks);

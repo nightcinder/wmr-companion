@@ -44,16 +44,19 @@ class DtStats {
 ///   (or the ESP32 time going backwards) means the timer restarted.
 /// - Missing reports are counted from the tick deltas: each delta spans
 ///   `round(delta / period)` periods, so `that - 1` reports are missing. The
-///   period is a low percentile ([periodQuantile], default the lower quartile)
+///   period is a low percentile ([periodQuantile], default the 10th)
 ///   of recent deltas, not the median: when a link loses half or more of the
 ///   reports the median is already a multiple of the true period and would
-///   hide the loss. Until [warmup] deltas are known nothing is counted; those
+///   hide the loss (a lower quartile still failed on an irregular 50% loss
+///   pattern in a test). The controller's own timer is regular, so single-
+///   period deltas exist as long as at least a tenth of the reports arrive
+///   back to back. Until [warmup] deltas are known nothing is counted; those
 ///   deltas are settled once the period is known.
 class TickTimer {
   TickTimer({
     this.window = 256,
-    this.warmup = 8,
-    this.periodQuantile = 0.25,
+    this.warmup = 32,
+    this.periodQuantile = 0.1,
     this.discontinuityTolerance = const Duration(milliseconds: 100),
   });
 
