@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ble/universal_ble_transport.dart';
 import '../capture/capture_screen.dart';
+import '../../services/controller_service.dart';
+import '../debug/debug_providers.dart';
 import '../debug/debug_screen.dart';
 import 'connect_providers.dart';
 
@@ -82,9 +84,9 @@ class RealPanel extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Not verified on hardware. Shows the raw stream only: there is no '
-          'orientation from real data until the decoded characteristic '
-          'exists, so the 3D view stays on the fake bridge.',
+          'Not verified on hardware. Raw FF11 feeds the Capture screen; '
+          'decoded FF12 feeds the 3D view. The bridge allows one at a time. '
+          'The FF12 firmware has not been run on hardware either.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
@@ -129,15 +131,31 @@ class RealPanel extends ConsumerWidget {
               ),
             if (s.connected)
               FilledButton.tonal(
+                onPressed: () => _openCapture(context, controller),
+                child: const Text('Capture'),
+              ),
+            if (s.connected)
+              FilledButton.tonal(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => const CaptureScreen(),
+                    builder: (_) => const DebugScreen(source: DebugSource.real),
                   ),
                 ),
-                child: const Text('Capture'),
+                child: const Text('Open 3D debug view'),
               ),
           ],
         ),
+        if (s.connected && s.mode != null) ...[
+          const SizedBox(height: 8),
+          StreamModeSelector(
+            mode: s.mode!.mode,
+            onChanged: controller.setStreamMode,
+          ),
+          if (s.mode!.fault != null) ...[
+            const SizedBox(height: 8),
+            ModeFaultBanner(s.mode!.fault!),
+          ],
+        ],
         const SizedBox(height: 8),
         if (s.results.isEmpty && s.scanning) const Text('Scanning...'),
         for (final r in s.results)
@@ -159,6 +177,19 @@ class RealPanel extends ConsumerWidget {
         ],
       ],
     );
+  }
+
+  /// The Capture screen records raw FF11 frames: switch to FF11 first, and
+  /// stay here if the bridge refuses.
+  Future<void> _openCapture(
+    BuildContext context,
+    RealDeviceController controller,
+  ) async {
+    await controller.setStreamMode(StreamMode.raw);
+    if (!context.mounted) return;
+    if (controller.service?.fault != null) return; // shown by the banner
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const CaptureScreen()));
   }
 
   static String _describe(BleLinkPhase p) => switch (p) {

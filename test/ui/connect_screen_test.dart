@@ -5,6 +5,7 @@ import 'package:wmr_companion/ble/ble_adapter.dart';
 import 'package:wmr_companion/ble/ble_transport.dart';
 import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
 import 'package:wmr_companion/ble/universal_ble_transport.dart';
+import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/ui/connect/connect_providers.dart';
 import 'package:wmr_companion/ui/connect/connect_screen.dart';
 
@@ -61,6 +62,101 @@ void main() {
     expect(find.textContaining('MTU (negotiated): 185'), findsOneWidget);
     expect(find.textContaining('LEFT   frames 0'), findsOneWidget);
     expect(find.text('Disconnect'), findsOneWidget);
+
+    await close(tester);
+  });
+
+  Future<void> connect(WidgetTester tester) async {
+    await tester.tap(find.text('Scan'));
+    await tester.pump();
+    await tester.pump();
+    adapter.emitScanResult(
+      const BleScanResult(
+        deviceId: fakeBridgeDeviceId,
+        name: 'WMR Bridge',
+        rssi: -48,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Connect'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+  }
+
+  testWidgets('switches the real device between raw and decoded', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await open(tester);
+    await connect(tester);
+    expect(find.text('Raw FF11'), findsOneWidget);
+    expect(find.text('Open 3D debug view'), findsOneWidget);
+    expect(adapter.ccc, ['on ff11']);
+
+    await tester.tap(find.text('Decoded FF12'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(adapter.ccc, ['on ff11', 'off ff11', 'on ff12']);
+
+    await close(tester);
+  });
+
+  testWidgets('a refused switch is shown on the connect screen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await open(tester);
+    await connect(tester);
+    adapter.disableErrors[wmrBridgeStreamCharUuid] = const BleAdapterException(
+      'refused',
+    );
+
+    await tester.tap(find.text('Decoded FF12'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('Could not turn the previous'), findsOneWidget);
+    expect(adapter.ccc, ['on ff11', 'FAIL off ff11']);
+
+    await close(tester);
+  });
+
+  testWidgets('Capture switches back to the raw stream first', (tester) async {
+    tester.view.physicalSize = const Size(900, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await open(tester);
+    await connect(tester);
+    await tester.tap(find.text('Decoded FF12'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(adapter.ccc.last, 'on ff12');
+
+    await tester.tap(find.text('Capture'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(adapter.ccc, [
+      'on ff11',
+      'off ff11',
+      'on ff12',
+      'off ff12',
+      'on ff11',
+    ]);
+    // The Capture screen schedules a zero-delay refresh when it is built.
+    await tester.pump(const Duration(milliseconds: 10));
 
     await close(tester);
   });
