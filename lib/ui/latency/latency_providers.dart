@@ -22,9 +22,10 @@ class LatencyInput {
     required this.samples,
     required this.modeChanges,
     required this.clock,
-    required this.stream,
+    required this.mode,
     required this.linkInfo,
     required this.counters,
+    this.setMode,
     this.priorityRequested,
     this.echoFactory,
   });
@@ -34,8 +35,13 @@ class LatencyInput {
   final Stream<ModeState> modeChanges;
   final MonotonicClock clock;
 
-  /// Name of the active stream mode.
-  final String stream;
+  /// The service mode when the input was resolved. [StreamMode.none] means
+  /// the run measures only FF15: no stream figures.
+  final StreamMode mode;
+
+  /// Switches the service mode through its normal API. Null in tests that do
+  /// not use the selector.
+  final Future<void> Function(StreamMode)? setMode;
 
   /// Null when the platform cannot say.
   final Future<BleConnectionInfo?> Function() linkInfo;
@@ -57,7 +63,8 @@ class LatencyInput {
       samples: service.decodedSamples,
       modeChanges: service.modeChanges,
       clock: service.transport.clock,
-      stream: service.mode.name,
+      mode: service.mode,
+      setMode: service.setMode,
       priorityRequested: priorityRequested,
       echoFactory: (timeout) =>
           EchoClient(service.transport, service.deviceId, timeout: timeout),
@@ -85,7 +92,30 @@ class LatencyInput {
   }
 }
 
-/// Resolved when a run starts. Null when there is no stream to measure.
+/// The latency screen's stream choice. [none] is the run mode where FF11,
+/// FF12 and FF14 are all off and only FF15 pings.
+enum LatencyStream {
+  none(StreamMode.none, 'None'),
+  raw(StreamMode.raw, 'FF11 raw'),
+  decoded(StreamMode.decoded, 'FF12 decoded'),
+  batched(StreamMode.batched, 'FF14 batched');
+
+  const LatencyStream(this.mode, this.label);
+
+  final StreamMode mode;
+  final String label;
+
+  bool get isNone => this == LatencyStream.none;
+
+  static LatencyStream fromMode(StreamMode mode) => switch (mode) {
+    StreamMode.none => LatencyStream.none,
+    StreamMode.raw => LatencyStream.raw,
+    StreamMode.decoded => LatencyStream.decoded,
+    StreamMode.batched => LatencyStream.batched,
+  };
+}
+
+/// Resolved when a run starts. Null when there is no connection.
 final latencyInputProvider =
     Provider<Future<LatencyInput?> Function(DebugSource)>((ref) {
       return (source) async {
@@ -164,6 +194,8 @@ class LatencyState {
     this.error,
     this.echoEnabled = true,
     this.echoNote,
+    this.streamChoice,
+    this.echoInterval = const Duration(milliseconds: 250),
   });
 
   final LatencyStage stage;
@@ -186,6 +218,13 @@ class LatencyState {
   /// Why a run goes without a round trip, when echo was asked for.
   final String? echoNote;
 
+  /// The stream the user picked on this screen. Null: follow the service's
+  /// current mode (the old behaviour: measure whatever stream is active).
+  final LatencyStream? streamChoice;
+
+  /// Time between echo pings; one is outstanding at a time.
+  final Duration echoInterval;
+
   LatencyState copyWith({
     LatencyStage? stage,
     int? Function()? durationSeconds,
@@ -197,6 +236,8 @@ class LatencyState {
     bool clearError = false,
     bool? echoEnabled,
     String? Function()? echoNote,
+    LatencyStream? streamChoice,
+    Duration? echoInterval,
   }) {
     return LatencyState(
       stage: stage ?? this.stage,
@@ -210,6 +251,8 @@ class LatencyState {
       error: clearError ? null : (error ?? this.error),
       echoEnabled: echoEnabled ?? this.echoEnabled,
       echoNote: echoNote != null ? echoNote() : this.echoNote,
+      streamChoice: streamChoice ?? this.streamChoice,
+      echoInterval: echoInterval ?? this.echoInterval,
     );
   }
 }
@@ -230,6 +273,10 @@ class LatencyController extends Notifier<LatencyState> {
   Timer? _echoTimer;
   EchoClient? _echo;
 
+  /// Mode to restore when a no-stream run ends. Set when this screen turns a
+  /// stream off; cleared when the user picks a stream explicitly.
+  StreamMode? _restoreMode;
+
   @override
   LatencyState build() {
     ref.onDispose(() {
@@ -239,9 +286,17 @@ class LatencyController extends Notifier<LatencyState> {
       for (final s in _subs) {
         s.cancel();
       }
+      final input = _input;
+      final restore = _restoreMode;
+      _restoreMode = null;
+      if (input != null && restore != null) {
+        // Leaving the screen mid-run must not leave the bridge without the
+        // stream the rest of the app expects.
+        unawaited(input.setMode?.call(restore) ?? Future<void>.value());
+      }
     });
     Future(refreshRuns);
-    return const LatencyState();
+    return LatencyState(echoInterval: ref.read(echoIntervalProvider));
   }
 
   /// Also runs from [build] a turn later, so the notifier may be gone.
@@ -262,12 +317,70 @@ class LatencyController extends Notifier<LatencyState> {
     state = state.copyWith(echoEnabled: on, echoNote: () => null);
   }
 
+  /// Chooses the stream and applies it through [ControllerService.setMode]
+  /// before the run. [LatencyStream.none] turns the active stream off and
+  /// remembers it for [stop]; picking a stream again clears that memory.
+  Future<void> selectStream(DebugSource source, LatencyStream choice) async {
+    if (state.stage == LatencyStage.running) return;
+    final input = await ref.read(latencyInputProvider)(source);
+    if (input == null) {
+      state = state.copyWith(error: 'Not connected to the bridge.');
+      return;
+    }
+    // Keep it for the dispose restore even when no run starts.
+    _input = input;
+    final wanted = choice.mode;
+    if (choice.isNone) {
+      if (input.mode != StreamMode.none && _restoreMode == null) {
+        _restoreMode = input.mode;
+      }
+    } else {
+      _restoreMode = null;
+    }
+    if (input.mode != wanted) {
+      final setMode = input.setMode;
+      if (setMode == null) {
+        state = state.copyWith(error: 'Cannot switch the stream here.');
+        return;
+      }
+      try {
+        await setMode(wanted);
+      } catch (e) {
+        state = state.copyWith(error: 'Cannot switch the stream: $e');
+        return;
+      }
+    }
+    state = state.copyWith(streamChoice: choice, clearError: true);
+  }
+
+  void selectEchoInterval(Duration interval) {
+    if (state.stage == LatencyStage.running) return;
+    state = state.copyWith(echoInterval: interval);
+  }
+
   Future<void> start(DebugSource source) async {
     if (state.stage == LatencyStage.running) return;
     final input = await ref.read(latencyInputProvider)(source);
     if (input == null) {
       state = state.copyWith(error: 'Not connected to the bridge.');
       return;
+    }
+    var activeMode = input.mode;
+    final choice = state.streamChoice;
+    if (choice != null && choice.mode != activeMode) {
+      final setMode = input.setMode;
+      if (setMode == null) {
+        state = state.copyWith(error: 'Cannot switch the stream here.');
+        return;
+      }
+      if (choice.isNone && _restoreMode == null) _restoreMode = activeMode;
+      try {
+        await setMode(choice.mode);
+      } catch (e) {
+        state = state.copyWith(error: 'Cannot switch the stream: $e');
+        return;
+      }
+      activeMode = choice.mode;
     }
     _input = input;
     final info = await input.linkInfo();
@@ -282,7 +395,7 @@ class LatencyController extends Notifier<LatencyState> {
     final recorder = _recorder = LatencyRecorder(
       started: DateTime.now(),
       originUs: input.clock.nowUs,
-      stream: input.stream,
+      stream: activeMode.name,
     );
     String? note;
     final factory = input.echoFactory;
@@ -291,7 +404,7 @@ class LatencyController extends Notifier<LatencyState> {
       if (await echo.start()) {
         recorder.useEcho();
         _echoTimer = Timer.periodic(
-          ref.read(echoIntervalProvider),
+          state.echoInterval,
           (_) => unawaited(_pingOnce(recorder, echo)),
         );
       } else {
@@ -324,7 +437,7 @@ class LatencyController extends Notifier<LatencyState> {
       )
       ..add(
         input.modeChanges.listen((m) {
-          if (m.mode.name != input.stream) recorder.markModeChanged();
+          if (m.mode.name != activeMode.name) recorder.markModeChanged();
         }),
       );
     state = LatencyState(
@@ -334,6 +447,8 @@ class LatencyController extends Notifier<LatencyState> {
       runs: state.runs,
       echoEnabled: state.echoEnabled,
       echoNote: note,
+      streamChoice: state.streamChoice,
+      echoInterval: state.echoInterval,
     );
     _timer?.cancel();
     _timer = Timer.periodic(ref.read(latencyTickProvider), (_) => _tick());
@@ -388,6 +503,7 @@ class LatencyController extends Notifier<LatencyState> {
       nowUs: _input!.clock.nowUs,
       link: _link,
       counters: _counterGrowth(),
+      echoIntervalUs: state.echoInterval.inMicroseconds,
       echoCounters: echo == null
           ? const {}
           : {
@@ -398,7 +514,8 @@ class LatencyController extends Notifier<LatencyState> {
     );
   }
 
-  /// Ends the run and saves the CSV and JSON.
+  /// Ends the run and saves the CSV and JSON. Also the cancel path: a no-stream
+  /// run restores the mode the screen turned off.
   Future<void> stop() async {
     if (state.stage != LatencyStage.running) return;
     _timer?.cancel();
@@ -419,6 +536,26 @@ class LatencyController extends Notifier<LatencyState> {
     final elapsed = report.durationUs ~/ Duration.microsecondsPerSecond;
     _recorder = null;
     _input = null;
+    final restore = _restoreMode;
+    _restoreMode = null;
+    String? restoreError;
+    if (restore != null) {
+      final setMode = input.setMode;
+      if (setMode == null) {
+        restoreError =
+            'The stream was not restored: switching is not '
+            'available here.';
+      } else {
+        try {
+          await setMode(restore);
+        } catch (e) {
+          restoreError = 'The stream was not restored: $e';
+        }
+      }
+    }
+    final restoredChoice = restore == null
+        ? state.streamChoice
+        : LatencyStream.fromMode(restore);
     try {
       final store = await ref.read(latencyStoreProvider.future);
       final saved = await store.save(recorder, report);
@@ -427,14 +564,19 @@ class LatencyController extends Notifier<LatencyState> {
         elapsedSeconds: elapsed,
         report: report,
         saved: saved,
+        streamChoice: restoredChoice,
         clearError: true,
       );
+      if (restoreError != null) {
+        state = state.copyWith(error: restoreError);
+      }
       await refreshRuns();
     } on FileSystemException catch (e) {
       state = state.copyWith(
         stage: LatencyStage.finished,
         elapsedSeconds: elapsed,
         report: report,
+        streamChoice: restoredChoice,
         error: 'Cannot save the run: ${e.message}',
       );
     }
@@ -447,6 +589,7 @@ class LatencyController extends Notifier<LatencyState> {
       durationSeconds: state.durationSeconds,
       runs: state.runs,
       echoEnabled: state.echoEnabled,
+      echoInterval: state.echoInterval,
     );
   }
 

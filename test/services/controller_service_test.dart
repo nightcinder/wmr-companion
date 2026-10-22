@@ -65,4 +65,18 @@ void main() {
     expect(s.hands[1].outOfOrder, 0);
     expect(s.hands[1].lastSequence, 0);
   });
+
+  test('none turns the active stream off and enables nothing', () async {
+    expect(t.cccLog, ['on $wmrBridgeStreamCharUuid']);
+    await service.setMode(StreamMode.none);
+    expect(service.mode, StreamMode.none);
+    expect(t.cccLog, [
+      'on $wmrBridgeStreamCharUuid',
+      'off $wmrBridgeStreamCharUuid',
+    ]);
+
+    await service.setMode(StreamMode.decoded);
+    expect(service.mode, StreamMode.decoded);
+    expect(t.cccLog.last, 'on $wmrBridgeDecodedCharUuid');
+  });
 }

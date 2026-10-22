@@ -49,6 +49,11 @@ class StreamStats {
 
 /// Which bridge characteristic the app listens to. Only one at a time.
 enum StreamMode {
+  /// No bridge stream: FF11, FF12 and FF14 are all off. FF15 (echo) is
+  /// independent and still works. The latency screen uses this for the
+  /// no-stream run; other screens keep one of the three streams on.
+  none,
+
   /// FF11: raw fragmented frames (Capture needs this).
   raw,
 
@@ -59,9 +64,12 @@ enum StreamMode {
   batched;
 
   /// FF12 and FF14 both deliver decoded records to the same pipeline.
-  bool get carriesRecords => this != StreamMode.raw;
+  bool get carriesRecords =>
+      this == StreamMode.decoded || this == StreamMode.batched;
 
-  String get characteristicUuid => switch (this) {
+  /// The characteristic to subscribe to; null for [StreamMode.none].
+  String? get characteristicUuid => switch (this) {
+    StreamMode.none => null,
     StreamMode.raw => wmrBridgeStreamCharUuid,
     StreamMode.decoded => wmrBridgeDecodedCharUuid,
     StreamMode.batched => wmrBridgeBatchedCharUuid,
@@ -302,22 +310,49 @@ class ControllerService {
 
   /// Connects and subscribes to the current [mode]. Call again after every
   /// reconnect: the bridge forgets the subscription on disconnect, and the
-  /// wanted stream is enabled from scratch.
+  /// wanted stream is enabled from scratch. [StreamMode.none] connects
+  /// without enabling a stream.
   Future<void> start() async {
     await transport.connect(deviceId);
     _started = true;
+    if (_mode == StreamMode.none) return;
     await _subscribe();
   }
 
   /// Switches to [next]. The transport writes 0x0000 to the active
   /// characteristic's CCC before it enables the other one; a refusal
-  /// (ATT 0x80) lands in [fault].
+  /// (ATT 0x80) lands in [fault]. [StreamMode.none] turns the active stream
+  /// off and enables nothing.
   Future<void> setMode(StreamMode next) async {
     if (next == _mode && _fault == null) return;
+    final previous = _mode;
     _mode = next;
     _fault = null;
     _emitMode();
-    if (_started) await _subscribe();
+    if (!_started) return;
+    if (next == StreamMode.none) {
+      await _disableStream(previous);
+      return;
+    }
+    await _subscribe();
+  }
+
+  /// Turns [previous] off through the transport. Its CCC write is the same
+  /// one a switch uses; the UI never writes CCCDs itself.
+  Future<void> _disableStream(StreamMode previous) async {
+    await _subscription?.cancel();
+    _subscription = null;
+    final uuid = previous.characteristicUuid;
+    if (uuid == null) {
+      _emitMode();
+      return;
+    }
+    try {
+      await transport.unsubscribe(deviceId, wmrBridgeServiceUuid, uuid);
+    } catch (e) {
+      _fault = ModeFault(ModeFaultKind.disableFailed, '$e');
+    }
+    _emitMode();
   }
 
   Future<void> _subscribe() async {
@@ -332,8 +367,9 @@ class ControllerService {
     }
     _fault = null;
     _subscription = transport
-        .subscribe(deviceId, wmrBridgeServiceUuid, _mode.characteristicUuid)
+        .subscribe(deviceId, wmrBridgeServiceUuid, _mode.characteristicUuid!)
         .listen(switch (_mode) {
+          StreamMode.none => throw StateError('No stream to subscribe to'),
           StreamMode.raw => _onNotification,
           StreamMode.decoded => _onDecoded,
           StreamMode.batched => _onBatched,
