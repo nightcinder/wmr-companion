@@ -43,8 +43,9 @@ class CapturePhase {
   final int minSeconds;
 }
 
-/// Same names and wording as `PHASES` in capture_ble.py (its line breaks are
-/// folded into spaces).
+/// Same names as `PHASES` in capture_ble.py (the analyzer keys on them) and the
+/// same wording except `twist_cw`, reworded here to describe the physical
+/// motion. No axis sign is verified by this text.
 const List<CapturePhase> capturePhases = [
   CapturePhase(
     'still',
@@ -55,9 +56,10 @@ const List<CapturePhase> capturePhases = [
   ),
   CapturePhase(
     'twist_cw',
-    'Start upright and facing away, as above. Twist it about its handle, '
-        'like tightening a screw: clockwise as seen from above. ONE full '
-        '360-degree turn, slowly (about 4 seconds), ending in the same pose.',
+    'Hold the controller with the buttons facing you, then twist it to the '
+        'right about its handle: the trigger side swings to your right and the '
+        'button side swings to your left. ONE full 360-degree turn, slowly '
+        '(about 4 seconds), ending in the same pose.',
   ),
   CapturePhase(
     'flip_away',

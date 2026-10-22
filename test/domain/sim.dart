@@ -20,7 +20,11 @@ DecodedRecord record({
   List<double> accel = const [gravity, 0, 0],
   int rxOriginUs = 1000000,
   int? rxTimeUs,
+  List<int> stick = const [0, 0],
+  int buttons = 0,
 }) => DecodedRecord(
+  stick: stick,
+  buttons: buttons,
   hand: hand,
   sequence: sequence,
   rxTimeUs: rxTimeUs ?? rxOriginUs + ticks * wmrTickNanoseconds ~/ 1000,

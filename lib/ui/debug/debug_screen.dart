@@ -128,6 +128,13 @@ class DebugScreen extends ConsumerWidget {
                       ?.recalibrate(hand),
                   child: const Text('Recalibrate gyro bias'),
                 ),
+              if (decoded)
+                FilledButton.tonal(
+                  onPressed: () => ref
+                      .read(controllerServiceProvider(source))
+                      ?.recentreStick(hand),
+                  child: const Text('Re-centre stick'),
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -307,6 +314,10 @@ class DecodedStatsView extends StatelessWidget {
         style: style,
       ),
       Text(
+        '  nominal period ${s.periodTicks == null ? '-' : '${(s.periodTicks! * 1e-4).toStringAsFixed(2)} ms (${s.periodTicks} ticks)'}',
+        style: style,
+      ),
+      Text(
         '  dt p50 ${_ms(s.dt.p50)} ms  p95 ${_ms(s.dt.p95)} ms  '
         'max ${_ms(s.dt.max)} ms',
         style: style,
@@ -314,6 +325,12 @@ class DecodedStatsView extends StatelessWidget {
       Text(
         '  gyro bias x ${_sgn(s.bias[0])} y ${_sgn(s.bias[1])} '
         'z ${_sgn(s.bias[2])} rad/s ($bias)',
+        style: style,
+      ),
+      Text(
+        '  stick centre x ${_sgn(s.stickCentre[0])} y ${_sgn(s.stickCentre[1])} '
+        '(${s.stickLearned ? 'learned/set ${s.stickCentreUpdates}x' : 'not set'})  '
+        'out x ${_sgn(s.stick[0])} y ${_sgn(s.stick[1])}',
         style: style,
       ),
       Text(
@@ -338,6 +355,8 @@ class AxisSettingsPanel extends ConsumerWidget {
     final mapping = ref.watch(axisMappingProvider);
     final notifier = ref.read(axisMappingProvider.notifier);
     final filter = ref.watch(filterKindProvider);
+    final stickConfig = ref.watch(stickConfigProvider);
+    final stickNotifier = ref.read(stickConfigProvider.notifier);
     final theme = Theme.of(context);
     return ExpansionTile(
       title: const Text('Debug settings'),
@@ -396,6 +415,24 @@ class AxisSettingsPanel extends ConsumerWidget {
             onPressed: notifier.reset,
             child: const Text('Reset to default table'),
           ),
+        ),
+        const SizedBox(height: 8),
+        Text('Stick dead zone ${stickConfig.deadZone.toStringAsFixed(2)}'),
+        Slider(
+          value: stickConfig.deadZone,
+          max: 0.3,
+          divisions: 30,
+          onChanged: stickNotifier.setDeadZone,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Learn stick rest centre'),
+          subtitle: const Text(
+            'Takes the stick position as centre after about 1 s still, inside '
+            'a quarter of full scale, with the controller otherwise untouched.',
+          ),
+          value: stickConfig.learn,
+          onChanged: stickNotifier.setLearn,
         ),
       ],
     );

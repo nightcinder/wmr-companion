@@ -56,13 +56,14 @@ ESP32 has no timestamp in this stream; sequence numbers are the loss signal.
 
 ### Phases
 
-Same names, order and instruction text as `PHASES` in `capture_ble.py` (the
-analyzer keys on the names):
+Same names and order as `PHASES` in `capture_ble.py` (the analyzer keys on the
+names), and the same instruction text except `twist_cw`, which the app words as
+a physical motion description. The wording does not verify any axis sign:
 
 | Phase | Instruction (line breaks folded) |
 | --- | --- |
 | `still` | Hold the controller still and upright: ring at the top, trigger facing away from you, as if aiming forward. Do not touch the buttons. Keep still for at least 5 seconds after pressing Enter. |
-| `twist_cw` | Start upright and facing away, as above. Twist it about its handle, like tightening a screw: clockwise as seen from above. ONE full 360-degree turn, slowly (about 4 seconds), ending in the same pose. |
+| `twist_cw` | Hold the controller with the buttons facing you, then twist it to the right about its handle: the trigger side swings to your right and the button side swings to your left. ONE full 360-degree turn, slowly (about 4 seconds), ending in the same pose. |
 | `flip_away` | Start upright and facing away. Tip the top of the ring away from you and over: a forward somersault of the controller. ONE full 360-degree turn, slowly (about 4 seconds), ending in the same pose. |
 | `lean_right` | Start upright and facing away. Tip the top of the ring to YOUR right and over: a cartwheel to the right. ONE full 360-degree turn, slowly (about 4 seconds), ending in the same pose. |
 

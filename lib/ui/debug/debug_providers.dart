@@ -39,10 +39,12 @@ final fakeServiceProvider = FutureProvider<ControllerService>((ref) async {
     mode: ref.read(streamModeProvider),
     mapping: ref.read(axisMappingProvider),
     filterKind: ref.read(filterKindProvider),
+    stickConfig: ref.read(stickConfigProvider),
   );
   ref.onDispose(service.dispose);
   ref.listen(axisMappingProvider, (_, m) => service.setMapping(m));
   ref.listen(filterKindProvider, (_, k) => service.setFilterKind(k));
+  ref.listen(stickConfigProvider, (_, c) => service.setStickConfig(c));
   await service.start();
   return service;
 });

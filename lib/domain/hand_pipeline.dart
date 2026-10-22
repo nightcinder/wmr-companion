@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:vector_math/vector_math_64.dart' as vm;
 import 'package:wmr_fusion/wmr_fusion.dart' as fusion;
 
 import '../protocol/decoded_record.dart';
 import 'axis_mapping.dart';
 import 'gyro_bias.dart';
+import 'stick_centre.dart';
 import 'tick_timer.dart';
 
 enum FilterKind { madgwick, mahony }
@@ -16,6 +19,7 @@ class DecodedSample {
     required this.step,
     required this.orientation,
     required this.fused,
+    this.stick = const [0, 0],
   });
 
   final DecodedRecord record;
@@ -30,6 +34,9 @@ class DecodedSample {
 
   /// Whether this sample advanced the filter.
   final bool fused;
+
+  /// Thumbstick after centre removal and dead zone, -1..1 (x, y).
+  final List<double> stick;
 }
 
 /// Timing, gyro bias, axis mapping and the orientation filter for one hand.
@@ -46,8 +53,10 @@ class HandPipeline {
     this.maxDt = 0.1,
     TickTimer? timer,
     GyroBiasEstimator? bias,
+    StickNormalizer? stickNormalizer,
   }) : timer = timer ?? TickTimer(),
        bias = bias ?? GyroBiasEstimator(),
+       stickNormalizer = stickNormalizer ?? StickNormalizer(),
        _kind = kind,
        _filter = _makeFilter(kind, maxDt);
 
@@ -56,6 +65,14 @@ class HandPipeline {
   final double maxDt;
   final TickTimer timer;
   final GyroBiasEstimator bias;
+  final StickNormalizer stickNormalizer;
+
+  /// Live-editable: the next sample uses the new settings.
+  StickConfig stickConfig = const StickConfig();
+
+  /// Gyro magnitude (rad/s, bias removed) above which the controller counts
+  /// as being moved, so the stick centre is not learned. A guess.
+  static const double stickBusyGyro = 0.3;
 
   FilterKind _kind;
   fusion.OrientationFilterBase _filter;
@@ -104,7 +121,11 @@ class HandPipeline {
   void streamRestarted() {
     timer.rebaseline();
     bias.breakWindow();
+    stickNormalizer.breakWindow();
   }
+
+  /// Takes the current stick position as its rest centre.
+  void recentreStick() => stickNormalizer.recentre();
 
   DecodedSample add(DecodedRecord r, int receivedAtUs) {
     samples++;
@@ -156,6 +177,27 @@ class HandPipeline {
       step: step,
       orientation: orientation,
       fused: fused,
+      stick: _stick(r, step),
+    );
+  }
+
+  List<double> _stick(DecodedRecord r, TickStep step) {
+    final b = bias.bias;
+    final g = [for (var i = 0; i < 3; i++) r.gyro[i] - b[i]];
+    final rate = math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+    // Moved or pressed in any other way: buttons, trigger, trackpad, or a
+    // gyro rate above the threshold (non-finite counts as moving).
+    final busy =
+        r.buttons != 0 ||
+        r.trigger != 0 ||
+        r.trackpad.any((v) => v != 0) ||
+        !(rate <= stickBusyGyro);
+    return stickNormalizer.process(
+      r.stick[0],
+      r.stick[1],
+      dt: step.kind == TickStepKind.step ? step.dtSeconds : 0,
+      busy: busy,
+      config: stickConfig,
     );
   }
 

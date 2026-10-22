@@ -174,8 +174,8 @@ those axes are **unverified** in the firmware's own docs
 
 FF13 (controller config block: mix matrix, bias, pose) is a design only in the
 firmware docs. The app uses the uncalibrated values, estimates the gyro bias
-itself and ignores `temperature_raw`, `stick`, `trackpad`, `trigger` and
-`battery` apart from parsing them.
+itself and ignores `temperature_raw`, `trackpad`, `trigger` and `battery`
+apart from parsing them. `stick` is normalized (see "Stick centre").
 
 ## FF12 in the app
 
@@ -218,17 +218,29 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
 - A `dt` above 100 ms skips that filter step (`largeDtSkips`) and restarts the
   gyro-bias window. A `dt` of a few periods (lost reports) is integrated with
   its real value.
-- **Missing reports** are counted from the tick deltas: each delta spans
-  `round(delta / period)` report periods, so that minus one are missing. The
-  period is the **10th percentile** of the last 256 deltas, after 32 deltas
-  (earlier deltas are settled then). The task asked for the median; the median
-  is a multiple of the true period once a link loses about half the reports
-  (the measured LEFT case), which would hide the loss, and a lower quartile
-  still failed on an irregular 50 % pattern in a test. This relies on the
-  controller's own timer being regular, which is not established. The count
-  is shown next to the sequence-gap count: sequence gaps only see reports lost
-  after the ESP32 numbered them, the tick count also sees reports lost on the
-  controller link.
+- **Missing reports** use the **firmware's definition**, so the app's number
+  and the bridge's `dev_missing` (LINKLOG / `link:` line, WMR_Bridge
+  `docs/COUNTERS.md`) mean the same thing. Read from `src/wmr_devloss.c`,
+  `docs/COUNTERS.md`, `docs/DECODING.md` and `tools/analyze_capture.py`
+  (`device_loss`) on `main`: each delta between consecutive reports spans
+  `round(delta / period)` periods, so that minus one are missing; `period` is
+  the **median of the deltas not longer than 1.5x the 10th-percentile delta**
+  (`sorted[n / 10]`), over a sliding window of the last 256 deltas, refreshed
+  every 32 deltas. Nothing is counted until 16 deltas exist (they are then
+  counted retroactively); a zero delta is ignored; a delta over 5 s is not
+  counted as missing (`longGaps`). This replaces the earlier app rule (plain
+  10th-percentile period, 32-delta warm-up), which sat at the low end of the
+  jitter and so differed from the firmware's nominal period (the firmware's
+  own write-up quotes 4.98 ms for the missing percentages). The reason for
+  following the firmware: the two numbers can then be compared directly. The
+  app resets its window on a timer discontinuity (the firmware resets on a
+  Classic reconnect); that is the one deliberate difference. Same limit as
+  the firmware: perfectly uniform loss looks like a slower controller. The
+  count is shown next to the sequence-gap count, which is unchanged: sequence
+  gaps only see reports lost after the ESP32 numbered them, the tick count
+  also sees reports lost on the controller link. The nominal period in use is
+  shown per hand on the debug screen. Like the rest of this section, the
+  counter has not been compared against a live bridge.
 - `tick/clock` (controller ticks at 100 ns over ESP32 `rx_time_us`) is shown as
   a check of the unverified 100 ns unit; about 1.0 if it is right.
 
@@ -244,6 +256,30 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
   `ki = 0` because the bias is estimated here.
 - No magnetometer: **yaw drifts**. "Reset orientation" zeroes the heading of
   the fused filter (`resetYaw`).
+
+### Stick centre
+
+**Not verified on hardware.** `StickNormalizer` (`lib/domain/stick_centre.dart`,
+one per hand inside `HandPipeline`) turns the raw `stick` i16 pair into -1..1.
+A stick can rest off-centre; the only figure we have is one user-reported
+measurement (RIGHT y about 0.148 of full scale), not a property established
+for the hardware in general.
+
+- **Learned centre.** With learning on, a sample is a rest candidate when the
+  stick is within 0.25 of full scale of zero and the controller is not being
+  used otherwise: no button bit set, trigger 0, trackpad 0, and bias-corrected
+  gyro magnitude at most 0.3 rad/s (a guess). If the stick then stays within
+  0.02 of where the candidate began for 1.0 s of tick time, the mean of that
+  stretch becomes the centre. A step above 100 ms or a stream restart drops
+  the candidate. The stick held still and slightly deflected inside the window
+  for a second is therefore taken as rest; use "Re-centre stick" or switch
+  learning off if that is wrong.
+- **Output.** Centre subtracted, each half-axis rescaled so the end stop still
+  reaches +-1, clamped, then a radial dead zone (default 0.05, debug settings
+  slider 0 to 0.3) rescaled so the zone edge is 0 and full deflection is 1.
+- **Debug UI.** The learned or set centre and the normalized output are shown
+  per hand; "Re-centre stick" takes the current reading of the selected hand
+  as centre; a switch turns learning off.
 
 ## Axis mapping
 

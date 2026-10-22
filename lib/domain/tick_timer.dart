@@ -42,38 +42,42 @@ class DtStats {
 /// - The spec's discontinuity rule: `dt_ticks * 100 ns` against
 ///   `delta(rx_time_us) * 1000 ns`; more than [discontinuityTolerance] apart
 ///   (or the ESP32 time going backwards) means the timer restarted.
-/// - Missing reports are counted from the tick deltas: each delta spans
-///   `round(delta / period)` periods, so `that - 1` reports are missing. The
-///   period is a low percentile ([periodQuantile], default the 10th)
-///   of recent deltas, not the median: when a link loses half or more of the
-///   reports the median is already a multiple of the true period and would
-///   hide the loss (a lower quartile still failed on an irregular 50% loss
-///   pattern in a test). The controller's own timer is regular, so single-
-///   period deltas exist as long as at least a tenth of the reports arrive
-///   back to back. Until [warmup] deltas are known nothing is counted; those
-///   deltas are settled once the period is known.
+/// - Missing reports use the firmware's definition (WMR_Bridge
+///   `src/wmr_devloss.c`, `docs/COUNTERS.md`, `tools/analyze_capture.py`
+///   `device_loss`): each delta spans `round(delta / period)` periods, so
+///   `that - 1` reports are missing. The period is the median of the deltas
+///   not longer than 1.5x the 10th-percentile delta (`sorted[n ~/ 10]`) of a
+///   sliding window of the last [window] deltas, refreshed every [refresh]
+///   deltas. Nothing is counted until [warmup] deltas exist; those are then
+///   counted retroactively. A zero delta is ignored; a delta over
+///   [maxDeltaTicks] (5 s) is not counted as missing and not used for the
+///   period. Like the firmware it cannot see perfectly uniform loss.
 class TickTimer {
   TickTimer({
     this.window = 256,
-    this.warmup = 32,
-    this.periodQuantile = 0.1,
+    this.warmup = 16,
+    this.refresh = 32,
+    this.maxDeltaTicks = 50000000,
     this.discontinuityTolerance = const Duration(milliseconds: 100),
   });
 
   final int window;
   final int warmup;
-  final double periodQuantile;
+  final int refresh;
+  final int maxDeltaTicks;
   final Duration discontinuityTolerance;
 
   int? _prevTicks;
   int? _prevRxUs;
-  final List<int> _recent = []; // recent non-zero deltas, in ticks
-  final List<int> _pending = []; // deltas not yet counted for missing
+  final List<int> _recent = []; // last deltas in arrival order, in ticks
+  int _sinceRefresh = 0;
+  int? _period;
   final List<double> _dts = []; // recent dt, seconds
   double _maxDt = 0;
   int _missing = 0;
   int _steps = 0;
   int _discontinuities = 0;
+  int _longGaps = 0;
   int _elapsedTicks = 0;
   int _rxElapsedUs = 0;
 
@@ -85,12 +89,17 @@ class TickTimer {
   int get steps => _steps;
   int get discontinuities => _discontinuities;
 
-  /// Report period in ticks, or null until enough deltas were seen.
-  int? get periodTicks {
-    if (_recent.length < warmup) return null;
-    final sorted = List<int>.of(_recent)..sort();
-    final i = (periodQuantile * (sorted.length - 1)).round();
-    return sorted[i];
+  /// Deltas over [maxDeltaTicks] that were left out of the missing count.
+  int get longGaps => _longGaps;
+
+  /// Nominal report period in ticks (firmware definition, see above), or
+  /// null until [warmup] deltas were seen.
+  int? get periodTicks => _period;
+
+  /// [periodTicks] in milliseconds, or null.
+  double? get periodMs {
+    final p = _period;
+    return p == null ? null : p * wmrTickSeconds * 1000;
   }
 
   /// Ratio of controller time (ticks at 100 ns) to ESP32 receive time over
@@ -134,7 +143,8 @@ class TickTimer {
         (tickNs - rxNs).abs() > discontinuityTolerance.inMicroseconds * 1000) {
       _discontinuities++;
       _recent.clear();
-      _pending.clear();
+      _sinceRefresh = 0;
+      _period = null;
       return const TickStep(TickStepKind.discontinuity);
     }
 
@@ -145,28 +155,63 @@ class TickTimer {
     _dts.add(dt);
     if (_dts.length > window) _dts.removeAt(0);
     if (dt > _maxDt) _maxDt = dt;
-    if (dtTicks > 0) _count(dtTicks);
+    if (dtTicks > maxDeltaTicks) {
+      _longGaps++;
+    } else if (dtTicks > 0) {
+      _count(dtTicks);
+    }
     return TickStep(TickStepKind.step, dtTicks: dtTicks, dtSeconds: dt);
   }
 
+  /// Mirrors `wmr_devloss_add` after its discontinuity and zero-delta checks.
   void _count(int dtTicks) {
     _recent.add(dtTicks);
     if (_recent.length > window) _recent.removeAt(0);
-    final period = periodTicks;
-    if (period == null) {
-      _pending.add(dtTicks);
+    _sinceRefresh++;
+
+    if (_period == null) {
+      if (_recent.length >= warmup) {
+        final p = _estimatePeriod();
+        _sinceRefresh = 0;
+        if (p > 0) {
+          _period = p;
+          // Deltas collected during warm-up are counted retroactively.
+          for (final d in _recent) {
+            _missing += _lost(d, p);
+          }
+        }
+      }
       return;
     }
-    for (final d in _pending) {
-      _missing += _lost(d, period);
+    _missing += _lost(dtTicks, _period!);
+    if (_sinceRefresh >= refresh) {
+      final p = _estimatePeriod();
+      if (p > 0) _period = p;
+      _sinceRefresh = 0;
     }
-    _pending.clear();
-    _missing += _lost(dtTicks, period);
   }
 
+  /// Median of the window deltas that are at most 1.5x the 10th percentile
+  /// (`sorted[n ~/ 10]`); 0 if that reference is 0. Integer arithmetic as in
+  /// the firmware.
+  int _estimatePeriod() {
+    final sorted = List<int>.of(_recent)..sort();
+    final ref = sorted[sorted.length ~/ 10];
+    if (ref == 0) return 0;
+    final limit = ref + ref ~/ 2;
+    var m = 0;
+    while (m < sorted.length && sorted[m] <= limit) {
+      m++;
+    }
+    if (m == 0) return 0;
+    if (m.isOdd) return sorted[m ~/ 2];
+    return (sorted[m ~/ 2 - 1] + sorted[m ~/ 2]) ~/ 2;
+  }
+
+  /// `round(delta / period) - 1`, at least 0, rounding half up as the
+  /// firmware's `(delta + period / 2) / period`.
   static int _lost(int dtTicks, int period) {
-    if (period <= 0) return 0;
-    final n = (dtTicks / period).round() - 1;
-    return n > 0 ? n : 0;
+    final k = (dtTicks + period ~/ 2) ~/ period;
+    return k > 1 ? k - 1 : 0;
   }
 }

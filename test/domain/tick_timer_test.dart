@@ -144,6 +144,73 @@ void main() {
       },
     );
 
+    test('period is the median of deltas up to 1.5x the 10th percentile', () {
+      final t = TickTimer();
+      var k = 0;
+      final ticks = <int>[0];
+      // Jittered deltas: 20 of 49000 and 20 of 50000 ticks, interleaved.
+      for (var i = 0; i < 40; i++) {
+        k += i.isEven ? 49000 : 50000;
+        ticks.add(k);
+      }
+      feed(t, ticks);
+      // The 10th percentile alone would give 49000; the firmware definition
+      // is the median of the deltas within 1.5x of it.
+      expect(t.periodTicks, 49500);
+      expect(t.periodMs, closeTo(4.95, 1e-9));
+      expect(t.missing, 0);
+    });
+
+    test('long deltas do not pull the period up (firmware 1.5x rule)', () {
+      final t = TickTimer();
+      var k = 0;
+      final ticks = <int>[0];
+      // Two thirds of the deltas are two periods long.
+      for (var i = 0; i < 60; i++) {
+        k += i % 3 == 0 ? 49800 : 99600;
+        ticks.add(k);
+      }
+      feed(t, ticks);
+      expect(t.periodTicks, 49800);
+      expect(t.missing, 40);
+    });
+
+    test('nothing is counted before 16 deltas, then they are settled', () {
+      final t = TickTimer();
+      // 15 deltas: a drop at 5 (one 2-period delta), period unknown.
+      final ticks = [
+        for (var i = 0; i <= 17; i++)
+          if (i != 5) i * p,
+      ];
+      feed(t, ticks.take(16)); // 15 deltas
+      expect(t.periodTicks, isNull);
+      expect(t.missing, 0);
+      feed(t, ticks.skip(16));
+      expect(t.periodTicks, p);
+      expect(t.missing, 1);
+    });
+
+    test('a repeated tick value is ignored', () {
+      final t = TickTimer();
+      feed(t, [
+        for (var i = 0; i < 40; i++) ...[i * p, i * p],
+      ]);
+      expect(t.missing, 0);
+      expect(t.periodTicks, p);
+    });
+
+    test('a delta over 5 s is not counted as missing', () {
+      final t = TickTimer();
+      final ticks = [
+        for (var i = 0; i < 30; i++) i * p,
+        29 * p + 60000000, // 6 s later
+        29 * p + 60000000 + p,
+      ];
+      feed(t, ticks);
+      expect(t.missing, 0);
+      expect(t.longGaps, 1);
+    });
+
     test('counting survives the 32-bit wrap', () {
       final t = TickTimer();
       const start = 0xffffffff - 20 * p;
