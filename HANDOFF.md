@@ -2,7 +2,7 @@
 
 Written 2026-10-22 by the outgoing "director" session for whoever runs this project next, who starts without our conversation. Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
 
-Everything the project owner (Nick) has not reported himself is **not verified on hardware**. Results below are labelled "user-reported" when he pasted or told us the figure.
+Everything the project owner (Nick) has not reported is **not verified on hardware**. Results below are labelled "user-reported" when Nick pasted or told us the figure.
 
 ## 1. What the project is
 
@@ -26,7 +26,7 @@ GATT service FF10 on the bridge: FF11 raw fragmented HID frames, FF12 decoded 56
 7. Scope agent tasks tightly; say what is out of scope; agents print a short summary and do not push or merge unless told.
 8. Be honest about uncertainty and your own mistakes. Don't pad.
 
-Style Nick wants: short answers that lead with the result or the command; tables for comparisons; when he pastes serial output, extract the figures that matter and say what they imply and do not prove. Hardware runs are his: give him ready-to-run commands first. The project default model is Sonnet (his choice, to save usage).
+Style Nick wants: short answers that lead with the result or the command; tables for comparisons; when Nick pastes serial output, extract the figures that matter and say what they imply and do not prove. Hardware runs are his: give him ready-to-run commands first. The project default model is Sonnet (his choice, to save usage).
 
 ## 3. Machines, sessions and environment gotchas
 
@@ -143,7 +143,7 @@ Nothing from the earlier tool (project chat, project memory, uploaded files) car
 - Monado key: Nick chose the fetch script; the key is never committed (section 3).
 - A history of the FF13 regression: since WMR_Bridge #17 the controllers stopped streaming after the config read; fixed by #21 (re-sends Monado's enable commands). User-reported working with LEFT about 204/s. Test C7 (`WMR_CFG_FF13_READ=0`) is still not run.
 - Loss figures (user-reported single runs, 2026-10-22, FF14 at MTU 517, phone streaming): LEFT alone about 0.5 %, RIGHT alone about 10.8 %, both connected about 19 % each. Contention between the two Classic links and BLE on the ESP32's radio is the working hypothesis; RIGHT has about 10 % loss of its own. Tracked in WMR_Bridge #18.
-- Permissions: merges, deletes and other outward-facing git actions need Nick's explicit yes (he authorised branch and Ixhel cleanup on 2026-10-22, see section 11). If the permission layer refuses an action, do not work around it; tell Nick.
+- Permissions: merges, deletes and other outward-facing git actions need Nick's explicit yes (Nick authorised branch and Ixhel cleanup on 2026-10-22, see section 11). If the permission layer refuses an action, do not work around it; tell Nick.
 - Model default for this project was Sonnet (Nick, 2026-10-22) to save usage.
 
 ## 11. Cleanup list for Nick
