@@ -77,7 +77,7 @@ All of this is merged; the "checked" column is only what Nick reported.
 | Gamepad mapping layer, Gamepad screen, settings persistence, Bluetooth HID output | yes | **not run on a phone** |
 | Latency screen with CSV/JSON export | yes | one run (above) |
 
-Not yet run (Nick offered to check; none reported): the negotiated MTU on the Connect screen after the 517 request; the 4-step gamepad check in `docs/GAMEPAD.md`; whether the gamepad settings survive an app restart; the Bluetooth HID output on a phone and a host; B4 (phone-side sequence gaps on FF14) and B9 (latency); firmware C7; the remaining firmware checklists in `docs/TESTING.md`.
+Reported by Nick on 2026-10-22 (user-reported, one-liners): Connect screen shows MTU 517; the gamepad checks worked; gamepad settings persisted across a restart; C7 partly (RIGHT streamed at 181/s with FF13 state 0 and `other=0`, LEFT not connected, build hash not stated). Not yet run: the Bluetooth HID output on a phone and a host (skipped); B4 (phone-side sequence gaps on FF14) and B9 (latency); the remaining firmware checklists in `docs/TESTING.md`.
 
 ### The main open problem: upstream report loss
 

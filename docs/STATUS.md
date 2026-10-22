@@ -121,13 +121,10 @@ Then:
 
 ## Not yet run on hardware (as of 2026-10-22)
 
-Built and unit-tested only, until the project owner reports a result:
+Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
 
-- The MTU readout on the Connect screen after the 517 request.
-- The gamepad checks in [GAMEPAD.md](GAMEPAD.md), and whether the gamepad settings survive an app restart.
-- Bluetooth HID output on a phone and a host.
+- Bluetooth HID output on a phone and a host (skipped).
 - FF14 checks B4 (phone-side sequence gaps) and B9, and B6-B8, B10, B11.
-- Firmware check C7 (`WMR_CFG_FF13_READ=0`).
 - A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream.
 
 ## Where things are
