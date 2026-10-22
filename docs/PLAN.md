@@ -1,5 +1,7 @@
 # WMR Companion App: Project Plan (for Claude Code)
 
+> Current state, hardware results and the roadmap live in [STATUS.md](STATUS.md). This file is the plan and architecture reference; where the two differ, STATUS.md is newer.
+
 ## Goal
 A Flutter app (Android first, iOS next) that connects over BLE GATT to ESP32 firmware (BTstack) exposing WMR controllers, and:
 1. Shows live 3DoF orientation of each controller in a **debug mode**.
@@ -39,14 +41,17 @@ wmr-companion/
     app.dart
     ble/            # BleTransport, universal_ble impl, fake transport
     protocol/       # GATT UUIDs, packet models, parser
-    domain/         # ControllerState, quaternion/euler helpers
+    domain/         # tick timing, gyro bias, axis mapping, per-hand pipeline, orientation helpers
     services/       # ControllerService, LatencyService, LogRecorder
     ui/
       scan/         # scan + connect screen
       controller/   # live controller view (buttons, axes, battery)
-      debug/        # 3DoF view + stats panel
-      latency/      # latency test screen
+      debug/        # 3DoF view + stats panel + stream settings
+      capture/      # guided raw capture (FF11)
+      latency/      # latency test screen (not built yet)
+  packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
   test/
+  docs/STATUS.md    # current state and roadmap
   docs/PLAN.md      # this file
   docs/PROTOCOL.md  # links to WMR_Bridge docs + app-side decisions
   .github/workflows/ci.yml
@@ -63,17 +68,17 @@ The firmware is a **raw pipe**: it does not decode, filter or time-stamp. What t
 - There is **no quaternion, no ESP32 timestamp and no echo characteristic** in the stream.
 - Connection sequence (from the firmware's ANDROID.md): connect, requestMtu(247 or 517), wait for the negotiated MTU, request High connection priority, discover services, enable notifications (CCC 0x0001). Repeat all of it after every reconnect. Serialize GATT operations and do no heavy work in the notification callback. The bridge serves one phone at a time.
 
-## Decoded stream (planned, in progress in WMR_Bridge)
-WMR report decoding is being done in the ESP32 firmware (separate session with the full ESP setup), not in the app. The layout is not final. It will be fixed in WMR_Bridge `docs/PROTOCOL.md` before the app depends on it. Expected shape:
-- A new characteristic (proposed `FF12`) next to the existing raw `FF11` stream, which keeps working.
-- A version byte, per-hand sequence number, an ESP32 receive timestamp, gyro and accel in physical units, plus buttons, stick, trackpad and battery.
+## Decoded stream (implemented: FF12; planned: FF14 batching)
+WMR report decoding is done in the ESP32 firmware, not in the app. The layout is fixed in WMR_Bridge `docs/PROTOCOL.md`, mirrored and explained in this repo's [PROTOCOL.md](PROTOCOL.md):
+- `FF12`, notify only, next to the raw `FF11` stream, which keeps working. The two are mutually exclusive (a second enable fails with ATT error 0x80).
+- 56-byte version-1 records: hand, buttons, sequence (per hand), ESP32 receive time, `device_ticks` (100 ns, the sensor clock), gyro (rad/s), accel (scale about 10 m/s^2 at rest, not 9.81), temperature, stick, trackpad, trigger, battery. Needs MTU 59 or more.
 - Raw IMU is sent, not a quaternion: fusion runs on the phone.
-Do not guess the layout. Until the spec lands, develop against `FakeTransport` and keep the raw FF11 path as a debug view.
+- Planned: FF12 version 2 batching on a new characteristic `FF14` (several records per notification), motivated by bench results showing notification airtime costs controller reports. Not to be used until specified in the firmware docs.
 ## Orientation pipeline (app side)
 1. Per-hand fragment reassembler (pure Dart port of `wmr_reassembler_push`); reuse the firmware's test vectors and sample frames.
 2. Decoded samples: the firmware decodes the HID reports (see "Decoded stream" above). The app parses the decoded format and feeds IMU samples to fusion. The raw FF11 frames stay available as a debug view.
 3. Fusion: Madgwick or Mahony filter (small pure-Dart implementation) on gyro + accel gives a quaternion per hand. Expect yaw drift; keep the "Reset orientation" button and show drift in debug mode.
-4. If no device timestamp exists, dt comes from phone arrival time, which adds jitter-induced error. Flag that in the UI.
+4. For FF12, dt comes from the device ticks (100 ns), with wraparound handling and a cap on large steps; arrival time is only used for the raw FF11 path, where it adds jitter-induced error. Axis mapping from sensor to view axes is a configurable table with per-axis flips (default checked visually in the 3D view, user-reported).
 
 ## Debug mode (3DoF view)
 - Toggle from the controller screen or a settings switch (`debugMode` provider).
@@ -111,6 +116,8 @@ Check on pub.dev for current versions before pinning. Verify which Android contr
 - **iOS** (later): `NSBluetoothAlwaysUsageDescription` in Info.plist. iOS controls connection interval, so measure rather than assume.
 
 ## Milestones
+Status of each is in [STATUS.md](STATUS.md) (1 to 3 done, plus the Capture screen).
+
 1. Scaffold project (`flutter create` into this repo), CI green, `FakeTransport` drives the debug 3D view (no hardware needed).
 2. Scan/connect to the ESP32, subscribe, parse packets, show raw values.
 3. Debug 3DoF view on real data + stats panel.
@@ -119,7 +126,7 @@ Check on pub.dev for current versions before pinning. Verify which Android contr
 6. iOS build, then gamepad-style mapping.
 
 ## GitHub and CI
-- Repo: `wmr-companion` (private until it has a README and a license decision), default branch `main`.
+- Repo: `wmr-companion` (public, MIT), default branch `main`. Squash merges.
 - `.gitignore`: merge with the one from `flutter create`; keep `*.keystore`, `key.properties`, `local.properties` ignored.
 - `.github/workflows/ci.yml` (add in milestone 1): on push/PR, `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build apk --debug`, upload the APK as an artifact (so any machine can grab a build without an Android SDK).
 - Small commits, conventional messages, one milestone per PR.
