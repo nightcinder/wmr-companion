@@ -35,7 +35,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
 | - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
 | - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8); tests only, the app has not been run against FF14 on hardware. Firmware FF14 was run with nRF Connect (see the A/B/A below). FF14 is the app's default stream (#12) and the app requests ATT MTU 517 on every connect (#15, up to 9 records per batch); neither has been run on a phone, and on Android 14+ the stack may ignore the MTU request |
-| 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from `rx_time_us`), and round trip over the FF15 echo, CSV + JSON export ([LATENCY.md](LATENCY.md)). Firmware FF15 merged (WMR_Bridge #13), also not run on hardware |
+| 4 | Latency screen and CSV export | Done; first hardware run (FF14, 2026-10-22, user-reported): 479 of 479 FF15 pings answered, round trip p50 40.8 ms, p95 72.8 ms, see [LATENCY.md](LATENCY.md) "First hardware run". Inter-arrival, sequence gaps, tick-based loss, one-way delay variation and round trip, CSV + JSON export |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer, Gamepad screen and Bluetooth HID output (phone as a gamepad) built, not run on hardware or on a phone ([GAMEPAD.md](GAMEPAD.md)) |
 
@@ -49,6 +49,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | FF11/FF12 mutual exclusion | Second enable refused with ATT error 0x80; switching by writing 0 to the active CCC first works; below MTU 59 nothing is sent and `mtu_skip` counts; recovery after MTU raise works |
 | Axis mapping (sensor to 3D view) | Checked visually in the app's 3D view: world X right = -sensor Y, world Y up = +sensor X, world Z toward user = +sensor Z. Not measured numerically |
 | Phone transport | MTU 517 with High priority; no fragment errors, no sequence gaps on the phone in captures |
+| FF15 echo round trip | One 120 s run on FF14 at MTU 517, 15 ms interval, both controllers: 479 of 479 pings answered, no timeouts. Round trip min 22.4, p50 40.8, p95 72.8, p99 97.1, max 151.9 ms; ESP32 turnaround p50 0.43 ms, p99 2.3 ms, max 7.5 ms. One run, one position, one phone; details and what it does not show in [LATENCY.md](LATENCY.md) |
 
 ### The main open problem: upstream report loss
 
@@ -98,7 +99,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Missing-report definition differs between app and firmware | App follow-up (in progress) |
 | Yaw drifts (no magnetometer); gyro bias estimated from the first stationary second | Known limitation |
 | FF13 controller calibration blob | Firmware merged (WMR_Bridge #16, #17); both blocks read to READY on a bench run (user-reported). App: client, CRC check, de-obfuscation and JSON parsing built and unit tested with synthetic data and now seen on real blocks, a "Read config" button on the debug screen read both blocks over FF13 with CRC OK (LEFT 7147 bytes 8bc13223, RIGHT 7148 bytes 75e8ab85) and decoded gyro and accelerometer calibration with Monado's key (user-reported 2026-10-22; mix matrices near identity, Rt rotations mirrored between hands); the Monado XOR key table is not in the repo; calibration not applied to the fusion ([PROTOCOL.md](PROTOCOL.md) "FF13 config block in the app") |
-| Round trip over FF15: first distribution on a phone (min, p50, p95, max over a few hundred pings) | Latency screen; one 24 ms turnaround seen in nRF Connect (user-reported), no distribution yet |
+| Round trip: where the 40 ms goes (phone write and notification delivery, air, notification traffic). Needs an FF11/FF12 run and a run with no stream at the same position; the app has no stream-off mode yet | [LATENCY.md](LATENCY.md) "First hardware run" |
 | Controller discovery by name instead of compiled-in addresses | Firmware merged (WMR_Bridge #14); checks D1-D11 reported as passed by the project owner (user-reported, 2026-10-22, no output pasted) |
 | No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
 | `universal_ble` gaps (PHY, connection interval readout) to raise upstream | [PROTOCOL.md](PROTOCOL.md) "universal_ble coverage" |
@@ -112,7 +113,7 @@ Near term:
 3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
 
 Then:
-4. Latency runs on hardware with the latency screen (milestone 4, built); round trip over FF15 now in the latency screen.
+4. More latency runs with the latency screen: FF12 and FF11 at the same position for comparison with the first FF14 run.
 5. Calibration (FF13 or phone side), fusion tuning, optional magnetometer-free yaw handling.
 6. Bridge security.
 7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then try the Bluetooth HID output on a phone and a host (GAMEPAD.md checklist).

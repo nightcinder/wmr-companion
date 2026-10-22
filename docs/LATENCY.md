@@ -36,7 +36,7 @@ The per-ping clock offset estimate (`((t2 - t1) + (t3 - t4)) / 2`, error up to r
 
 A bridge without FF15 (older firmware) is detected from service discovery before anything is subscribed: the run goes ahead without a round trip and the screen says why. If the switch is off, or no pings are used, `round_trip` in the JSON is `{"measured": false, ...}`.
 
-Not verified on hardware: neither the firmware's FF15 nor this client has been run on a bridge. A single 24 ms turnaround seen in nRF Connect (user-reported) is not a distribution; a run from this screen is the first.
+One earlier data point, a single 24 ms turnaround seen in nRF Connect (user-reported), was not a distribution; the first run from this screen is below.
 
 ## Export
 
@@ -64,6 +64,49 @@ ping_id,t1_us,t1_done_us,t4_us,end_to_end_us,esp_rx_us,turnaround_us,rtt_us,queu
 `t1_us`, `t1_done_us` (write call returned) and `t4_us` are phone time since the run started; `esp_rx_us` is the raw ESP32 clock; `clock_offset_us` is the per-ping estimate above.
 
 JSON (format `wmr-latency`, version 2: `round_trip` is an object, percentiles gained `min_us` and `p95_us`): run metadata (`started`, `stream`, `duration_us`), `round_trip` (`measured`, and when true `rtt`, `end_to_end`, `turnaround`, `max_queue_depth`, `sent`, `answered`, `timeouts`, `failed_writes`, `counters`), `link`, `counters`, `rows_dropped`, `mode_changed`, and per hand `records`, `arrivals`, `span_us`, `rate_per_s`, `inter_arrival` and (decoded) `delay_above_window_min` / `delay_variation` as `{count, min_us, p50_us, p90_us, p95_us, p99_us, max_us}`, `stalls_over_50000us`, `sequence_gaps`, `sequence_loss`, `out_of_order`, `missing_from_ticks`, `tick_loss`, `period_us`. Fields that do not apply are `null`.
+
+## First hardware run (user-reported)
+
+One 120 s run from the screen, 2026-10-22 14:56:31, files `latency-20261022-145631{,-echo}.csv` and `.json`. Setup as reported: FF14 stream, MTU 517, 15 ms connection interval, high priority requested, both controllers connected. RSSI was -69 dBm at the start and -48 dBm at the end, so the phone/bridge position cannot be assumed fixed. Firmware FF15 (WMR_Bridge #13) and this client are exercised on hardware for the first time here.
+
+**FF15 round trip (479 pings, 479 answered, no timeouts, no late, bad or skipped answers):**
+
+| ms | min | p50 | p90 | p95 | p99 | max |
+|---|---|---|---|---|---|---|
+| rtt = (t4 - t1) - turnaround | 22.4 | 40.8 | 62.7 | 72.8 | 97.1 | 151.9 |
+| write call to answer (t4 - t1) | 22.8 | 41.2 | 63.1 | 73.1 | 98.3 | 152.2 |
+| ESP32 turnaround | 0.27 | 0.43 | 0.77 | 0.91 | 2.27 | 7.47 |
+
+Other figures from the echo CSV (computed from the exported file, not shown by the app):
+- The ESP32 queue depth the answers skipped was 0 for 118 of 479 pings, median 3, maximum 28. Median rtt by depth: 42.9 ms at depth 0, 40.6 ms at 1 to 5, 40.2 ms at 6 to 10, 76.4 ms at over 10 (only 7 pings). Correlation of rtt with depth 0.15.
+- Median rtt was 40.5 ms in the first half of the run and 41.4 ms in the second.
+- The write call itself (t1 to its return) took 5.0 ms at the least, 11.1 ms median, 46.7 ms at p95, 63.6 ms at most. The answer was always seen after the write call returned, but that does not mean the packet left the phone when the call returned: on 16 pings it came within 1 ms after it.
+
+**Same run, streams (both hands, FF14):**
+
+| | LEFT | RIGHT |
+|---|---|---|
+| records | 17 999 | 19 696 |
+| rate (per s) | 150.1 | 164.2 |
+| arrivals (notifications carrying the hand) | 4 895 | 5 031 |
+| inter-arrival ms: p50 / p95 / p99 / max | 19.1 / 57.7 / 89.6 / 166.8 | 19.7 / 50.0 / 80.8 / 209.9 |
+| stalls over 50 ms | 308 | 252 |
+| sequence gaps | 0 | 0 |
+| missing by ticks | 6 016 (25.1 %) | 4 268 (17.8 %) |
+| delay above window minimum ms: p50 / p95 / max | 20.9 / 39.4 / 138.4 | 20.1 / 39.5 / 137.6 |
+
+No incomplete frames, reassembly errors or parse errors. The tick loss figures are in the range of the other two-controller runs in STATUS.md; this run does not add to the LEFT/RIGHT loss question.
+
+**What this shows:**
+- The FF15 path works on hardware end to end: the layout, the write without response, the answers, and the app's matching. Nothing was lost on it.
+- The ESP32 is not where the time goes: the answer left the ESP32 within 0.43 ms of the request at the median and within 7.5 ms at worst.
+- The round trip has a floor of about 22 ms and a median of about 41 ms with a long tail. Even the fastest ping took longer than the 15 ms connection interval, so a ping and its answer spanned more than one connection event.
+- The rtt does not grow with the ESP32 stream backlog the answer skipped (flat from depth 0 to 10), which is what the priority rule should give. It does not show that the priority works: notifications already handed to the controller still go ahead of an answer, and the depth is a count of queued frames, not of notifications in flight.
+
+**What this does not show:**
+- Where the 41 ms is spent. The rtt includes the app's write call (median 11 ms), the plugin and platform channel in both directions, the phone's and the ESP32's Bluetooth stacks, and the air. It is not a controller-to-screen latency, and not the latency of the stream records.
+- Whether the FF14 traffic causes it. Every ping here competed with a running stream. A run with the stream off, and runs on FF12 and FF11, at the same position, are needed. The app has no stream-off mode yet.
+- Anything about other phones, positions or distances; the RSSI moved by 21 dB during the run.
 
 ## Known limits
 
