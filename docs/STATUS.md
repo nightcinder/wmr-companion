@@ -34,7 +34,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 2 | Scan/connect, subscribe, parse, show raw values | Done; used on hardware |
 | 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
 | - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
-| - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | In review; tests only, not run on hardware. Firmware FF14 not run on hardware either |
+| - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8); tests only, the app has not been run against FF14 on hardware. Firmware FF14 was run with nRF Connect (see the A/B/A below) |
 | 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from FF12 `rx_time_us`), CSV + JSON export ([LATENCY.md](LATENCY.md)). No true round trip (needs firmware issue #1) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer and Gamepad screen built, not run on hardware ([GAMEPAD.md](GAMEPAD.md)); output to the OS or another device not decided |
@@ -71,6 +71,22 @@ What this suggests (one position, one session, one ESP32, one phone):
 - RIGHT is the weaker link in other measurements too (lower link quality at similar RSSI).
 - Distance matters: with the controllers far from the ESP32 the loss was higher.
 
+FF14 against FF12, A/B/A (2026-10-22, user-reported; nRF Connect as the client for every phone run, MTU 517, 15 ms interval, `last5s` mean over 5 s rows from 35 s to 101 s of each run, controllers on the table and not moved at all between runs):
+
+| Run | Stream | LEFT | RIGHT | Notes |
+|---|---|---|---|---|
+| 0 | no phone | 13.4 % | 11.5 % | LEFT a little above the 9 to 11 % of the earlier no-phone runs |
+| 1 | A: FF12, N=1 | 19.5 % | 33.6 % | in line with the earlier N=1 runs |
+| 2 | B: FF14 | 20.9 % | 20.7 % | mean batch 6.7 records, max 9, 27 % of batches sent full; about 48 notifications/s against about 300/s on FF12 |
+| 4 | A again: FF12, N=1 | 27.1 % | 23.9 % | the second A (the run sheet numbered it 3) |
+
+What this does and does not show:
+
+- FF14 delivered the stream with no queue drops (`drop=0`, queue high-water mark 31, FF12 reached 35 to 36) and the counters add up: `rx = tx + q` per hand, `tx` over both hands equals `records_in_batches` (33995), `notify` equals `batches_tx` (5078). That is B3 and B5 for one run each; B4 (phone-side sequence gaps) was not run.
+- RIGHT on FF14 (20.7 %) is below the first FF12 run (33.6 %) and the second FF12 run (23.9 %) is close to it. The second A moved 9.7 points away from the first with the controllers not moved, so run-to-run variation is as large as the FF14 difference and the FF14 effect on RIGHT cannot be separated from it. The direction matches the decimation runs; the A/B/A does not demonstrate it.
+- LEFT: 19.5, 20.9, 27.1 % in order. It rose through the session and the FF14 run sits between the two FF12 runs, so FF14 shows no effect on LEFT. This agrees with the earlier finding that LEFT's extra loss does not follow notification volume. LEFT RSSI was about 4 dB weaker in runs 2 and 4 than in run 1 (about -30 and -27 against -26).
+- Run 4's cumulative figures include a stretch without a phone, so only `last5s` is comparable.
+
 Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes: upstream report loss") and `docs/TESTING.md`.
 
 ### Other open items
@@ -91,7 +107,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 ## Roadmap
 
 Near term:
-1. FF14 batching: firmware merged (`8f5921a`, not run on hardware); app support in review. Next: firmware bench checks B1-B12 and the FF12/FF14 A/B/A comparison at one fixed position (WMR_Bridge `docs/TESTING.md`), first with nRF Connect, then B4/B9 with the app.
+1. FF14 batching: firmware merged (`8f5921a`, not run on hardware); app support merged (#8). A first FF12/FF14 A/B/A with nRF Connect is recorded below (inconclusive for RIGHT because the second A drifted). Next: repeat at a recorded position, then B4/B9 with the app.
 2. Coexistence experiments for LEFT's extra loss (`AUTO_LATENCY`, modem sleep), A/B/A at a fixed position.
 3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
 
