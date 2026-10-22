@@ -26,7 +26,7 @@ GATT service FF10 on the bridge: FF11 raw fragmented HID frames, FF12 decoded 56
 7. Scope agent tasks tightly; say what is out of scope; agents print a short summary and do not push or merge unless told.
 8. Be honest about uncertainty and your own mistakes. Don't pad.
 
-Style Nick wants: short answers that lead with the result or the command; tables for comparisons; when Nick pastes serial output, extract the figures that matter and say what they imply and do not prove. Hardware runs are his: give him ready-to-run commands first. The project default model is Sonnet (his choice, to save usage).
+Style Nick wants: short answers that lead with the result or the command; tables for comparisons; when Nick pastes serial output, extract the figures that matter and say what they imply and do not prove. Hardware runs are Nick's: give Nick ready-to-run commands first. The project default model is Sonnet (Nick's choice, to save usage).
 
 ## 3. Machines, sessions and environment gotchas
 
@@ -104,7 +104,7 @@ Reports are lost between the controller and the ESP32 (Classic Bluetooth), befor
 | wmr-companion | #19 | iOS build (deferred: Nick has no Mac/Xcode now) |
 | wmr-companion | #20 | `universal_ble` gaps: no PHY API, no on-demand connection-interval query, connection priority Android only; raise upstream or work around behind `BleAdapter` |
 
-Parked ideas (no issue): the ESP32 itself as a BLE HID gamepad (HOGP) as a 3DoF fallback, revisit after the loss is understood (Nick worries about ESP32 radio load); an ESP32-side orientation stream; camera/headset fusion (research saved as [docs/CAMERAS.md](docs/CAMERAS.md)); the connection-interval test; iOS config and CI compile check (pending his decision); bridge security (`docs/SECURITY.md`: no BLE pairing or encryption).
+Parked ideas (no issue): the ESP32 itself as a BLE HID gamepad (HOGP) as a 3DoF fallback, revisit after the loss is understood (Nick worries about ESP32 radio load); an ESP32-side orientation stream; camera/headset fusion (research saved as [docs/CAMERAS.md](docs/CAMERAS.md)); the connection-interval test; iOS config and CI compile check (pending Nick's decision); bridge security (`docs/SECURITY.md`: no BLE pairing or encryption).
 
 ## 7. Suggested next steps, in order
 
