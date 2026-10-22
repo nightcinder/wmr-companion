@@ -34,7 +34,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 2 | Scan/connect, subscribe, parse, show raw values | Done; used on hardware |
 | 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
 | - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
-| - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | In review; tests only, not run on hardware. Firmware FF14 not run on hardware either |
+| - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8); tests only, the app has not been run against FF14 on hardware. Firmware FF14 was run with nRF Connect (see the A/B/A below) |
 | 4 | Latency screen and CSV export | Built, not run on hardware: inter-arrival, sequence gaps, tick-based loss, one-way delay variation (from FF12 `rx_time_us`), CSV + JSON export ([LATENCY.md](LATENCY.md)). No true round trip (needs firmware issue #1) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS build, then gamepad-style mapping | Not started |
@@ -107,7 +107,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 ## Roadmap
 
 Near term:
-1. FF14 batching: firmware merged (`8f5921a`, not run on hardware); app support in review. Next: firmware bench checks B1-B12 and the FF12/FF14 A/B/A comparison at one fixed position (WMR_Bridge `docs/TESTING.md`), first with nRF Connect, then B4/B9 with the app.
+1. FF14 batching: firmware merged (`8f5921a`, not run on hardware); app support merged (#8). A first FF12/FF14 A/B/A with nRF Connect is recorded below (inconclusive for RIGHT because the second A drifted). Next: repeat at a recorded position, then B4/B9 with the app.
 2. Coexistence experiments for LEFT's extra loss (`AUTO_LATENCY`, modem sleep), A/B/A at a fixed position.
 3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
 
