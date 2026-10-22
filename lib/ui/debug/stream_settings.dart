@@ -6,14 +6,17 @@ import '../../domain/stick_centre.dart';
 import '../../services/controller_service.dart';
 
 /// Which bridge stream the app wants. Applied to the service when it is
-/// created and on change; the Capture screen needs [StreamMode.raw].
+/// created and on change; the Capture screen needs [StreamMode.raw]. The
+/// default is FF14: the owner chose it on 2026-10-22 because it needs about
+/// six times fewer notifications than FF12 for the same records (bench A/B/A
+/// in docs/STATUS.md; its effect on report loss is not established).
 final streamModeProvider = NotifierProvider<StreamModeNotifier, StreamMode>(
   StreamModeNotifier.new,
 );
 
 class StreamModeNotifier extends Notifier<StreamMode> {
   @override
-  StreamMode build() => StreamMode.raw;
+  StreamMode build() => StreamMode.batched;
 
   void set(StreamMode mode) => state = mode;
 }

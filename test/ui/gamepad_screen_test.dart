@@ -12,6 +12,7 @@ import 'package:wmr_companion/ui/gamepad/gamepad_providers.dart';
 import 'package:wmr_companion/ui/gamepad/gamepad_screen.dart';
 
 import '../hid/fake_hid.dart';
+import 'raw_mode_notifier.dart';
 
 void tall(WidgetTester tester) {
   tester.view.physicalSize = const Size(900, 3200);
@@ -80,6 +81,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
           gamepadInputsProvider.overrideWith(
             (ref, source) => const Stream.empty(),
           ),

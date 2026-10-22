@@ -8,13 +8,15 @@ import 'package:wmr_companion/ble/universal_ble_transport.dart';
 import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/ui/connect/connect_providers.dart';
 import 'package:wmr_companion/ui/connect/connect_screen.dart';
+import 'package:wmr_companion/ui/debug/stream_settings.dart';
 
 import '../ble/fake_adapter.dart';
+import 'raw_mode_notifier.dart';
 
 void main() {
   late FakeAdapter adapter;
 
-  Future<void> open(WidgetTester tester) async {
+  Future<void> open(WidgetTester tester, {bool rawDefault = true}) async {
     adapter = FakeAdapter();
     final transport = UniversalBleTransport(
       adapter: adapter,
@@ -22,7 +24,10 @@ void main() {
     );
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [realTransportProvider.overrideWithValue(transport)],
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
+        ],
         child: const MaterialApp(home: ConnectScreen()),
       ),
     );
@@ -84,6 +89,18 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('connects on batched FF14 by default', (tester) async {
+    tester.view.physicalSize = const Size(900, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await open(tester, rawDefault: false);
+    await connect(tester);
+
+    expect(adapter.ccc, ['on ff14']);
+    expect(find.text('State: connected, streaming'), findsOneWidget);
+    await close(tester);
+  });
 
   testWidgets('switches the real device between raw and decoded', (
     tester,

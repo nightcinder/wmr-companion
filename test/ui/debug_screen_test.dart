@@ -13,6 +13,7 @@ import 'package:wmr_companion/ui/debug/debug_screen.dart';
 import 'package:wmr_companion/ui/debug/stream_settings.dart';
 
 import '../ble/fake_adapter.dart';
+import 'raw_mode_notifier.dart';
 
 void tall(WidgetTester tester) {
   tester.view.physicalSize = const Size(900, 3200);
@@ -29,6 +30,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
           orientationProvider.overrideWith((ref) => Stream.value(q)),
           streamStatsProvider.overrideWith(
             (ref) => Stream.value(
@@ -72,6 +74,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
             orientationProvider.overrideWith(
               (ref) => Stream.value(quaternionFromEuler(0, 0, 0)),
             ),
