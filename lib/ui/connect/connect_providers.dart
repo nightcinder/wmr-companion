@@ -67,6 +67,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleScanResult> _seen = {};
   StreamSubscription<BleScanResult>? _scanSub;
   StreamSubscription<BleLinkStatus>? _statusSub;
+  AppLifecycleListener? _lifecycle;
   WmrCompanion? _companion;
   Timer? _statsTimer;
 
@@ -84,7 +85,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     });
     // The BLE package has no widget dependency; the host forwards its
     // lifecycle so a scan pauses in the background and resumes on return.
-    final lifecycle = AppLifecycleListener(
+    _lifecycle?.dispose();
+    final lifecycle = _lifecycle = AppLifecycleListener(
       onStateChange: (s) => unawaited(
         transport.handleAppLifecycle(switch (s) {
           AppLifecycleState.resumed => BleAppLifecycle.resumed,

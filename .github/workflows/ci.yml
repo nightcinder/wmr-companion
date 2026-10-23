@@ -79,8 +79,8 @@ jobs:
         run: |
           set -eu
           test -d packages/wmr_ble/lib
-          if grep -rnE "package:(flutter_riverpod|wmr_companion_app)/|import 'package:flutter/(material|cupertino)" packages/wmr_ble/lib; then
-            echo "wmr_ble must not import Riverpod, the app or widget libraries"
+          if grep -rnE "package:(flutter_riverpod|wmr_companion_app)/|import 'package:flutter/|import 'dart:ui'" packages/wmr_ble/lib; then
+            echo "wmr_ble must not import Riverpod, the app, dart:ui or widget libraries"
             exit 1
           fi
       - name: wmr_fusion package

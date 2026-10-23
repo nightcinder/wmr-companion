@@ -403,23 +403,97 @@ void main() {
         final sub = slow.scan().listen((_) {});
         await pump();
         expect(slow.status.phase, BleLinkPhase.scanning);
-        final starts = adapter.calls
-            .where((c) => c.startsWith('startScan'))
-            .length;
+        final firstStart = adapter.calls.lastWhere(
+          (c) => c.startsWith('startScan'),
+        );
 
         await slow.handleAppLifecycle(BleAppLifecycle.inactive);
         expect(adapter.calls, contains('stopScan'));
-        expect(slow.status.phase, BleLinkPhase.scanning);
+        expect(slow.status.phase, BleLinkPhase.idle);
 
         await slow.handleAppLifecycle(BleAppLifecycle.resumed);
-        expect(
-          adapter.calls.where((c) => c.startsWith('startScan')).length,
-          starts + 1,
-        );
+        final starts = adapter.calls
+            .where((c) => c.startsWith('startScan'))
+            .toList();
+        expect(starts, hasLength(2));
+        expect(starts.last, firstStart);
         expect(slow.status.phase, BleLinkPhase.scanning);
 
         await sub.cancel();
       },
     );
+
+    test('a pause during preflight prevents the scan from starting', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+      adapter.availabilityGate = Completer<void>();
+
+      final sub = slow.scan().listen((_) {});
+      await pump();
+      final pause = slow.handleAppLifecycle(BleAppLifecycle.paused);
+      adapter.availabilityGate!.complete();
+      await pause;
+      await pump();
+
+      expect(adapter.calls.where((c) => c.startsWith('startScan')), isEmpty);
+
+      await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(1),
+      );
+      await sub.cancel();
+    });
+
+    test('a quick pause/resume pair ends scanning, not stopped', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+
+      final sub = slow.scan().listen((_) {});
+      await pump();
+
+      await Future.wait([
+        slow.handleAppLifecycle(BleAppLifecycle.paused),
+        slow.handleAppLifecycle(BleAppLifecycle.resumed),
+      ]);
+
+      expect(slow.status.phase, BleLinkPhase.scanning);
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(2),
+      );
+      await sub.cancel();
+    });
+
+    test('a failed resume reports the real preflight cause', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+      final errors = <Object>[];
+      final sub = slow.scan().listen((_) {}, onError: errors.add);
+      await pump();
+
+      await slow.handleAppLifecycle(BleAppLifecycle.paused);
+      adapter.availabilityState = BleAvailability.poweredOff;
+      await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+      await pump();
+
+      expect(
+        (errors.single as BleTransportException).phase,
+        BleLinkPhase.bluetoothOff,
+      );
+      await sub.cancel();
+    });
   });
 }

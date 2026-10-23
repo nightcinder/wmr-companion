@@ -18,6 +18,9 @@ class FakeBleAdapter implements BleAdapter {
   List<BleServiceInfo> services = fakeBridgeDevice.services;
   Object? connectError;
 
+  /// When set, [availability] waits for this completer before answering.
+  Completer<void>? availabilityGate;
+
   /// When set, [requestMtu] waits for this completer before answering.
   Completer<void>? mtuGate;
 
@@ -60,7 +63,10 @@ class FakeBleAdapter implements BleAdapter {
   }
 
   @override
-  Future<BleAvailability> availability() async => availabilityState;
+  Future<BleAvailability> availability() async {
+    await availabilityGate?.future;
+    return availabilityState;
+  }
 
   @override
   Stream<BleAvailability> get availabilityChanges => const Stream.empty();
