@@ -25,22 +25,24 @@ class HandStatsView extends StatelessWidget {
     final name = hand == Hand.left ? 'LEFT' : 'RIGHT';
     final dt = stats.dt;
     final loss = stats.windowLoss;
+    // Raw FF11 has no decoded rate/loss counters; show '-' rather than 0.
+    final decoded = stats.records > 0 || stats.missingFromTicks > 0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '$name  frames ${stats.frames}  records ${stats.records}  '
-          'rate ${stats.rateHz.toStringAsFixed(1)} Hz  '
+          'rate ${decoded ? '${stats.rateHz.toStringAsFixed(1)} Hz' : '-'}  '
           'seq ${stats.lastSequence ?? '-'}',
           style: style,
         ),
         Text(
           '  gaps ${stats.sequenceGaps}  out of order ${stats.outOfOrder}  '
-          'missing (ticks) ${stats.missingFromTicks}',
+          'missing (ticks) ${decoded ? stats.missingFromTicks : '-'}',
           style: style,
         ),
         Text(
-          '  loss ${_pct(stats.cumulativeLoss)} cumulative  '
+          '  loss ${decoded ? _pct(stats.cumulativeLoss) : '-'} cumulative  '
           '${loss == null ? '-' : _pct(loss.loss)} last 5 s',
           style: style,
         ),

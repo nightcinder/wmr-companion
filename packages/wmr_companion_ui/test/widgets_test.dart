@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
@@ -19,6 +22,19 @@ void main() {
 
     expect(find.byType(OrientationView), findsOneWidget);
     expect(find.byType(CustomPaint), findsWidgets);
+  });
+
+  test('rotates actively and does not mutate its input', () {
+    final q = Quaternion.axisAngle(Vector3(0, 1, 0), math.pi / 2);
+    final body = Vector3(1, 0, 0);
+
+    final rotated = rotateOrientationVector(q, body);
+
+    expect(rotated.x, closeTo(0, 1e-9));
+    expect(rotated.z, closeTo(-1, 1e-9));
+    // The shared cube corners must survive every paint unchanged.
+    expect(body.x, 1);
+    expect(body.z, 0);
   });
 
   testWidgets('renders link fields and a stream fault', (tester) async {
@@ -74,6 +90,12 @@ void main() {
     );
 
     expect(find.textContaining('LEFT  frames 12'), findsOneWidget);
+    expect(
+      find.textContaining('LEFT  frames 12  records 0  rate -'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('missing (ticks) -'), findsOneWidget);
+    expect(find.textContaining('loss - cumulative'), findsOneWidget);
     expect(find.textContaining('RIGHT  frames 0  records 100'), findsOneWidget);
     expect(find.textContaining('dt p50 10.00 ms'), findsOneWidget);
     expect(find.textContaining('nominal period 10.00 ms'), findsOneWidget);

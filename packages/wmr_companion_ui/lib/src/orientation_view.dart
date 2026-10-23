@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' show Quaternion, Vector3;
 
+/// Rotates a body-frame vector by [orientation] in the active direction
+/// (body to view), matching the app's historical orientation view.
+///
+/// [Quaternion.rotate] in vector_math rotates in the opposite direction and
+/// mutates its argument, so it is deliberately not used here.
+Vector3 rotateOrientationVector(Quaternion orientation, Vector3 body) =>
+    orientation.normalized().asRotationMatrix().transformed(body);
+
 /// A 3DoF orientation cube with body axes.
 ///
 /// Drop it in a [SizedBox] or another bounded box. X is red, Y green, Z blue;
@@ -57,10 +65,8 @@ class OrientationPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final focal = size.shortestSide * 1.6;
-    final q = orientation.normalized();
-
     Offset project(Vector3 v) {
-      final r = q.rotate(v);
+      final r = rotateOrientationVector(orientation, v);
       final depth = _cameraDistance - r.z;
       return center + Offset(focal * r.x / depth, -focal * r.y / depth);
     }
