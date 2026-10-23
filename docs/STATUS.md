@@ -35,7 +35,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
 | - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
 | - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8). Firmware FF14 was run with nRF Connect (see the A/B/A below). FF14 is the app's default stream (#12) and the app requests ATT MTU 517 on every connect (#15, up to 9 records per batch). The app ran on FF14 for the first time in the 2026-10-22 round-trip run (user-reported); its latency export records MTU 517. The MTU readout on the Connect screen itself and B4/B9 have not been checked, and on Android 14+ the stack may ignore the MTU request |
-| 4 | Latency screen and CSV export | Done; first hardware run (FF14, 2026-10-22, user-reported): 479 of 479 FF15 pings answered, round trip p50 40.8 ms, p95 72.8 ms, see [LATENCY.md](LATENCY.md) "First hardware run". Inter-arrival, sequence gaps, tick-based loss, one-way delay variation and round trip, CSV + JSON export. No-stream mode and a None / FF11 / FF12 / FF14 selector are built and unit/widget tested; **not yet run on hardware**. Run sheet in [LATENCY.md](LATENCY.md) |
+| 4 | Latency screen and CSV export | Done; first hardware run (FF14, 2026-10-22, user-reported): 479 of 479 FF15 pings answered, round trip p50 40.8 ms, p95 72.8 ms, see [LATENCY.md](LATENCY.md) "First hardware run". Inter-arrival, sequence gaps, tick-based loss, one-way delay variation and round trip, CSV + JSON export. PR #28 added no-stream latency mode, stream selector (None / FF11 / FF12 / FF14), and configurable ping interval (built and unit/widget tested; **not yet run on hardware**). Run sheet in [LATENCY.md](LATENCY.md) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS build, then gamepad-style mapping | iOS not started. In-app gamepad mapping layer, Gamepad screen and Bluetooth HID output (phone as a gamepad) built, not run on hardware or on a phone ([GAMEPAD.md](GAMEPAD.md)) |
 
@@ -95,11 +95,11 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Item | Where |
 |---|---|
 | Accel scale 9.81 vs 10; temperature and battery scales; buttons, trackpad, trigger ranges | WMR_Bridge `docs/DECODING.md` "Unknown" |
-| Stick rest offset (RIGHT y about 0.148 at rest): dead zone / learned centre | App follow-up (in progress) |
-| Missing-report definition differs between app and firmware | App follow-up (in progress) |
+| Stick rest offset (RIGHT y about 0.148 at rest): dead zone / learned centre | Done (#7): pure-Dart `StickNormalizer` per hand with configurable radial dead zone (default 0.05), learned rest centre, manual re-centre, and debug controls; not yet tested on hardware ([PROTOCOL.md](PROTOCOL.md) "Stick dead zone and learned rest centre") |
+| Missing-report definition differs between app and firmware | Done (#7): tick delta missing-report calculation unified to match firmware (`wmr_devloss.c`: median of deltas within 1.5x 10th-percentile over 256-delta window); not compared against live bridge |
 | Yaw drifts (no magnetometer); gyro bias estimated from the first stationary second | Known limitation |
-| FF13 controller calibration blob | Firmware merged (WMR_Bridge #16, #17); both blocks read to READY on a bench run (user-reported). App: client, CRC check, de-obfuscation and JSON parsing built and unit tested with synthetic data and now seen on real blocks, a "Read config" button on the debug screen read both blocks over FF13 with CRC OK (LEFT 7147 bytes 8bc13223, RIGHT 7148 bytes 75e8ab85) and decoded gyro and accelerometer calibration with Monado's key (user-reported 2026-10-22; mix matrices near identity, Rt rotations mirrored between hands); the Monado XOR key table is not in the repo; calibration applied behind a per-hand switch (default off), not yet run on hardware ([PROTOCOL.md](PROTOCOL.md) "FF13 config block in the app") |
-| Round trip: where the 40 ms goes (phone write and notification delivery, air, notification traffic). Needs an FF11/FF12 run and a run with no stream at the same position; the screen now has a no-stream mode and a stream selector (built, **not yet run on hardware**) | [LATENCY.md](LATENCY.md) "First hardware run", "Run sheet" |
+| FF13 controller calibration blob | Firmware merged (WMR_Bridge #16, #17); both blocks read to READY on a bench run (user-reported). App: client, CRC check, de-obfuscation and JSON parsing built and unit tested with synthetic data and now seen on real blocks, a "Read config" button on the debug screen read both blocks over FF13 with CRC OK (LEFT 7147 bytes 8bc13223, RIGHT 7148 bytes 75e8ab85) and decoded gyro and accelerometer calibration with Monado's key (user-reported 2026-10-22; mix matrices near identity, Rt rotations mirrored between hands); the Monado XOR key table is not in the repo; calibration applied behind a per-hand switch in fusion (#27, default off), not yet run on hardware ([PROTOCOL.md](PROTOCOL.md) "FF13 config block in the app") |
+| Round trip: where the 40 ms goes (phone write and notification delivery, air, notification traffic). Needs an FF11/FF12 run and a run with no stream at the same position; the screen now has a no-stream latency mode and a stream selector (PR #28, built, **not yet run on hardware**) | [LATENCY.md](LATENCY.md) "First hardware run", "Run sheet" |
 | Controller discovery by name instead of compiled-in addresses (done; addresses are stored in the ESP32's NVS) | Firmware merged (WMR_Bridge #14); checks D1-D11 reported as passed by the project owner (user-reported, 2026-10-22, no output pasted) |
 | No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
 | `universal_ble` gaps (PHY, connection interval readout) to raise upstream | [PROTOCOL.md](PROTOCOL.md) "universal_ble coverage" |
@@ -111,11 +111,11 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 Near term:
 1. FF14 batching: firmware and app support merged and run (user-reported); the A/B/A above is inconclusive for RIGHT because the second A drifted. Next: B4/B9 with the app.
 2. LEFT's extra loss: auto latency and modem sleep off were each tried twice, interleaved with baselines (2026-10-22, user-reported): no effect shown, and the session drifted (LEFT's RSSI 5 to 10 dB weaker from run 5 on, baselines 15.4 to 25.6 %). Next: a long baseline run with nothing changed to measure the drift. That long run (user-reported) showed RIGHT's loss falling from about 20 % to about 11 % when LEFT went to sleep. Single-controller runs with the phone on FF14 at MTU 517, on the firmware of WMR_Bridge PR #21 (FF13 streaming fix), user-reported, 5 to 8 min each: LEFT alone about 0.5 %, RIGHT alone about 10.8 %, both connected about 19 % each (same build and position). Working hypothesis, not proven: the two Classic links and the phone compete for the ESP32's radio. Tracked in WMR_Bridge issue #18.
-3. App: stick dead zone and learned centre; unified missing-report definition; surface link quality (loss %, rssi, lq) in the debug panel.
+3. App: stick dead zone and learned centre, and unified missing-report definition (both done, #7; not yet tested on hardware); surface link quality (loss %, rssi, lq) in the debug panel.
 
 Then:
-4. More latency runs with the latency screen: FF12 and FF11 at the same position for comparison with the first FF14 run.
-5. Calibration (FF13 or phone side), fusion tuning, optional magnetometer-free yaw handling.
+4. More latency runs with the latency screen: runs on FF12, FF11, and no-stream mode (PR #28) at the same position for comparison with the first FF14 run.
+5. Hardware evaluation of FF13 calibration in fusion (#27), fusion tuning, optional magnetometer-free yaw handling.
 6. Bridge security.
 7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then try the Bluetooth HID output on a phone and a host (GAMEPAD.md checklist).
 
@@ -125,7 +125,9 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 
 - Bluetooth HID output on a phone and a host (skipped).
 - FF14 checks B4 (phone-side sequence gaps) and B9, and B6-B8, B10, B11.
-- A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream (the screen now supports all four; not yet run).
+- A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream (the screen now supports all four via PR #28 no-stream latency mode and stream selector; not yet run).
+- FF13 IMU calibration applied in fusion behind a per-hand switch (PR #27).
+- Stick dead zone, learned rest centre, and unified missing-report definition (PR #7).
 
 ## Where things are
 

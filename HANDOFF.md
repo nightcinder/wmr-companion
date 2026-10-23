@@ -68,16 +68,16 @@ All of this is merged; the "checked" column is only what Nick reported.
 
 | Area | Built | Checked on hardware |
 |---|---|---|
-| FF11/FF12 pipeline, 3D view, axis mapping, gyro rad/s, tick 100 ns | yes | yes (user-reported; accel scale looks like ~10, not 9.81, open) |
+| FF11/FF12 pipeline, 3D view, axis mapping, gyro rad/s, tick 100 ns, stick dead zone & learned centre (#7), unified missing-report definition (#7) | yes | yes (user-reported; accel scale looks like ~10, not 9.81, open); stick normalizer and unified missing-report definition not yet run on hardware |
 | Capture screen | yes | yes |
 | FF14 batching (firmware + app, app default) | yes | firmware via nRF Connect only; the app on FF14 and MTU 517 has not been run on a phone |
 | FF15 echo (firmware) and round trip in the latency screen | yes | E1-E10 reported passed; first app run: 479/479 pings answered, round trip min 22.4, p50 40.8, p95 72.8, p99 97.1, max 151.9 ms, ESP32 turnaround p50 0.43 ms (user-reported); where the ~40 ms goes is open |
 | Discovery by name (firmware) | yes | D1-D11 reported passed (no output pasted) |
-| FF13 config blob | firmware (PR #16, #17, fix #21), app client, CRC, de-obfuscation and calibration parsing | both blocks read with CRC OK and gyro/accel calibration decoded on real blocks (user-reported); the calibration is **not applied** to the fusion |
+| FF13 config blob | firmware (PR #16, #17, fix #21), app client, CRC, de-obfuscation, calibration parsing, and fusion calibration (#27) | both blocks read with CRC OK and gyro/accel calibration decoded on real blocks (user-reported); FF13 IMU calibration is applied behind a per-hand switch in fusion (#27, default off), not yet run on hardware |
 | Gamepad mapping layer, Gamepad screen, settings persistence, Bluetooth HID output | yes | **not run on a phone** |
-| Latency screen with CSV/JSON export | yes | one run (above) |
+| Latency screen with CSV/JSON export | yes; no-stream latency mode, stream selector (None/FF11/FF12/FF14), and ping interval (#28) | one run (above, on FF14); no-stream mode and stream selector not yet run on hardware |
 
-Reported by Nick on 2026-10-22 (user-reported, one-liners): Connect screen shows MTU 517; the gamepad checks worked; gamepad settings persisted across a restart; C7 partly (RIGHT streamed at 181/s with FF13 state 0 and `other=0`, LEFT not connected, build hash not stated). Not yet run: the Bluetooth HID output on a phone and a host (skipped); B4 (phone-side sequence gaps on FF14) and B9 (latency); the remaining firmware checklists in `docs/TESTING.md`.
+Reported by Nick on 2026-10-22 (user-reported, one-liners): Connect screen shows MTU 517; the gamepad checks worked; gamepad settings persisted across a restart; C7 partly (RIGHT streamed at 181/s with FF13 state 0 and `other=0`, LEFT not connected, build hash not stated). Not yet run: the Bluetooth HID output on a phone and a host (skipped); B4 (phone-side sequence gaps on FF14) and B9 (latency); FF13 calibration in fusion (#27); stick normalizer / dead zone (#7); no-stream latency mode and stream selector (#28); the remaining firmware checklists in `docs/TESTING.md`.
 
 ### The main open problem: upstream report loss
 
@@ -110,8 +110,8 @@ Parked ideas (no issue): the ESP32 itself as a BLE HID gamepad (HOGP) as a 3DoF 
 
 1. Run the close-out checks with Nick: `WMR_Bridge/docs/runs/sheets/closeout.md` has the commands, pass criteria and what to paste back (MTU readout, gamepad checks, settings persistence, optional HID, B4/B9, firmware C7, optional fixed-position round-trip rerun), ordered for the fewest reflashes. Record results as "user-reported" in STATUS.
 2. The contention problem (issue #18): decide the next experiment with Nick before writing code. A reference both-connected run on the same build and position should come first each session; compare `last5s` over equal windows after the 30 s settle.
-3. Round trip: explain the ~40 ms (runs on FF12, FF11 and with no stream at one fixed position; the app has no stream-off mode yet, and RSSI moved from -69 to -48 dBm during the first run).
-4. Apply the FF13 calibration in the fusion (take the pose composition from Monado's `wmr_config_precompute_transforms`; do not re-derive it).
+3. Round trip: explain the ~40 ms (runs on FF12, FF11, and with no stream at one fixed position; no-stream latency mode, stream selector, and configurable ping interval are now built in PR #28, run sheet in `docs/LATENCY.md`); RSSI moved from -69 to -48 dBm during the first run.
+4. Evaluate FF13 calibration in fusion on hardware (applied behind a per-hand switch in fusion in PR #27; pose composition ported from Monado's `wmr_controller_hp_packet_parse` and `wmr_config_precompute_transforms`; the $R^T$ / `AxisMapping` composition is the open question; accel scale ~10 vs 9.81 untouched).
 5. Resolve DECODING.md unknowns (#19), then fusion tuning (Madgwick beta is untuned; yaw drifts without a magnetometer).
 6. iOS (#19 app) when a Mac is available; `universal_ble` upstream gaps (#20).
 7. Later: browser flasher (#20 firmware), 6DoF/camera fusion.
@@ -142,6 +142,8 @@ Nothing from the earlier tool (project chat, project memory, uploaded files) car
 - Parked idea: the ESP32 as a BLE HID gamepad (HOGP), only a 3DoF fallback. Revisit after the loss is understood; Nick worries about ESP32 radio load.
 - Monado key: Nick chose the fetch script; the key is never committed (section 3).
 - A history of the FF13 regression: since WMR_Bridge #17 the controllers stopped streaming after the config read; fixed by #21 (re-sends Monado's enable commands). User-reported working with LEFT about 204/s. Test C7 (`WMR_CFG_FF13_READ=0`) is still not run.
+- FF13 IMU calibration is applied behind a per-hand switch in fusion (#27, default off, enabled on debug screen after reading config; Monado $M \times \text{raw} + \text{bias} \to R^T \to \text{AxisMapping} \to \text{runtime gyro bias} \to \text{fusion}$; not yet verified on hardware).
+- Latency screen supports a no-stream latency mode (FF15-only echo), stream selector (None / FF11 / FF12 / FF14), and configurable ping interval (#28; run sheet in `docs/LATENCY.md`).
 - Loss figures (user-reported single runs, 2026-10-22, FF14 at MTU 517, phone streaming): LEFT alone about 0.5 %, RIGHT alone about 10.8 %, both connected about 19 % each. Contention between the two Classic links and BLE on the ESP32's radio is the working hypothesis; RIGHT has about 10 % loss of its own. Tracked in WMR_Bridge #18.
 - Permissions: merges, deletes and other outward-facing git actions need Nick's explicit yes (Nick authorised branch and Ixhel cleanup on 2026-10-22, see section 11). If the permission layer refuses an action, do not work around it; tell Nick.
 - Model default for this project was Sonnet (Nick, 2026-10-22) to save usage.
