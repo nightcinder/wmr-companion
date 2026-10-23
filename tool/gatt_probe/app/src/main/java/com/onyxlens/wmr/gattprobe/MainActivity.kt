@@ -273,6 +273,12 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         }
     }
 
+    private fun setRadioGroupEnabled(rg: RadioGroup, enabled: Boolean) {
+        for (i in 0 until rg.childCount) {
+            rg.getChildAt(i).isEnabled = enabled
+        }
+    }
+
     // GattClient.Listener implementations
     override fun onStateChanged(state: GattState, message: String) {
         tvConnectionStatus.text = "Status: $message"
@@ -281,11 +287,15 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                 btnConnect.isEnabled = false
                 btnDisconnect.isEnabled = true
                 btnStartRun.isEnabled = !isRunInProgress
+                setRadioGroupEnabled(rgStream, false)
+                cbTwoBridges.isEnabled = false
             }
             GattState.DISCONNECTED -> {
                 btnConnect.isEnabled = true
                 btnDisconnect.isEnabled = false
                 btnStartRun.isEnabled = false
+                setRadioGroupEnabled(rgStream, true)
+                cbTwoBridges.isEnabled = true
                 if (isRunInProgress) {
                     stopRun(userCancelled = true)
                 }
@@ -294,6 +304,8 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                 btnConnect.isEnabled = false
                 btnDisconnect.isEnabled = true
                 btnStartRun.isEnabled = false
+                setRadioGroupEnabled(rgStream, false)
+                cbTwoBridges.isEnabled = false
             }
         }
     }
@@ -404,6 +416,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         btnStartRun.isEnabled = false
         btnStopRun.isEnabled = true
         btnShare.isEnabled = false
+        setRadioGroupEnabled(rgInterval, false)
         tvSummary.text = "Measurement run in progress..."
 
         val nowIso = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -415,9 +428,9 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         runStartTimeNanos = SystemClock.elapsedRealtimeNanos()
         val originUs = runStartTimeNanos / 1000L
 
-        // Freshly snapshot RSSI, stream and interval at start of run
+        // Freshly snapshot RSSI, stream (derived strictly from active client subscription), and interval
         runStartRssi = client.lastRssi
-        runStreamStr = if (rbStreamBatched.isChecked) "batched" else "none"
+        runStreamStr = if (client.streamMode == StreamMode.BATCHED) "batched" else "none"
         runEchoIntervalUs = selectedIntervalMs * 1000L
 
         currentRecorder = LatencyRecorder(
@@ -489,6 +502,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
         btnStartRun.isEnabled = false
         btnStopRun.isEnabled = false
+        setRadioGroupEnabled(rgInterval, true)
         tvRunMetrics.text = "Finishing run and reading final RSSI..."
 
         Thread {
