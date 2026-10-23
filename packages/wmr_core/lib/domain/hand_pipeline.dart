@@ -63,9 +63,14 @@ class DecodedSample {
     required this.orientation,
     required this.fused,
     this.stick = const [0, 0],
+    this.bridgeId = '',
   });
 
   final DecodedRecord record;
+
+  /// Transport device id of the bridge this record arrived from. Empty only
+  /// when a caller built a sample without one (tests or synthetic data).
+  final String bridgeId;
 
   /// Transport monotonic clock when the notification arrived.
   final int receivedAtUs;
@@ -245,7 +250,7 @@ class HandPipeline {
   /// Takes the current stick position as its rest centre.
   void recentreStick() => stickNormalizer.recentre();
 
-  DecodedSample add(DecodedRecord r, int receivedAtUs) {
+  DecodedSample add(DecodedRecord r, int receivedAtUs, {String bridgeId = ''}) {
     samples++;
     if (r.calibrated) calibratedFlagged++;
     final step = timer.advance(r.deviceTicks, r.rxTimeUs);
@@ -323,6 +328,7 @@ class HandPipeline {
       orientation: orientation,
       fused: fused,
       stick: _stick(r, step),
+      bridgeId: bridgeId,
     );
   }
 

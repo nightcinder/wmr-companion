@@ -103,7 +103,7 @@ void main() {
     expect(state().stage, LatencyStage.finished);
     final report = state().report!;
     expect(report.stream, 'decoded');
-    expect(report.link.mtu, isNotNull);
+    expect(report.links[fakeBridgeDeviceId]!.mtu, isNotNull);
     expect(report.durationUs, 1000000);
     final left = report.hands[wmrHandLeft];
     final right = report.hands[wmrHandRight];
@@ -118,7 +118,7 @@ void main() {
 
     final saved = state().saved!;
     final csv = File(saved.csvPath).readAsLinesSync();
-    expect(csv.first, startsWith('hand,sequence,arrival_us'));
+    expect(csv.first, startsWith('hand,bridge_id,sequence,arrival_us'));
     expect(csv, hasLength(1 + 199));
     expect(File(saved.jsonPath).readAsStringSync(), contains('"LEFT"'));
     expect(state().runs.map((r) => r.csvPath), [saved.csvPath]);
@@ -142,7 +142,8 @@ void main() {
         modeChanges: const Stream<ModeState>.empty(),
         clock: clock,
         mode: StreamMode.raw,
-        linkInfo: () async => const BleConnectionInfo(mtu: 23, rssi: -70),
+        bridgeIds: const ['test-bridge'],
+        linkInfo: (_) async => const BleConnectionInfo(mtu: 23, rssi: -70),
         counters: () => {'incomplete_frames': incomplete},
       ),
     );
@@ -163,8 +164,8 @@ void main() {
     await until(() => state().stage == LatencyStage.finished);
     final report = state().report!;
     expect(report.stream, 'raw');
-    expect(report.link.mtu, 23);
-    expect(report.link.rssiEnd, -70);
+    expect(report.links['test-bridge']!.mtu, 23);
+    expect(report.links['test-bridge']!.rssiEnd, -70);
     expect(report.counters, {'incomplete_frames': 3});
     final right = report.hands[wmrHandRight];
     expect(right.records, 10);

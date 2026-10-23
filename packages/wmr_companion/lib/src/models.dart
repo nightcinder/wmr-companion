@@ -140,6 +140,7 @@ class WmrControllerUpdate {
   const WmrControllerUpdate({
     required this.hand,
     required this.receivedAtUs,
+    this.bridgeId = '',
     this.frame,
     this.decoded,
     this.orientation,
@@ -148,6 +149,10 @@ class WmrControllerUpdate {
   });
 
   final Hand hand;
+
+  /// Transport device id of the bridge that delivered this update. Empty only
+  /// when the update was synthesized without one.
+  final String bridgeId;
 
   /// Monotonic receive time stamped by the transport before parsing.
   final int receivedAtUs;

@@ -25,9 +25,11 @@ import 'echo_client.dart';
 
 const String latencyFormatName = 'wmr-latency';
 
-/// Version 2: `round_trip` is an object (`measured` plus the figures) instead
-/// of a string.
-const int latencyFormatVersion = 2;
+/// Version 3: `link` is an object keyed by bridge id (transport device id),
+/// every hand summary names the bridge that fed it, and the per-row CSV gained
+/// a `bridge_id` column. Version 2 is not read by this package: the app only
+/// lists and shares saved files, so there is no loader to keep compatible.
+const int latencyFormatVersion = 3;
 
 /// Inter-arrival above this counts as a stall.
 const int latencyStallUs = 50000;
@@ -127,6 +129,8 @@ class LatencyLink {
 class LatencyHandSummary {
   const LatencyHandSummary({
     required this.hand,
+    this.bridgeId,
+    this.bridgeRecords = const {},
     this.records = 0,
     this.arrivals = 0,
     this.spanUs = 0,
@@ -141,6 +145,14 @@ class LatencyHandSummary {
   });
 
   final int hand;
+
+  /// Transport device id of the bridge that fed this hand (the one with the
+  /// most records when the hand moved between bridges during the run), or
+  /// null when the recorder was fed without attribution.
+  final String? bridgeId;
+
+  /// Records per bridge id. Normally one entry; more after a bridge swap.
+  final Map<String, int> bridgeRecords;
 
   /// Frames (raw) or records (decoded) received.
   final int records;
@@ -191,6 +203,8 @@ class LatencyHandSummary {
 
   Map<String, Object?> toJson() => {
     'hand': handName(hand),
+    'bridge_id': bridgeId,
+    'bridge_records': bridgeRecords,
     'records': records,
     'arrivals': arrivals,
     'span_us': spanUs,
@@ -270,11 +284,12 @@ class LatencyReport {
     required this.stream,
     required this.durationUs,
     required this.hands,
-    this.link = const LatencyLink(),
+    this.links = const {},
     this.counters = const {},
     this.rowsDropped = 0,
     this.modeChanged = false,
     this.echo,
+    this.echoBridgeId,
     this.echoIntervalUs,
   });
 
@@ -285,7 +300,10 @@ class LatencyReport {
   final String stream;
   final int durationUs;
   final List<LatencyHandSummary> hands;
-  final LatencyLink link;
+
+  /// Link parameters per bridge, keyed by transport device id. Empty only
+  /// when the caller did not supply a bridge id.
+  final Map<String, LatencyLink> links;
 
   /// Service counters that grew during the run (incomplete frames, parse
   /// errors, ...), by name.
@@ -301,6 +319,10 @@ class LatencyReport {
 
   /// Null when no echo was used: the round trip was not measured.
   final EchoSummary? echo;
+
+  /// The bridge the FF15 pings went to, when a round trip was measured. The
+  /// screen pings one bridge; the link figures are per bridge.
+  final String? echoBridgeId;
 
   /// Time between echo pings, when a round trip was measured.
   final int? echoIntervalUs;
@@ -319,9 +341,12 @@ class LatencyReport {
           }
         : {
             ...echo!.toJson(),
+            if (echoBridgeId != null) 'bridge_id': echoBridgeId,
             if (echoIntervalUs != null) 'ping_interval_us': echoIntervalUs,
           },
-    'link': link.toJson(),
+    'link': {
+      for (final entry in links.entries) entry.key: entry.value.toJson(),
+    },
     'counters': counters,
     'rows_dropped': rowsDropped,
     'mode_changed': modeChanged,
@@ -338,6 +363,7 @@ class LatencyRow {
     required this.hand,
     required this.sequence,
     required this.arrivalUs,
+    this.bridgeId,
     this.interArrivalUs,
     this.sequenceDelta,
     this.deviceTicks,
@@ -346,6 +372,10 @@ class LatencyRow {
   });
 
   final int hand;
+
+  /// Transport device id of the bridge that delivered the frame or record.
+  final String? bridgeId;
+
   final int sequence;
 
   /// Phone monotonic time since the run started.
@@ -365,11 +395,12 @@ class LatencyRow {
   final int? espRxUs;
 
   static const String csvHeader =
-      'hand,sequence,arrival_us,inter_arrival_us,seq_delta,device_ticks,'
-      'device_dt_us,esp_rx_us';
+      'hand,bridge_id,sequence,arrival_us,inter_arrival_us,seq_delta,'
+      'device_ticks,device_dt_us,esp_rx_us';
 
   String toCsv() => [
     LatencyHandSummary.handName(hand),
+    bridgeId ?? '',
     sequence,
     arrivalUs,
     interArrivalUs ?? '',
@@ -412,6 +443,7 @@ class EchoRow {
 class _HandState {
   int records = 0;
   int arrivals = 0;
+  final Map<String, int> bridgeCounts = {};
   int? firstUs;
   int? lastUs;
   int? lastSeq;
@@ -506,22 +538,29 @@ class LatencyRecorder {
   /// Call when the service switched streams during the run.
   void markModeChanged() => _modeChanged = true;
 
-  /// A reassembled raw frame.
-  void addFrame(int hand, int sequence, int arrivalUs) =>
-      _add(hand, sequence, arrivalUs);
+  /// A reassembled raw frame. [bridgeId] is the transport device id it came
+  /// from.
+  void addFrame(
+    int hand,
+    int sequence,
+    int arrivalUs, {
+    String bridgeId = '',
+  }) => _add(hand, sequence, arrivalUs, bridgeId: bridgeId);
 
   /// A decoded record: its sequence, the controller tick counter and the
-  /// ESP32 receive time.
+  /// ESP32 receive time. [bridgeId] is the transport device id it came from.
   void addRecord(
     int hand,
     int sequence,
     int arrivalUs, {
     required int deviceTicks,
     required int espRxUs,
+    String bridgeId = '',
   }) => _add(
     hand,
     sequence,
     arrivalUs,
+    bridgeId: bridgeId,
     deviceTicks: deviceTicks,
     espRxUs: espRxUs,
   );
@@ -530,12 +569,16 @@ class LatencyRecorder {
     int hand,
     int sequence,
     int arrivalUs, {
+    String bridgeId = '',
     int? deviceTicks,
     int? espRxUs,
   }) {
     if (hand < 0 || hand >= wmrNumControllers) return;
     final s = _hands[hand];
     s.records++;
+    if (bridgeId.isNotEmpty) {
+      s.bridgeCounts[bridgeId] = (s.bridgeCounts[bridgeId] ?? 0) + 1;
+    }
 
     int? inter;
     final last = s.lastUs;
@@ -575,6 +618,7 @@ class LatencyRecorder {
       _rows.add(
         LatencyRow(
           hand: hand,
+          bridgeId: bridgeId.isEmpty ? null : bridgeId,
           sequence: sequence,
           arrivalUs: arrivalUs - originUs,
           interArrivalUs: inter,
@@ -610,21 +654,23 @@ class LatencyRecorder {
     s.windowOffsets.add(offset);
   }
 
-  /// Figures so far. [link] and [counters] come from the caller.
+  /// Figures so far. [links] and [counters] come from the caller.
   LatencyReport report({
     required int nowUs,
-    LatencyLink link = const LatencyLink(),
+    Map<String, LatencyLink> links = const {},
     Map<String, int> counters = const {},
     Map<String, int> echoCounters = const {},
+    String? echoBridgeId,
     int? echoIntervalUs,
   }) {
     return LatencyReport(
       echo: _echoUsed ? _echoSummary(echoCounters) : null,
+      echoBridgeId: _echoUsed ? echoBridgeId : null,
       echoIntervalUs: _echoUsed ? echoIntervalUs : null,
       started: started,
       stream: stream,
       durationUs: nowUs - originUs,
-      link: link,
+      links: links,
       counters: counters,
       rowsDropped: _rowsDropped,
       modeChanged: _modeChanged,
@@ -664,8 +710,19 @@ class LatencyRecorder {
       delay = [...s.delay, for (final o in open) o - min];
     }
     final period = timer?.periodTicks;
+    final bridgeRecords = Map<String, int>.unmodifiable(s.bridgeCounts);
+    String? bridgeId;
+    var most = -1;
+    for (final entry in bridgeRecords.entries) {
+      if (entry.value > most) {
+        most = entry.value;
+        bridgeId = entry.key;
+      }
+    }
     return LatencyHandSummary(
       hand: hand,
+      bridgeId: bridgeId,
+      bridgeRecords: bridgeRecords,
       records: s.records,
       arrivals: s.arrivals,
       spanUs: (s.lastUs ?? 0) - (s.firstUs ?? 0),

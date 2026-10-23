@@ -55,6 +55,9 @@ class DebugScreen extends ConsumerWidget {
         ? ref.watch(modeStateProvider(source)).value
         : null;
     final link = ref.watch(linkStatusProvider(source)).value;
+    final bridges =
+        ref.watch(bridgeLinksProvider(source)).value ??
+        const <BridgeLinkSnapshot>[];
 
     final vm.Quaternion raw = decoded
         ? view?.orientation ?? vm.Quaternion.identity()
@@ -157,6 +160,7 @@ class DebugScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
+          BridgeLinkTable(bridges, style: mono),
           if (decoded)
             if (view == null)
               const Text('Waiting for the decoded stream...')
@@ -304,6 +308,44 @@ class ModeFaultBanner extends StatelessWidget {
   }
 }
 
+/// One row per bridge: link parameters and the rate/loss of each hand it
+/// feeds. The id is the transport device id.
+class BridgeLinkTable extends StatelessWidget {
+  const BridgeLinkTable(this.bridges, {super.key, this.style});
+
+  final List<BridgeLinkSnapshot> bridges;
+  final TextStyle? style;
+
+  static String _pct(double v) => '${(v * 100).toStringAsFixed(1)}%';
+
+  static String _hand(BridgeLinkSnapshot bridge, int hand) {
+    final label = hand == 0 ? 'L' : 'R';
+    final rate = bridge.rateHz[hand];
+    final loss = bridge.loss[hand];
+    if (rate == 0 && loss == null) return '$label -';
+    return '$label ${rate.toStringAsFixed(1)}/s '
+        '${loss == null ? '-' : _pct(loss)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (bridges.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final bridge in bridges)
+          Text(
+            '${bridge.bridgeId}  ${bridge.mode.name}  '
+            'MTU ${bridge.mtu ?? '-'}  '
+            'RSSI ${bridge.rssi == null ? 'n/a' : '${bridge.rssi} dBm'}  '
+            '${_hand(bridge, 0)}  ${_hand(bridge, 1)}',
+            style: style,
+          ),
+      ],
+    );
+  }
+}
+
 class DecodedStatsView extends StatelessWidget {
   const DecodedStatsView(
     this.stats, {
@@ -332,6 +374,12 @@ class DecodedStatsView extends StatelessWidget {
         _link(),
         for (var h = 0; h < stats.hands.length; h++)
           ..._hand(h, stats.hands[h]),
+        if (stats.byBridge.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text('By bridge', style: style),
+          for (final bridge in stats.byBridge.entries)
+            Text(_bridgeRow(bridge.key, bridge.value), style: style),
+        ],
         Text(
           'parse errors  length ${stats.wrongLength}  '
           'version ${stats.unknownVersion}  hand ${stats.badHand}',
@@ -364,6 +412,21 @@ class DecodedStatsView extends StatelessWidget {
     final phy = l.info?.phy;
     if (phy != null) parts.add('PHY $phy');
     return Text(parts.join('  '), style: style);
+  }
+
+  String _bridgeRow(String bridgeId, DecodedStats bridge) {
+    final parts = <String>['bridge $bridgeId'];
+    for (var h = 0; h < bridge.hands.length; h++) {
+      final s = bridge.hands[h];
+      if (s.records == 0 && s.missingFromTicks == 0) continue;
+      parts.add(
+        '${_handNames[h]} ${s.records} rx  '
+        '${s.rateHz.toStringAsFixed(1)} Hz  '
+        'loss ${_pct(s.cumulativeLoss)}',
+      );
+    }
+    if (parts.length == 1) parts.add('no records');
+    return parts.join('  ');
   }
 
   List<Widget> _hand(int h, DecodedHandStats s) {
@@ -580,6 +643,16 @@ class StatsTable extends StatelessWidget {
             'incomplete ${stats.hands[h].incomplete}',
             style: style,
           ),
+        if (stats.byBridge.isNotEmpty) ...[
+          Text('By bridge', style: style),
+          for (final bridge in stats.byBridge.entries)
+            Text(
+              '  ${bridge.key}  '
+              '${[for (var h = 0; h < bridge.value.hands.length; h++) '${_handNames[h]} ${bridge.value.hands[h].frames} frames '
+                    '${bridge.value.hands[h].gaps} gaps'].join('  ')}',
+              style: style,
+            ),
+        ],
         Text('fragment errors ${stats.errors}', style: style),
       ],
     );

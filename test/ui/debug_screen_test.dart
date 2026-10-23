@@ -427,6 +427,85 @@ void main() {
       expect(find.text('link n/a'), findsOneWidget);
     });
 
+    testWidgets('per-bridge rows show link figures and decoded counters', (
+      tester,
+    ) async {
+      const bridgeLeft = DecodedStats(
+        hands: [
+          DecodedHandStats(records: 90, missingFromTicks: 10, rateHz: 99),
+          DecodedHandStats(),
+        ],
+      );
+      const bridgeRight = DecodedStats(
+        hands: [
+          DecodedHandStats(),
+          DecodedHandStats(records: 120, rateHz: 120),
+        ],
+      );
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: [
+                  BridgeLinkTable([
+                    BridgeLinkSnapshot(
+                      bridgeId: 'bridge-left',
+                      mode: StreamMode.decoded,
+                      mtu: 247,
+                      rssi: -48,
+                      rateHz: [99, 0],
+                      loss: [0.1, null],
+                    ),
+                    BridgeLinkSnapshot(
+                      bridgeId: 'bridge-right',
+                      mode: StreamMode.decoded,
+                      mtu: 247,
+                      rssi: -60,
+                      rateHz: [0, 120],
+                      loss: [null, 0],
+                    ),
+                  ]),
+                  DecodedStatsView(
+                    DecodedStats(
+                      hands: [DecodedHandStats(), DecodedHandStats()],
+                      byBridge: {
+                        'bridge-left': bridgeLeft,
+                        'bridge-right': bridgeRight,
+                      },
+                    ),
+                    selectedHand: 0,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining(
+          'bridge-left  decoded  MTU 247  RSSI -48 dBm  '
+          'L 99.0/s 10.0%  R -',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('bridge-right  decoded  MTU 247  RSSI -60 dBm'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'bridge bridge-left  LEFT 90 rx  99.0 Hz  loss 10.0%',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('bridge bridge-right  RIGHT 120 rx  120.0 Hz'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('a disconnected link drops stale RSSI', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(

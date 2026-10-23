@@ -429,6 +429,7 @@ class WmrCompanion {
       WmrControllerUpdate(
         hand: hand,
         receivedAtUs: frame.receivedAtUs,
+        bridgeId: frame.bridgeId,
         frame: frame.frame,
         stats: WmrHandStats(
           frames: raw.frames,
@@ -452,6 +453,7 @@ class WmrCompanion {
         WmrControllerUpdate(
           hand: hand,
           receivedAtUs: sample.receivedAtUs,
+          bridgeId: sample.bridgeId,
           decoded: sample.record,
           orientation: sample.orientation,
           input: input,
