@@ -202,6 +202,7 @@ class LatencyRecorder(
     private var _echoSkipped = 0
     private var _echoLateOrDup = 0
     private var _echoBadAnswers = 0
+    private var _decodedParseErrors = 0
     private var _echoUsed = false
     private var _rowsDropped = 0
     private var _modeChanged = false
@@ -213,6 +214,7 @@ class LatencyRecorder(
     val echoTimeouts: Int @Synchronized get() = _echoTimeouts
     val echoFailed: Int @Synchronized get() = _echoFailed
     val echoSkipped: Int @Synchronized get() = _echoSkipped
+    val decodedParseErrors: Int @Synchronized get() = _decodedParseErrors
 
     @Synchronized
     fun useEcho() {
@@ -253,6 +255,11 @@ class LatencyRecorder(
     fun addEchoBadAnswer() {
         _echoUsed = true
         _echoBadAnswers++
+    }
+
+    @Synchronized
+    fun addDecodedParseError() {
+        _decodedParseErrors++
     }
 
     @Synchronized
@@ -362,6 +369,11 @@ class LatencyRecorder(
             durationUs = nowUs - originUs,
             link = link,
             echo = if (_echoUsed) _echoSummary(echoIntervalUs) else null,
+            counters = mapOf(
+                "incomplete_frames" to 0,
+                "reassembly_errors" to 0,
+                "decoded_parse_errors" to _decodedParseErrors
+            ),
             rowsDropped = _rowsDropped,
             modeChanged = _modeChanged,
             hands = listOf(

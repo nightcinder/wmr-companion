@@ -142,12 +142,18 @@ class LatencyRecorderTest {
         assertEquals(1, echo.counters["late_or_duplicate_answers"])
         assertEquals(1, echo.counters["bad_answers"])
 
-        val json = JsonWriter.toJsonString(report)
+        // Also test decoded parse error counting
+        recorder.addDecodedParseError()
+        val reportWithParseErr = recorder.report(nowUs = 2000000L)
+        assertEquals(1, reportWithParseErr.counters["decoded_parse_errors"])
+
+        val json = JsonWriter.toJsonString(reportWithParseErr)
         assertTrue(json.contains("\"sent\": 4"))
         assertTrue(json.contains("\"answered\": 1"))
         assertTrue(json.contains("\"timeouts\": 2"))
         assertTrue(json.contains("\"failed_writes\": 1"))
         assertTrue(json.contains("\"pings_skipped_busy\": 1"))
+        assertTrue(json.contains("\"decoded_parse_errors\": 1"))
     }
 
     @Test

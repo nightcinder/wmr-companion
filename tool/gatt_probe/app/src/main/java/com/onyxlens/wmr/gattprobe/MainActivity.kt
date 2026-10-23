@@ -69,11 +69,14 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
     private var targetDevice: BluetoothDevice? = null
 
-    // Run measurement state
+    // Run measurement state: volatile for visibility across GATT binder thread and main thread
+    @Volatile
     private var isRunInProgress = false
+    @Volatile
+    private var currentRecorder: LatencyRecorder? = null
+
     private var runStartTimeNanos: Long = 0L
     private var runDurationSec = DEFAULT_RUN_DURATION_SEC
-    private var currentRecorder: LatencyRecorder? = null
     private var pingTimerHandler = Handler(Looper.getMainLooper())
     private var pingRunnable: Runnable? = null
     private var nextPingId = 1
@@ -162,9 +165,9 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         }
 
         cbTwoBridges.setOnCheckedChangeListener { _, isChecked ->
-            Log.i(TAG, "Dual-bridge mode: $isChecked")
+            Log.i(TAG, "Dual-bridge mode toggled: $isChecked")
             if (isChecked) {
-                Toast.makeText(this, "Dual-bridge mode selected (connects primary bridge)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Dual-bridge mode enabled (connects primary bridge)", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -326,6 +329,12 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         }
     }
 
+    override fun onEchoSkipped() {
+        if (isRunInProgress) {
+            currentRecorder?.addEchoSkipped()
+        }
+    }
+
     override fun onEchoLateOrDuplicate(pingId: Int) {
         if (isRunInProgress) {
             currentRecorder?.addEchoLateOrDuplicate()
@@ -347,6 +356,12 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                 deviceTicks = record.deviceTicks,
                 espRxUs = record.rxTimeUs
             )
+        }
+    }
+
+    override fun onDecodedParseError() {
+        if (isRunInProgress) {
+            currentRecorder?.addDecodedParseError()
         }
     }
 
@@ -376,7 +391,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         runStartTimeNanos = SystemClock.elapsedRealtimeNanos()
         val originUs = runStartTimeNanos / 1000L
 
-        // Snapshot parameters at start of run
+        // Snapshot parameters and initial RSSI at start of run
         runStartRssi = client.lastRssi
         runStreamStr = if (rbStreamBatched.isChecked) "batched" else "none"
         runEchoIntervalUs = selectedIntervalMs * 1000L
@@ -400,14 +415,10 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
             override fun run() {
                 if (!isRunInProgress) return
                 val client = gattClient
-                val recorder = currentRecorder
-                if (client != null && recorder != null) {
+                if (client != null) {
                     val id = nextPingId
                     nextPingId = (nextPingId + 1) and 0xFFFF
-                    val ok = client.sendPing(id, timeoutMs = 1000L)
-                    if (!ok) {
-                        recorder.addEchoSkipped()
-                    }
+                    client.sendPing(id, timeoutMs = 1000L)
                 }
                 pingTimerHandler.postDelayed(this, interval)
             }

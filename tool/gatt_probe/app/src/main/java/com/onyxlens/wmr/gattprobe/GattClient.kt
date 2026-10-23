@@ -44,9 +44,11 @@ class GattClient(
         fun onEchoSample(sample: EchoSample)
         fun onEchoTimeout(pingId: Int)
         fun onEchoFailure(pingId: Int)
+        fun onEchoSkipped()
         fun onEchoLateOrDuplicate(pingId: Int)
         fun onEchoBadAnswer()
         fun onDecodedRecord(record: Protocol.DecodedRecord, arrivalUs: Long)
+        fun onDecodedParseError()
         fun onError(message: String)
     }
 
@@ -150,6 +152,7 @@ class GattClient(
         synchronized(this) {
             if (currentPendingPing != null) {
                 // Client busy: ping skipped
+                mainHandler.post { listener.onEchoSkipped() }
                 return false
             }
             currentPendingPing = PendingPing(pingId, t1Us)
@@ -284,13 +287,14 @@ class GattClient(
                 return
             }
 
-            // Read start RSSI
-            gatt.readRemoteRssi()
-
             // Begin CCC subscriptions: start with FF15
             updateState(GattState.SUBSCRIBING, "Subscribing to FF15 echo...")
             subscribingToBatched = false
-            gatt.setCharacteristicNotification(echoChar, true)
+            val notifOk = gatt.setCharacteristicNotification(echoChar, true)
+            if (!notifOk) {
+                updateState(GattState.DISCONNECTED, "Failed to enable notification for FF15")
+                return
+            }
             val ccc = echoChar?.getDescriptor(Protocol.CCC_DESCRIPTOR_UUID)
             if (ccc != null) {
                 val ok = writeDescriptor(gatt, ccc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
@@ -314,7 +318,11 @@ class GattClient(
                 if (bChar != null) {
                     subscribingToBatched = true
                     updateState(GattState.SUBSCRIBING, "Subscribing to FF14 batched...")
-                    gatt.setCharacteristicNotification(bChar, true)
+                    val notifOk = gatt.setCharacteristicNotification(bChar, true)
+                    if (!notifOk) {
+                        updateState(GattState.DISCONNECTED, "Failed to enable notification for FF14")
+                        return
+                    }
                     val bCcc = bChar.getDescriptor(Protocol.CCC_DESCRIPTOR_UUID)
                     if (bCcc != null) {
                         val ok = writeDescriptor(gatt, bCcc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
@@ -326,7 +334,8 @@ class GattClient(
                 }
             }
 
-            // All requested subscriptions completed
+            // Subscriptions complete: read initial RSSI to establish baseline before declaring ready
+            gatt.readRemoteRssi()
             updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
         }
 
@@ -339,7 +348,7 @@ class GattClient(
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                val intervalUs = interval * 1250 // 1.25 ms per interval unit
+                val intervalUs = interval * 1250 // 1.25 ms per interval count -> microseconds
                 connectionIntervalUs = intervalUs
                 mainHandler.post { listener.onIntervalUpdated(intervalUs) }
             }
@@ -411,6 +420,7 @@ class GattClient(
                     }
                     is Protocol.BatchParseResult.Error -> {
                         Log.w(TAG, "Batch parse error: ${res.reason}")
+                        mainHandler.post { listener.onDecodedParseError() }
                     }
                 }
             }
