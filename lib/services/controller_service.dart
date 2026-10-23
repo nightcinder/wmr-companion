@@ -4,6 +4,7 @@ import '../ble/ble_transport.dart';
 import '../domain/axis_mapping.dart';
 import '../domain/hand_pipeline.dart';
 import '../domain/imu_calibration.dart';
+import '../domain/loss_window.dart';
 import '../domain/stick_centre.dart';
 import '../domain/tick_timer.dart';
 import '../protocol/decoded_batch.dart';
@@ -126,6 +127,7 @@ class DecodedHandStats {
     this.stickLearned = false,
     this.stickCentreUpdates = 0,
     this.stick = const [0, 0],
+    this.windowLoss,
   });
 
   final int records;
@@ -168,6 +170,22 @@ class DecodedHandStats {
 
   /// Last normalized stick output (x, y).
   final List<double> stick;
+
+  /// Received and missing reports over the trailing five seconds, or null
+  /// before the window has filled or while the stream is stale. The
+  /// cumulative figure is [missingFromTicks] over [records] +
+  /// [missingFromTicks].
+  final LossWindowStats? windowLoss;
+
+  /// Reports estimated missing as a share of expected reports, 0 when
+  /// nothing was expected yet. Double arithmetic keeps the addition safe at
+  /// the integer limit.
+  double get cumulativeLoss {
+    final received = records.toDouble();
+    final lost = missingFromTicks.toDouble();
+    final expected = received + lost;
+    return expected == 0 ? 0 : lost / expected;
+  }
 }
 
 class DecodedStats {
@@ -278,6 +296,9 @@ class ControllerService {
   final List<int> _dGaps = List.filled(wmrNumControllers, 0);
   final List<int> _dOutOfOrder = List.filled(wmrNumControllers, 0);
   final List<int> _dRecords = List.filled(wmrNumControllers, 0);
+  final List<LossWindow> _lossWindows = [
+    for (var h = 0; h < wmrNumControllers; h++) LossWindow(),
+  ];
   final List<_RateMeter> _rates = [
     for (var h = 0; h < wmrNumControllers; h++) _RateMeter(),
   ];
@@ -378,6 +399,10 @@ class ControllerService {
     _dLastSeq.fillRange(0, _dLastSeq.length, null);
     for (final p in _pipelines) {
       p.streamRestarted();
+    }
+    for (final w in _lossWindows) {
+      // The new stream has no five-second history yet.
+      w.reset();
     }
     _fault = null;
     _subscription = transport
@@ -494,6 +519,11 @@ class ControllerService {
     _rates[hand].add(receivedAtUs);
     final sample = _pipelines[hand].add(r, receivedAtUs);
     _lastStick[hand] = sample.stick;
+    _lossWindows[hand].add(
+      receivedAtUs,
+      _dRecords[hand],
+      _pipelines[hand].timer.missing,
+    );
     _samples.add(sample);
   }
 
@@ -589,6 +619,7 @@ class ControllerService {
             stickLearned: _pipelines[h].stickNormalizer.hasCentre,
             stickCentreUpdates: _pipelines[h].stickNormalizer.centreUpdates,
             stick: _lastStick[h],
+            windowLoss: _lossWindows[h].statsAt(now),
           ),
       ],
       wrongLength: _wrongLength,

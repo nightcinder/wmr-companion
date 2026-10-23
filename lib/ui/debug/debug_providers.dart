@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vector_math/vector_math_64.dart';
 
@@ -23,6 +25,84 @@ final fakeTransportProvider = Provider<FakeTransport>((ref) {
 final transportProvider = Provider<BleTransport>(
   (ref) => ref.watch(fakeTransportProvider),
 );
+
+/// The BLE link behind [DebugSource], as last reported by the transport.
+class LinkStatus {
+  const LinkStatus({this.state, this.info});
+
+  /// Null until the transport reports its first state.
+  final BleConnectionState? state;
+
+  /// RSSI, MTU and connection interval, only while connected and only when
+  /// the platform exposes them.
+  final BleConnectionInfo? info;
+}
+
+/// Link state and parameters for the debug panel. [BleTransport] has no RSSI
+/// stream, so the parameters are read every two seconds; state changes come
+/// from [BleTransport.connectionState] immediately. Parameters are dropped
+/// while the link is not connected, because [BleTransport.connectionInfo]
+/// then fails.
+final linkStatusProvider = StreamProvider.family<LinkStatus, DebugSource>((
+  ref,
+  source,
+) {
+  final BleTransport transport = source == DebugSource.fake
+      ? ref.watch(transportProvider)
+      : ref.watch(realTransportProvider);
+  final String? deviceId = source == DebugSource.fake
+      ? fakeBridgeDeviceId
+      : ref.watch(realDeviceProvider.select((s) => s.deviceId));
+  if (deviceId == null) return Stream.value(const LinkStatus());
+
+  BleConnectionState? state;
+  BleConnectionInfo? info;
+  var closed = false;
+  final controller = StreamController<LinkStatus>();
+
+  void emit() {
+    if (closed) return;
+    controller.add(
+      LinkStatus(
+        state: state,
+        info: state == BleConnectionState.connected ? info : null,
+      ),
+    );
+  }
+
+  Future<void> readInfo() async {
+    if (state != BleConnectionState.connected) {
+      info = null;
+      emit();
+      return;
+    }
+    try {
+      info = await transport.connectionInfo(deviceId);
+    } catch (_) {
+      // The platform does not expose RSSI/MTU on every stack: show "n/a".
+      info = null;
+    }
+    emit();
+  }
+
+  final stateSub = transport.connectionState(deviceId).listen((next) {
+    state = next;
+    if (next == BleConnectionState.connected) {
+      readInfo();
+    } else {
+      info = null;
+      emit();
+    }
+  });
+  final poll = Timer.periodic(const Duration(seconds: 2), (_) => readInfo());
+  ref.onDispose(() {
+    closed = true;
+    poll.cancel();
+    stateSub.cancel();
+    controller.close();
+  });
+  return controller.stream;
+});
 
 final fakeBridgeProvider = Provider<FakeWmrBridge>((ref) {
   final bridge = FakeWmrBridge(
