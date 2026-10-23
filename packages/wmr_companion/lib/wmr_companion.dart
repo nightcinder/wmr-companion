@@ -24,6 +24,8 @@ export 'package:wmr_core/domain/loss_window.dart' show LossWindowStats;
 export 'package:wmr_core/domain/stick_centre.dart' show StickConfig;
 export 'package:wmr_core/domain/tick_timer.dart' show DtStats;
 export 'package:wmr_core/protocol/decoded_record.dart' show DecodedRecord;
+export 'package:wmr_core/protocol/firmware_version.dart'
+    show WmrBridgeFeature, WmrBridgeFeatures, WmrProtocolVersion;
 export 'package:wmr_core/protocol/wmr_fragment.dart' show WmrFrame;
 export 'package:wmr_core/services/controller_service.dart'
     show DecodedStats, StreamMode;

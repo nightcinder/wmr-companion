@@ -3,6 +3,7 @@ import 'package:wmr_core/domain/gamepad.dart';
 import 'package:wmr_core/domain/loss_window.dart';
 import 'package:wmr_core/domain/tick_timer.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/controller_service.dart'
     show DecodedStats, StreamMode;
@@ -179,6 +180,7 @@ class WmrLinkSnapshot {
     this.mode,
     this.fault,
     this.stats,
+    this.protocol,
   });
 
   final WmrConnectionState state;
@@ -198,6 +200,15 @@ class WmrLinkSnapshot {
 
   /// Decoded-stream counters while connected; null otherwise.
   final DecodedStats? stats;
+
+  /// The bridge's firmware version (FF16) and its FF feature matrix.
+  ///
+  /// Null until the one-time read after connect completes, and when service
+  /// discovery failed. A bridge without FF16 reports
+  /// [WmrProtocolVersion.withoutFirmwareVersion]: an older firmware, not an
+  /// error. See [WmrProtocolVersion.firmwareVersionMalformed] for a value that
+  /// could not be decoded.
+  final WmrProtocolVersion? protocol;
 
   bool get connected => state == WmrConnectionState.ready;
 }
