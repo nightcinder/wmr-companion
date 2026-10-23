@@ -91,5 +91,5 @@ Tap **Share / Export Results** in the app to share the JSON and CSV files via An
 The exported JSON matches `wmr-latency` v2:
 - Root fields: `format` (`"wmr-latency"`), `version` (`2`), `source` (`"wmr-gatt-probe (native Android)"`), `started`, `stream`, `duration_us`.
 - `round_trip`: `measured` (boolean), `sent`, `answered`, `timeouts`, `failed_writes`, `rtt`, `end_to_end`, `turnaround`, `max_queue_depth`, `counters`, `ping_interval_us`.
-- `link`: `mtu`, `rssi_start_dbm`, `rssi_end_dbm`, `connection_interval_us`, `high_priority_requested`.
+- `link`: `mtu`, `rssi_start_dbm`, `rssi_end_dbm`, `connection_interval_us` (populated when the platform dispatches connection parameter updates, or null where the OS does not surface it), `high_priority_requested`.
 - `hands`: per-hand records, arrivals, span, rate, `inter_arrival` percentiles, `stalls_over_50000us`, `sequence_gaps`, `missing_from_ticks`, `delay_above_window_min`, and `delay_variation`.
