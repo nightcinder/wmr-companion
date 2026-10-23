@@ -69,11 +69,19 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
     private var targetDevice: BluetoothDevice? = null
 
-    // Run measurement state: volatile for visibility across GATT binder thread and main thread
+    // Run measurement state: volatile for thread visibility across GATT binder thread and main thread
     @Volatile
     private var isRunInProgress = false
     @Volatile
     private var currentRecorder: LatencyRecorder? = null
+    @Volatile
+    private var runStartRssi: Int? = null
+    @Volatile
+    private var lastExportedJsonFile: File? = null
+    @Volatile
+    private var lastExportedEchoFile: File? = null
+    @Volatile
+    private var lastExportedSamplesFile: File? = null
 
     private var runStartTimeNanos: Long = 0L
     private var runDurationSec = DEFAULT_RUN_DURATION_SEC
@@ -83,13 +91,8 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
     private var selectedIntervalMs = 250L
 
     // Snapshotted at run start to prevent mid-run UI changes from altering report
-    private var runStartRssi: Int? = null
     private var runStreamStr: String = "batched"
     private var runEchoIntervalUs: Long = 250000L
-
-    private var lastExportedJsonFile: File? = null
-    private var lastExportedEchoFile: File? = null
-    private var lastExportedSamplesFile: File? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -391,7 +394,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         runStartTimeNanos = SystemClock.elapsedRealtimeNanos()
         val originUs = runStartTimeNanos / 1000L
 
-        // Snapshot parameters and initial RSSI at start of run
+        // Snapshot parameters and initial start RSSI at start of run
         runStartRssi = client.lastRssi
         runStreamStr = if (rbStreamBatched.isChecked) "batched" else "none"
         runEchoIntervalUs = selectedIntervalMs * 1000L
@@ -475,14 +478,11 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
             // Read end RSSI in background thread
             val endRssi = gattClient?.readRssiSafe(1500L)
 
-            val effectiveIntervalUs = gattClient?.connectionIntervalUs
-                ?: if (gattClient?.priorityRequested == true) 15000 else null
-
             val link = LatencyLink(
                 mtu = gattClient?.negotiatedMtu,
                 rssiStart = runStartRssi,
                 rssiEnd = endRssi,
-                connectionIntervalUs = effectiveIntervalUs,
+                connectionIntervalUs = gattClient?.connectionIntervalUs,
                 highPriorityRequested = gattClient?.priorityRequested
             )
 
@@ -525,10 +525,14 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
             lastExportedSamplesFile = samplesFile
 
             Log.i(TAG, "Exported probe files to: ${jsonFile.absolutePath}")
-            Toast.makeText(this, "Files exported to: ${jsonFile.name}", Toast.LENGTH_LONG).show()
+            mainHandler.post {
+                Toast.makeText(this, "Files exported to: ${jsonFile.name}", Toast.LENGTH_LONG).show()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error writing export files", e)
-            Toast.makeText(this, "Failed to write export files: $e", Toast.LENGTH_LONG).show()
+            mainHandler.post {
+                Toast.makeText(this, "Failed to write export files: $e", Toast.LENGTH_LONG).show()
+            }
         }
     }
 

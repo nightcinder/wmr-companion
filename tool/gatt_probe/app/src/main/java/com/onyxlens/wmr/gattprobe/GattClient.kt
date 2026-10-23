@@ -66,8 +66,10 @@ class GattClient(
         private set
     var priorityRequested: Boolean? = null
         private set
+    @Volatile
     var lastRssi: Int? = null
         private set
+    @Volatile
     var connectionIntervalUs: Int? = null
         private set
 
@@ -334,17 +336,12 @@ class GattClient(
                 }
             }
 
-            // All descriptor writes complete.
-            // Read initial start RSSI, and await onReadRemoteRssi to declare READY
-            updateState(GattState.SUBSCRIBING, "Reading initial RSSI...")
-            val readStarted = gatt.readRemoteRssi()
-            if (!readStarted) {
-                // If stack rejected RSSI read, transition directly to READY
-                updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
-            }
+            // All descriptor writes complete: transition to READY and trigger initial RSSI read
+            updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+            gatt.readRemoteRssi()
         }
 
-        // Android 8.0+ / 13+ connection parameter change callback
+        // Android connection parameters update callback
         fun onConnectionUpdated(
             gatt: BluetoothGatt,
             interval: Int,
@@ -353,7 +350,7 @@ class GattClient(
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                val intervalUs = interval * 1250 // 1.25 ms per unit
+                val intervalUs = interval * 1250 // 1.25 ms per unit -> microseconds
                 connectionIntervalUs = intervalUs
                 mainHandler.post { listener.onIntervalUpdated(intervalUs) }
             }
@@ -433,9 +430,6 @@ class GattClient(
                 mainHandler.post { listener.onRssiRead(rssi) }
             }
             rssiLatch?.countDown()
-            if (state == GattState.SUBSCRIBING) {
-                updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name}, RSSI: ${rssi} dBm)")
-            }
         }
     }
 }
