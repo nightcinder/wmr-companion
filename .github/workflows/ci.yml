@@ -53,3 +53,24 @@ jobs:
           name: wmr-companion-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 14
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test WMRCompanionKit Swift Package
+        working-directory: packages/WMRCompanionKit
+        run: swift test
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Validate Flutter iOS config
+        run: |
+          flutter pub get
+          flutter build ios --config-only --no-codesign
