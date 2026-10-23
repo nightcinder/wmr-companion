@@ -1,23 +1,54 @@
 import 'package:flutter/material.dart';
-import 'package:vector_math/vector_math_64.dart' as vm;
+import 'package:vector_math/vector_math_64.dart' show Quaternion, Vector3;
 
-import 'package:wmr_core/domain/orientation.dart';
+/// Rotates a body-frame vector by [orientation] in the active direction
+/// (body to view), matching the app's historical orientation view.
+///
+/// [Quaternion.rotate] in vector_math rotates in the opposite direction and
+/// mutates its argument, so it is deliberately not used here.
+Vector3 rotateOrientationVector(Quaternion orientation, Vector3 body) =>
+    orientation.normalized().asRotationMatrix().transformed(body);
+
+/// A 3DoF orientation cube with body axes.
+///
+/// Drop it in a [SizedBox] or another bounded box. X is red, Y green, Z blue;
+/// the +Z face is shaded. The widget has no state and no controller
+/// dependency, so a host can feed it any fused [Quaternion].
+class OrientationView extends StatelessWidget {
+  const OrientationView({super.key, required this.orientation, this.edgeColor});
+
+  final Quaternion orientation;
+
+  /// Cube edge colour. Defaults to the theme's `onSurface`.
+  final Color? edgeColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: OrientationPainter(
+        orientation,
+        edgeColor: edgeColor ?? Theme.of(context).colorScheme.onSurface,
+      ),
+      size: Size.infinite,
+    );
+  }
+}
 
 /// Draws a cube and its body axes rotated by [orientation], with a simple
-/// perspective projection. X red, Y green, Z blue; the +Z face is shaded.
+/// perspective projection.
 class OrientationPainter extends CustomPainter {
   OrientationPainter(this.orientation, {required this.edgeColor});
 
-  final vm.Quaternion orientation;
+  final Quaternion orientation;
   final Color edgeColor;
 
   static const double _cameraDistance = 5;
   static const double _halfSize = 0.7;
 
-  static final List<vm.Vector3> _corners = [
+  static final List<Vector3> _corners = [
     for (final x in [-1.0, 1.0])
       for (final y in [-1.0, 1.0])
-        for (final z in [-1.0, 1.0]) vm.Vector3(x, y, z) * _halfSize,
+        for (final z in [-1.0, 1.0]) Vector3(x, y, z) * _halfSize,
   ];
 
   // Pairs of corner indices differing in exactly one coordinate.
@@ -34,9 +65,8 @@ class OrientationPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final focal = size.shortestSide * 1.6;
-
-    Offset project(vm.Vector3 v) {
-      final r = rotateVector(orientation, v);
+    Offset project(Vector3 v) {
+      final r = rotateOrientationVector(orientation, v);
       final depth = _cameraDistance - r.z;
       return center + Offset(focal * r.x / depth, -focal * r.y / depth);
     }
@@ -57,12 +87,12 @@ class OrientationPainter extends CustomPainter {
       canvas.drawLine(points[a], points[b], edgePaint);
     }
 
-    final origin = project(vm.Vector3.zero());
+    final origin = project(Vector3.zero());
     const axisLength = 1.3;
     final axes = [
-      (vm.Vector3(axisLength, 0, 0), Colors.red),
-      (vm.Vector3(0, axisLength, 0), Colors.green),
-      (vm.Vector3(0, 0, axisLength), Colors.blue),
+      (Vector3(axisLength, 0, 0), Colors.red),
+      (Vector3(0, axisLength, 0), Colors.green),
+      (Vector3(0, 0, axisLength), Colors.blue),
     ];
     for (final (axis, color) in axes) {
       canvas.drawLine(
