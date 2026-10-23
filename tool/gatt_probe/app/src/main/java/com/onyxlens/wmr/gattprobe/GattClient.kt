@@ -341,8 +341,8 @@ class GattClient(
             gatt.readRemoteRssi()
         }
 
-        // Android connection parameters update callback
-        fun onConnectionUpdated(
+        // Standard override in Android SDK 33+ (compileSdk = 35)
+        override fun onConnectionUpdated(
             gatt: BluetoothGatt,
             interval: Int,
             latency: Int,

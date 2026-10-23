@@ -143,7 +143,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         }
 
         btnStartRun.setOnClickListener {
-            startRun()
+            prepareAndStartRun()
         }
 
         btnStopRun.setOnClickListener {
@@ -372,10 +372,29 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun startRun() {
+    private fun prepareAndStartRun() {
         val client = gattClient ?: return
         if (!client.isReady) {
             Toast.makeText(this, "GATT not ready", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        btnStartRun.isEnabled = false
+        tvRunMetrics.text = "Reading baseline RSSI..."
+
+        // Read fresh start RSSI in background before starting pings
+        Thread {
+            client.readRssiSafe(1000L)
+            mainHandler.post {
+                actualStartRun()
+            }
+        }.start()
+    }
+
+    private fun actualStartRun() {
+        val client = gattClient ?: return
+        if (!client.isReady) {
+            btnStartRun.isEnabled = true
             return
         }
 
@@ -394,7 +413,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         runStartTimeNanos = SystemClock.elapsedRealtimeNanos()
         val originUs = runStartTimeNanos / 1000L
 
-        // Snapshot parameters and initial start RSSI at start of run
+        // Freshly snapshot RSSI, stream and interval at start of run
         runStartRssi = client.lastRssi
         runStreamStr = if (rbStreamBatched.isChecked) "batched" else "none"
         runEchoIntervalUs = selectedIntervalMs * 1000L
