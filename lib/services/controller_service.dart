@@ -239,13 +239,28 @@ class ControllerService {
     this._mapping = AxisMapping.defaultMapping,
     this._filterKind = FilterKind.madgwick,
     StickConfig stickConfig = const StickConfig(),
+    this.onStickCentre,
   }) : _stickConfig = stickConfig {
+    _pipelines = [
+      for (var h = 0; h < wmrNumControllers; h++)
+        HandPipeline(
+          stickNormalizer: StickNormalizer(
+            onCentreChanged: onStickCentre == null
+                ? null
+                : (centre) => onStickCentre!(h, centre),
+          ),
+        ),
+    ];
     for (final p in _pipelines) {
       p.mapping = _mapping;
       p.setFilter(_filterKind);
       p.stickConfig = stickConfig;
     }
   }
+
+  /// Called when a hand learns a new rest centre or the user re-centres it,
+  /// so the app can save it. Restoring a saved centre does not call it.
+  final void Function(int hand, List<double> centre)? onStickCentre;
 
   final BleTransport transport;
   final String deviceId;
@@ -258,9 +273,7 @@ class ControllerService {
   StreamSubscription<BleNotification>? _subscription;
 
   // Decoded (FF12 and FF14) side.
-  final List<HandPipeline> _pipelines = [
-    for (var h = 0; h < wmrNumControllers; h++) HandPipeline(),
-  ];
+  late final List<HandPipeline> _pipelines;
   final List<int?> _dLastSeq = List.filled(wmrNumControllers, null);
   final List<int> _dGaps = List.filled(wmrNumControllers, 0);
   final List<int> _dOutOfOrder = List.filled(wmrNumControllers, 0);
@@ -513,6 +526,13 @@ class ControllerService {
   }
 
   StickConfig get stickConfig => _stickConfig;
+
+  /// Restores a saved rest centre for [hand], in fraction of full scale.
+  void setStickCentre(int hand, double cx, double cy) =>
+      _pipelines[hand].stickNormalizer.restoreCentre(cx, cy);
+
+  /// Forgets the saved rest centre of [hand].
+  void clearStickCentre(int hand) => _pipelines[hand].stickNormalizer.reset();
 
   /// Takes the current stick position of [hand] as its rest centre.
   void recentreStick(int hand) => _pipelines[hand].recentreStick();

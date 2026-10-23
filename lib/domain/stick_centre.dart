@@ -26,6 +26,116 @@ class StickConfig {
   int get hashCode => Object.hash(deadZone, learn);
 }
 
+/// Everything the app keeps between runs about the sticks: the live settings
+/// and, per hand (0 LEFT, 1 RIGHT), the learned or manual rest centre.
+class StickSettings {
+  const StickSettings({
+    this.config = const StickConfig(),
+    this.centres = const [null, null],
+  });
+
+  final StickConfig config;
+
+  /// Rest centre per hand as a fraction of full scale, or null before one has
+  /// been learned or set.
+  final List<List<double>?> centres;
+
+  List<double>? centreFor(int hand) =>
+      hand >= 0 && hand < centres.length ? centres[hand] : null;
+
+  StickSettings copyWith({StickConfig? config, List<List<double>?>? centres}) =>
+      StickSettings(
+        config: config ?? this.config,
+        centres: centres ?? this.centres,
+      );
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! StickSettings ||
+        other.config != config ||
+        other.centres.length != centres.length) {
+      return false;
+    }
+    for (var h = 0; h < centres.length; h++) {
+      final a = centres[h];
+      final b = other.centres[h];
+      if (a == null || b == null) {
+        if (a != b) return false;
+        continue;
+      }
+      if (a.length != b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (a[i] != b[i]) return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    config,
+    Object.hashAll([
+      for (final centre in centres)
+        centre == null ? null : Object.hashAll(centre),
+    ]),
+  );
+}
+
+const int stickSettingsVersion = 1;
+
+Map<String, Object?> stickSettingsToJson(StickSettings settings) => {
+  'version': stickSettingsVersion,
+  'deadZone': settings.config.deadZone,
+  'learn': settings.config.learn,
+  'centres': [
+    for (final centre in settings.centres)
+      centre == null ? null : [centre[0], centre[1]],
+  ],
+};
+
+/// Reads [stickSettingsToJson] output. Tolerant: a missing, mistyped or
+/// out-of-range field falls back to its default (the dead zone is clamped to
+/// the slider range), and a malformed or non-finite centre is dropped. Null
+/// if [json] is not a map or has a newer version.
+StickSettings? stickSettingsFromJson(Object? json) {
+  if (json is! Map) return null;
+  final version = json['version'];
+  if (version is int && version > stickSettingsVersion) return null;
+
+  const defaults = StickSettings();
+  double num_(Object? v, double def, double lo, double hi) =>
+      v is num && v.isFinite ? v.toDouble().clamp(lo, hi) : def;
+
+  final raw = json['centres'];
+  final centres = <List<double>?>[];
+  for (var h = 0; h < defaults.centres.length; h++) {
+    final value = raw is List && h < raw.length ? raw[h] : null;
+    if (value is List &&
+        value.length >= 2 &&
+        value[0] is num &&
+        value[1] is num &&
+        (value[0] as num).isFinite &&
+        (value[1] as num).isFinite) {
+      centres.add([
+        (value[0] as num).toDouble().clamp(-1.0, 1.0),
+        (value[1] as num).toDouble().clamp(-1.0, 1.0),
+      ]);
+    } else {
+      centres.add(null);
+    }
+  }
+
+  return StickSettings(
+    config: StickConfig(
+      deadZone: num_(json['deadZone'], defaults.config.deadZone, 0, 0.3),
+      learn: json['learn'] is bool
+          ? json['learn'] as bool
+          : defaults.config.learn,
+    ),
+    centres: centres,
+  );
+}
+
 /// Turns the raw thumbstick (i16 per axis, -32767..32767) of one hand into a
 /// normalized -1..1 pair with the rest offset removed.
 ///
@@ -49,9 +159,14 @@ class StickNormalizer {
     this.holdSeconds = 1.0,
     this.stillTolerance = 0.02,
     this.maxStep = 0.1,
+    this.onCentreChanged,
   });
 
   static const double fullScale = 32767;
+
+  /// Called when a new centre is learned or [recentre] sets one, so the app
+  /// can save it. Restoring a saved centre does not call it.
+  final void Function(List<double> centre)? onCentreChanged;
 
   /// Largest distance from zero (the nominal centre) at which a rest can be
   /// learned, in fraction of full scale.
@@ -116,11 +231,27 @@ class StickNormalizer {
   /// first sample.
   void recentre() {
     if (!_haveLast) return;
-    _cx = _lastX;
-    _cy = _lastY;
+    _setCentre(_lastX, _lastY, notify: true);
+  }
+
+  /// Restores a saved centre (fraction of full scale). Invalid readings are
+  /// ignored; a restore is not reported through [onCentreChanged].
+  void restoreCentre(double cx, double cy) {
+    if (!cx.isFinite || !cy.isFinite) return;
+    _setCentre(cx, cy);
+  }
+
+  void _setCentre(double cx, double cy, {bool notify = false}) {
+    final x = cx.clamp(-1.0, 1.0).toDouble();
+    final y = cy.clamp(-1.0, 1.0).toDouble();
+    final changed = !_hasCentre || _cx != x || _cy != y;
+    _cx = x;
+    _cy = y;
     _hasCentre = true;
-    _centreUpdates++;
     breakWindow();
+    if (!changed) return;
+    _centreUpdates++;
+    if (notify) onCentreChanged?.call(centre);
   }
 
   /// Normalizes one sample. [dt] is the controller-time step since the
@@ -165,11 +296,7 @@ class StickNormalizer {
     _n++;
     _held += dt;
     if (_held >= holdSeconds) {
-      _cx = _sumX / _n;
-      _cy = _sumY / _n;
-      _hasCentre = true;
-      _centreUpdates++;
-      breakWindow();
+      _setCentre(_sumX / _n, _sumY / _n, notify: true);
     }
   }
 
