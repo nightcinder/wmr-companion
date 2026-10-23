@@ -3,11 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:wmr_core/ble/ble_transport.dart';
-import 'package:wmr_companion/wmr_companion.dart';
-
 import 'package:wmr_ble/wmr_ble.dart';
-
+import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/services/controller_service.dart';
 
 import '../debug/stream_settings.dart';
@@ -25,10 +22,13 @@ class RealDeviceState {
   const RealDeviceState({
     this.status = const BleLinkStatus(BleLinkPhase.idle),
     this.results = const [],
-    this.deviceId,
+    String? deviceId,
+    this.connectedDeviceIds = const {},
+    this.connectingDeviceIds = const {},
+    this.deviceStatuses = const {},
     this.stats,
     this.mode,
-  });
+  }) : _primaryDeviceId = deviceId;
 
   final BleLinkStatus status;
 
@@ -39,18 +39,61 @@ class RealDeviceState {
   final List<BleScanResult> results;
 
   /// The device we connected to (or lost).
-  final String? deviceId;
+  final String? _primaryDeviceId;
+  String? get deviceId => connectedDeviceIds.isNotEmpty
+      ? connectedDeviceIds.first
+      : (connectingDeviceIds.isNotEmpty
+            ? connectingDeviceIds.first
+            : _primaryDeviceId);
+
+  /// All currently connected bridges.
+  final Set<String> connectedDeviceIds;
+
+  /// Bridges currently in the process of connecting.
+  final Set<String> connectingDeviceIds;
+
+  /// Per-device link status.
+  final Map<String, BleLinkStatus> deviceStatuses;
+
   final StreamStats? stats;
 
   bool get scanning => status.phase == BleLinkPhase.scanning;
-  bool get connected => status.phase == BleLinkPhase.ready;
-  bool get busy => const {
-    BleLinkPhase.connecting,
-    BleLinkPhase.negotiatingMtu,
-    BleLinkPhase.discovering,
-    BleLinkPhase.subscribing,
-    BleLinkPhase.disconnecting,
-  }.contains(status.phase);
+  bool get connected =>
+      connectedDeviceIds.isNotEmpty || status.phase == BleLinkPhase.ready;
+
+  bool isDeviceConnected(String id) => connectedDeviceIds.contains(id);
+
+  bool isDeviceBusy(String id) {
+    if (connectingDeviceIds.contains(id)) return true;
+    final s = deviceStatuses[id];
+    if (s == null) return false;
+    return const {
+      BleLinkPhase.connecting,
+      BleLinkPhase.negotiatingMtu,
+      BleLinkPhase.discovering,
+      BleLinkPhase.subscribing,
+      BleLinkPhase.disconnecting,
+    }.contains(s.phase);
+  }
+
+  bool get busy =>
+      connectingDeviceIds.isNotEmpty ||
+      const {
+        BleLinkPhase.connecting,
+        BleLinkPhase.negotiatingMtu,
+        BleLinkPhase.discovering,
+        BleLinkPhase.subscribing,
+        BleLinkPhase.disconnecting,
+      }.contains(status.phase) ||
+      deviceStatuses.values.any(
+        (s) => const {
+          BleLinkPhase.connecting,
+          BleLinkPhase.negotiatingMtu,
+          BleLinkPhase.discovering,
+          BleLinkPhase.subscribing,
+          BleLinkPhase.disconnecting,
+        }.contains(s.phase),
+      );
 }
 
 final realDeviceProvider =
@@ -58,33 +101,56 @@ final realDeviceProvider =
       RealDeviceController.new,
     );
 
-/// Drives scan, connect and the [WmrCompanion] session for the real bridge.
-///
-/// The facade owns the pipeline; this controller adapts its connection
-/// lifecycle to the screen's existing [RealDeviceState] and keeps the raw
-/// [ControllerService] reachable for the diagnostic screens until phase 4.
+/// Drives scan, connect and the [ControllerService] for the real bridge.
 class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleScanResult> _seen = {};
+  final Set<String> _connectedDeviceIds = {};
+  final Set<String> _connectingDeviceIds = {};
+  final Map<String, BleLinkStatus> _deviceStatuses = {};
+  final Map<String, Timer> _reconnectTimers = {};
   StreamSubscription<BleScanResult>? _scanSub;
   StreamSubscription<BleLinkStatus>? _statusSub;
   AppLifecycleListener? _lifecycle;
-  WmrCompanion? _companion;
+  ControllerService? _service;
   Timer? _statsTimer;
+  final Map<String, int> _deviceDisconnectGenerations = {};
+  int _globalDisconnectGeneration = 0;
+  bool _intentionalDisconnect = false;
 
   @override
   RealDeviceState build() {
     final transport = ref.watch(realTransportProvider);
     _statusSub = transport.statusChanges.listen((s) {
-      state = RealDeviceState(
-        status: s,
-        results: state.results,
-        deviceId: state.deviceId,
-        stats: state.stats,
-        mode: state.mode,
-      );
+      if (s.deviceId != null) {
+        final id = s.deviceId!;
+        _deviceStatuses[id] = s;
+        if (s.phase == BleLinkPhase.ready) {
+          _connectedDeviceIds.add(id);
+          _connectingDeviceIds.remove(id);
+        } else if (s.phase == BleLinkPhase.disconnected ||
+            s.phase == BleLinkPhase.disconnecting ||
+            s.phase == BleLinkPhase.connectionLost ||
+            s.isFailure) {
+          _connectedDeviceIds.remove(id);
+          _connectingDeviceIds.remove(id);
+          unawaited(_service?.removeDevice(id, disconnectTransport: false));
+          if (_connectedDeviceIds.isEmpty && _connectingDeviceIds.isEmpty) {
+            _statsTimer?.cancel();
+            unawaited(_service?.dispose());
+            _service = null;
+          }
+          if (s.phase == BleLinkPhase.connectionLost &&
+              !_intentionalDisconnect) {
+            _scheduleReconnect(id);
+          }
+        }
+      }
+      final effectiveStatus = _connectedDeviceIds.isNotEmpty
+          ? (_deviceStatuses[_connectedDeviceIds.first] ?? s)
+          : s;
+      _update(status: effectiveStatus);
     });
-    // The BLE package has no widget dependency; the host forwards its
-    // lifecycle so a scan pauses in the background and resumes on return.
+
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
       onStateChange: (s) => unawaited(
@@ -97,29 +163,35 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         }),
       ),
     );
-    ref.listen(axisMappingProvider, (_, m) => _companion?.setAxisMapping(m));
-    ref.listen(filterKindProvider, (_, _) => _applyFusion());
-    ref.listen(filterTuningProvider, (_, _) => _applyFusion());
+
+    ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
+    ref.listen(filterKindProvider, (_, k) => _service?.setFilterKind(k));
+    ref.listen(
+      filterTuningProvider,
+      (_, tuning) => _service?.setFilterTuning(tuning),
+    );
     ref.listen(
       stickSettingsProvider.select((s) => s.config),
-      (_, c) => _companion?.setStickConfig(c),
+      (_, c) => _service?.setStickConfig(c),
     );
     ref.listen(stickSettingsProvider.select((s) => s.centres), (_, centres) {
-      final companion = _companion;
-      if (companion != null) _applyStickCentres(companion, centres);
+      final service = _service;
+      if (service != null) applyStickCentres(service, centres);
     });
     ref.listen(ff13SettingsProvider, (_, s) {
-      final companion = _companion;
-      if (companion != null) _applyFf13(companion, s);
+      final service = _service;
+      if (service != null) applyFf13Settings(service, s);
     });
     ref.onDispose(() {
       lifecycle.dispose();
       _scanSub?.cancel();
       _statusSub?.cancel();
       _statsTimer?.cancel();
-      final companion = _companion;
-      _companion = null;
-      if (companion != null) unawaited(companion.dispose());
+      for (final t in _reconnectTimers.values) {
+        t.cancel();
+      }
+      _reconnectTimers.clear();
+      _service?.dispose();
     });
     return RealDeviceState(status: transport.status);
   }
@@ -128,50 +200,43 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// The service behind the current connection, for consumers that share its
   /// frame stream (the capture screen). Null before the first connect.
-  ControllerService? get service => _companion?.debugControllerService;
+  ControllerService? get service => _service;
 
-  void _applyFusion() {
-    _companion?.setFusion(
-      FusionConfig(
-        kind: ref.read(filterKindProvider),
-        tuning: ref.read(filterTuningProvider),
-      ),
-    );
-  }
-
-  /// Keeps the facade's stored centres in step, not only the live service: a
-  /// facade reconnect builds a new service from that stored state. Sending a
-  /// change to [service] directly would lose it on the next reconnect.
-  void _applyStickCentres(WmrCompanion companion, List<List<double>?> centres) {
-    for (var h = 0; h < centres.length; h++) {
-      final centre = centres[h];
-      if (centre == null) {
-        companion.clearStickCentre(Hand.of(h));
-      } else {
-        companion.setStickCentre(Hand.of(h), centre[0], centre[1]);
+  void _scheduleReconnect(String id) {
+    _reconnectTimers[id]?.cancel();
+    _reconnectTimers[id] = Timer(const Duration(milliseconds: 500), () async {
+      _reconnectTimers.remove(id);
+      if (!_intentionalDisconnect) {
+        await connect(id);
       }
-    }
+    });
   }
 
-  /// Same for FF13: the facade stores the block per hand and restores it when
-  /// it reconnects.
-  void _applyFf13(WmrCompanion companion, Ff13Settings settings) {
-    for (var h = 0; h < settings.calibrations.length; h++) {
-      companion.setFf13Calibration(
-        Hand.of(h),
-        settings.calibrations[h],
-        apply: settings.apply[h],
-      );
-    }
-  }
-
-  void _update({List<BleScanResult>? results, String? deviceId}) {
+  void _update({
+    BleLinkStatus? status,
+    List<BleScanResult>? results,
+    String? deviceId,
+  }) {
+    final activeStatus =
+        status ??
+        (_connectedDeviceIds.isNotEmpty
+            ? (_deviceStatuses[_connectedDeviceIds.first] ?? _transport.status)
+            : _transport.status);
     state = RealDeviceState(
-      status: _transport.status,
+      status: activeStatus,
       results: results ?? state.results,
-      deviceId: deviceId ?? state.deviceId,
-      stats: state.stats,
-      mode: state.mode,
+      deviceId:
+          deviceId ??
+          (_connectedDeviceIds.isNotEmpty
+              ? _connectedDeviceIds.first
+              : (_connectingDeviceIds.isNotEmpty
+                    ? _connectingDeviceIds.first
+                    : state.deviceId)),
+      connectedDeviceIds: Set.unmodifiable(_connectedDeviceIds),
+      connectingDeviceIds: Set.unmodifiable(_connectingDeviceIds),
+      deviceStatuses: Map.unmodifiable(_deviceStatuses),
+      stats: _service?.stats ?? state.stats,
+      mode: _service?.modeState ?? state.mode,
     );
   }
 
@@ -199,61 +264,75 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// Connects and subscribes. Also the way to reconnect after a lost
   /// connection: it repeats the whole sequence.
-  ///
-  /// The facade owns the pipeline and its lifecycle; this method only feeds it
-  /// the app's current settings and publishes the service counters the screen
-  /// already shows.
   Future<void> connect(String deviceId) async {
+    if (_connectedDeviceIds.contains(deviceId) ||
+        _connectingDeviceIds.contains(deviceId)) {
+      return;
+    }
     await stopScan();
+    final deviceDisconnectGen = _deviceDisconnectGenerations[deviceId] ?? 0;
+    final globalDisconnectGen = _globalDisconnectGeneration;
+    _connectingDeviceIds.add(deviceId);
     _update(deviceId: deviceId);
-    final previous = _companion;
-    _companion = null;
-    await previous?.dispose();
-
-    final settings = ref.read(stickSettingsProvider);
-    final companion = _companion = WmrCompanion(
-      ble: _transport,
-      config: WmrCompanionConfig(
-        streamMode: ref.read(streamModeProvider),
-        fusion: FusionConfig(
-          kind: ref.read(filterKindProvider),
-          tuning: ref.read(filterTuningProvider),
-        ),
-        axisMapping: ref.read(axisMappingProvider),
-        sticks: settings.config,
-      ),
-      onStickCentre: (hand, centre) => ref
-          .read(stickSettingsProvider.notifier)
-          .setCentre(hand.wireIndex, centre[0], centre[1]),
-    );
-    _applyStickCentres(companion, settings.centres);
-    _applyFf13(companion, ref.read(ff13SettingsProvider));
-
     try {
-      await companion.connect(WmrBridgeDevice(id: deviceId));
-    } on WmrStreamModeException {
-      // The link is up but the stream did not enable; the banner reads the
-      // fault from the service. Keep the session for the retry.
-    } on WmrException {
-      return; // connection failure is already in the transport status
-    }
-    final service = companion.debugControllerService;
-    if (service == null) return;
+      if (_service == null) {
+        final settings = ref.read(stickSettingsProvider);
+        final service = _service = ControllerService(
+          _transport,
+          [deviceId],
+          mode: ref.read(streamModeProvider),
+          mapping: ref.read(axisMappingProvider),
+          filterKind: ref.read(filterKindProvider),
+          filterTuning: ref.read(filterTuningProvider),
+          stickConfig: settings.config,
+          onStickCentre: (hand, centre) => ref
+              .read(stickSettingsProvider.notifier)
+              .setCentre(hand, centre[0], centre[1]),
+        );
+        applyStickCentres(service, settings.centres);
+        applyFf13Settings(service, ref.read(ff13SettingsProvider));
+        try {
+          await service.start();
+        } on BleTransportException {
+          _connectedDeviceIds.remove(deviceId);
+          _service?.dispose();
+          _service = null;
+          _update();
+          return; // already in the status
+        } catch (_) {
+          _connectedDeviceIds.remove(deviceId);
+          _service?.dispose();
+          _service = null;
+          _update();
+          return;
+        }
+      } else {
+        try {
+          await _service!.addDevice(deviceId);
+        } on BleTransportException {
+          _connectedDeviceIds.remove(deviceId);
+          _update();
+          return;
+        } catch (_) {
+          _connectedDeviceIds.remove(deviceId);
+          _update();
+          return;
+        }
+      }
 
-    void publish() {
-      // Read the service through the getter on every tick: the facade creates
-      // a new ControllerService when it reconnects after a drop.
-      final current = this.service;
-      if (current == null) return;
-      state = RealDeviceState(
-        status: _transport.status,
-        results: state.results,
-        deviceId: state.deviceId,
-        stats: current.stats,
-        mode: current.modeState,
-      );
+      // Check if disconnect was called for this device or all devices:
+      if ((_deviceDisconnectGenerations[deviceId] ?? 0) !=
+              deviceDisconnectGen ||
+          globalDisconnectGen != _globalDisconnectGeneration) {
+        await _transport.disconnect(deviceId);
+        return;
+      }
+    } finally {
+      _connectingDeviceIds.remove(deviceId);
+      _update();
     }
 
+    void publish() => _update();
     publish();
     _statsTimer?.cancel();
     _statsTimer = Timer.periodic(
@@ -267,38 +346,57 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// A refusal shows up in [RealDeviceState.mode], never silently.
   Future<void> setStreamMode(StreamMode mode) async {
     ref.read(streamModeProvider.notifier).set(mode);
-    final companion = _companion;
-    final service = companion?.debugControllerService;
-    if (companion == null || service == null) return;
-    try {
-      await companion.setStreamMode(mode);
-    } on WmrException {
-      // Typed failure; the mode state below carries the fault for the banner.
-    }
-    // Re-read after the await: a reconnect during the switch replaces the
-    // service, and the state must describe the one that is live now.
-    final current = this.service;
-    state = RealDeviceState(
-      status: _transport.status,
-      results: state.results,
-      deviceId: state.deviceId,
-      stats: current?.stats ?? state.stats,
-      mode: current?.modeState ?? state.mode,
-    );
+    final service = _service;
+    if (service == null) return;
+    await service.setMode(mode);
+    _update();
   }
 
-  Future<void> disconnect() async {
-    final id = state.deviceId;
-    _statsTimer?.cancel();
-    final companion = _companion;
-    _companion = null;
-    if (companion != null) {
-      // The facade owns the link, so it also performs the intentional
-      // disconnect that suppresses the auto-reconnect path.
-      await companion.disconnect();
-      await companion.dispose();
+  Future<void> disconnect([String? deviceId]) async {
+    if (deviceId != null) {
+      _deviceDisconnectGenerations[deviceId] =
+          (_deviceDisconnectGenerations[deviceId] ?? 0) + 1;
+      _reconnectTimers.remove(deviceId)?.cancel();
+
+      _connectingDeviceIds.remove(deviceId);
+      _connectedDeviceIds.remove(deviceId);
+      _deviceStatuses.remove(deviceId);
+      await _service?.removeDevice(deviceId);
+      if (_connectedDeviceIds.isEmpty && _connectingDeviceIds.isEmpty) {
+        _statsTimer?.cancel();
+        await _service?.dispose();
+        _service = null;
+      }
+      try {
+        await _transport.disconnect(deviceId);
+      } catch (_) {}
+      _update();
       return;
     }
-    if (id != null) await _transport.disconnect(id);
+
+    _globalDisconnectGeneration++;
+    for (final t in _reconnectTimers.values) {
+      t.cancel();
+    }
+    _reconnectTimers.clear();
+
+    _intentionalDisconnect = true;
+    try {
+      _statsTimer?.cancel();
+      await _service?.dispose();
+      _service = null;
+      final toDisconnect = {..._connectedDeviceIds, ..._connectingDeviceIds};
+      _connectingDeviceIds.clear();
+      _connectedDeviceIds.clear();
+      _deviceStatuses.clear();
+      for (final id in toDisconnect) {
+        try {
+          await _transport.disconnect(id);
+        } catch (_) {}
+      }
+      _update();
+    } finally {
+      _intentionalDisconnect = false;
+    }
   }
 }

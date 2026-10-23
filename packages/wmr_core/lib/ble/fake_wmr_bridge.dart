@@ -15,23 +15,39 @@ import 'ble_transport.dart';
 import 'fake_transport.dart';
 
 const String fakeBridgeDeviceId = 'fake-wmr-bridge';
+const String fakeBridgeLeftDeviceId = 'fake-wmr-bridge-left';
+const String fakeBridgeRightDeviceId = 'fake-wmr-bridge-right';
+
+const List<BleServiceInfo> fakeBridgeDeviceServices = [
+  BleServiceInfo(
+    uuid: wmrBridgeServiceUuid,
+    characteristicUuids: [
+      wmrBridgeStreamCharUuid,
+      wmrBridgeDecodedCharUuid,
+      wmrBridgeBatchedCharUuid,
+      wmrBridgeEchoCharUuid,
+      wmrBridgeConfigCharUuid,
+    ],
+  ),
+];
 
 /// A [FakeDevice] exposing the bridge's GATT layout.
 const FakeDevice fakeBridgeDevice = FakeDevice(
   id: fakeBridgeDeviceId,
   name: wmrBridgeDeviceName,
-  services: [
-    BleServiceInfo(
-      uuid: wmrBridgeServiceUuid,
-      characteristicUuids: [
-        wmrBridgeStreamCharUuid,
-        wmrBridgeDecodedCharUuid,
-        wmrBridgeBatchedCharUuid,
-        wmrBridgeEchoCharUuid,
-        wmrBridgeConfigCharUuid,
-      ],
-    ),
-  ],
+  services: fakeBridgeDeviceServices,
+);
+
+const FakeDevice fakeBridgeLeftDevice = FakeDevice(
+  id: fakeBridgeLeftDeviceId,
+  name: 'WMR Bridge Left',
+  services: fakeBridgeDeviceServices,
+);
+
+const FakeDevice fakeBridgeRightDevice = FakeDevice(
+  id: fakeBridgeRightDeviceId,
+  name: 'WMR Bridge Right',
+  services: fakeBridgeDeviceServices,
 );
 
 /// Same filler as the firmware tests' `make_frame`: `A1`, report ID 1, then a
@@ -104,6 +120,7 @@ class FakeWmrBridge {
     this.echoEnabled = true,
     List<Uint8List?> configBlobs = const [null, null],
     List<ConfigState>? configStates,
+    this.hands = const [wmrHandLeft, wmrHandRight],
   }) : _ticks = List.of(startTicks ?? const [1000, 1000]),
        configBlobs = List.of(configBlobs),
        configStates = List.of(
@@ -113,9 +130,25 @@ class FakeWmrBridge {
                  b == null ? ConfigState.notRead : ConfigState.ready,
              ],
        ) {
-    transport.onWrite = _onWrite;
-    transport.onRead = _onRead;
+    if (transport.onWrite == null) {
+      transport.onWrite = _onWrite;
+    } else {
+      transport.addWriteHandler(_onWrite);
+    }
+    if (transport.onRead == null) {
+      transport.onRead = _onRead;
+    } else {
+      transport.addReadHandler((id, uuid) {
+        if (id == deviceId && uuid.toLowerCase() == wmrBridgeConfigCharUuid) {
+          return _onRead(id, uuid);
+        }
+        return null;
+      });
+    }
   }
+
+  /// Hands this bridge serves. Defaults to both [wmrHandLeft, wmrHandRight].
+  final List<int> hands;
 
   /// FF13: the block served per hand and the state reported for it. Change
   /// them between reads to model a block that finishes reading.
@@ -234,7 +267,7 @@ class FakeWmrBridge {
   void tick() {
     final capacity = notificationCapacity(attMtu);
     final t = _elapsedUs / 1e6;
-    for (var hand = 0; hand < wmrNumControllers; hand++) {
+    for (final hand in hands) {
       _sequence[hand] = (_sequence[hand] + 1) & 0xffffffff;
       final ticks = _ticks[hand];
       _ticks[hand] = (ticks + periodTicks) & 0xffffffff;

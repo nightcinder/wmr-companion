@@ -131,11 +131,12 @@ class UniversalBleTransport implements BleTransport {
   Stream<BleLinkStatus> get statusChanges => _statusCtl.stream;
 
   Future<void> _tail = Future.value();
-  _Session? _session;
+  final Map<String, _Session> _sessions = {};
+  final Map<String, BleLinkStatus> _deviceStatuses = {};
   final Set<String> _connecting = {};
   final Map<String, BleConnectionState> _states = {};
   final Map<String, StreamController<BleConnectionState>> _stateCtls = {};
-  StreamSubscription<AdapterConnectionEvent>? _linkSub;
+  final Map<String, StreamSubscription<AdapterConnectionEvent>> _linkSubs = {};
 
   final Map<String, _Wanted> _wanted = {};
   final Map<String, StreamController<BleNotification>> _streams = {};
@@ -162,17 +163,29 @@ class UniversalBleTransport implements BleTransport {
     return next;
   }
 
+  BleLinkStatus statusFor(String deviceId) =>
+      _deviceStatuses[deviceId] ?? const BleLinkStatus(BleLinkPhase.idle);
+
+  Map<String, BleLinkStatus> get deviceStatuses =>
+      Map.unmodifiable(_deviceStatuses);
+
   /// Runs [op] after every earlier GATT operation finished.
   Future<T> _serial<T>(Future<T> Function() op) {
     final done = Completer<void>();
     final previous = _tail;
     _tail = done.future;
-    return previous.then((_) => op()).whenComplete(done.complete);
+    return previous
+        .then((_) {
+          return op();
+        })
+        .whenComplete(done.complete);
   }
 
   void _emit(BleLinkPhase phase, {String? deviceId, String? message}) {
-    final s = _session;
-    _status = BleLinkStatus(
+    final s = deviceId != null
+        ? _sessions[deviceId]
+        : _sessions.values.lastOrNull;
+    final status = BleLinkStatus(
       phase,
       deviceId: deviceId ?? s?.deviceId,
       message: message,
@@ -180,6 +193,10 @@ class UniversalBleTransport implements BleTransport {
       priorityRequested: s?.priorityRequested,
       warnings: List.unmodifiable(s?.warnings ?? const []),
     );
+    if (deviceId != null) {
+      _deviceStatuses[deviceId] = status;
+    }
+    _status = status;
     if (!_statusCtl.isClosed) _statusCtl.add(_status);
   }
 
@@ -385,7 +402,17 @@ class UniversalBleTransport implements BleTransport {
       // The platform may already have stopped the scan when it suspended us.
     }
     _adapterScanning = false;
-    if (_status.phase == BleLinkPhase.scanning) _emit(BleLinkPhase.idle);
+    if (_status.phase == BleLinkPhase.scanning) {
+      final readySession = _sessions.values.cast<_Session?>().firstWhere(
+        (s) => s != null && s.ready,
+        orElse: () => null,
+      );
+      if (readySession != null) {
+        _emit(BleLinkPhase.ready, deviceId: readySession.deviceId);
+      } else {
+        _emit(BleLinkPhase.idle);
+      }
+    }
   }
 
   @override
@@ -402,7 +429,7 @@ class UniversalBleTransport implements BleTransport {
 
   @override
   Future<void> connect(String deviceId) {
-    if (_session?.deviceId == deviceId && _session!.ready) {
+    if (_sessions[deviceId]?.ready == true) {
       return Future.value();
     }
     _connecting.add(deviceId);
@@ -411,14 +438,14 @@ class UniversalBleTransport implements BleTransport {
   }
 
   Future<void> _setup(String deviceId) async {
-    final session = _session = _Session(deviceId);
+    final session = _sessions[deviceId] = _Session(deviceId);
     _setState(deviceId, BleConnectionState.connecting);
-    _emit(BleLinkPhase.connecting);
+    _emit(BleLinkPhase.connecting, deviceId: deviceId);
     var linkAttempted = false;
     try {
       await _preflight(deviceId: deviceId);
-      await _linkSub?.cancel();
-      _linkSub = _adapter
+      await _linkSubs[deviceId]?.cancel();
+      _linkSubs[deviceId] = _adapter
           .connectionEvents(deviceId)
           .listen((e) => _onLinkEvent(session, e));
 
@@ -433,7 +460,7 @@ class UniversalBleTransport implements BleTransport {
         );
       }
 
-      _emit(BleLinkPhase.negotiatingMtu);
+      _emit(BleLinkPhase.negotiatingMtu, deviceId: deviceId);
       try {
         session.mtu = await _adapter.requestMtu(deviceId, requestedMtu);
       } catch (e) {
@@ -450,7 +477,7 @@ class UniversalBleTransport implements BleTransport {
         }
       }
 
-      _emit(BleLinkPhase.discovering);
+      _emit(BleLinkPhase.discovering, deviceId: deviceId);
       final List<BleServiceInfo> services;
       try {
         services = await _adapter.discoverServices(deviceId);
@@ -475,7 +502,7 @@ class UniversalBleTransport implements BleTransport {
           deviceId: deviceId,
         );
       }
-      if (_session != session) {
+      if (_sessions[deviceId] != session) {
         throw _fail(
           BleLinkPhase.connectionLost,
           'Disconnected during setup',
@@ -497,9 +524,9 @@ class UniversalBleTransport implements BleTransport {
         }
       }
       _setState(deviceId, BleConnectionState.connected);
-      _emit(BleLinkPhase.ready);
+      _emit(BleLinkPhase.ready, deviceId: deviceId);
     } catch (e) {
-      if (_session == session) _session = null;
+      if (_sessions[deviceId] == session) _sessions.remove(deviceId);
       _setState(deviceId, BleConnectionState.disconnected);
       if (linkAttempted) {
         try {
@@ -512,9 +539,10 @@ class UniversalBleTransport implements BleTransport {
   }
 
   void _onLinkEvent(_Session session, AdapterConnectionEvent e) {
-    if (e.connected || _session != session) return;
+    if (e.connected || _sessions[session.deviceId] != session) return;
     final wasReady = session.ready;
-    _session = null;
+    _sessions.remove(session.deviceId);
+    _linkSubs.remove(session.deviceId)?.cancel();
     _setState(session.deviceId, BleConnectionState.disconnected);
     // During setup the failing step reports the error; only a drop after
     // setup is an unexpected disconnect.
@@ -575,14 +603,13 @@ class UniversalBleTransport implements BleTransport {
   @override
   Future<void> disconnect(String deviceId) async {
     // Clearing the session first makes the link event this causes harmless.
-    _session = null;
+    _sessions.remove(deviceId);
     _emit(BleLinkPhase.disconnecting, deviceId: deviceId);
     await _closeStreams(deviceId);
     try {
       await _adapter.disconnect(deviceId);
     } finally {
-      await _linkSub?.cancel();
-      _linkSub = null;
+      _linkSubs.remove(deviceId)?.cancel();
       _setState(deviceId, BleConnectionState.disconnected);
       _emit(BleLinkPhase.disconnected, deviceId: deviceId);
     }
@@ -592,11 +619,11 @@ class UniversalBleTransport implements BleTransport {
     final prefix = '$deviceId|';
     for (final key
         in _valueSubs.keys.where((k) => k.startsWith(prefix)).toList()) {
-      await _valueSubs.remove(key)!.cancel();
+      _valueSubs.remove(key)?.cancel();
     }
     for (final key
         in _streams.keys.where((k) => k.startsWith(prefix)).toList()) {
-      await _streams.remove(key)!.close();
+      _streams.remove(key)?.close();
     }
     _wanted.removeWhere((k, _) => k.startsWith(prefix));
   }
@@ -618,7 +645,8 @@ class UniversalBleTransport implements BleTransport {
     String serviceUuid,
     String characteristicUuid,
   ) {
-    final active = _session?.deviceId == deviceId && _session!.ready;
+    final session = _sessions[deviceId];
+    final active = session != null && session.ready;
     if (!active && !_connecting.contains(deviceId)) {
       throw StateError('Device $deviceId is not connected');
     }
@@ -632,7 +660,9 @@ class UniversalBleTransport implements BleTransport {
       () => _adapter.notifications(deviceId, characteristicUuid).listen((v) {
         // Stamp first; nothing else happens on this path.
         final t = clock.nowUs;
-        ctl.add(BleNotification(value: v, receivedAtUs: t));
+        if (!ctl.isClosed) {
+          ctl.add(BleNotification(value: v, receivedAtUs: t));
+        }
       }),
     );
     // FF11, FF12 and FF14 are mutually exclusive on the bridge. Forget the
@@ -647,8 +677,8 @@ class UniversalBleTransport implements BleTransport {
     // result, priority and discovery. A no-op if setup already enabled it.
     unawaited(
       _serial(() async {
-        final session = _session;
-        if (session == null || session.deviceId != deviceId || !session.ready) {
+        final session = _sessions[deviceId];
+        if (session == null || !session.ready) {
           return;
         }
         // Superseded by a later subscribe or unsubscribe while queued.
@@ -688,18 +718,23 @@ class UniversalBleTransport implements BleTransport {
             _fail(
               BleLinkPhase.connectFailed,
               'Enable notifications failed: $e',
+              deviceId: deviceId,
             );
           } else if (_status.phase == BleLinkPhase.subscribing) {
-            _emit(BleLinkPhase.ready);
+            _emit(BleLinkPhase.ready, deviceId: deviceId);
           }
           return;
         }
         if (_status.phase == BleLinkPhase.subscribing) {
-          _emit(BleLinkPhase.ready);
+          _emit(BleLinkPhase.ready, deviceId: deviceId);
         }
       }).catchError((Object e) {
         if (!ctl.isClosed) ctl.addError(e);
-        _fail(BleLinkPhase.connectFailed, 'Enable notifications failed: $e');
+        _fail(
+          BleLinkPhase.connectFailed,
+          'Enable notifications failed: $e',
+          deviceId: deviceId,
+        );
       }),
     );
     return ctl.stream;
@@ -714,11 +749,8 @@ class UniversalBleTransport implements BleTransport {
     final key = '$deviceId|${characteristicUuid.toLowerCase()}';
     final w = _wanted.remove(key);
     return _serial(() async {
-      final session = _session;
-      if (w == null ||
-          session == null ||
-          session.deviceId != deviceId ||
-          !session.ready) {
+      final session = _sessions[deviceId];
+      if (w == null || session == null || !session.ready) {
         return;
       }
       await _disable(session, key, w);
@@ -769,15 +801,14 @@ class UniversalBleTransport implements BleTransport {
   }
 
   /// MTU negotiated for the current session, or null.
-  int? negotiatedMtu(String deviceId) =>
-      _session?.deviceId == deviceId ? _session!.mtu : null;
+  int? negotiatedMtu(String deviceId) => _sessions[deviceId]?.mtu;
 
   /// PHY is not exposed by universal_ble, so it stays null. The connection
   /// interval is only known after Android reports a parameter update.
   @override
   Future<BleConnectionInfo> connectionInfo(String deviceId) async {
-    final session = _session;
-    if (session == null || session.deviceId != deviceId) {
+    final session = _sessions[deviceId];
+    if (session == null || !session.ready) {
       throw StateError('Device $deviceId is not connected');
     }
     int? rssi;
@@ -795,7 +826,10 @@ class UniversalBleTransport implements BleTransport {
   Future<void> dispose() async {
     await stopScan();
     await _scanCtl?.close();
-    await _linkSub?.cancel();
+    for (final s in _linkSubs.values) {
+      await s.cancel();
+    }
+    _linkSubs.clear();
     await _paramsSub?.cancel();
     for (final s in _valueSubs.values) {
       await s.cancel();

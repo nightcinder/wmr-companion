@@ -64,6 +64,7 @@ class FakeTransport implements BleTransport {
 
   /// Called for every write, after it is recorded in [writes].
   FutureOr<void> Function(FakeWrite write)? onWrite;
+  final List<FutureOr<void> Function(FakeWrite write)> _writeHandlers = [];
 
   /// Every read received, oldest first, as `<deviceId> <uuid>`.
   final List<String> reads = [];
@@ -71,6 +72,25 @@ class FakeTransport implements BleTransport {
   /// Supplies the value of a read. Without it a read throws [StateError].
   FutureOr<Uint8List> Function(String deviceId, String characteristicUuid)?
   onRead;
+  final List<
+    FutureOr<Uint8List?> Function(String deviceId, String characteristicUuid)
+  >
+  _readHandlers = [];
+
+  void addDevice(FakeDevice device) {
+    _devices[device.id] = device;
+  }
+
+  void addWriteHandler(FutureOr<void> Function(FakeWrite write) handler) {
+    _writeHandlers.add(handler);
+  }
+
+  void addReadHandler(
+    FutureOr<Uint8List?> Function(String deviceId, String characteristicUuid)
+    handler,
+  ) {
+    _readHandlers.add(handler);
+  }
 
   bool _scanning = false;
   bool get isScanning => _scanning;
@@ -162,8 +182,12 @@ class FakeTransport implements BleTransport {
     _requireConnected(deviceId);
     reads.add('$deviceId ${_norm(characteristicUuid)}');
     final handler = onRead;
-    if (handler == null) throw StateError('FakeTransport: no onRead handler');
-    return handler(deviceId, characteristicUuid);
+    if (handler != null) return handler(deviceId, characteristicUuid);
+    for (final h in _readHandlers) {
+      final res = await h(deviceId, characteristicUuid);
+      if (res != null) return res;
+    }
+    throw StateError('FakeTransport: no onRead handler');
   }
 
   @override
@@ -184,6 +208,9 @@ class FakeTransport implements BleTransport {
     );
     writes.add(write);
     await onWrite?.call(write);
+    for (final h in _writeHandlers) {
+      await h(write);
+    }
   }
 
   @override

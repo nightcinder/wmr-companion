@@ -252,14 +252,20 @@ class _RateMeter {
 class ControllerService {
   ControllerService(
     this.transport,
-    this.deviceId, {
+    Object deviceIdOrIds, {
     this._mode = StreamMode.raw,
     this._mapping = AxisMapping.defaultMapping,
     this._filterKind = FilterKind.madgwick,
     this._filterTuning = const FilterTuning(),
     StickConfig stickConfig = const StickConfig(),
     this.onStickCentre,
-  }) : _stickConfig = stickConfig {
+  }) : _deviceIds = {
+         if (deviceIdOrIds is Iterable<String>)
+           ...deviceIdOrIds
+         else if (deviceIdOrIds is String)
+           deviceIdOrIds,
+       }.toList(),
+       _stickConfig = stickConfig {
     _pipelines = [
       for (var h = 0; h < wmrNumControllers; h++)
         HandPipeline(
@@ -283,14 +289,17 @@ class ControllerService {
   final void Function(int hand, List<double> centre)? onStickCentre;
 
   final BleTransport transport;
-  final String deviceId;
+  final List<String> _deviceIds;
+
+  List<String> get deviceIds => List.unmodifiable(_deviceIds);
+  String get deviceId => _deviceIds.isNotEmpty ? _deviceIds.first : '';
 
   final WmrReassembler _reassembler = WmrReassembler();
   final List<int?> _lastSeq = List.filled(wmrNumControllers, null);
   final List<int> _gaps = List.filled(wmrNumControllers, 0);
   final List<int> _outOfOrder = List.filled(wmrNumControllers, 0);
   final StreamController<ReceivedFrame> _frames = StreamController.broadcast();
-  StreamSubscription<BleNotification>? _subscription;
+  final Map<String, StreamSubscription<BleNotification>> _subscriptions = {};
 
   // Decoded (FF12 and FF14) side.
   late final List<HandPipeline> _pipelines;
@@ -311,6 +320,7 @@ class ControllerService {
   int _batchRecords = 0;
   int _batchMax = 0;
   int _batchErrors = 0;
+  final List<String?> _lastDeviceForHand = List.filled(wmrNumControllers, null);
   final StreamController<DecodedSample> _samples = StreamController.broadcast();
 
   StreamMode _mode;
@@ -351,11 +361,70 @@ class ControllerService {
   /// reconnect: the bridge forgets the subscription on disconnect, and the
   /// wanted stream is enabled from scratch. [StreamMode.none] connects
   /// without enabling a stream.
+  bool _starting = false;
+
+  /// Connects and subscribes to the current [mode]. Call again after every
+  /// reconnect: the bridge forgets the subscription on disconnect, and the
+  /// wanted stream is enabled from scratch. [StreamMode.none] connects
+  /// without enabling a stream.
   Future<void> start() async {
-    await transport.connect(deviceId);
-    _started = true;
-    if (_mode == StreamMode.none) return;
-    await _subscribe();
+    _starting = true;
+    try {
+      final toConnect = List.of(_deviceIds);
+      for (final id in toConnect) {
+        await transport.connect(id);
+      }
+      _started = true;
+      if (_mode == StreamMode.none) return;
+      await _subscribe();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  /// Connects and subscribes [deviceId] to the active stream.
+  Future<void> addDevice(String deviceId) async {
+    if (!_deviceIds.contains(deviceId)) {
+      _deviceIds.add(deviceId);
+    }
+    if (_started || _starting) {
+      try {
+        await transport.connect(deviceId);
+        if (_mode != StreamMode.none) {
+          final oldSub = _subscriptions.remove(deviceId);
+          await oldSub?.cancel();
+          _subscribeDevice(deviceId);
+          if (_mode.carriesRecords) {
+            await _checkMtu(deviceId);
+          }
+          _emitMode();
+        }
+      } catch (_) {
+        _deviceIds.remove(deviceId);
+        final sub = _subscriptions.remove(deviceId);
+        await sub?.cancel();
+        rethrow;
+      }
+    }
+  }
+
+  /// Unsubscribes and optionally disconnects [deviceId].
+  Future<void> removeDevice(
+    String deviceId, {
+    bool disconnectTransport = true,
+  }) async {
+    if (!_deviceIds.contains(deviceId)) return;
+    _deviceIds.remove(deviceId);
+    final sub = _subscriptions.remove(deviceId);
+    await sub?.cancel();
+    for (var h = 0; h < wmrNumControllers; h++) {
+      if (_lastDeviceForHand[h] == deviceId) {
+        _resetHandBaseline(h);
+      }
+    }
+    if (disconnectTransport) {
+      await transport.disconnect(deviceId);
+    }
   }
 
   /// Switches to [next]. The transport writes 0x0000 to the active
@@ -379,28 +448,37 @@ class ControllerService {
   /// Turns [previous] off through the transport. Its CCC write is the same
   /// one a switch uses; the UI never writes CCCDs itself.
   Future<void> _disableStream(StreamMode previous) async {
-    await _subscription?.cancel();
-    _subscription = null;
+    for (final sub in _subscriptions.values) {
+      await sub.cancel();
+    }
+    _subscriptions.clear();
     final uuid = previous.characteristicUuid;
     if (uuid == null) {
       _emitMode();
       return;
     }
-    try {
-      await transport.unsubscribe(deviceId, wmrBridgeServiceUuid, uuid);
-    } catch (e) {
-      _fault = ModeFault(ModeFaultKind.disableFailed, '$e');
+    for (final id in _deviceIds) {
+      try {
+        await transport.unsubscribe(id, wmrBridgeServiceUuid, uuid);
+      } catch (e) {
+        _fault = ModeFault(ModeFaultKind.disableFailed, '$e');
+      }
     }
     _emitMode();
   }
 
   Future<void> _subscribe() async {
-    await _subscription?.cancel();
+    final oldSubs = _subscriptions.values.toList();
+    _subscriptions.clear();
+    for (final s in oldSubs) {
+      await s.cancel();
+    }
     // Sequence numbers kept advancing while we were away or on the other
     // stream, so the first record of a new subscription is a new baseline,
     // not a gap. The same goes for tick timing.
     _lastSeq.fillRange(0, _lastSeq.length, null);
     _dLastSeq.fillRange(0, _dLastSeq.length, null);
+    _lastDeviceForHand.fillRange(0, _lastDeviceForHand.length, null);
     for (final p in _pipelines) {
       p.streamRestarted();
     }
@@ -409,24 +487,58 @@ class ControllerService {
       w.reset();
     }
     _fault = null;
-    _subscription = transport
-        .subscribe(deviceId, wmrBridgeServiceUuid, _mode.characteristicUuid!)
-        .listen(switch (_mode) {
-          StreamMode.none => throw StateError('No stream to subscribe to'),
-          StreamMode.raw => _onNotification,
-          StreamMode.decoded => _onDecoded,
-          StreamMode.batched => _onBatched,
-        }, onError: _onStreamError);
-    if (_mode.carriesRecords) await _checkMtu();
+    for (final id in _deviceIds) {
+      try {
+        _subscribeDevice(id);
+      } catch (_) {
+        // Bridge may be disconnected or link lost; skip to allow remaining bridges to subscribe.
+      }
+    }
+    if (_mode.carriesRecords) {
+      for (final id in _deviceIds) {
+        try {
+          await _checkMtu(id);
+        } catch (_) {}
+      }
+    }
     _emitMode();
   }
 
-  Future<void> _checkMtu() async {
+  void _resetHandBaseline(int hand) {
+    _lastSeq[hand] = null;
+    _dLastSeq[hand] = null;
+    _lastDeviceForHand[hand] = null;
+    _pipelines[hand].streamRestarted();
+    _lossWindows[hand].reset();
+  }
+
+  void _checkSourceDevice(int hand, String sourceDeviceId) {
+    if (_lastDeviceForHand[hand] != null &&
+        _lastDeviceForHand[hand] != sourceDeviceId) {
+      _resetHandBaseline(hand);
+    }
+    _lastDeviceForHand[hand] = sourceDeviceId;
+  }
+
+  void _subscribeDevice(String id) {
+    final uuid = _mode.characteristicUuid;
+    if (uuid == null) return;
+    _subscriptions[id] = transport
+        .subscribe(id, wmrBridgeServiceUuid, uuid)
+        .listen(switch (_mode) {
+          StreamMode.none => throw StateError('No stream to subscribe to'),
+          StreamMode.raw => (n) => _onNotification(n, id),
+          StreamMode.decoded => (n) => _onDecoded(n, id),
+          StreamMode.batched => (n) => _onBatched(n, id),
+        }, onError: _onStreamError);
+  }
+
+  Future<void> _checkMtu(String id) async {
     final (name, min) = _mode == StreamMode.batched
         ? ('FF14', wmrBatchedMinMtu)
         : ('FF12', wmrDecodedMinMtu);
     try {
-      final mtu = (await transport.connectionInfo(deviceId)).mtu;
+      final mtu = (await transport.connectionInfo(id)).mtu;
       if (mtu != null && mtu < min && _fault == null) {
         _fault = ModeFault(
           ModeFaultKind.mtuTooSmall,
@@ -458,10 +570,11 @@ class ControllerService {
     if (!_modeChanges.isClosed) _modeChanges.add(modeState);
   }
 
-  void _onNotification(BleNotification n) {
+  void _onNotification(BleNotification n, String sourceDeviceId) {
     if (_reassembler.push(n.value) != ReassemblyResult.frameComplete) return;
     final frame = _reassembler.lastFrame!;
     final hand = frame.hand;
+    _checkSourceDevice(hand, sourceDeviceId);
     final last = _lastSeq[hand];
     if (last != null) {
       final delta = sequenceDelta(last, frame.sequence);
@@ -475,12 +588,12 @@ class ControllerService {
     _frames.add(ReceivedFrame(frame, n.receivedAtUs));
   }
 
-  void _onDecoded(BleNotification n) =>
-      _onRecord(parseDecodedRecord(n.value), n.receivedAtUs);
+  void _onDecoded(BleNotification n, String sourceDeviceId) =>
+      _onRecord(parseDecodedRecord(n.value), n.receivedAtUs, sourceDeviceId);
 
   /// Every record of a batch gets the batch's arrival time. Timing and
   /// fusion use `device_ticks`, so that does not change the time step.
-  void _onBatched(BleNotification n) {
+  void _onBatched(BleNotification n, String sourceDeviceId) {
     final parsed = parseDecodedBatch(n.value);
     final records = parsed.records;
     if (records == null) {
@@ -491,11 +604,15 @@ class ControllerService {
     _batchRecords += records.length;
     if (records.length > _batchMax) _batchMax = records.length;
     for (final r in records) {
-      _onRecord(r, n.receivedAtUs);
+      _onRecord(r, n.receivedAtUs, sourceDeviceId);
     }
   }
 
-  void _onRecord(DecodedParseResult parsed, int receivedAtUs) {
+  void _onRecord(
+    DecodedParseResult parsed,
+    int receivedAtUs,
+    String sourceDeviceId,
+  ) {
     final r = parsed.record;
     if (r == null) {
       switch (parsed.error!) {
@@ -509,6 +626,7 @@ class ControllerService {
       return;
     }
     final hand = r.hand;
+    _checkSourceDevice(hand, sourceDeviceId);
     final last = _dLastSeq[hand];
     if (last != null) {
       final delta = sequenceDelta(last, r.sequence);
@@ -646,7 +764,11 @@ class ControllerService {
   }
 
   Future<void> dispose() async {
-    await _subscription?.cancel();
+    final subs = _subscriptions.values.toList();
+    _subscriptions.clear();
+    for (final sub in subs) {
+      await sub.cancel();
+    }
     await _frames.close();
     await _samples.close();
     await _modeChanges.close();
