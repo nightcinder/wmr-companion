@@ -7,6 +7,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 
 import '../connect/connect_providers.dart';
 import '../gamepad/gamepad_screen.dart';
@@ -15,7 +16,6 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
 import 'config_panel.dart';
 import 'debug_providers.dart';
-import 'orientation_painter.dart';
 import 'stream_settings.dart';
 
 const _handNames = ['LEFT', 'RIGHT'];
@@ -110,11 +110,9 @@ class DebugScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           SizedBox(
             height: 320,
-            child: CustomPaint(
-              painter: OrientationPainter(
-                q,
-                edgeColor: theme.colorScheme.onSurface,
-              ),
+            child: OrientationView(
+              orientation: q,
+              edgeColor: theme.colorScheme.onSurface,
             ),
           ),
           Text(

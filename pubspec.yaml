@@ -19,6 +19,8 @@ dependencies:
     path: packages/wmr_ble
   wmr_companion:
     path: packages/wmr_companion
+  wmr_companion_ui:
+    path: packages/wmr_companion_ui
   wmr_fusion:
     path: packages/wmr_fusion
 

@@ -1,0 +1,19 @@
+name: wmr_companion_ui
+description: Optional Flutter widgets for wmr_companion hosts (orientation, link and stats views).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  vector_math: ^2.4.3
+  wmr_companion:
+    path: ../wmr_companion
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

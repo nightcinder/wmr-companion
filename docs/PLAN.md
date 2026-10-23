@@ -49,6 +49,9 @@ wmr-companion/
       latency/      # latency test screen and CSV/JSON export (docs/LATENCY.md)
       gamepad/      # gamepad mapping debug screen (docs/GAMEPAD.md)
   packages/wmr_core/    # pure Dart: protocol, domain, BleTransport, controller services
+  packages/wmr_companion/    # public facade for host apps
+  packages/wmr_ble/          # universal_ble adapter/transport and lifecycle hook
+  packages/wmr_companion_ui/ # optional orientation/link/stats/gamepad widgets
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
   test/
   docs/STATUS.md    # current state and roadmap
