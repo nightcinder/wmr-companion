@@ -390,7 +390,8 @@ the directory move changed paths, not imports.
   max 31 bytes UTF-8) and covers all three firmware eras:
   1. *Older than #38 (`41771f8`):* No FF16 characteristic. The facade leaves
      `snapshot.protocol.firmwareVersion` as null and `features.firmwareVersion` as
-     false; FF11–FF15 function normally.
+     false; FF11/FF12 are available, FF14 depends on batching support & ATT MTU >= 61,
+     and FF13/FF15 are optional per the canonical matrix.
   2. *Builds between #38 and `v0.1.0-rc1` (`547ab09`):* FF16 reports a git commit
      placeholder (`0.0.0+<sha>`).
   3. *`v0.1.0-rc1` (`547ab09`) and later:* First build whose FF16 reports a real
