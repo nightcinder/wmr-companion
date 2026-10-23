@@ -22,9 +22,9 @@ mirror `main` at `8f5921a`; see the FF14 section.
 | FF11 16-byte status read | `BridgeStatus.parse` (`packages/wmr_core/lib/protocol/bridge_status.dart`) |
 | `wmr_proto_notification_capacity`, `wmr_proto_encode_fragment` | `notificationCapacity`, `encodeFragment`, `encodeFrame` |
 | `wmr_reassembler_push` and its counters | `WmrReassembler.push` (`packages/wmr_core/lib/protocol/wmr_fragment.dart`) |
-| `tests/test_protocol.c` | `test/protocol/wmr_fragment_test.dart` (ported case by case) |
+| `tests/test_protocol.c` | `packages/wmr_core/test/protocol/wmr_fragment_test.dart` (ported case by case) |
 | `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`packages/wmr_core/lib/protocol/decoded_batch.dart`) |
-| `tests/test_batch.c` golden bytes and MTU table | `test/protocol/decoded_batch_test.dart` |
+| `tests/test_batch.c` golden bytes and MTU table | `packages/wmr_core/test/protocol/decoded_batch_test.dart` |
 | `samples/controller_frames.txt` | `test/fixtures/controller_frames.txt` (copy) |
 
 The encoder is in the app only so `FakeWmrBridge` and the tests can produce
@@ -134,7 +134,7 @@ fragmentation. Little-endian; floats are IEEE 754 binary32.
 | 55 | u8 | `battery` | raw, scale not established |
 
 Golden bytes: `decoded_golden` in the firmware's `tests/test_protocol.c`; the
-same array is in `test/protocol/decoded_record_test.dart`, so firmware and app
+same array is in `packages/wmr_core/test/protocol/decoded_record_test.dart`, so firmware and app
 are checked against identical bytes. Parser: `parseDecodedRecord`. It rejects,
 like `wmr_decoded_unpack`, any length other than 56, a version other than 1 and
 a hand above 1.

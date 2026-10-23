@@ -104,8 +104,8 @@ the begin action.
 
 ## Tests
 
-`test/services/capture_recorder_test.dart` compares the output byte for byte
-with `test/fixtures/capture_golden.txt`, which was written by hand following
+`packages/wmr_core/test/capture_recorder_test.dart` compares the output byte for byte
+with `packages/wmr_core/test/fixtures/capture_golden.txt`, which was written by hand following
 the desktop format (`%.6f` times, `bytes.hex()`). It was not produced by
 running `capture_ble.py` or checked by `analyze_capture.py`. The tests also
 cover the gap and Hz summary and 100,000 frames fed back to back.

@@ -196,10 +196,9 @@ void main() {
     });
 
     test('golden frames reassemble through transport and service', () async {
-      final lines =
-          File('packages/wmr_core/test/fixtures/controller_frames.txt')
-              .readAsLinesSync()
-              .where((l) => l.trim().isNotEmpty && !l.startsWith('#'));
+      final lines = File('test/fixtures/controller_frames.txt')
+          .readAsLinesSync()
+          .where((l) => l.trim().isNotEmpty && !l.startsWith('#'));
       final golden = [
         for (final (i, line) in lines.indexed)
           WmrFrame(
