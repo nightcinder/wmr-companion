@@ -55,8 +55,8 @@ abstract class OrientationFilterBase implements OrientationFilter {
   int _skipped = 0;
 
   OrientationFilterBase({this.maxDt = 0.1, this.minAccelNorm = 0.1})
-      : assert(maxDt > 0),
-        assert(minAccelNorm > 0);
+    : assert(maxDt > 0),
+      assert(minAccelNorm > 0);
 
   @override
   Quaternion get orientation => Quaternion(_w, _x, _y, _z);

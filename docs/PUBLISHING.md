@@ -1,6 +1,6 @@
 # Publishing `wmr-companion` Packages to pub.dev
 
-This document defines the publication process for the `wmr-companion` multi-package repository, the dependency constraints and publication order, the evaluation of local development workflows after publication, and the exact steps required for the initial 0.1.0 release.
+This document defines the publication process for the `wmr-companion` multi-package repository, the dependency constraints and publication order, the local-development mechanism, and the exact steps required for the initial `0.1.0` release.
 
 ---
 
@@ -20,19 +20,11 @@ All six package names have been verified as available and unclaimed on pub.dev (
 
 The root application (`wmr_companion_app`) and `example/` (`wmr_companion_example`) remain application hosts and retain `publish_to: none`.
 
-### Decision on v1 Publication Set for `wmr_companion_ui` and `wmr_companion_hid_android`
-
-Both `wmr_companion_ui` and `wmr_companion_hid_android` are explicitly included in the **v1 publish set**.
-- `wmr_companion_ui` provides reusable widgets (`OrientationView`, `LinkStatusView`, `HandStatsView`, `GamepadStateView`) for hosts that use `wmr_companion`. It has no third-party plugin dependencies beyond Flutter and `vector_math`.
-- `wmr_companion_hid_android` provides Android Bluetooth HID gamepad output (`BluetoothHidDevice`), enabling devices running Flutter hosts to act as standard Bluetooth gamepads. It is self-contained as an Android Flutter plugin and introduces no unstable dependencies.
-
-Holding either package back is unnecessary; publishing all six packages under version `0.1.0` delivers the complete modular architecture envisioned in ONY-41 / ONY-50.
-
 ---
 
 ## 2. Dependency Graph & Publication Order
 
-pub.dev strictly forbids packages from having `path:` dependencies upon publication. Any inter-package dependency must be a hosted version constraint (e.g. `wmr_core: ^0.1.0`).
+pub.dev strictly forbids packages from having `path:` dependencies upon publication. Every inter-package dependency is therefore a hosted version constraint (e.g. `wmr_core: ^0.1.0`); the root pub workspace resolves those constraints to the local source while developing (see §3).
 
 Because a published package cannot depend on a package version that does not yet exist on pub.dev, the dependency DAG dictates a strict sequential publication order across three distinct waves:
 
@@ -59,36 +51,34 @@ Because a published package cannot depend on a package version that does not yet
      - Has no internal dependencies.
      - Must be published first to pub.dev.
    - **Step 1b: `packages/wmr_core`**
-     - Depends on `wmr_fusion`.
-     - Once `wmr_fusion 0.1.0` is published and indexed on pub.dev, `wmr_core` can switch its dependency from `path: ../wmr_fusion` to `wmr_fusion: ^0.1.0` and be published.
+     - Already declares `wmr_fusion: ^0.1.0`.
+     - Publish once `wmr_fusion 0.1.0` is published and indexed on pub.dev.
 
 2. **Wave 2: Public Facade**
    - **Step 2: `packages/wmr_companion`**
-     - Depends on `wmr_core`.
-     - Once `wmr_core 0.1.0` is published on pub.dev, `wmr_companion` switches `path: ../wmr_core` to `wmr_core: ^0.1.0` and is published.
+     - Already declares `wmr_core: ^0.1.0`.
+     - Publish once `wmr_core 0.1.0` is published and indexed on pub.dev.
 
 3. **Wave 3: Platform Transports & Optional Add-ons**
    - **Step 3a: `packages/wmr_ble`**
-     - Depends on `wmr_core` and Flutter SDK.
-     - Switches `path: ../wmr_core` to `wmr_core: ^0.1.0` and is published.
+     - Already declares `wmr_core: ^0.1.0` and depends on the Flutter SDK.
+     - Publish once `wmr_core 0.1.0` is indexed.
    - **Step 3b: `packages/wmr_companion_ui`**
-     - Depends on `wmr_companion` and Flutter SDK.
-     - Switches `path: ../wmr_companion` to `wmr_companion: ^0.1.0` and is published.
+     - Already declares `wmr_companion: ^0.1.0` and depends on the Flutter SDK.
+     - Publish once `wmr_companion 0.1.0` is indexed.
    - **Step 3c: `packages/wmr_companion_hid_android`**
-     - Depends on `wmr_companion` and Android Flutter SDK.
-     - Switches `path: ../wmr_companion` to `wmr_companion: ^0.1.0` and is published.
+     - Already declares `wmr_companion: ^0.1.0` and is an Android Flutter plugin.
+     - Publish once `wmr_companion 0.1.0` is indexed.
 
 *(Note: Steps 3a, 3b, and 3c are mutually independent and can be published in parallel once Wave 1 and Wave 2 are indexed on pub.dev.)*
 
 ---
 
-## 3. Local Development Mechanism: Evaluation & Recommendation
+## 3. Local Development Mechanism: Pub Workspace
 
-When inter-package dependencies transition from relative `path:` entries to hosted version constraints (`^0.1.0`), repository development must continue to link to local source code rather than downloading released artifacts from pub.dev. Two mechanisms exist in the Dart ecosystem to accomplish this: `dependency_overrides` and `pub workspace`.
+When inter-package dependencies became hosted constraints (`^0.1.0`), repository development still had to link to local source code rather than download released artifacts from pub.dev. Two mechanisms exist in the Dart ecosystem: `dependency_overrides` and `pub workspace`.
 
 ### Evaluation: `dependency_overrides`
-
-In this model, packages declare hosted dependencies (e.g. `wmr_core: ^0.1.0`) under `dependencies:`, and add local paths under `dependency_overrides:`:
 
 ```yaml
 dependencies:
@@ -104,14 +94,18 @@ dependency_overrides:
 2. **Leaky configuration:** `dependency_overrides` can accidentally be committed into published package archives. While pub.dev ignores overrides when other packages import them, pub issuance flags them with hints or warnings during `dart pub publish --dry-run`.
 3. **No coordinated lockfile:** Each package and example maintains its own independent resolution and lockfile, allowing dependency skew across the repository.
 
-### Evaluation: Dart `pub workspace`
+### Implemented: Dart `pub workspace`
 
-Introduced in Dart 3.5, pub workspaces provide first-class monorepo support. The repository root defines the workspace member directories, and each member opts in with `resolution: workspace`:
+Introduced in Dart 3.5, pub workspaces provide first-class monorepo support. The repository root defines the workspace member directories, and each member opts in with `resolution: workspace`. This is the mechanism the repository now uses.
+
+The repository root declares the workspace, because it is the common ancestor of
+both the packages and the app (app directory moves and `working-directory`
+changes do not affect member discovery):
 
 ```yaml
-# Root pubspec.yaml
-name: wmr_companion_workspace
+# pubspec.yaml (wmr_companion_workspace, publish_to: none)
 workspace:
+  - apps/wmr_companion_app
   - packages/wmr_fusion
   - packages/wmr_core
   - packages/wmr_companion
@@ -121,8 +115,10 @@ workspace:
   - example
 ```
 
+Each member opts in and declares only hosted constraints:
+
 ```yaml
-# Member pubspec.yaml (e.g. packages/wmr_core/pubspec.yaml)
+# packages/wmr_core/pubspec.yaml
 name: wmr_core
 resolution: workspace
 
@@ -130,118 +126,74 @@ dependencies:
   wmr_fusion: ^0.1.0
 ```
 
-**Benefits:**
-1. **Workspace-native resolution:** When a workspace member specifies a hosted constraint (`wmr_fusion: ^0.1.0`), pub automatically resolves it to the local workspace member directory. No `dependency_overrides` or path juggling is needed.
-2. **Seamless transitive resolution:** Any package or app in the workspace automatically resolves all inter-package dependencies locally without duplicating paths.
-3. **Single source of truth:** A single shared lockfile at the workspace root ensures identical dependency resolution across all packages and tools.
-4. **Publish-ready:** `dart pub publish` natively understands workspaces and strips `resolution: workspace` when creating publication archives.
+**Benefits, as realised here:**
+1. **Workspace-native resolution:** A hosted constraint such as `wmr_fusion: ^0.1.0` resolves to the local workspace member directory. No `dependency_overrides` or path juggling is needed.
+2. **Seamless transitive resolution:** Every package, both app hosts and all six packages resolve the whole internal graph locally.
+3. **Single source of truth:** One lockfile at the repository root (`pubspec.lock`) replaces the per-package and example locks.
+4. **Publish-ready:** `dart pub publish` understands workspaces and the published archive keeps the hosted constraint, not the local path. `resolution: workspace` is workspace metadata and does not make the package depend on the repository layout.
 
-### Recommendation: Pub Workspace
-
-**Recommendation: Use Dart `pub workspace` for monorepo development.**
-
-`pub workspace` is the standard, declarative approach designed specifically for multi-package repositories. It eliminates manual, non-transitive `dependency_overrides` boilerplate across packages and prevents transitive resolution failures. Once the repository API freeze is completed and the apps/packages are aligned, the entire repository should be structured as a unified pub workspace.
+`resolution: workspace` requires language version 3.5 or newer. `wmr_fusion`'s SDK floor was therefore raised from `^3.0.0` to `^3.13.5`, matching the rest of the repository. This is not a behavioural change; the package had no dependency that needed the older floor, and the other five packages already required `^3.13.5`.
 
 ---
 
-## 4. Dependency shape before publication
+## 4. Publish-Readiness Status
 
-The five intra-repo dependencies are **hosted version constraints**
-(`wmr_fusion: ^0.1.0`, `wmr_core: ^0.1.0`, `wmr_companion: ^0.1.0`), which is
-what pub.dev requires. Nothing is published yet, so local development resolves
-them through a committed `pubspec_overrides.yaml` in each package:
+**Status: landed.** No published package declares a `path:` dependency. The internal dependencies are hosted constraints and the root workspace resolves them locally:
 
-```yaml
-# packages/wmr_core/pubspec_overrides.yaml
-dependency_overrides:
-  wmr_fusion:
-    path: ../wmr_fusion
-```
+| Package | Internal dependencies |
+| --- | --- |
+| `wmr_fusion` | none |
+| `wmr_core` | `wmr_fusion: ^0.1.0` |
+| `wmr_companion` | `wmr_core: ^0.1.0` |
+| `wmr_ble` | `wmr_core: ^0.1.0` |
+| `wmr_companion_ui` | `wmr_companion: ^0.1.0` |
+| `wmr_companion_hid_android` | `wmr_companion: ^0.1.0` |
 
-Overrides are **not transitive**, so each file lists the package's whole
-internal closure (for example `wmr_companion_ui` overrides `wmr_companion`,
-`wmr_core` and `wmr_fusion`). The root app and `example/` do the same for all
-six packages. `pubspec_overrides.yaml` is a development-only file: pub uses it
-for resolution and leaves it out of the published archive.
+All six packages are fully prepared for publication:
+- `publish_to: none` has been removed from all six packages.
+- Each package contains its own `LICENSE` file matching the root MIT license.
+- Each package contains a `CHANGELOG.md` with an honest `0.1.0` entry.
+- Each package specifies `repository:` and `issue_tracker:` pointing to the GitHub repository.
+- Each package has an `export_boundary_test.dart` under `test/` that fails if its `lib/` imports Riverpod, a file plugin, `dart:ui`, or a package above it in the graph. This replaced the hand-written `grep` steps that used to live only in CI.
 
-This replaced the temporary `invalid_dependency: ignore` analyzer setting that
-the first cut of this PR needed. With hosted constraints and the overrides, the
-analyzer's "publishable packages can't have path dependencies" warning cannot
-fire, so the five `analysis_options.yaml` files no longer hide it.
-
-*Why not a pub workspace?* A workspace is the long-term simplification (one
-lockfile, no override boilerplate) and is still the recommendation in §5. It
-touches every member pubspec and the app/example resolution, so it is a
-follow-up, not part of this publication prep. The override files give the same
-build with fewer moving parts today.
-
-### Preparation status
-
-All six packages are prepared for publication:
-
-- `publish_to: none` removed (they are publishable packages now).
-- Hosted constraints for every intra-repo dependency, plus local overrides.
-- Per-package `LICENSE` (MIT, matching the repo root) and `CHANGELOG.md`.
-- `repository:` and `issue_tracker:` pointing at the GitHub repository.
-- `dart analyze`, `flutter analyze`, all tests and the app/example builds stay
-  green with nothing published.
+The two application hosts (`wmr_companion_app` and `example/`) are workspace members with `publish_to: none`; they are not part of the publish set.
 
 ---
 
-## 5. Publication order
+## 5. First Publication
 
-When the owner authorizes publication, no pubspec edits are needed — only the
-publish calls, in dependency order:
+Publishing is a separate, owner-authorised step. Nothing in the repository publishes automatically, and `dart pub publish --dry-run` uploads nothing.
 
-1. **`wmr_fusion`** (no internal dependencies)
+When the owner authorises publication after the API freeze, publish in the wave order from §2 — **no pubspec edits are required**:
+
+1. **Wave 1:**
    ```sh
    cd packages/wmr_fusion && dart pub publish
-   ```
-2. **`wmr_core`** (`wmr_fusion: ^0.1.0`)
-   ```sh
+   # wait for wmr_fusion 0.1.0 to be indexed on pub.dev
    cd packages/wmr_core && dart pub publish
    ```
-3. **`wmr_companion`** (`wmr_core: ^0.1.0`)
+2. **Wave 2:**
    ```sh
    cd packages/wmr_companion && dart pub publish
    ```
-4. **`wmr_ble`** (`wmr_core: ^0.1.0`), then **`wmr_companion_ui`** and
-   **`wmr_companion_hid_android`** (`wmr_companion: ^0.1.0`)
+3. **Wave 3** (order within the wave does not matter):
    ```sh
    cd packages/wmr_ble && flutter pub publish
    cd packages/wmr_companion_ui && flutter pub publish
    cd packages/wmr_companion_hid_android && flutter pub publish
    ```
 
-After each upload, confirm the version is indexed before publishing the next
-wave. Optional follow-up: replace the per-package override files with a root
-`workspace:` configuration once the published versions make the path overrides
-unnecessary.
+After the first release, `flutter pub get` in the app and `example/` still resolves the local workspace members, so local development keeps using the working tree. A consumer outside the repository gets the published versions through the same `^0.1.0` constraints.
 
 ---
 
-## 6. CI verification
+## 6. CI Verification
 
-Two checks run in CI; both are strict and neither uploads anything.
+The CI workflow (`.github/workflows/ci.yml`) is the gate for this document:
 
-```sh
-./tool/publish_dry_run.sh   # staged `dart pub publish --dry-run` for all six
-./tool/fresh_app_check.sh   # a brand-new Flutter app consumes the packages
-```
+- **Strict dry-run for every package in the publish set.** The `pub.dev publish dry-run (every package in the publish set)` step runs `dart pub publish --dry-run` for `wmr_fusion`, `wmr_core`, and `wmr_companion`, and `flutter pub publish --dry-run` for `wmr_ble`, `wmr_companion_ui`, and `wmr_companion_hid_android`. It has no `|| true`: any dry-run error (or warning, which pub reports with a non-zero exit) fails the job. The workspace resolution is what lets the five dependent packages pass before anything is on pub.dev.
+- **Export-boundary tests per package.** Each package's test suite includes `test/export_boundary_test.dart`, run by the existing per-package `dart test` / `flutter test` steps. It reads every file under the package's own `lib/` and fails on a forbidden import, so the boundary is checked where the package is developed rather than by a CI-only shell grep.
+- **Package tests and analysis.** Each package still runs its own `analyze` and test suite; the app and `example/` run theirs.
+- **A fresh app consumes the packages.** `tool/fresh_app_check.sh` creates a throwaway Flutter app, depends on the four host-facing packages by path, connects a `WmrCompanion` to `FakeTransport`, reads a gamepad frame and imports the BLE/UI/HID entry points. It proves the host-facing surface still works for a consumer that is not part of the workspace.
 
-`publish_dry_run.sh` copies each package to a temporary directory, drops any
-`publish_to` gate there, rewrites the internal dependencies to `^0.1.0` and
-points them at the staged siblings with `pubspec_overrides.yaml`. Every package
-must pass with zero warnings; the only allowed hints are the override notices.
-A packaging problem (missing LICENSE, bad metadata, a file that would not be
-archived) fails the job — it is not allowed to fail soft.
-
-`fresh_app_check.sh` runs `flutter create`, depends on the four host-facing
-packages by path plus the internal-closure overrides, connects a
-`WmrCompanion` to `FakeTransport`, reads a gamepad frame and imports the
-optional BLE, UI and HID entry points. That is the "a fresh app can add the
-package and read gamepad state" acceptance before the first upload.
-
-Still not covered: the real `dart pub publish` upload, a hosted-version
-install (impossible before publishing), the pub.dev scorecard, and any device
-or iOS run.
+What CI does **not** prove: that the packages upload successfully, that a fresh external app can resolve them from pub.dev (impossible before the first release), the pub score, or anything on hardware. Those are checked after an authorised release, not by a dry-run.

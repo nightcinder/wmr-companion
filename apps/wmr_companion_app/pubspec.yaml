@@ -6,6 +6,8 @@ version: 0.1.0+1
 environment:
   sdk: ^3.13.5
 
+resolution: workspace
+
 dependencies:
   flutter:
     sdk: flutter
@@ -13,32 +15,12 @@ dependencies:
   path_provider: ^2.1.6
   share_plus: ^13.3.1
   vector_math: ^2.4.3
-  wmr_core:
-    path: ../../packages/wmr_core
-  wmr_ble:
-    path: ../../packages/wmr_ble
-  wmr_companion:
-    path: ../../packages/wmr_companion
-  wmr_companion_ui:
-    path: ../../packages/wmr_companion_ui
-  wmr_companion_hid_android:
-    path: ../../packages/wmr_companion_hid_android
-  wmr_fusion:
-    path: ../../packages/wmr_fusion
-
-dependency_overrides:
-  wmr_core:
-    path: ../../packages/wmr_core
-  wmr_fusion:
-    path: ../../packages/wmr_fusion
-  wmr_ble:
-    path: ../../packages/wmr_ble
-  wmr_companion:
-    path: ../../packages/wmr_companion
-  wmr_companion_ui:
-    path: ../../packages/wmr_companion_ui
-  wmr_companion_hid_android:
-    path: ../../packages/wmr_companion_hid_android
+  wmr_core: ^0.1.0
+  wmr_ble: ^0.1.0
+  wmr_companion: ^0.1.0
+  wmr_companion_ui: ^0.1.0
+  wmr_companion_hid_android: ^0.1.0
+  wmr_fusion: ^0.1.0
 
 dev_dependencies:
   flutter_test:

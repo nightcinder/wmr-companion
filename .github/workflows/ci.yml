@@ -27,101 +27,69 @@ jobs:
           flutter-version: 3.47.7
           cache: true
 
-      - working-directory: apps/wmr_companion_app
-        run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
+      # One resolution for the whole workspace; every member is resolved here.
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
       - working-directory: apps/wmr_companion_app
         run: flutter analyze
       - working-directory: apps/wmr_companion_app
         run: flutter test
+      # Each package's own test suite includes export_boundary_test.dart, which
+      # asserts that its lib/ imports no Riverpod, file plugin or higher layer.
       - name: wmr_core package
         working-directory: packages/wmr_core
         run: |
-          dart pub get
           dart analyze
           dart test
-      - name: wmr_core stays pure Dart
-        run: |
-          set -eu
-          test -d packages/wmr_core/lib
-          if grep -rnE "package:(flutter|flutter_riverpod|universal_ble|path_provider|share_plus|permission_handler)/|import 'dart:ui'" packages/wmr_core/lib; then
-            echo "wmr_core must not import Flutter, Riverpod, dart:ui or plugins"
-            exit 1
-          fi
       - name: wmr_companion package
         working-directory: packages/wmr_companion
         run: |
-          dart pub get
           dart analyze
           dart test
-      - name: wmr_companion stays framework-agnostic
-        run: |
-          set -eu
-          test -d packages/wmr_companion/lib
-          if grep -rnE "package:(flutter|flutter_riverpod|universal_ble|path_provider|share_plus|permission_handler)/|import 'dart:ui'" packages/wmr_companion/lib; then
-            echo "wmr_companion must not import Flutter, Riverpod, dart:ui or plugins"
-            exit 1
-          fi
-      - name: wmr_companion public surface is in the barrel only
-        run: |
-          set -eu
-          test -f packages/wmr_companion/lib/wmr_companion.dart
-          test -f packages/wmr_companion/lib/testing.dart
-          if find packages/wmr_companion/lib -maxdepth 1 -name '*.dart' \
-              ! -name 'wmr_companion.dart' ! -name 'testing.dart' | grep .; then
-            echo "only wmr_companion.dart and testing.dart may be top-level libraries"
-            exit 1
-          fi
       - name: wmr_companion_hid_android package
         working-directory: packages/wmr_companion_hid_android
         run: |
-          flutter pub get
           flutter analyze
           flutter test
-      - name: wmr_companion_hid_android stays app-free
-        run: |
-          set -eu
-          test -d packages/wmr_companion_hid_android/lib
-          if grep -rnE "package:(flutter_riverpod|wmr_companion_app|wmr_core)/" packages/wmr_companion_hid_android/lib; then
-            echo "wmr_companion_hid_android must not import Riverpod, wmr_core internals or the app"
-            exit 1
-          fi
       - name: wmr_companion_ui package
         working-directory: packages/wmr_companion_ui
         run: |
-          flutter pub get
           flutter analyze
           flutter test
-      - name: wmr_companion_ui stays UI-only
-        run: |
-          set -eu
-          test -d packages/wmr_companion_ui/lib
-          if grep -rnE "package:(flutter_riverpod|wmr_core|wmr_companion_app)/|import 'dart:ui'" packages/wmr_companion_ui/lib; then
-            echo "wmr_companion_ui must not import Riverpod, wmr_core internals, dart:ui or the app"
-            exit 1
-          fi
       - name: wmr_ble package
         working-directory: packages/wmr_ble
         run: |
-          flutter pub get
           flutter analyze
           flutter test
-      - name: wmr_ble stays UI- and app-free
-        run: |
-          set -eu
-          test -d packages/wmr_ble/lib
-          if grep -rnE "package:(flutter_riverpod|wmr_companion_app)/|import 'package:flutter/|import 'dart:ui'" packages/wmr_ble/lib; then
-            echo "wmr_ble must not import Riverpod, the app, dart:ui or widget libraries"
-            exit 1
-          fi
       - name: wmr_fusion package
         working-directory: packages/wmr_fusion
         run: |
-          dart pub get
           dart analyze
           dart test
-      - name: Publish dry-run (staged, nothing uploaded)
-        run: ./tool/publish_dry_run.sh
+      - name: pub.dev publish dry-run (every package in the publish set)
+        run: |
+          # A clean dry-run for all six published packages. The root pub
+          # workspace resolves each hosted inter-package constraint to the
+          # local member directory, so nothing has to be on pub.dev yet.
+          # A dry-run error or warning fails this step; nothing is uploaded.
+          set -eu
+          echo "=== Publish dry-run: wmr_fusion ==="
+          (cd packages/wmr_fusion && dart pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_core ==="
+          (cd packages/wmr_core && dart pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_companion ==="
+          (cd packages/wmr_companion && dart pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_ble ==="
+          (cd packages/wmr_ble && flutter pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_companion_ui ==="
+          (cd packages/wmr_companion_ui && flutter pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_companion_hid_android ==="
+          (cd packages/wmr_companion_hid_android && flutter pub publish --dry-run)
 
       - name: A fresh app consumes the packages
         run: ./tool/fresh_app_check.sh
@@ -142,7 +110,6 @@ jobs:
       - name: Example app
         working-directory: example
         run: |
-          flutter pub get
           flutter analyze
           flutter test
           flutter build apk --debug
