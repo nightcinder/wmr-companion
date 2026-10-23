@@ -463,39 +463,48 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         pingRunnable?.let { pingTimerHandler.removeCallbacks(it) }
         pingRunnable = null
 
-        btnStartRun.isEnabled = gattClient?.isReady == true
+        btnStartRun.isEnabled = false
         btnStopRun.isEnabled = false
+        tvRunMetrics.text = "Finishing run and reading final RSSI..."
 
-        val recorder = currentRecorder ?: return
-        val endNanos = SystemClock.elapsedRealtimeNanos()
-        val nowUs = endNanos / 1000L
+        Thread {
+            val recorder = currentRecorder ?: return@Thread
+            val endNanos = SystemClock.elapsedRealtimeNanos()
+            val nowUs = endNanos / 1000L
 
-        // Read end RSSI with safe timeout
-        val endRssi = gattClient?.readRssiSafe(1500L)
+            // Read end RSSI in background thread
+            val endRssi = gattClient?.readRssiSafe(1500L)
 
-        val link = LatencyLink(
-            mtu = gattClient?.negotiatedMtu,
-            rssiStart = runStartRssi,
-            rssiEnd = endRssi,
-            connectionIntervalUs = gattClient?.connectionIntervalUs,
-            highPriorityRequested = gattClient?.priorityRequested
-        )
+            val effectiveIntervalUs = gattClient?.connectionIntervalUs
+                ?: if (gattClient?.priorityRequested == true) 15000 else null
 
-        val report = recorder.report(
-            nowUs = nowUs,
-            link = link,
-            echoIntervalUs = runEchoIntervalUs
-        )
+            val link = LatencyLink(
+                mtu = gattClient?.negotiatedMtu,
+                rssiStart = runStartRssi,
+                rssiEnd = endRssi,
+                connectionIntervalUs = effectiveIntervalUs,
+                highPriorityRequested = gattClient?.priorityRequested
+            )
 
-        val jsonString = JsonWriter.toJsonString(report)
-        val echoCsvString = recorder.toEchoCsv()
-        val samplesCsvString = recorder.toSamplesCsv()
+            val report = recorder.report(
+                nowUs = nowUs,
+                link = link,
+                echoIntervalUs = runEchoIntervalUs
+            )
 
-        exportFiles(jsonString, echoCsvString, samplesCsvString)
+            val jsonString = JsonWriter.toJsonString(report)
+            val echoCsvString = recorder.toEchoCsv()
+            val samplesCsvString = recorder.toSamplesCsv()
 
-        tvSummary.text = jsonString
-        btnShare.isEnabled = true
-        tvRunMetrics.text = if (userCancelled) "Run cancelled by user." else "Run finished successfully (120 s)."
+            exportFiles(jsonString, echoCsvString, samplesCsvString)
+
+            mainHandler.post {
+                tvSummary.text = jsonString
+                btnStartRun.isEnabled = gattClient?.isReady == true
+                btnShare.isEnabled = true
+                tvRunMetrics.text = if (userCancelled) "Run cancelled by user." else "Run finished successfully (120 s)."
+            }
+        }.start()
     }
 
     private fun exportFiles(jsonContent: String, echoContent: String, samplesContent: String) {

@@ -83,38 +83,40 @@ object Protocol {
         val deviceTicks: Long
     )
 
-    sealed class BatchParseResult {
-        data class Ok(val records: List<DecodedRecord>) : BatchParseResult()
-        data class Error(val reason: String) : BatchParseResult()
+    data class BatchParseResult(
+        val records: List<DecodedRecord>,
+        val parseErrors: Int = 0,
+        val errorMessage: String? = null
+    ) {
+        val isOk: Boolean get() = errorMessage == null
     }
 
     fun parseDecodedBatch(bytes: ByteArray): BatchParseResult {
         if (bytes.size < WMR_BATCH_HEADER_SIZE + WMR_DECODED_SIZE) {
-            return BatchParseResult.Error("Batch too short: ${bytes.size}")
+            return BatchParseResult(emptyList(), parseErrors = 1, errorMessage = "Batch too short: ${bytes.size}")
         }
         val version = bytes[0].toInt() and 0xFF
         if (version != WMR_BATCH_VERSION) {
-            return BatchParseResult.Error("Unknown batch version: $version")
+            return BatchParseResult(emptyList(), parseErrors = 1, errorMessage = "Unknown batch version: $version")
         }
         val count = bytes[1].toInt() and 0xFF
         if (count < 1) {
-            return BatchParseResult.Error("Empty batch count: $count")
+            return BatchParseResult(emptyList(), parseErrors = 1, errorMessage = "Empty batch count: $count")
         }
         val expectedLength = WMR_BATCH_HEADER_SIZE + count * WMR_DECODED_SIZE
         if (bytes.size != expectedLength) {
-            return BatchParseResult.Error("Batch wrong length: ${bytes.size} != $expectedLength")
+            return BatchParseResult(emptyList(), parseErrors = 1, errorMessage = "Batch wrong length: ${bytes.size} != $expectedLength")
         }
 
         val records = ArrayList<DecodedRecord>(count)
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        var parseErrors = 0
         for (i in 0 until count) {
             val offset = WMR_BATCH_HEADER_SIZE + i * WMR_DECODED_SIZE
             val recVersion = bytes[offset].toInt() and 0xFF
-            if (recVersion != WMR_DECODED_VERSION) {
-                continue
-            }
             val hand = bytes[offset + 1].toInt() and 0xFF
-            if (hand !in 0 until WMR_NUM_CONTROLLERS) {
+            if (recVersion != WMR_DECODED_VERSION || hand !in 0 until WMR_NUM_CONTROLLERS) {
+                parseErrors++
                 continue
             }
             val flags = bytes[offset + 2].toInt() and 0xFF
@@ -134,7 +136,7 @@ object Protocol {
                 )
             )
         }
-        return BatchParseResult.Ok(records)
+        return BatchParseResult(records, parseErrors = parseErrors)
     }
 
     /**

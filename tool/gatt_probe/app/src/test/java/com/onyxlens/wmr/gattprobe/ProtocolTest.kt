@@ -56,14 +56,42 @@ class ProtocolTest {
         // rest 36 bytes zeroes
 
         val res = Protocol.parseDecodedBatch(buffer.array())
-        assertTrue(res is Protocol.BatchParseResult.Ok)
-        val records = (res as Protocol.BatchParseResult.Ok).records
+        assertTrue(res.isOk)
+        assertEquals(0, res.parseErrors)
+        val records = res.records
         assertEquals(1, records.size)
         val r = records[0]
         assertEquals(Protocol.WMR_HAND_LEFT, r.hand)
         assertEquals(100L, r.sequence)
         assertEquals(987654321L, r.rxTimeUs)
         assertEquals(50000L, r.deviceTicks)
+    }
+
+    @Test
+    fun testDecodedBatchWithCorruptedRecord() {
+        // Header: version=2, count=2
+        val buffer = ByteBuffer.allocate(2 + 56 * 2).order(ByteOrder.LITTLE_ENDIAN)
+        buffer.put(2) // batch version
+        buffer.put(2) // count = 2
+
+        // Record 1: valid
+        buffer.put(1) // version = 1
+        buffer.put(0) // hand = 0 (LEFT)
+        buffer.put(0)
+        buffer.put(0)
+        buffer.putInt(100)
+        buffer.putLong(987654321L)
+        buffer.putInt(50000)
+        buffer.position(2 + 56)
+
+        // Record 2: corrupted version (e.g. 99)
+        buffer.put(99)
+        buffer.put(1)
+        buffer.position(2 + 56 * 2)
+
+        val res = Protocol.parseDecodedBatch(buffer.array())
+        assertEquals(1, res.records.size)
+        assertEquals(1, res.parseErrors)
     }
 
     @Test

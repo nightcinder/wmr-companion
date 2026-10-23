@@ -334,12 +334,17 @@ class GattClient(
                 }
             }
 
-            // Subscriptions complete: read initial RSSI to establish baseline before declaring ready
-            gatt.readRemoteRssi()
-            updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+            // All descriptor writes complete.
+            // Read initial start RSSI, and await onReadRemoteRssi to declare READY
+            updateState(GattState.SUBSCRIBING, "Reading initial RSSI...")
+            val readStarted = gatt.readRemoteRssi()
+            if (!readStarted) {
+                // If stack rejected RSSI read, transition directly to READY
+                updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+            }
         }
 
-        // Available on Android 8.0+ (API 26+)
+        // Android 8.0+ / 13+ connection parameter change callback
         fun onConnectionUpdated(
             gatt: BluetoothGatt,
             interval: Int,
@@ -348,7 +353,7 @@ class GattClient(
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                val intervalUs = interval * 1250 // 1.25 ms per interval count -> microseconds
+                val intervalUs = interval * 1250 // 1.25 ms per unit
                 connectionIntervalUs = intervalUs
                 mainHandler.post { listener.onIntervalUpdated(intervalUs) }
             }
@@ -412,16 +417,12 @@ class GattClient(
                     }
                 }
             } else if (uuid == Protocol.WMR_BATCHED_CHAR_UUID) {
-                when (val res = Protocol.parseDecodedBatch(value)) {
-                    is Protocol.BatchParseResult.Ok -> {
-                        for (rec in res.records) {
-                            listener.onDecodedRecord(rec, arrivalUs)
-                        }
-                    }
-                    is Protocol.BatchParseResult.Error -> {
-                        Log.w(TAG, "Batch parse error: ${res.reason}")
-                        mainHandler.post { listener.onDecodedParseError() }
-                    }
+                val res = Protocol.parseDecodedBatch(value)
+                for (rec in res.records) {
+                    listener.onDecodedRecord(rec, arrivalUs)
+                }
+                for (err in 0 until res.parseErrors) {
+                    mainHandler.post { listener.onDecodedParseError() }
                 }
             }
         }
@@ -432,6 +433,9 @@ class GattClient(
                 mainHandler.post { listener.onRssiRead(rssi) }
             }
             rssiLatch?.countDown()
+            if (state == GattState.SUBSCRIBING) {
+                updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name}, RSSI: ${rssi} dBm)")
+            }
         }
     }
 }
