@@ -51,6 +51,7 @@ class DebugScreen extends ConsumerWidget {
     final modeState = decoded || source == DebugSource.real
         ? ref.watch(modeStateProvider(source)).value
         : null;
+    final link = ref.watch(linkStatusProvider(source)).value;
 
     final vm.Quaternion raw = decoded
         ? view?.orientation ?? vm.Quaternion.identity()
@@ -159,7 +160,12 @@ class DebugScreen extends ConsumerWidget {
             if (view == null)
               const Text('Waiting for the decoded stream...')
             else
-              DecodedStatsView(view.stats, selectedHand: hand, style: mono)
+              DecodedStatsView(
+                view.stats,
+                selectedHand: hand,
+                style: mono,
+                link: link,
+              )
           else
             _rawStats(ref, mono),
           const SizedBox(height: 16),
@@ -303,20 +309,26 @@ class DecodedStatsView extends StatelessWidget {
     super.key,
     required this.selectedHand,
     this.style,
+    this.link,
   });
 
   final DecodedStats stats;
   final int selectedHand;
   final TextStyle? style;
 
+  /// BLE link state and parameters, when the debug screen has a transport.
+  final LinkStatus? link;
+
   static String _ms(double s) => (s * 1000).toStringAsFixed(2);
   static String _sgn(double v) => '${v >= 0 ? '+' : ''}${v.toStringAsFixed(4)}';
+  static String _pct(double v) => '${(v * 100).toStringAsFixed(1)}%';
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _link(),
         for (var h = 0; h < stats.hands.length; h++)
           ..._hand(h, stats.hands[h]),
         Text(
@@ -333,6 +345,24 @@ class DecodedStatsView extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  Widget _link() {
+    final l = link;
+    if (l == null) return Text('link n/a', style: style);
+    final parts = <String>[
+      'link ${l.state?.name ?? 'n/a'}',
+      'RSSI ${l.info?.rssi == null ? 'n/a' : '${l.info!.rssi} dBm'}',
+    ];
+    final mtu = l.info?.mtu;
+    if (mtu != null) parts.add('MTU $mtu');
+    final interval = l.info?.connectionIntervalUs;
+    if (interval != null) {
+      parts.add('${(interval / 1000).toStringAsFixed(1)} ms');
+    }
+    final phy = l.info?.phy;
+    if (phy != null) parts.add('PHY $phy');
+    return Text(parts.join('  '), style: style);
   }
 
   List<Widget> _hand(int h, DecodedHandStats s) {
@@ -354,6 +384,11 @@ class DecodedStatsView extends StatelessWidget {
       Text(
         '  seq gaps ${s.sequenceGaps}  missing (ticks) ${s.missingFromTicks}  '
         'out of order ${s.outOfOrder}',
+        style: style,
+      ),
+      Text(
+        '  loss ${_pct(s.cumulativeLoss)} cumulative  '
+        '${s.windowLoss == null ? '-' : _pct(s.windowLoss!.loss)} last 5 s',
         style: style,
       ),
       Text(

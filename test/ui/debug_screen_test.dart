@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion/ble/ble_adapter.dart';
+import 'package:wmr_companion/ble/ble_transport.dart';
 import 'package:wmr_companion/ble/fake_transport.dart';
 import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
 import 'package:wmr_companion/ble/universal_ble_transport.dart';
+import 'package:wmr_companion/domain/loss_window.dart';
 import 'package:wmr_companion/domain/orientation.dart';
 import 'package:wmr_companion/protocol/gatt.dart';
 import 'package:wmr_companion/services/controller_service.dart';
@@ -286,6 +288,103 @@ void main() {
       );
       expect(find.textContaining('ATT 0x80'), findsOneWidget);
       expect(find.textContaining('other stream active'), findsOneWidget);
+    });
+  });
+
+  group('decoded loss and link quality', () {
+    testWidgets('shows cumulative and windowed loss plus RSSI and state', (
+      tester,
+    ) async {
+      const stats = DecodedStats(
+        hands: [
+          DecodedHandStats(
+            records: 90,
+            missingFromTicks: 10,
+            windowLoss: LossWindowStats(
+              records: 45,
+              missing: 5,
+              spanUs: 5000000,
+            ),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: DecodedStatsView(
+              stats,
+              selectedHand: 0,
+              link: LinkStatus(
+                state: BleConnectionState.connected,
+                info: BleConnectionInfo(
+                  mtu: 517,
+                  rssi: -48,
+                  connectionIntervalUs: 15000,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining('loss 10.0% cumulative  10.0% last 5 s'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('link connected  RSSI -48 dBm  MTU 517  15.0 ms'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('0 records is 0 %, and missing link or window data is n/a', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: DecodedStatsView(
+              DecodedStats(
+                hands: [
+                  DecodedHandStats(),
+                  DecodedHandStats(records: 0, missingFromTicks: 7),
+                ],
+              ),
+              selectedHand: 1,
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining('loss 0.0% cumulative  - last 5 s'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('loss 100.0% cumulative  - last 5 s'),
+        findsOneWidget,
+      );
+      expect(find.text('link n/a'), findsOneWidget);
+    });
+
+    testWidgets('a disconnected link drops stale RSSI', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: DecodedStatsView(
+              DecodedStats(hands: [DecodedHandStats()]),
+              selectedHand: 0,
+              link: LinkStatus(state: BleConnectionState.disconnected),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining('link disconnected  RSSI n/a'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('dBm'), findsNothing);
     });
   });
 }
