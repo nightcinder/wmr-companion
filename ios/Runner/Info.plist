@@ -10,6 +10,12 @@
 	<string>WMR Companion</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connects to the WMR Bridge to read controller data.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Connects to the WMR Bridge to read controller data.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
