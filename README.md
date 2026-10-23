@@ -39,10 +39,12 @@ cd apps/wmr_companion_app
 flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze
-flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_companion && dart test; cd packages/wmr_ble && flutter test; cd packages/wmr_companion_ui && flutter test; cd packages/wmr_companion_hid_android && flutter test; cd packages/wmr_fusion && dart test; cd example && flutter test
+flutter test
 flutter build apk --debug
 flutter run -d <device>           # BLE needs a physical phone
 ```
+
+From the repo root, the package suites are: `cd packages/wmr_core && dart test`; `cd packages/wmr_companion && dart test`; `cd packages/wmr_ble && flutter test`; `cd packages/wmr_companion_ui && flutter test`; `cd packages/wmr_companion_hid_android && flutter test`; `cd packages/wmr_fusion && dart test`; `cd example && flutter test`.
 
 CI runs the same checks and uploads a debug APK. Each CI APK is signed differently, so installing a new one over an old one needs `adb uninstall com.onyxlens.wmr_companion` first.
 
