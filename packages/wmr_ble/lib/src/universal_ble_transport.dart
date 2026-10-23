@@ -79,6 +79,11 @@ class _Session {
   final List<String> warnings = [];
   bool ready = false;
   final Set<String> enabled = {};
+
+  /// The GATT table discovered during [UniversalBleTransport._setup]. Cached
+  /// so a later [UniversalBleTransport.discoverServices] from the facade does
+  /// not run a second platform discovery on a live stream.
+  List<BleServiceInfo>? services;
 }
 
 class _Wanted {
@@ -510,6 +515,7 @@ class UniversalBleTransport implements BleTransport {
         );
       }
 
+      session.services = List.unmodifiable(services);
       session.ready = true;
       for (final key in _wanted.keys.toList()) {
         final w = _wanted[key]!;
@@ -636,6 +642,10 @@ class UniversalBleTransport implements BleTransport {
 
   @override
   Future<List<BleServiceInfo>> discoverServices(String deviceId) {
+    // The connect sequence already discovered the bridge's table. Returning it
+    // avoids a second platform discovery now that notifications are live.
+    final cached = _sessions[deviceId]?.services;
+    if (cached != null) return Future.value(cached);
     return _serial(() => _adapter.discoverServices(deviceId));
   }
 

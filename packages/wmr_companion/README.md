@@ -152,9 +152,15 @@ wmr.link.listen((WmrLinkSnapshot snapshot) {
 ```
 
 `WmrCompanion.protocol` returns the same value without waiting for the next
-snapshot. The read is best-effort: it never blocks or interrupts the stream,
-never appears on `failures`, and a value that cannot be decoded is flagged
-(`firmwareVersionMalformed`) rather than thrown.
+snapshot. The read is best-effort: it never appears on `failures`, and a value
+that cannot be decoded is flagged (`firmwareVersionMalformed`) rather than
+thrown. A discovery failure leaves `protocol` null; a failed FF16 read leaves
+`firmwareVersion` null (the feature matrix is still published). The read is
+fired after `connect` reports `ready`, so a slow read does not delay the
+stream. `UniversalBleTransport` caches the GATT table from its connect
+sequence, so the facade's lookup does not run a second platform discovery on a
+live link; a custom transport should do the same or expect one extra
+`discoverServices` call after connect.
 
 `WmrProtocolVersion.features` is a capability matrix taken from the bridge's
 GATT table, not parsed from the version string. The string is free-form

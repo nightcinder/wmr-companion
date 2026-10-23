@@ -580,12 +580,19 @@ class WmrCompanion {
     final WmrBridgeFeatures features;
     try {
       final services = await _transport.discoverServices(deviceId);
+      var foundService = false;
       var characteristicUuids = const <String>[];
       for (final discovered in services) {
         if (discovered.uuid.toLowerCase() == wmrBridgeServiceUuid) {
+          foundService = true;
           characteristicUuids = discovered.characteristicUuids;
           break;
         }
+      }
+      if (!foundService) {
+        // A bridge without FF10 is not a WMR bridge the facade can describe;
+        // leave protocol unknown rather than claim an empty capability set.
+        return;
       }
       features = WmrBridgeFeatures.fromCharacteristics(characteristicUuids);
     } catch (_) {

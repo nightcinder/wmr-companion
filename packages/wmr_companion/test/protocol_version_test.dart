@@ -20,6 +20,21 @@ const _legacyBridge = FakeDevice(
   ],
 );
 
+const _noFf10BridgeId = 'no-ff10-bridge';
+
+/// Discovery succeeds but the FF10 service is absent: the facade cannot
+/// describe the bridge and must not claim an empty capability set.
+const _noFf10Bridge = FakeDevice(
+  id: _noFf10BridgeId,
+  name: 'WMR Bridge',
+  services: [
+    BleServiceInfo(
+      uuid: '0000abcd-0000-1000-8000-00805f9b34fb',
+      characteristicUuids: [wmrBridgeStreamCharUuid],
+    ),
+  ],
+);
+
 Future<void> _settle([int millis = 20]) =>
     Future<void>.delayed(Duration(milliseconds: millis));
 
@@ -186,6 +201,25 @@ void main() {
       expect(companion.state, WmrConnectionState.ready);
     },
   );
+
+  test('a discovery result without FF10 leaves the protocol unknown', () async {
+    await transport.dispose();
+    transport = FakeTransport(devices: const [_noFf10Bridge]);
+    fakeBridge = FakeWmrBridge(transport, deviceId: _noFf10BridgeId);
+    companion = WmrCompanion(ble: transport);
+    final links = <WmrLinkSnapshot>[];
+    companion.link.listen(links.add);
+
+    await companion.connect(
+      const WmrBridgeDevice(id: _noFf10BridgeId, name: 'WMR Bridge'),
+    );
+    await _settle();
+
+    expect(companion.state, WmrConnectionState.ready);
+    expect(companion.protocol, isNull);
+    expect(links.last.protocol, isNull);
+    expect(transport.reads, isEmpty);
+  });
 
   test('the FF16 read does not delay connect or the stream', () async {
     final onRead = transport.onRead!;

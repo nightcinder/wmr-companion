@@ -168,6 +168,21 @@ void main() {
       expect(got, hasLength(1));
     });
 
+    test('a later discovery reuses the connect-time table', () async {
+      await connectAndSubscribe();
+      final discoveries = adapter.calls
+          .where((call) => call == 'discoverServices')
+          .length;
+
+      final services = await t.discoverServices(id);
+
+      expect(services.single.uuid, wmrBridgeServiceUuid);
+      expect(
+        adapter.calls.where((call) => call == 'discoverServices').length,
+        discoveries,
+      );
+    });
+
     test('a user disconnect is not reported as a lost connection', () async {
       await connectAndSubscribe();
       await t.disconnect(id);
