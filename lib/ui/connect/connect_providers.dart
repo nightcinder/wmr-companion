@@ -212,13 +212,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     final service = companion.debugControllerService;
     if (service == null) return;
 
-    void publish() => state = RealDeviceState(
-      status: _transport.status,
-      results: state.results,
-      deviceId: state.deviceId,
-      stats: service.stats,
-      mode: service.modeState,
-    );
+    void publish() {
+      // Read the service through the getter on every tick: the facade creates
+      // a new ControllerService when it reconnects after a drop.
+      final current = this.service;
+      if (current == null) return;
+      state = RealDeviceState(
+        status: _transport.status,
+        results: state.results,
+        deviceId: state.deviceId,
+        stats: current.stats,
+        mode: current.modeState,
+      );
+    }
+
     publish();
     _statsTimer?.cancel();
     _statsTimer = Timer.periodic(
