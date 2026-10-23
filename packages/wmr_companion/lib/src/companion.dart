@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/domain/axis_mapping.dart';
@@ -6,6 +7,8 @@ import 'package:wmr_core/domain/gamepad.dart';
 import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/imu_calibration.dart';
 import 'package:wmr_core/domain/stick_centre.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
+import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
 
 import 'config.dart';
@@ -63,6 +66,7 @@ class WmrCompanion {
   ControllerService? _service;
   BleConnectionInfo? _lastInfo;
   DecodedStats? _lastStats;
+  WmrProtocolVersion? _protocol;
   GamepadState? _previousGamepad;
   String? _reportedFault;
 
@@ -87,6 +91,11 @@ class WmrCompanion {
 
   /// The configuration in force. Setters return a new value here.
   WmrCompanionConfig get config => _config;
+
+  /// The connected bridge's firmware version and FF feature matrix, read once
+  /// after connect. Null before the first read completes, and when service
+  /// discovery failed. Prefer [link], which republishes this on every snapshot.
+  WmrProtocolVersion? get protocol => _protocol;
 
   /// Scan results, strongest first, de-duplicated by id.
   Stream<List<WmrBridgeDevice>> get bridges => _bridges.stream;
@@ -215,6 +224,11 @@ class WmrCompanion {
     _linkUp = true;
     _setState(WmrConnectionState.ready);
     _startLinkPolling();
+    // Read FF16 once, after the transport's MTU/priority setup (which
+    // `service.start()` waits for). It never gates the stream: a slow or
+    // failed read leaves the snapshot's protocol null, and an older bridge
+    // without FF16 is a normal status.
+    unawaited(_readProtocol(service));
     final fault = service.fault;
     if (fault != null) {
       throw _reportFault(fault);
@@ -501,6 +515,7 @@ class WmrCompanion {
     _linkTimer = null;
     _lastStats = null;
     _lastInfo = null;
+    _protocol = null;
     if (!_config.autoReconnect) {
       _setState(WmrConnectionState.failed);
       return;
@@ -554,6 +569,63 @@ class WmrCompanion {
     _emitLink();
   }
 
+  /// Reads the FF16 firmware version and the GATT feature matrix once.
+  ///
+  /// Best-effort by design: discovery failure leaves [protocol] null, a
+  /// missing FF16 is an older bridge, and a malformed value is flagged rather
+  /// than thrown. No path here reaches [failures] or blocks the stream.
+  Future<void> _readProtocol(ControllerService service) async {
+    final deviceId = _deviceId;
+    if (deviceId == null) return;
+    final WmrBridgeFeatures features;
+    try {
+      final services = await _transport.discoverServices(deviceId);
+      var foundService = false;
+      var characteristicUuids = const <String>[];
+      for (final discovered in services) {
+        if (discovered.uuid.toLowerCase() == wmrBridgeServiceUuid) {
+          foundService = true;
+          characteristicUuids = discovered.characteristicUuids;
+          break;
+        }
+      }
+      if (!foundService) {
+        // A bridge without FF10 is not a WMR bridge the facade can describe;
+        // leave protocol unknown rather than claim an empty capability set.
+        return;
+      }
+      features = WmrBridgeFeatures.fromCharacteristics(characteristicUuids);
+    } catch (_) {
+      // GATT discovery is optional for streaming; leave protocol unknown.
+      return;
+    }
+    if (_disposed || !identical(service, _service)) return;
+
+    WmrProtocolVersion protocol;
+    if (features.firmwareVersion) {
+      Uint8List? value;
+      try {
+        value = await _transport.read(
+          deviceId,
+          wmrBridgeServiceUuid,
+          wmrBridgeVersionCharUuid,
+        );
+      } catch (_) {
+        // A read that fails is the same status as a missing FF16: no version.
+        value = null;
+      }
+      if (_disposed || !identical(service, _service)) return;
+      protocol = WmrProtocolVersion.parseFirmwareVersion(
+        value,
+        features: features,
+      );
+    } else {
+      protocol = WmrProtocolVersion.withoutFirmwareVersion(features: features);
+    }
+    _protocol = protocol;
+    _emitLink();
+  }
+
   void _emitLink() {
     if (_link.isClosed) return;
     final service = _service;
@@ -568,6 +640,7 @@ class WmrCompanion {
         mode: service?.mode ?? _config.streamMode,
         fault: service == null ? null : _faultOf(service.fault),
         stats: _lastStats,
+        protocol: _protocol,
       ),
     );
   }
@@ -625,6 +698,7 @@ class WmrCompanion {
     _previousGamepad = null;
     _lastInfo = null;
     _lastStats = null;
+    _protocol = null;
     _linkUp = false;
     if (service != null) await service.dispose();
   }

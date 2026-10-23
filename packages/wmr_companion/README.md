@@ -72,7 +72,8 @@ Future<void> run(BleTransport transport) async {
       // Buttons, sticks, triggers, optional tilt: ready to drive a game.
     }),
     wmr.link.listen((WmrLinkSnapshot snapshot) {
-      // MTU, RSSI, rate, sequence gaps, tick loss.
+      // MTU, RSSI, rate, sequence gaps, tick loss, and snapshot.protocol
+      // (FF16 firmware version plus the bridge's feature matrix).
     }),
   ];
 
@@ -101,7 +102,8 @@ One class, one config, a handful of models.
 | `disconnect()` | Close the link and return to idle. |
 | `controllers` | FF11 frames or FF12/FF14 samples, one event per frame/sample. |
 | `gamepad` | Mapped two-handed `GamepadState`, one event per decoded sample. |
-| `link` | `WmrLinkSnapshot`: state, MTU, RSSI, interval, mode, fault, counters. |
+| `link` | `WmrLinkSnapshot`: state, MTU, RSSI, interval, mode, fault, protocol, counters. |
+| `protocol` | The bridge's `WmrProtocolVersion` (FF16 firmware version and feature matrix) after the one-time read. |
 | `failures` | Typed non-fatal errors (scan failures, stream faults). |
 | `setGamepadConfig` / `setAxisMapping` / `setFusion` / `setStickConfig` | Live reconfiguration. |
 | `setStickCentre` / `clearStickCentre` / `recentreStick` | Stick rest centre, before or after connecting. |
@@ -128,6 +130,60 @@ Two important rules:
   from device ticks, never the phone clock.
 - **No globals.** Two `WmrCompanion` instances in one process are independent.
   There is no singleton and no static mutable state.
+
+## Bridge firmware and the FF16 version
+
+Firmware `WMR_Bridge` #38 (`41771f8`) added a read-only FF16 characteristic:
+a UTF-8 `PROJECT_VER` string with no terminator, at most 31 bytes. It is the
+same value the build writes to `manifest.json` and `build-info.json`, so a host
+can match a running bridge to a release without a serial console. A build made
+directly with `idf.py` reports that project's `PROJECT_VER` (ESP-IDF's default
+is `1`).
+
+The facade reads FF16 once after connect, after the transport's MTU/priority
+setup, and publishes the result on `WmrLinkSnapshot.protocol`:
+
+```dart
+wmr.link.listen((WmrLinkSnapshot snapshot) {
+  final protocol = snapshot.protocol; // null until the read returns
+  final version = protocol?.firmwareVersion; // null on a pre-#38 bridge
+  final batching = protocol?.features.batchedStream ?? false;
+});
+```
+
+`WmrCompanion.protocol` returns the same value without waiting for the next
+snapshot. The read is best-effort: it never appears on `failures`, and a value
+that cannot be decoded is flagged (`firmwareVersionMalformed`) rather than
+thrown. A discovery failure leaves `protocol` null; a failed FF16 read leaves
+`firmwareVersion` null (the feature matrix is still published). The read is
+fired after `connect` reports `ready`, so a slow read does not delay the
+stream. `UniversalBleTransport` caches the GATT table from its connect
+sequence, so the facade's lookup does not run a second platform discovery on a
+live link; a custom transport should do the same or expect one extra
+`discoverServices` call after connect.
+
+`WmrProtocolVersion.features` is a capability matrix taken from the bridge's
+GATT table, not parsed from the version string. The string is free-form
+(`build.py` uses a tag or `git describe`; a direct `idf.py` build reports `1`),
+so the characteristics are the reliable signal:
+
+| Feature | Characteristic | When the bridge offers it |
+| --- | --- | --- |
+| `rawStream` | FF11 | every known firmware |
+| `decodedStream` | FF12 | every firmware with the decoded stream |
+| `batchedStream` | FF14 | firmware with batching; also needs ATT MTU >= 61 |
+| `configBlock` | FF13 | firmware with the config block (`WMR_Bridge` #17) |
+| `echo` | FF15 | firmware with echo (`WMR_Bridge` #13) |
+| `firmwareVersion` | FF16 | firmware with #38 (`41771f8`) and later |
+
+A bridge with no FF16 is an older firmware and a normal status:
+`protocol.firmwareVersion` is null and `features.firmwareVersion` is false. The
+rest of the matrix still describes what that bridge can do. Unknown
+characteristics are ignored, and callers should ignore records or fields their
+app does not know instead of treating them as fatal.
+
+None of this is a hardware claim: the firmware change is merged, and this client
+is exercised against the fake bridge only.
 
 ## Platform notes
 

@@ -38,6 +38,12 @@ const String wmrBridgeEchoCharUuid = '0000ff15-0000-1000-8000-00805f9b34fb';
 /// "Controller config block, FF13".
 const String wmrBridgeConfigCharUuid = '0000ff13-0000-1000-8000-00805f9b34fb';
 
+/// Firmware version: read-only UTF-8 string with no terminator, at most 31
+/// bytes, carrying the ESP-IDF `PROJECT_VER` value (WMR_Bridge #38 and later).
+/// The build tooling writes the same string to `manifest.json` and
+/// `build-info.json`. Independent of the stream exclusion and of FF13/FF15.
+const String wmrBridgeVersionCharUuid = '0000ff16-0000-1000-8000-00805f9b34fb';
+
 /// ATT application error the bridge returns when a CCC write would enable a
 /// second stream. Write 0x0000 to the active CCC first.
 const int attErrorOtherStreamActive = 0x80;

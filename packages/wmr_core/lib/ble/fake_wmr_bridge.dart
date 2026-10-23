@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:vector_math/vector_math_64.dart' as vm;
@@ -27,6 +28,7 @@ const List<BleServiceInfo> fakeBridgeDeviceServices = [
       wmrBridgeBatchedCharUuid,
       wmrBridgeEchoCharUuid,
       wmrBridgeConfigCharUuid,
+      wmrBridgeVersionCharUuid,
     ],
   ),
 ];
@@ -121,6 +123,8 @@ class FakeWmrBridge {
     List<Uint8List?> configBlobs = const [null, null],
     List<ConfigState>? configStates,
     this.hands = const [wmrHandLeft, wmrHandRight],
+    this.firmwareVersion = 'fake-1.0.0',
+    this.firmwareVersionBytes,
   }) : _ticks = List.of(startTicks ?? const [1000, 1000]),
        configBlobs = List.of(configBlobs),
        configStates = List.of(
@@ -139,7 +143,10 @@ class FakeWmrBridge {
       transport.onRead = _onRead;
     } else {
       transport.addReadHandler((id, uuid) {
-        if (id == deviceId && uuid.toLowerCase() == wmrBridgeConfigCharUuid) {
+        final lower = uuid.toLowerCase();
+        if (id == deviceId &&
+            (lower == wmrBridgeConfigCharUuid ||
+                lower == wmrBridgeVersionCharUuid)) {
           return _onRead(id, uuid);
         }
         return null;
@@ -150,6 +157,15 @@ class FakeWmrBridge {
   /// Hands this bridge serves. Defaults to both [wmrHandLeft, wmrHandRight].
   final List<int> hands;
 
+  /// FF16: what the bridge reports as its firmware version. Null makes the
+  /// read fail, like a bridge that advertises the characteristic but cannot
+  /// serve it.
+  final String? firmwareVersion;
+
+  /// FF16 raw bytes, used instead of [firmwareVersion] to model a malformed
+  /// value. Takes precedence when non-null.
+  final List<int>? firmwareVersionBytes;
+
   /// FF13: the block served per hand and the state reported for it. Change
   /// them between reads to model a block that finishes reading.
   final List<Uint8List?> configBlobs;
@@ -158,8 +174,19 @@ class FakeWmrBridge {
   int _cfgOffset = 0;
 
   Uint8List _onRead(String id, String characteristicUuid) {
-    if (id != deviceId ||
-        characteristicUuid.toLowerCase() != wmrBridgeConfigCharUuid) {
+    final uuid = characteristicUuid.toLowerCase();
+    if (id == deviceId && uuid == wmrBridgeVersionCharUuid) {
+      final bytes =
+          firmwareVersionBytes ??
+          (firmwareVersion == null
+              ? null
+              : Uint8List.fromList(utf8.encode(firmwareVersion!)));
+      if (bytes == null) {
+        throw StateError('FakeWmrBridge: FF16 has no value');
+      }
+      return Uint8List.fromList(bytes);
+    }
+    if (id != deviceId || uuid != wmrBridgeConfigCharUuid) {
       throw StateError(
         'FakeWmrBridge: unsupported read of $characteristicUuid',
       );
