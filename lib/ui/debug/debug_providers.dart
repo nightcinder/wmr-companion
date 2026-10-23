@@ -123,6 +123,7 @@ final fakeServiceProvider = FutureProvider<ControllerService>((ref) async {
     mode: ref.read(streamModeProvider),
     mapping: ref.read(axisMappingProvider),
     filterKind: ref.read(filterKindProvider),
+    filterTuning: ref.read(filterTuningProvider),
     stickConfig: settings.config,
     onStickCentre: (hand, centre) => ref
         .read(stickSettingsProvider.notifier)
@@ -133,6 +134,10 @@ final fakeServiceProvider = FutureProvider<ControllerService>((ref) async {
   ref.onDispose(service.dispose);
   ref.listen(axisMappingProvider, (_, m) => service.setMapping(m));
   ref.listen(filterKindProvider, (_, k) => service.setFilterKind(k));
+  ref.listen(
+    filterTuningProvider,
+    (_, tuning) => service.setFilterTuning(tuning),
+  );
   ref.listen(
     stickSettingsProvider.select((s) => s.config),
     (_, c) => service.setStickConfig(c),

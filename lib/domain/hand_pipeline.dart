@@ -12,6 +12,48 @@ import 'tick_timer.dart';
 
 enum FilterKind { madgwick, mahony }
 
+/// Live-tunable gains for the orientation filters.
+///
+/// One value object covers both filters so a pipeline keeps the other
+/// filter's gains while it is not selected. Defaults match the filter
+/// constructors except [mahonyKi]: the runtime gyro bias estimator already
+/// runs in [HandPipeline], so the filter's own integral starts off.
+class FilterTuning {
+  const FilterTuning({
+    this.beta = 0.05,
+    this.mahonyKp = 1.0,
+    this.mahonyKi = 0.0,
+  });
+
+  /// Madgwick gradient-descent gain (rad/s): larger values trust gravity
+  /// more and linear acceleration less.
+  final double beta;
+
+  /// Mahony proportional gain (1/s) pulling toward gravity.
+  final double mahonyKp;
+
+  /// Mahony integral gain (1/s^2) estimating a constant gyro bias. Zero
+  /// leaves the bias estimate to the pipeline.
+  final double mahonyKi;
+
+  FilterTuning copyWith({double? beta, double? mahonyKp, double? mahonyKi}) =>
+      FilterTuning(
+        beta: beta ?? this.beta,
+        mahonyKp: mahonyKp ?? this.mahonyKp,
+        mahonyKi: mahonyKi ?? this.mahonyKi,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is FilterTuning &&
+      other.beta == beta &&
+      other.mahonyKp == mahonyKp &&
+      other.mahonyKi == mahonyKi;
+
+  @override
+  int get hashCode => Object.hash(beta, mahonyKp, mahonyKi);
+}
+
 /// One decoded record after timing and fusion.
 class DecodedSample {
   const DecodedSample({
@@ -70,16 +112,18 @@ class DecodedSample {
 class HandPipeline {
   HandPipeline({
     FilterKind kind = FilterKind.madgwick,
+    FilterTuning tuning = const FilterTuning(),
     this.mapping = AxisMapping.defaultMapping,
     this.maxDt = 0.1,
     TickTimer? timer,
     GyroBiasEstimator? bias,
     StickNormalizer? stickNormalizer,
-  }) : timer = timer ?? TickTimer(),
+  }) : _tuning = tuning,
+       timer = timer ?? TickTimer(),
        bias = bias ?? GyroBiasEstimator(),
        stickNormalizer = stickNormalizer ?? StickNormalizer(),
        _kind = kind,
-       _filter = _makeFilter(kind, maxDt);
+       _filter = _makeFilter(kind, maxDt, tuning);
 
   /// Live-editable: the next sample uses the new mapping.
   AxisMapping mapping;
@@ -87,6 +131,33 @@ class HandPipeline {
   final TickTimer timer;
   final GyroBiasEstimator bias;
   final StickNormalizer stickNormalizer;
+
+  FilterTuning _tuning;
+
+  /// Live-editable filter gains. A change reaches the active filter
+  /// immediately, so the next sample uses it.
+  FilterTuning get tuning => _tuning;
+  set tuning(FilterTuning value) {
+    _tuning = value;
+    final f = _filter;
+    if (f is fusion.MadgwickFilter) f.beta = value.beta;
+    if (f is fusion.MahonyFilter) {
+      f.kp = value.mahonyKp;
+      f.ki = value.mahonyKi;
+    }
+  }
+
+  /// Madgwick beta; the next sample uses the new value.
+  double get beta => _tuning.beta;
+  set beta(double value) => tuning = _tuning.copyWith(beta: value);
+
+  /// Mahony Kp; the next sample uses the new value.
+  double get mahonyKp => _tuning.mahonyKp;
+  set mahonyKp(double value) => tuning = _tuning.copyWith(mahonyKp: value);
+
+  /// Mahony Ki; the next sample uses the new value.
+  double get mahonyKi => _tuning.mahonyKi;
+  set mahonyKi(double value) => tuning = _tuning.copyWith(mahonyKi: value);
 
   /// Live-editable: the next sample uses the new settings.
   StickConfig stickConfig = const StickConfig();
@@ -128,18 +199,27 @@ class HandPipeline {
   static fusion.OrientationFilterBase _makeFilter(
     FilterKind kind,
     double maxDt,
+    FilterTuning tuning,
   ) => switch (kind) {
-    FilterKind.madgwick => fusion.MadgwickFilter(maxDt: maxDt),
-    // The bias is estimated here, so the filter's own integral stays off.
-    FilterKind.mahony => fusion.MahonyFilter(ki: 0, maxDt: maxDt),
+    FilterKind.madgwick => fusion.MadgwickFilter(
+      beta: tuning.beta,
+      maxDt: maxDt,
+    ),
+    // The runtime bias estimator is on, so Ki defaults to 0; the debug
+    // screen can still raise it.
+    FilterKind.mahony => fusion.MahonyFilter(
+      kp: tuning.mahonyKp,
+      ki: tuning.mahonyKi,
+      maxDt: maxDt,
+    ),
   };
 
-  /// Switches the filter, keeping the current orientation.
+  /// Switches the filter, keeping the current orientation and tuning.
   void setFilter(FilterKind kind) {
     if (kind == _kind) return;
     final q = _filter.isInitialized ? _filter.orientation : null;
     _kind = kind;
-    _filter = _makeFilter(kind, maxDt);
+    _filter = _makeFilter(kind, maxDt, _tuning);
     if (q != null) _filter.reset(orientation: q);
   }
 

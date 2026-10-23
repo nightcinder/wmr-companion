@@ -77,6 +77,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
     ref.listen(filterKindProvider, (_, k) => _service?.setFilterKind(k));
     ref.listen(
+      filterTuningProvider,
+      (_, tuning) => _service?.setFilterTuning(tuning),
+    );
+    ref.listen(
       stickSettingsProvider.select((s) => s.config),
       (_, c) => _service?.setStickConfig(c),
     );
@@ -148,6 +152,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       mode: ref.read(streamModeProvider),
       mapping: ref.read(axisMappingProvider),
       filterKind: ref.read(filterKindProvider),
+      filterTuning: ref.read(filterTuningProvider),
       stickConfig: settings.config,
       onStickCentre: (hand, centre) => ref
           .read(stickSettingsProvider.notifier)
