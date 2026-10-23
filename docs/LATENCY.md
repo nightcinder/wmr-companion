@@ -152,6 +152,8 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 
 Six runs is one position, one phone, one session. The two repeats are there so a difference smaller than the run-to-run spread is not called a result. Nothing here is "verified" until Nick reports it.
 
+**Next: latency-2, the app against the native probe.** The comparison that decides milestone 5 is not stream against stream but this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). It is not yet run, and the probe it needs (milestone 7.1) is not built yet.
+
 ## Known limits
 
 - Percentiles are nearest-rank over the whole run.
