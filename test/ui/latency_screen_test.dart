@@ -11,9 +11,9 @@ import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/echo_client.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_core/services/latency_recorder.dart';
-import 'package:wmr_companion/ui/debug/debug_providers.dart';
-import 'package:wmr_companion/ui/latency/latency_providers.dart';
-import 'package:wmr_companion/ui/latency/latency_screen.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/latency/latency_providers.dart';
+import 'package:wmr_companion_app/ui/latency/latency_screen.dart';
 
 void main() {
   testWidgets('report view shows the decoded figures per hand', (tester) async {

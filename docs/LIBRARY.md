@@ -1,17 +1,17 @@
 # Companion as a Flutter library
 
-Status: **phase 1 landed; the rest is design.** `packages/wmr_core` now holds
-the pure-Dart protocol, domain, `BleTransport` interface, controller service and
-the pure services listed in §10, and the app depends on it by path. Everything
-else in this document is still a target: no facade, BLE package, UI package or
-plugin has been extracted, and the current app remains the only consumer.
+Status: **phases 1 and 2 landed; the rest is design.** `packages/wmr_core`
+holds the pure-Dart protocol, domain, `BleTransport` interface, controller
+service and the pure services, and `packages/wmr_companion` is the public
+facade (`WmrCompanion`, config, models, typed errors) with an API README and
+tests. The app depends on both by path and drives its real connection through
+the facade. The BLE package, UI package, Android HID add-on and publishing are
+still targets; the current app remains the reference consumer.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
-[PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions). The native iOS
-`WMRCompanionKit` and its `IOS.md` guide are added by PR #37 (ONY-38); they are
-not on this branch until that PR lands, so the iOS references below describe
-that pending work rather than files you can open here.
+[PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions), and
+[IOS.md](IOS.md) with the native `WMRCompanionKit` from ONY-38 (PR #37).
 
 ## 1. Decision in one page
 
@@ -128,7 +128,7 @@ apps/wmr_companion_app                  reference app: Connect, Debug, Capture,
 | `wmr_core` | Dart | yes (after API freeze) | GATT ids, parsers, reassembler, config decode, echo, hand pipeline, loss/latency maths, gamepad mapping, `BleTransport` interface, `ControllerService` | Flutter, Riverpod, plugins, `dart:ui` |
 | `wmr_fusion` | Dart | yes | 3DoF filters only | Flutter |
 | `wmr_ble` | Flutter plugin | yes | `UniversalBleTransport`, native iOS/Android transports, permissions, adapter-state and app-lifecycle handling | UI, Riverpod, app settings |
-| `wmr_companion` | Flutter | yes | Facade (`WmrCompanion`), models/DTOs, defaults, lifecycle, capture/latency recorders with injected sinks | UI widgets, Riverpod |
+| `wmr_companion` | Dart (Flutter once the BLE plugin lands) | yes | Facade (`WmrCompanion`), models/DTOs, defaults, lifecycle, capture/latency recorders with injected sinks | UI widgets, Riverpod |
 | `wmr_companion_ui` | Flutter | optional | Debug 3D view, stats panel, gamepad tester | Core internals; talks to the facade |
 | `wmr_companion_hid_android` | Flutter plugin | optional | Existing `BluetoothHidDevice` output | Core internals |
 | `apps/wmr_companion_app` | Flutter app | no | The current app; dogfoods every package | — |
@@ -156,18 +156,26 @@ and two independent sessions in one process stay possible.
 import 'package:wmr_companion/wmr_companion.dart';
 
 final wmr = WmrCompanion(
-  ble: const UniversalBleAdapter(),          // or a custom BleTransport
-  fusion: const FusionConfig.madgwick(beta: 0.05),
-  axisMapping: AxisMapping.defaults,
+  ble: transport,                            // any BleTransport
+  config: WmrCompanionConfig(
+    streamMode: StreamMode.batched,          // FF14
+    fusion: FusionConfig.madgwick(beta: 0.05),
+  ),
 );
 
-await wmr.initialize();                      // adapter state, permissions
+await wmr.initialize();                      // adapter state, permissions (wmr_ble)
 await wmr.startScan();
-await for (final bridge in wmr.bridges) {    // Stream<List<WmrBridgeDevice>>
-  if (bridge.name == 'WMR Bridge') {
-    await wmr.connect(bridge);
-    break;
+await for (final devices in wmr.bridges) {   // Stream<List<WmrBridgeDevice>>
+  WmrBridgeDevice? bridge;
+  for (final device in devices) {
+    if (device.name == 'WMR Bridge') {
+      bridge = device;
+      break;
+    }
   }
+  if (bridge == null) continue;
+  await wmr.connect(bridge);
+  break;
 }
 await wmr.setStreamMode(StreamMode.batched); // FF14
 
@@ -181,40 +189,48 @@ final subs = [
     // Buttons, sticks, triggers, optional tilt; ready to drive a game.
   }),
   wmr.link.listen((WmrLinkSnapshot s) {
-    // MTU, RSSI, rate, gaps, tick-loss, echo round trip.
+    // MTU, RSSI, rate, gaps, tick-loss.
   }),
 ];
 
 await wmr.dispose();
 ```
 
-Supporting shapes (names indicative, to be frozen in phase 2):
+The example above is the one in `packages/wmr_companion/README.md`, and
+`packages/wmr_companion/test/readme_example_test.dart` runs it against the fake
+bridge.
+
+Supporting shapes as frozen in phase 2:
 
 ```dart
 enum Hand { left, right }
 enum WmrConnectionState { idle, scanning, connecting, ready, reconnecting, failed }
 
-class WmrBridgeDevice { final String id, name; final int? rssi; }
+class WmrBridgeDevice { final String id; final String? name; final int? rssi; }
 
 class WmrControllerUpdate {
   final Hand hand;
   final int receivedAtUs;          // monotonic, stamped at transport boundary
   final WmrFrame? frame;           // raw FF11
-  final WmrDecodedRecord? decoded; // FF12/FF14
-  final Quaternion? orientation;  // fused, null until seeded
-  final WmrInput input;            // buttons, stick, trackpad, trigger, battery
+  final DecodedRecord? decoded;    // FF12/FF14
+  final Quaternion? orientation;   // fused, null until seeded
+  final HandInput? input;          // buttons, stick, trackpad, trigger; null on FF11
   final WmrHandStats stats;        // rate, gaps, tick loss, dt
 }
 
 class WmrCompanionConfig {
   final StreamMode streamMode;     // none | raw | decoded | batched
-  final int requestedMtu;          // best effort; 0 = platform default
-  final bool requestHighPriority;  // Android only, best effort
-  final FusionConfig fusion;
+  final FusionConfig fusion;       // filter kind + gains
+  final AxisMapping axisMapping;
   final GamepadConfig gamepad;
   final StickConfig sticks;
+  final bool autoReconnect;        // one retry after an unexpected drop
 }
 ```
+
+`requestedMtu` and `requestHighPriority` are deliberately **not** in the
+phase-2 config: `BleTransport` has no request call yet, and a config field that
+does nothing would be a lie. They arrive with `wmr_ble` in phase 3.
 
 API rules:
 
@@ -329,21 +345,23 @@ imported by `wmr_core` or `wmr_companion`.
 
 ```
 wmr-companion/
-  apps/wmr_companion_app/        # current app, moved; CI builds the APK here
+  apps/wmr_companion_app/        # current app, moved in phase 4; CI builds the APK here
   packages/
-    wmr_core/                    # pure Dart
-    wmr_fusion/                  # existing, kept pure Dart
-    wmr_ble/                     # Flutter plugin
-    wmr_companion/               # umbrella facade
-    wmr_companion_ui/            # optional widgets
-    wmr_companion_hid_android/   # optional HID output
-    WMRCompanionKit/             # native Swift kit (ONY-38, PR #37); not yet here
+    wmr_core/                    # phase 1: pure Dart (landed)
+    wmr_fusion/                  # existing, kept pure Dart (landed)
+    wmr_ble/                     # phase 3: Flutter plugin
+    wmr_companion/               # phase 2: umbrella facade (landed)
+    wmr_companion_ui/            # phase 7: optional widgets
+    wmr_companion_hid_android/   # phase 7: optional HID output
+    WMRCompanionKit/             # native Swift kit (ONY-38, PR #37)
   docs/                          # unchanged, plus this file
   tool/                          # capture/analysis, probes
 ```
 
-Moving the app into `apps/` is a later phase; during extraction it stays at the
-repo root and depends on the packages by path. That keeps CI and the debug-APK
+Moving the app into `apps/` is phase 4; during extraction it stays at the repo
+root and depends on the packages by path. Its pubspec package name is already
+`wmr_companion_app` (phase 2) so the facade can own the `wmr_companion` name;
+the directory move changes paths, not imports. That keeps CI and the debug-APK
 artifact stable while the boundary settles.
 
 ## 9. Compatibility, publishing and licensing
@@ -385,7 +403,7 @@ phase says so.
 | --- | --- | --- | --- |
 | 0 | Framework (this doc) | Record the decision, package map, API and phases | Owner agrees on package names, iOS approach and scope |
 | 1 | Pure-Dart core | Move `protocol/`, `domain/`, `controller_service` and pure services into `packages/wmr_core`; app depends by path; move tests and golden fixtures | App and core tests green; `wmr_core` has no Flutter/Riverpod import (CI grep) |
-| 2 | Public facade | Add `WmrCompanion`, config, models, typed errors, `FakeTransport` example, API README; app uses the facade through a thin adapter | App works unchanged; README example compiles as a test; no `package:flutter` in `wmr_companion`'s public exports except the plugin type |
+| 2 | Public facade | Add `WmrCompanion`, config, models, typed errors, `FakeTransport` example, API README; app uses the facade through a thin adapter | App works unchanged; README example compiles as a test; no `package:flutter` in `wmr_companion`'s public exports except the plugin type (met: the phase-2 facade has no Flutter dependency at all) |
 | 3 | BLE package | Move `lib/ble/` into `wmr_ble`; keep `UniversalBleTransport` and fakes; add permission/adapter-state docs; inject app lifecycle | Android debug APK connects and streams on hardware (user-reported); fake tests green |
 | 4 | Reference app | Keep the current app as `apps/wmr_companion_app` (or root app during transition); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
 | 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
@@ -393,7 +411,8 @@ phase says so.
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats), `wmr_companion_hid_android` (existing HID output) | App consumes the UI kit; HID package tested as before; neither is required by the facade |
 | 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
 
-Phase 1 landed in #39 (`packages/wmr_core`); the remaining rows are still ahead.
+Phase 1 landed in #39 (`packages/wmr_core`) and phase 2 in the facade PR
+(`packages/wmr_companion`); the remaining rows are still ahead.
 
 Sequencing notes:
 

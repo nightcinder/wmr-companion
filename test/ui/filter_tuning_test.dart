@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_core/domain/hand_pipeline.dart';
-import 'package:wmr_companion/ui/debug/debug_providers.dart';
-import 'package:wmr_companion/ui/debug/stream_settings.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 
 void main() {
   test('filter tuning clamps to the slider bounds', () {

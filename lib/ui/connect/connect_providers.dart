@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_companion/wmr_companion.dart';
 
 import '../../ble/universal_ble_adapter.dart';
 import '../../ble/universal_ble_transport.dart';
@@ -57,12 +58,16 @@ final realDeviceProvider =
       RealDeviceController.new,
     );
 
-/// Drives scan, connect and the [ControllerService] for the real bridge.
+/// Drives scan, connect and the [WmrCompanion] session for the real bridge.
+///
+/// The facade owns the pipeline; this controller adapts its connection
+/// lifecycle to the screen's existing [RealDeviceState] and keeps the raw
+/// [ControllerService] reachable for the diagnostic screens until phase 4.
 class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleScanResult> _seen = {};
   StreamSubscription<BleScanResult>? _scanSub;
   StreamSubscription<BleLinkStatus>? _statusSub;
-  ControllerService? _service;
+  WmrCompanion? _companion;
   Timer? _statsTimer;
 
   @override
@@ -77,29 +82,28 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         mode: state.mode,
       );
     });
-    ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
-    ref.listen(filterKindProvider, (_, k) => _service?.setFilterKind(k));
-    ref.listen(
-      filterTuningProvider,
-      (_, tuning) => _service?.setFilterTuning(tuning),
-    );
+    ref.listen(axisMappingProvider, (_, m) => _companion?.setAxisMapping(m));
+    ref.listen(filterKindProvider, (_, _) => _applyFusion());
+    ref.listen(filterTuningProvider, (_, _) => _applyFusion());
     ref.listen(
       stickSettingsProvider.select((s) => s.config),
-      (_, c) => _service?.setStickConfig(c),
+      (_, c) => _companion?.setStickConfig(c),
     );
     ref.listen(stickSettingsProvider.select((s) => s.centres), (_, centres) {
-      final service = _service;
+      final service = this.service;
       if (service != null) applyStickCentres(service, centres);
     });
     ref.listen(ff13SettingsProvider, (_, s) {
-      final service = _service;
+      final service = this.service;
       if (service != null) applyFf13Settings(service, s);
     });
     ref.onDispose(() {
       _scanSub?.cancel();
       _statusSub?.cancel();
       _statsTimer?.cancel();
-      _service?.dispose();
+      final companion = _companion;
+      _companion = null;
+      if (companion != null) unawaited(companion.dispose());
     });
     return RealDeviceState(status: transport.status);
   }
@@ -108,7 +112,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// The service behind the current connection, for consumers that share its
   /// frame stream (the capture screen). Null before the first connect.
-  ControllerService? get service => _service;
+  ControllerService? get service => _companion?.debugControllerService;
+
+  void _applyFusion() {
+    _companion?.setFusion(
+      FusionConfig(
+        kind: ref.read(filterKindProvider),
+        tuning: ref.read(filterTuningProvider),
+      ),
+    );
+  }
 
   void _update({List<BleScanResult>? results, String? deviceId}) {
     state = RealDeviceState(
@@ -144,32 +157,61 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// Connects and subscribes. Also the way to reconnect after a lost
   /// connection: it repeats the whole sequence.
+  ///
+  /// The facade owns the pipeline and its lifecycle; this method only feeds it
+  /// the app's current settings and publishes the service counters the screen
+  /// already shows.
   Future<void> connect(String deviceId) async {
     await stopScan();
     _update(deviceId: deviceId);
-    await _service?.dispose();
+    final previous = _companion;
+    _companion = null;
+    await previous?.dispose();
+
     final settings = ref.read(stickSettingsProvider);
-    final service = _service = ControllerService(
-      _transport,
-      deviceId,
-      mode: ref.read(streamModeProvider),
-      mapping: ref.read(axisMappingProvider),
-      filterKind: ref.read(filterKindProvider),
-      filterTuning: ref.read(filterTuningProvider),
-      stickConfig: settings.config,
+    final companion = _companion = WmrCompanion(
+      ble: _transport,
+      config: WmrCompanionConfig(
+        streamMode: ref.read(streamModeProvider),
+        fusion: FusionConfig(
+          kind: ref.read(filterKindProvider),
+          tuning: ref.read(filterTuningProvider),
+        ),
+        axisMapping: ref.read(axisMappingProvider),
+        sticks: settings.config,
+      ),
       onStickCentre: (hand, centre) => ref
           .read(stickSettingsProvider.notifier)
-          .setCentre(hand, centre[0], centre[1]),
+          .setCentre(hand.wireIndex, centre[0], centre[1]),
     );
-    applyStickCentres(service, settings.centres);
-    applyFf13Settings(service, ref.read(ff13SettingsProvider));
-    try {
-      await service.start();
-    } on BleTransportException {
-      return; // already in the status
-    } catch (_) {
-      return;
+    for (var h = 0; h < settings.centres.length; h++) {
+      final centre = settings.centres[h];
+      if (centre == null) {
+        companion.clearStickCentre(Hand.of(h));
+      } else {
+        companion.setStickCentre(Hand.of(h), centre[0], centre[1]);
+      }
     }
+    final ff13 = ref.read(ff13SettingsProvider);
+    for (var h = 0; h < ff13.calibrations.length; h++) {
+      companion.setFf13Calibration(
+        Hand.of(h),
+        ff13.calibrations[h],
+        apply: ff13.apply[h],
+      );
+    }
+
+    try {
+      await companion.connect(WmrBridgeDevice(id: deviceId));
+    } on WmrStreamModeException {
+      // The link is up but the stream did not enable; the banner reads the
+      // fault from the service. Keep the session for the retry.
+    } on WmrException {
+      return; // connection failure is already in the transport status
+    }
+    final service = companion.debugControllerService;
+    if (service == null) return;
+
     void publish() => state = RealDeviceState(
       status: _transport.status,
       results: state.results,
@@ -190,9 +232,14 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// A refusal shows up in [RealDeviceState.mode], never silently.
   Future<void> setStreamMode(StreamMode mode) async {
     ref.read(streamModeProvider.notifier).set(mode);
-    final service = _service;
-    if (service == null) return;
-    await service.setMode(mode);
+    final companion = _companion;
+    final service = companion?.debugControllerService;
+    if (companion == null || service == null) return;
+    try {
+      await companion.setStreamMode(mode);
+    } on WmrException {
+      // Typed failure; the mode state below carries the fault for the banner.
+    }
     state = RealDeviceState(
       status: _transport.status,
       results: state.results,
@@ -205,6 +252,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   Future<void> disconnect() async {
     final id = state.deviceId;
     _statsTimer?.cancel();
+    final companion = _companion;
+    _companion = null;
+    if (companion != null) {
+      // The facade owns the link, so it also performs the intentional
+      // disconnect that suppresses the auto-reconnect path.
+      await companion.disconnect();
+      await companion.dispose();
+      return;
+    }
     if (id != null) await _transport.disconnect(id);
   }
 }

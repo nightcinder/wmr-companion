@@ -28,7 +28,7 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core
+      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion
       - run: flutter analyze
       - run: flutter test
       - name: wmr_core package
@@ -43,6 +43,30 @@ jobs:
           test -d packages/wmr_core/lib
           if grep -rnE "package:(flutter|flutter_riverpod|universal_ble|path_provider|share_plus|permission_handler)/|import 'dart:ui'" packages/wmr_core/lib; then
             echo "wmr_core must not import Flutter, Riverpod, dart:ui or plugins"
+            exit 1
+          fi
+      - name: wmr_companion package
+        working-directory: packages/wmr_companion
+        run: |
+          dart pub get
+          dart analyze
+          dart test
+      - name: wmr_companion stays framework-agnostic
+        run: |
+          set -eu
+          test -d packages/wmr_companion/lib
+          if grep -rnE "package:(flutter|flutter_riverpod|universal_ble|path_provider|share_plus|permission_handler)/|import 'dart:ui'" packages/wmr_companion/lib; then
+            echo "wmr_companion must not import Flutter, Riverpod, dart:ui or plugins"
+            exit 1
+          fi
+      - name: wmr_companion public surface is in the barrel only
+        run: |
+          set -eu
+          test -f packages/wmr_companion/lib/wmr_companion.dart
+          test -f packages/wmr_companion/lib/testing.dart
+          if find packages/wmr_companion/lib -maxdepth 1 -name '*.dart' \
+              ! -name 'wmr_companion.dart' ! -name 'testing.dart' | grep .; then
+            echo "only wmr_companion.dart and testing.dart may be top-level libraries"
             exit 1
           fi
       - name: wmr_fusion package

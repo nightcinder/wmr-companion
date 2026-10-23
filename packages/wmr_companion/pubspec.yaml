@@ -1,0 +1,17 @@
+name: wmr_companion
+description: >-
+  Public, framework-agnostic facade over the WMR Bridge controller pipeline:
+  scan, connect, decode, fuse and map WMR controllers in-process.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  vector_math: ^2.4.3
+  wmr_core:
+    path: ../wmr_core
+
+dev_dependencies:
+  test: ^1.25.0

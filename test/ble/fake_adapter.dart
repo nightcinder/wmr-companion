@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:wmr_companion/ble/ble_adapter.dart';
+import 'package:wmr_companion_app/ble/ble_adapter.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
