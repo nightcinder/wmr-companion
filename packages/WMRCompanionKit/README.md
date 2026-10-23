@@ -20,7 +20,7 @@ A pure Swift framework for building iOS, macOS, and visionOS companion applicati
 
 ## Supported Platforms
 
-- iOS 14.0+
+- iOS 18.0+
 - macOS 12.0+
 - visionOS 1.0+
 

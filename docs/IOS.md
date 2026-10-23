@@ -59,7 +59,7 @@ Building a low-latency companion client on iOS requires handling several CoreBlu
 
 ## 3. `WMRCompanionKit` Swift Package
 
-The core framework is implemented in `packages/WMRCompanionKit` as a modular Swift Package supporting iOS 14.0+, macOS 12.0+, and visionOS 1.0+.
+The core framework is implemented in `packages/WMRCompanionKit` as a modular Swift Package supporting iOS 18.0+, macOS 12.0+, and visionOS 1.0+.
 
 ### Components
 
@@ -89,6 +89,6 @@ A native SwiftUI application is provided in `tool/ios_probe/` to serve as a late
 
 ## 5. Flutter iOS Integration & CI
 
-- `ios/Podfile`: Configured for iOS 14.0+, integrating Flutter plugins with modular headers.
+- `ios/Podfile`: Configured for iOS 18.0+, integrating Flutter plugins with modular headers.
 - `ios/Runner/Info.plist`: Includes `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, and `UIBackgroundModes` (`bluetooth-central`).
 - `.github/workflows/ci.yml`: Includes a dedicated `ios` job running on `macos-latest` that validates `WMRCompanionKit` unit tests (`swift test`) and Flutter iOS project build configuration (`flutter build ios --config-only --no-codesign`).

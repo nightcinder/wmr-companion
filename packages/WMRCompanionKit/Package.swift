@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "WMRCompanionKit",
     platforms: [
-        .iOS(.v14),
+        .iOS("18.0"),
         .macOS(.v12),
         .visionOS(.v1)
     ],

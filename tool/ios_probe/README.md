@@ -16,5 +16,5 @@ This tool provides a native iOS baseline for evaluating controller streaming lat
 
 1. Open the project in Xcode on macOS.
 2. Ensure `WMRCompanionKit` (located in `packages/WMRCompanionKit`) is included as a local Swift package dependency.
-3. Select an iOS device target (iOS 14.0 or later). Real physical hardware is required for CoreBluetooth.
+3. Select an iOS device target (iOS 18.0 or later). Real physical hardware is required for CoreBluetooth.
 4. Build and run (`Cmd + R`).
