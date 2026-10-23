@@ -220,8 +220,28 @@ unnecessary.
 
 ---
 
-## 6. CI Dry-Run Verification
+## 6. CI verification
 
-The CI workflow (`.github/workflows/ci.yml`) runs `dart pub publish --dry-run` across all six packages:
-- `packages/wmr_fusion` has no inter-package path dependencies and passes dry-run validation strictly with zero errors and zero warnings.
-- `packages/wmr_core`, `packages/wmr_companion`, `packages/wmr_ble`, `packages/wmr_companion_ui`, and `packages/wmr_companion_hid_android` report path dependency errors during `--dry-run` because their sister packages are not yet published. The CI step allows them to fail soft with a reference to this document, ensuring that any other packaging issues (missing license, invalid metadata, syntax errors) are surfaced without breaking CI before the first publish.
+Two checks run in CI; both are strict and neither uploads anything.
+
+```sh
+./tool/publish_dry_run.sh   # staged `dart pub publish --dry-run` for all six
+./tool/fresh_app_check.sh   # a brand-new Flutter app consumes the packages
+```
+
+`publish_dry_run.sh` copies each package to a temporary directory, drops any
+`publish_to` gate there, rewrites the internal dependencies to `^0.1.0` and
+points them at the staged siblings with `pubspec_overrides.yaml`. Every package
+must pass with zero warnings; the only allowed hints are the override notices.
+A packaging problem (missing LICENSE, bad metadata, a file that would not be
+archived) fails the job — it is not allowed to fail soft.
+
+`fresh_app_check.sh` runs `flutter create`, depends on the four host-facing
+packages by path plus the internal-closure overrides, connects a
+`WmrCompanion` to `FakeTransport`, reads a gamepad frame and imports the
+optional BLE, UI and HID entry points. That is the "a fresh app can add the
+package and read gamepad state" acceptance before the first upload.
+
+Still not covered: the real `dart pub publish` upload, a hosted-version
+install (impossible before publishing), the pub.dev scorecard, and any device
+or iOS run.
