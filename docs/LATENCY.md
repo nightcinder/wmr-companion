@@ -154,6 +154,30 @@ Six runs is one position, one phone, one session. The two repeats are there so a
 
 **Next: latency-2, the app against the native probe.** The comparison that decides milestone 5 is not stream against stream but this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). It is not yet run, and the probe it needs (milestone 7.1) is not built yet.
 
+## Flutter library / iOS v1 run (phase 5)
+
+The library package split is merged through phase 4. Phase 5 is the first real
+iOS evidence and needs a device; it is not a CI-only result.
+
+1. **Example app, both platforms.** `cd example && flutter run -d <device>`.
+   It shows a live stick/trigger/button sample from the fake bridge; this
+   proves the package builds and the UI wiring works on the platform.
+2. **Real bridge, both platforms.** Replace `FakeTransport` with
+   `UniversalBleTransport`, grant the Bluetooth permission (the example
+   manifest/Info.plist already declare it), and confirm FF14 samples in the
+   example. Then run the full app and connect on iOS 18.
+3. **Latency, iOS and Android.** Use the existing Latency screen and the six
+   runs above on each platform. Record the exported JSON/echo files, firmware
+   hash, app commit, phone model, iOS version and whether MTU/RSSI are
+   visible.
+4. **Decision.** Apply the fixed rule in [runs/sheets/latency-2.md](runs/sheets/latency-2.md):
+   if `universal_ble` meets the latency/background requirement, phase 6 (the
+   native iOS transport) never runs; if not, the numbers decide it. Record
+   the outcome here and in `docs/STATUS.md`.
+
+No iOS device run has happened yet; until then iOS is design- and
+CI-compile-only, not a hardware claim.
+
 ## Known limits
 
 - Percentiles are nearest-rank over the whole run.

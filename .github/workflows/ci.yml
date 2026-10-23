@@ -163,3 +163,9 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign
+
+      - name: Validate example iOS config
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build ios --config-only --no-codesign
