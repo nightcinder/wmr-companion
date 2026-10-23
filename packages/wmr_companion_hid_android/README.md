@@ -58,6 +58,12 @@ flutter test
 The tests cover report encoding, descriptor shape, channel arguments and
 status parsing. Native HID registration is not exercised without a phone.
 
+## Status
+
+Pre-1.0 (`0.1.0`): the API is frozen for the publishing preparation but the
+package is **not published** to pub.dev yet; see `docs/PUBLISHING.md` in the
+repository.
+
 ## Licence
 
 MIT. The bridge firmware is separate (BTstack-derived, non-commercial); this

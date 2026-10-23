@@ -1,5 +1,7 @@
 name: wmr_companion_ui
 description: Optional Flutter widgets for wmr_companion hosts (orientation, link and stats views).
+repository: https://github.com/nightcinder/wmr-companion
+issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 version: 0.1.0
 publish_to: none
 

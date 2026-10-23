@@ -2,7 +2,7 @@
 
 Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to the [WMR_Bridge](https://github.com/nightcinder/WMR_Bridge) firmware over BLE GATT, fuses controller orientation on the phone (3DoF, Madgwick/Mahony), shows a debug 3D view with link statistics, and records raw captures. Android first, iOS later; the end goal is gamepad-style 3DoF input. The pipeline is also being extracted into Flutter packages that other apps can import in-process on **Android and iOS** (see [docs/LIBRARY.md](docs/LIBRARY.md), [packages/wmr_companion](packages/wmr_companion/README.md) and [packages/wmr_ble](packages/wmr_ble/README.md)); the app is the reference consumer.
 
-**Status (v0.2.0):** milestones 1 to 4 and the Capture screen are done and used on hardware (user-reported): the decoded-stream pipeline (FF12, and FF14 batches as the default) and 3D view, the controller config read over FF13 with calibration decoded, and the latency screen with the FF15 round trip (first run: 479 of 479 pings, p50 40.8 ms). An in-app gamepad mapping layer and a Bluetooth HID output ([docs/GAMEPAD.md](docs/GAMEPAD.md)) are built but not run on hardware; iOS is not started. Controller-to-ESP32 report loss (about 19 % per controller with both connected) is the main open problem. Start with [HANDOFF.md](HANDOFF.md), then [docs/STATUS.md](docs/STATUS.md) for the state, hardware results and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
+**Status (v0.2.0):** milestones 1 to 4 and the Capture screen are done and used on hardware (user-reported): the decoded-stream pipeline (FF12, and FF14 batches as the default) and 3D view, the controller config read over FF13 with calibration decoded, and the latency screen with the FF15 round trip (first run: 479 of 479 pings, p50 40.8 ms). An in-app gamepad mapping layer and a Bluetooth HID output ([docs/GAMEPAD.md](docs/GAMEPAD.md)) are built but not run on hardware. iOS is configured, CI-checked and has a run sheet but has not run on a device (iOS 18 is the library floor); the library packages are publishable but **not published** ([docs/PUBLISHING.md](docs/PUBLISHING.md)). Controller-to-ESP32 report loss (about 19 % per controller with both connected) is the main open problem. Start with [HANDOFF.md](HANDOFF.md), then [docs/STATUS.md](docs/STATUS.md) for the state, hardware results and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
 
 ## What is in the app
 
@@ -26,9 +26,10 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 | `example/` | Minimal Flutter host: one facade, a connect and a gamepad `StreamBuilder` on the fake bridge ([README](example/README.md)) |
 | `lib/services/` | App-side config report, key store and settings wiring |
 | `lib/ui/` | Connect, debug, capture, latency and gamepad screens |
-| `lib/hid/` | Bluetooth HID gamepad output |
+| `lib/hid/` | App-side Riverpod adapter for the optional HID package |
 | `packages/wmr_fusion/` | Pure-Dart Madgwick and Mahony filters |
-| `docs/` | Status, plan, protocol notes, capture, latency, gamepad, camera research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable Flutter package split |
+| `docs/` | Status, plan, protocol notes, capture, latency, gamepad, camera research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable Flutter package split and [PUBLISHING.md](docs/PUBLISHING.md) the frozen surface and publish checks |
+| `tool/publish_dry_run.sh`, `tool/fresh_app_check.sh` | Phase-8 checks: staged `pub publish --dry-run` and a fresh-app consumer test |
 | `HANDOFF.md` | Rules, environment, state, not-yet-run list, cleanup list |
 
 ## Build and test
@@ -40,6 +41,8 @@ flutter analyze
 flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_companion && dart test; cd packages/wmr_ble && flutter test; cd packages/wmr_companion_ui && flutter test; cd packages/wmr_companion_hid_android && flutter test; cd packages/wmr_fusion && dart test; cd example && flutter test
 flutter build apk --debug
 flutter run -d <device>           # BLE needs a physical phone
+./tool/publish_dry_run.sh         # phase-8: staged dry-run, nothing uploaded
+./tool/fresh_app_check.sh         # phase-8: a fresh app consumes the packages
 ```
 
 CI runs the same checks and uploads a debug APK. Each CI APK is signed differently, so installing a new one over an old one needs `adb uninstall com.onyxlens.wmr_companion` first.

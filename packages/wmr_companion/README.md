@@ -223,3 +223,9 @@ dart test
 The facade tests use `package:wmr_companion/testing.dart`, which re-exports
 `FakeTransport` and `FakeWmrBridge` from `wmr_core`, so the whole lifecycle is
 covered without a phone.
+
+## Status and licence
+
+Pre-1.0 (`0.1.0`): the API is frozen for the publishing preparation but the
+package is **not published** to pub.dev yet; see `docs/PUBLISHING.md` in the
+repository. MIT.

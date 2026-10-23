@@ -197,3 +197,23 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign
+
+  # Phase 8 preparation: prove the packages are publishable and that a fresh
+  # app can consume them. Nothing is uploaded and publish_to stays `none`.
+  publish-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Publish dry-run for every package
+        run: ./tool/publish_dry_run.sh
+
+      - name: A fresh app consumes the packages
+        run: ./tool/fresh_app_check.sh
