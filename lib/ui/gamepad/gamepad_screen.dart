@@ -276,6 +276,21 @@ class GamepadSettingsPanel extends ConsumerWidget {
           onChanged: (v) => n.set(c.copyWith(triggerPressThreshold: v)),
         ),
         Text(
+          'Trigger release (L2/R2) at '
+          '${c.triggerReleaseThreshold.toStringAsFixed(2)}',
+        ),
+        Slider(
+          value: c.triggerReleaseThreshold,
+          max: c.triggerPressThreshold,
+          divisions: 20,
+          onChanged: (v) => n.set(c.copyWith(triggerReleaseThreshold: v)),
+        ),
+        Text(
+          'The band between press and release is the hysteresis that stops a '
+          'resting finger from flickering L2/R2.',
+          style: small,
+        ),
+        Text(
           'Trackpad centre (no press) '
           '${c.trackpadCentreRadius.toStringAsFixed(2)}',
         ),
