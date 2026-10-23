@@ -11,8 +11,7 @@ environment:
 
 dependencies:
   vector_math: ^2.4.3
-  wmr_core:
-    path: ../wmr_core
+  wmr_core: ^0.1.0
 
 dev_dependencies:
   test: ^1.25.0
