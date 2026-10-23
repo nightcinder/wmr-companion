@@ -9,8 +9,9 @@ const String wmrConfigKeyAsset = 'assets/monado/wmr_config_key.bin';
 enum ConfigKeyStatus {
   ok,
 
-  /// The asset is not in the build: run `tool/fetch_wmr_config_key.dart` and
-  /// rebuild. Reading the config block still works; decoding it does not.
+  /// The asset is not in the build: run `tool/fetch_wmr_config_key.dart` from
+  /// `apps/wmr_companion_app` and rebuild. Reading the config block still
+  /// works; decoding it does not.
   missing,
 
   /// The asset exists but is not 1024 bytes.
@@ -33,7 +34,8 @@ class ConfigKeyResult {
     ConfigKeyStatus.ok => 'Monado config key loaded',
     ConfigKeyStatus.missing =>
       'Monado config key not in this build. Run '
-          '`dart run tool/fetch_wmr_config_key.dart`, then rebuild.',
+          '`dart run ../../tool/fetch_wmr_config_key.dart` from '
+          'apps/wmr_companion_app, then rebuild.',
     ConfigKeyStatus.wrongSize =>
       'Monado config key has $size bytes, expected $wmrConfigKeySize.',
   };

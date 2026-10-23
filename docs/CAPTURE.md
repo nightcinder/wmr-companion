@@ -93,7 +93,7 @@ the begin action.
 - `packages/wmr_core/lib/services/capture_files.dart`: `FileCaptureSink` (buffered `IOSink`;
   each frame is one short `write`, no flush) and `CaptureStore` (naming,
   listing).
-- `lib/ui/capture/`: controller and screen. The recorder listens to
+- `apps/wmr_companion_app/lib/ui/capture/`: controller and screen. The recorder listens to
   `ControllerService.frames`; there is no second BLE subscription and the
   transport is untouched.
 - Files go to the app documents directory (`path_provider`) as
@@ -109,5 +109,5 @@ with `packages/wmr_core/test/fixtures/capture_golden.txt`, which was written by 
 the desktop format (`%.6f` times, `bytes.hex()`). It was not produced by
 running `capture_ble.py` or checked by `analyze_capture.py`. The tests also
 cover the gap and Hz summary and 100,000 frames fed back to back.
-`test/ui/capture_controller_test.dart` drives the whole guided run with a fake
+`apps/wmr_companion_app/test/ui/capture_controller_test.dart` drives the whole guided run with a fake
 frame stream and clock.

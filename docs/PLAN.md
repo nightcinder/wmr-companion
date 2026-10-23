@@ -36,25 +36,26 @@ Rules:
 ## Repo layout
 ```
 wmr-companion/
-  lib/
-    main.dart
-    app.dart
-    ble/            # universal_ble adapter/transport
-    services/       # app-side config report, key store and settings wiring
-    ui/
-      scan/         # scan + connect screen
-      controller/   # live controller view (buttons, axes, battery)
-      debug/        # 3DoF view + stats panel + stream settings
-      capture/      # guided raw capture (FF11)
-      latency/      # latency test screen and CSV/JSON export (docs/LATENCY.md)
-      gamepad/      # gamepad mapping debug screen (docs/GAMEPAD.md)
+  apps/wmr_companion_app/
+    lib/
+      main.dart
+      app.dart
+      ble/            # universal_ble adapter/transport
+      services/       # app-side config report, key store and settings wiring
+      ui/
+        scan/         # scan + connect screen
+        controller/   # live controller view (buttons, axes, battery)
+        debug/        # 3DoF view + stats panel + stream settings
+        capture/      # guided raw capture (FF11)
+        latency/      # latency test screen and CSV/JSON export (docs/LATENCY.md)
+        gamepad/      # gamepad mapping debug screen (docs/GAMEPAD.md)
+    test/
   packages/wmr_core/    # pure Dart: protocol, domain, BleTransport, controller services
   packages/wmr_companion/    # public facade for host apps
   packages/wmr_ble/          # universal_ble adapter/transport and lifecycle hook
   packages/wmr_companion_ui/ # optional orientation/link/stats/gamepad widgets
   packages/wmr_companion_hid_android/ # optional Android Bluetooth HID output
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
-  test/
   docs/STATUS.md    # current state and roadmap
   docs/PLAN.md      # this file
   docs/PROTOCOL.md  # links to WMR_Bridge docs + app-side decisions

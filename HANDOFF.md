@@ -17,7 +17,7 @@ The repository is no longer one monolithic Flutter app. It is a federated packag
 - `packages/wmr_companion_ui`: Reusable Flutter UI widgets (`OrientationView`, `LinkStatusView`, `HandStatsView`) extracted from the reference app's debug screen (merged in PR #45).
 - `packages/WMRCompanionKit`: Native Swift framework targeting iOS 18+, macOS 12+, visionOS 1+ (CoreBluetooth transport, FF11–FF15 parsers, fusion, dual-bridge coordination) from ONY-38 (PR #37).
 - `example/`: Minimal Flutter host demonstrating in-process controller consumption (~20 lines to gamepad state).
-- Root app (`wmr_companion_app`): The full reference consumer app (Connect, Debug, Capture, Latency, Gamepad screens) driving its real connection through the `WmrCompanion` facade.
+- App (`apps/wmr_companion_app`): The full reference consumer app (Connect, Debug, Capture, Latency, Gamepad screens) driving its real connection through the `WmrCompanion` facade.
 
 | Repo | What | Notes |
 |---|---|---|
@@ -54,14 +54,14 @@ Style Nick wants: short answers that lead with the result or the command; tables
 - **Anya**: Nick's desktop with the full ESP-IDF setup, the ESP32 on COM5, the controllers and the phone. The old way to direct firmware work there was WMR_Bridge issue #3 ("Director", closed 2026-10-22; reopen it if a session on Anya is needed). Firmware changes are now written in project threads without a build there, so **any firmware PR needs Nick to build and flash it**. On Anya's ESP-IDF terminal never replace PATH; append only.
 - **Cloud container** (where project threads run): GitHub through the `mcp__github__*` tools or `gh` CLI; no Android SDK, so no APK builds there (CI builds them). Flutter for local format/analyze/test: download `flutter_linux_3.47.7-stable.tar.xz` (the CI version) from storage.googleapis.com, then `git config --global --add safe.directory <sdk>/flutter`.
 - PowerShell: a backtick inside a double-quoted string is an escape character; use single-quoted here-strings for text with backticks. Repo files may be CRLF; normalize before multi-line replacements. The `Edit` tool refuses `C:\...` paths. `git worktree remove` can fail with "Filename too long": robocopy /MIR from an empty folder, then delete. Check an agent's log before saying it is running (one died silently on a CLI session limit).
-- **Monado config key (FF13).** The XOR key table that de-obfuscates the controller config blob is Monado's `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0). It is **fetched, never committed**: `dart run tool/fetch_wmr_config_key.dart` (or `--file <downloaded header>`) writes the gitignored `assets/monado/wmr_config_key.bin`, which the app bundles on the next build; the BSL-1.0 notice ships as `assets/monado/NOTICE.txt`. CI runs the same script before building the debug APK (a failed download does not fail CI), so the CI APK carries the key and decodes real blocks. `loadConfigKey` reports a missing or wrong-size key as a status, never an exception. This is the project's reading of the licence, not legal advice. Details: `docs/PROTOCOL.md` "FF13".
+- **Monado config key (FF13).** The XOR key table that de-obfuscates the controller config blob is Monado's `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0). It is **fetched, never committed**: from `apps/wmr_companion_app`, run `dart run ../../tool/fetch_wmr_config_key.dart` (or `--file <downloaded header>`); it writes the gitignored `apps/wmr_companion_app/assets/monado/wmr_config_key.bin`, which the app bundles on the next build; the BSL-1.0 notice ships as `apps/wmr_companion_app/assets/monado/NOTICE.txt`. CI runs the same script before building the debug APK (a failed download does not fail CI), so the CI APK carries the key and decodes real blocks. `loadConfigKey` reports a missing or wrong-size key as a status, never an exception. This is the project's reading of the licence, not legal advice. Details: `docs/PROTOCOL.md` "FF13".
 
 ## 4. Build, flash and test commands
 
-App (repo root of wmr-companion):
+App (`apps/wmr_companion_app`; run these from that directory):
 - Format: `dart format --set-exit-if-changed .`
 - Analyze: `flutter analyze`
-- Test root app: `flutter test`
+- Test app: `flutter test`
 - Package tests:
   - `cd packages/wmr_core && dart test`
   - `cd packages/wmr_companion && dart test`
@@ -152,7 +152,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 ### M10 — Library v1: close the package tree and freeze the API
 *Question: can a fresh Flutter app add one dependency, read `GamepadState`, and know which firmware it needs?*
 - **10.1 Merge PR #45** (UI package `wmr_companion_ui`, reviewed in ONY-52) — **merged on 2026-10-23**.
-- **10.2 Phase 7b**: extract `wmr_companion_hid_android` from `lib/hid/`, or park it with the reason recorded (depends on owner's answer).
+- **10.2 Phase 7b**: extract `wmr_companion_hid_android` from `apps/wmr_companion_app/lib/hid/`, or park it with the reason recorded (depends on owner's answer).
 - **10.3 `WmrProtocolVersion` + FF16** (ONY-56): read the bridge's packaged version, expose it on the link snapshot, and publish the FF11–FF16 feature matrix (skip unknown records, never fatal).
 - **10.4 Release hygiene**: pub workspace, per-package CHANGELOG and version policy, `dart pub publish --dry-run` in CI, export-boundary test per package.
 - **10.5 App placement decision**: move to `apps/wmr_companion_app` or stay at root (depends on owner's answer).
@@ -205,7 +205,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 ## 10. Standing decisions and facts from project memory
 
 - **iOS scope and floor**: The owner settled **iOS 18 as the floor and both platforms in v1 scope** (`docs/LIBRARY.md` §13). "iOS is deferred" is no longer the project decision. `packages/WMRCompanionKit` (pure Swift framework), the native SwiftUI probe app (`tool/ios_probe`), and macOS CI compile validation landed in ONY-38 (PR #37) and ONY-41 (PR #44); **no iOS device run has happened yet**.
-- **Package split**: The repo is no longer a single Flutter app. It is split into `packages/wmr_core` (pure Dart), `packages/wmr_companion` (public facade), `packages/wmr_ble` (transport), `packages/wmr_fusion` (filters), `packages/wmr_companion_ui` (optional widgets, merged in PR #45), `packages/WMRCompanionKit` (Swift), and `example/` (minimal host). The root app is the reference consumer driving its real connection through the facade.
+- **Package split**: The repo is no longer a single Flutter app. It is split into `packages/wmr_core` (pure Dart), `packages/wmr_companion` (public facade), `packages/wmr_ble` (transport), `packages/wmr_fusion` (filters), `packages/wmr_companion_ui` (optional widgets, merged in PR #45), `packages/WMRCompanionKit` (Swift), and `example/` (minimal host). The app under `apps/wmr_companion_app` is the reference consumer driving its real connection through the facade.
 - **Protocol defaults and hardware status**: FF14 is the app's default stream and requests ATT MTU 517 on connect. FF15 answered 479/479 pings in a hardware run (round trip p50 40.8 ms, user-reported). The line claiming neither has been run on hardware was wrong. FF16 exists on firmware `main` (#38); the app does not read it yet (ONY-56).
 - **Multi-bridge**: Connecting several bridges concurrently exists (#34 in app, #33 single-hand mode on firmware). It cannot deliver "zero loss" because RIGHT has an independent ~10.8 % loss floor on current evidence.
 - **Firmware flashing**: One-command `build.py` and a browser installer landed on firmware (#37); L/R variant packaging is M11.1.

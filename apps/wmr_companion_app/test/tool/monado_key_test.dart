@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../tool/monado_key.dart';
+import '../../../../tool/monado_key.dart';
 
 /// A synthetic header shaped like Monado's: comments, a declaration, 1024
 /// values in rows of 16. NOT Monado's table.

@@ -27,10 +27,13 @@ jobs:
           flutter-version: 3.47.7
           cache: true
 
-      - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
-      - run: flutter analyze
-      - run: flutter test
+      - working-directory: apps/wmr_companion_app
+        run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
+      - working-directory: apps/wmr_companion_app
+        run: flutter analyze
+      - working-directory: apps/wmr_companion_app
+        run: flutter test
       - name: wmr_core package
         working-directory: packages/wmr_core
         run: |
@@ -119,14 +122,16 @@ jobs:
           dart test
       # Monado's config key (BSL-1.0) is not committed. It is fetched here so the
       # test APK can decode a controller config block; it ends up only inside the
-      # APK artifact, together with assets/monado/NOTICE.txt. A failed download
-      # must not fail CI: the app reports a missing key.
+      # APK artifact, together with apps/wmr_companion_app/assets/monado/NOTICE.txt.
+      # A failed download must not fail CI: the app reports a missing key.
       - name: Fetch Monado config key
         continue-on-error: true
-        run: dart run tool/fetch_wmr_config_key.dart
+        working-directory: apps/wmr_companion_app
+        run: dart run ../../tool/fetch_wmr_config_key.dart
       - name: Show whether the key is in the build
-        run: ls -l assets/monado/
-      - run: flutter build apk --debug
+        run: ls -l apps/wmr_companion_app/assets/monado/
+      - working-directory: apps/wmr_companion_app
+        run: flutter build apk --debug
 
       - name: Example app
         working-directory: example
@@ -139,7 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: wmr-companion-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 14
 
   gatt-probe:
@@ -188,6 +193,7 @@ jobs:
           cache: true
 
       - name: Validate Flutter iOS config
+        working-directory: apps/wmr_companion_app
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign

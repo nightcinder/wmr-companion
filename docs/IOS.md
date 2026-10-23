@@ -89,6 +89,6 @@ A native SwiftUI application is provided in `tool/ios_probe/` to serve as a late
 
 ## 5. Flutter iOS Integration & CI
 
-- `ios/Podfile`: Configured for iOS 18.0+, integrating Flutter plugins with modular headers.
-- `ios/Runner/Info.plist`: Includes `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, and `UIBackgroundModes` (`bluetooth-central`).
+- `apps/wmr_companion_app/ios/Podfile`: Configured for iOS 18.0+, integrating Flutter plugins with modular headers.
+- `apps/wmr_companion_app/ios/Runner/Info.plist`: Includes `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, and `UIBackgroundModes` (`bluetooth-central`).
 - `.github/workflows/ci.yml`: Includes a dedicated `ios` job running on `macos-latest` that validates `WMRCompanionKit` unit tests (`swift test`) and Flutter iOS project build configuration (`flutter build ios --config-only --no-codesign`).

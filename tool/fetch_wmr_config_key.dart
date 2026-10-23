@@ -1,13 +1,17 @@
 // Fetches Monado's WMR config XOR key and writes it as
-// assets/monado/wmr_config_key.bin (gitignored, 1024 bytes).
+// apps/wmr_companion_app/assets/monado/wmr_config_key.bin (gitignored,
+// 1024 bytes). Run it from apps/wmr_companion_app so the relative output
+// path lands inside the app:
+//
+//   cd apps/wmr_companion_app
+//   dart run ../../tool/fetch_wmr_config_key.dart
 //
 // The key is Monado's `wmr_config_key.h`, Copyright 2021 Jan Schmidt,
 // SPDX-License-Identifier: BSL-1.0. It is not committed to this repository;
 // run this once per machine that builds the app, then rebuild.
 //
-//   dart run tool/fetch_wmr_config_key.dart
-//   dart run tool/fetch_wmr_config_key.dart --file path/to/wmr_config_key.h
-//   dart run tool/fetch_wmr_config_key.dart --url <raw URL of the header>
+//   dart run ../../tool/fetch_wmr_config_key.dart --file path/to/wmr_config_key.h
+//   dart run ../../tool/fetch_wmr_config_key.dart --url <raw URL of the header>
 //
 // Without options it downloads the header from Monado's GitLab. The download
 // path has not been run from the build container (the host is blocked
@@ -46,7 +50,7 @@ Future<void> main(List<String> args) async {
       url = args[++i];
     } else {
       stderr.writeln(
-        'usage: dart run tool/fetch_wmr_config_key.dart '
+        'usage: dart run ../../tool/fetch_wmr_config_key.dart '
         '[--file header.h | --url URL]',
       );
       exit(64);

@@ -349,7 +349,7 @@ imported by `wmr_core` or `wmr_companion`.
 
 ```
 wmr-companion/
-  apps/wmr_companion_app/        # future home of the reference app; it stays at the root during transition
+  apps/wmr_companion_app/        # reference app (moved here in M10.5, ONY-71)
   example/                       # phase 4: minimal host (one facade, gamepad stream) (landed)
   packages/
     wmr_core/                    # phase 1: pure Dart (landed)
@@ -363,11 +363,10 @@ wmr-companion/
   tool/                          # capture/analysis, probes
 ```
 
-Moving the app into `apps/` is phase 4; during extraction it stays at the repo
-root and depends on the packages by path. Its pubspec package name is already
+The app lives in `apps/wmr_companion_app` (M10.5, ONY-71) and depends on the
+packages by path (`../../packages/*`). Its pubspec package name is already
 `wmr_companion_app` (phase 2) so the facade can own the `wmr_companion` name;
-the directory move changes paths, not imports. That keeps CI and the debug-APK
-artifact stable while the boundary settles.
+the directory move changed paths, not imports.
 
 ## 9. Compatibility, publishing and licensing
 
@@ -410,7 +409,7 @@ phase says so.
 | 1 | Pure-Dart core | Move `protocol/`, `domain/`, `controller_service` and pure services into `packages/wmr_core`; app depends by path; move tests and golden fixtures | App and core tests green; `wmr_core` has no Flutter/Riverpod import (CI grep) |
 | 2 | Public facade | Add `WmrCompanion`, config, models, typed errors, `FakeTransport` example, API README; app uses the facade through a thin adapter | App works unchanged; README example compiles as a test; no `package:flutter` in `wmr_companion`'s public exports except the plugin type (met: the phase-2 facade has no Flutter dependency at all) |
 | 3 | BLE package | Move `lib/ble/` into `wmr_ble`; keep `UniversalBleTransport` and fakes; add permission/adapter-state docs; inject app lifecycle | Android debug APK connects and streams on hardware (user-reported); fake tests green |
-| 4 | Reference app | Keep the current app as `apps/wmr_companion_app` (or root app during transition); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
+| 4 | Reference app | Move the current app to `apps/wmr_companion_app` (M10.5, ONY-71); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
 | 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
 | 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures | iOS latency/background requirement met or explicitly declined with numbers |
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats) and `wmr_companion_hid_android` (existing HID output) **landed** | App consumes the UI kit; HID package tested as before; neither is required by the facade |
@@ -475,7 +474,8 @@ Sequencing notes:
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
    straight to the ONY-38 `WMRCompanionKit` transport on iOS?
 3. **App placement:** move the app to `apps/` (cleaner boundary) or keep it at
-   the repo root during extraction (less churn)?
+   the repo root during extraction (less churn)? — **settled: moved to
+   `apps/wmr_companion_app` in M10.5 (ONY-71).**
 4. **Android HID:** keep the HID output as a supported optional package, or
    park it once the in-process API exists?
 5. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
