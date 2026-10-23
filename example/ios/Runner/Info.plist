@@ -8,6 +8,10 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>Wmr Companion Example</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Connects to the WMR Bridge to read controller data.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Connects to the WMR Bridge to read controller data.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

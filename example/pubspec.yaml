@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   wmr_companion:
     path: ../packages/wmr_companion
+  wmr_ble:
+    path: ../packages/wmr_ble
 
 dev_dependencies:
   flutter_test:
