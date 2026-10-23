@@ -129,15 +129,16 @@ apps/wmr_companion_app                  reference app: Connect, Debug, Capture,
 | Package | Kind | Publishes | Responsibility | Must not import |
 | --- | --- | --- | --- | --- |
 | `wmr_core` | Dart | yes (after API freeze) | GATT ids, parsers, reassembler, config decode, echo, hand pipeline, loss/latency maths, gamepad mapping, `BleTransport` interface, `ControllerService` | Flutter, Riverpod, plugins, `dart:ui` |
-| `wmr_fusion` | Dart | yes | 3DoF filters only | Flutter |
+| `wmr_fusion` | Dart | yes | 3DoF filters only | any package (zero dependencies) |
 | `wmr_ble` | Flutter plugin | yes | `UniversalBleTransport`, native iOS/Android transports, permissions, adapter-state and app-lifecycle handling | UI, Riverpod, app settings |
 | `wmr_companion` | Dart (Flutter once the BLE plugin lands) | yes | Facade (`WmrCompanion`), models/DTOs, defaults, lifecycle, capture/latency recorders with injected sinks | UI widgets, Riverpod |
 | `wmr_companion_ui` | Flutter | optional | Debug 3D view, stats panel, gamepad tester | Core internals; talks to the facade |
 | `wmr_companion_hid_android` | Flutter plugin | optional | Existing `BluetoothHidDevice` output | Core internals |
 | `apps/wmr_companion_app` | Flutter app | no | The current app; dogfoods every package | — |
 
-Use Dart pub workspaces (SDK is already `^3.13.5`) rather than adding Melos.
-Path dependencies during migration; version constraints when published. Keep
+Use a Dart pub workspace (SDK is already `^3.13.5`) rather than adding Melos.
+Internal dependencies are hosted constraints (`wmr_core: ^0.1.0`) resolved to
+the local members by the workspace; no `path:` dependencies remain. Keep
 the package names unpretentious and stable: `wmr_core`, `wmr_ble`,
 `wmr_companion`, `wmr_companion_ui`, `wmr_companion_hid_android`.
 

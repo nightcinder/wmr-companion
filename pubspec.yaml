@@ -1,0 +1,16 @@
+name: wmr_companion_workspace
+description: Workspace root for the wmr-companion app, example and packages.
+publish_to: 'none'
+
+environment:
+  sdk: ^3.13.5
+
+workspace:
+  - apps/wmr_companion_app
+  - packages/wmr_fusion
+  - packages/wmr_core
+  - packages/wmr_companion
+  - packages/wmr_ble
+  - packages/wmr_companion_ui
+  - packages/wmr_companion_hid_android
+  - example
