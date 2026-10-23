@@ -1,15 +1,15 @@
 name: wmr_core
 description: Pure-Dart protocol, controller pipeline and gamepad mapping for the WMR Bridge.
 version: 0.1.0
-publish_to: none
+repository: https://github.com/nightcinder/wmr-companion
+issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 
 environment:
   sdk: ^3.13.5
 
 dependencies:
   vector_math: ^2.4.3
-  wmr_fusion:
-    path: ../wmr_fusion
+  wmr_fusion: ^0.1.0
 
 dev_dependencies:
   test: ^1.25.0

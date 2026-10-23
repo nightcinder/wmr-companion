@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -120,6 +120,12 @@ jobs:
           dart pub get
           dart analyze
           dart test
+      - name: Publish dry-run (staged, nothing uploaded)
+        run: ./tool/publish_dry_run.sh
+
+      - name: A fresh app consumes the packages
+        run: ./tool/fresh_app_check.sh
+
       # Monado's config key (BSL-1.0) is not committed. It is fetched here so the
       # test APK can decode a controller config block; it ends up only inside the
       # APK artifact, together with apps/wmr_companion_app/assets/monado/NOTICE.txt.
@@ -141,7 +147,7 @@ jobs:
           flutter test
           flutter build apk --debug
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wmr-companion-debug-apk
           path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-debug.apk
@@ -151,9 +157,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -166,7 +172,7 @@ jobs:
         working-directory: tool/gatt_probe
         run: ./gradlew assembleDebug --stacktrace
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wmr-gatt-probe-debug-apk
           path: tool/gatt_probe/app/build/outputs/apk/debug/app-debug.apk
@@ -176,7 +182,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Test WMRCompanionKit Swift Package
         working-directory: packages/WMRCompanionKit

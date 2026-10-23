@@ -1,11 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
 
-- Read the bridge firmware version over FF16 (`wmrBridgeVersionCharUuid`) once
-  after connect and publish it, with the FF11–FF16 feature matrix, as
-  `WmrCompanion.protocol` and `WmrLinkSnapshot.protocol`
-  (`WmrProtocolVersion`). A bridge without FF16 is a normal older-firmware
-  status; malformed values are flagged, never thrown, and the stream is never
-  gated on the read.
+- Initial release of the public, framework-agnostic facade for the WMR Bridge controller pipeline.
+- `WmrCompanion` high-level facade managing discovery, connection, stream mode switching, auto-reconnect, and teardown.
+- Unified reactive streams for host consumption:
+  - `controllers`: per-sample raw frames or decoded updates (`WmrControllerUpdate`).
+  - `gamepad`: combined two-handed gamepad state (`GamepadState`).
+  - `link`: link quality snapshots including RSSI, MTU, connection interval, stream mode, and fault counters (`WmrLinkSnapshot`).
+  - `failures`: stream mode faults and non-fatal errors.
+- Bridge firmware version read over FF16 (`wmrBridgeVersionCharUuid`) once after connect and published as `WmrCompanion.protocol` and `WmrLinkSnapshot.protocol` (`WmrProtocolVersion`). A bridge without FF16 reports a normal older-firmware status without gating the stream.
 - Re-export `WmrBridgeFeature`, `WmrBridgeFeatures` and `WmrProtocolVersion`.
+- Runtime configuration:
+  - Stream mode selection (FF11 raw, FF12 decoded, FF14 batched).
+  - Dynamic fusion tuning, stick centering, and axis remapping.
+  - FF13 controller calibration storage across reconnects.
+- Clean error hierarchy (`WmrConnectionException`, `WmrStreamModeException`, `WmrTransportException`, `WmrConfigException`).
+- Standalone testing utilities in `package:wmr_companion/testing.dart`.
