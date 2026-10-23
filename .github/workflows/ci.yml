@@ -28,7 +28,7 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion packages/wmr_ble
+      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion packages/wmr_ble example/lib example/test
       - run: flutter analyze
       - run: flutter test
       - name: wmr_core package
@@ -99,6 +99,14 @@ jobs:
       - name: Show whether the key is in the build
         run: ls -l assets/monado/
       - run: flutter build apk --debug
+
+      - name: Example app
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter build apk --debug
 
       - uses: actions/upload-artifact@v4
         with:
