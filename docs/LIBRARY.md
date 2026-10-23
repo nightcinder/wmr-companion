@@ -346,10 +346,9 @@ artifact stable while the boundary settles.
   `Vector3`/`Quaternion`. Freeze one public math vocabulary in `wmr_core`
   (recommend `vector_math`'s `Quaternion`/`Vector3`), and keep the conversion at
   the fusion boundary. Do not leak two quaternion types to consumers.
-- **Minimum platforms:** Android `minSdk` per `universal_ble`; iOS builds on
-  the ONY-38 decision (currently iOS 18 target). Revisit the iOS floor before
-  publishing if it excludes devices the owner cares about; a library with a
-  high floor is a adoption tax.
+- **Minimum platforms:** Android `minSdk` per `universal_ble`; iOS 18 is the
+  floor, as decided by the owner on ONY-38. Revisit only if it blocks a specific
+  target; a library with a high floor is an adoption tax.
 - **No plugin leakage:** `path_provider`, `share_plus` and `permission_handler`
   stay in the app or in optional packages. Core services take a `Directory` or
   a sink; the facade does not require file plugins.
@@ -427,12 +426,12 @@ Sequencing notes:
    straight to the ONY-38 `WMRCompanionKit` transport on iOS?
 3. **App placement:** move the app to `apps/` (cleaner boundary) or keep it at
    the repo root during extraction (less churn)?
-4. **Minimum iOS version:** keep ONY-38's iOS 18 floor, or lower it before
-   publishing?
-5. **Android HID:** keep the HID output as a supported optional package, or
+4. **Android HID:** keep the HID output as a supported optional package, or
    park it once the in-process API exists?
-6. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
+5. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
    also need a non-Flutter SDK (then the native kits become products too)?
+
+Settled: **iOS 18 is the minimum** (owner, ONY-38).
 
 ## 14. What this framework does not claim
 
