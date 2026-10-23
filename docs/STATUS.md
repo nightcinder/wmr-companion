@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-22 (end of the first working session; see [../HANDOFF.md](../HANDOFF.md) for the handoff). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-23 for the reusable-library close-out (ONY-41, [LIBRARY.md](LIBRARY.md)); the milestone and hardware tables otherwise reflect the 2026-10-22 session, see [../HANDOFF.md](../HANDOFF.md). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -39,7 +39,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | - | Multi-bridge support (removes two-controller contention penalty) | Done (#ONY-18); transport and `ControllerService` support concurrent multi-bridge connections (e.g. Left and Right ESP32 bridges), merging notification streams into shared hand pipelines. Connection UI and Riverpod providers updated to discover and connect/disconnect multiple bridges concurrently. Unit/mock transport and widget tests passing; **not yet run on hardware** |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS companion framework & probe | In progress (ONY-38). Built `WMRCompanionKit` (pure Swift framework in `packages/WMRCompanionKit` targeting iOS 18.0+, macOS 12.0+, and visionOS 1.0+ with CoreBluetooth transport, FF11/FF12/FF14/FF15/FF13 parsers, Madgwick/Mahony fusion, dual-bridge coordinator, and full unit test suite), native SwiftUI probe app (`tool/ios_probe/`), iOS 18 Podfile and project deployment target, Info.plist BLE permissions, and CI job (`.github/workflows/ci.yml`). Flutter iOS compile verification added ([IOS.md](IOS.md)) |
-| - | Reusable Flutter library (ONY-41) | Phases 1–4 and 7 landed: `packages/wmr_core` (pure Dart), `packages/wmr_companion` (facade; the app drives its real connection through it), `packages/wmr_ble` (`universal_ble` transport, link status, app-lifecycle hook), `example/` (minimal Flutter host), `packages/wmr_companion_ui` (optional widgets) and `packages/wmr_companion_hid_android` (optional Android HID output). Phase 5 needs an iOS 18 device run; phase 8 is publishing. See [LIBRARY.md](LIBRARY.md) |
+| - | Reusable Flutter library (ONY-41) | Phases 1–4 and 7 landed, plus the packaging half of phase 8: `packages/wmr_core` (pure Dart), `packages/wmr_companion` (facade; the app drives its real connection through it), `packages/wmr_ble` (`universal_ble` transport, link status, app-lifecycle hook), `example/` (minimal Flutter host), `packages/wmr_companion_ui` (optional widgets) and `packages/wmr_companion_hid_android` (optional Android HID output); the repo is one pub workspace and all six packages have clean `pub publish --dry-run`s. **`0.1.0` is not published (owner hold), and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified.** See [LIBRARY.md](LIBRARY.md) and [PUBLISHING.md](PUBLISHING.md) |
 
 ### What has been checked on hardware (user-reported)
 

@@ -166,6 +166,10 @@ Six runs is one position, one phone, one session. The two repeats are there so a
 The library package split is merged through phase 4. Phase 5 is the first real
 iOS evidence and needs a device; it is not a CI-only result.
 
+**Status: not run — waived by the owner on 2026-10-23 (ONY-41) for the `0.1.0`
+release line.** The steps below stay the sheet for any release that claims iOS
+support; this release does not have that evidence.
+
 1. **Example app, both platforms.** `cd example && flutter run -d <device>`.
    It shows a live stick/trigger/button sample from the fake bridge; this
    proves the package builds and the UI wiring works on the platform.

@@ -1,6 +1,6 @@
 # Companion as a Flutter library
 
-Status: **phases 1–4 and both optional packages are implemented.** `packages/wmr_core`
+Status: **phases 1–4 and 7 have landed, and phase 8's packaging half is done.** `packages/wmr_core`
 holds the pure-Dart protocol, domain, `BleTransport` interface, controller
 service and the pure services; `packages/wmr_companion` is the public facade
 (`WmrCompanion`, config, models, typed errors) with an API README and tests;
@@ -9,7 +9,16 @@ lifecycle hook; `packages/wmr_companion_ui` holds optional orientation, link,
 stats and gamepad widgets; `packages/wmr_companion_hid_android` holds the
 optional Android HID output; and `example/` is a minimal Flutter host. The app
 depends on the packages by path and drives its real connection through the
-facade. Publishing is still a target; phase 5 needs an iOS 18 device run.
+facade. The repository is a Dart pub workspace with one lockfile, and all six
+packages are publishable (clean `pub publish --dry-run`, export-boundary tests,
+fresh-app check in CI).
+
+**Release status (owner, 2026-10-23 on ONY-41).** `0.1.0` is **not published**
+to pub.dev: publication is on hold. The iOS 18 device gate (phase 5) is
+**waived for this release line**, so this release ships without iOS hardware
+evidence. That waives the gate, not the fact: **nothing here has been run on
+iOS hardware**, and the phase-6 native transport stays unstarted because it was
+conditional on measurements that do not exist.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
@@ -377,8 +386,10 @@ the directory move changed paths, not imports.
   documented bridge-firmware matrix (FF11/FF12 always; FF14 needs bridge
   firmware with batching; FF13/FF15 optional). Unknown fields/records must be
   skipped, not fatal, so a newer bridge does not crash an older app.
-- **Publish on pub.dev** only after the API freeze, with `publish_to: none`
-  until then. Keep the app's `publish_to: none`.
+- **Publish on pub.dev** after the API freeze. The six packages no longer carry
+  `publish_to: none` and their dry-runs are clean (#49/#54); the actual `0.1.0`
+  upload is on hold by owner decision (2026-10-23), see [PUBLISHING.md](PUBLISHING.md) §5.
+  Keep the app's and `example/`'s `publish_to: none`.
 - **License:** MIT for the Dart packages and app. The Monado XOR key table is
   fetched, never committed (`HANDOFF.md` §3); the library accepts key bytes
   from the host and documents the BSL-1.0 notice. Do not bundle the key in a
@@ -411,13 +422,14 @@ phase says so.
 | 2 | Public facade | Add `WmrCompanion`, config, models, typed errors, `FakeTransport` example, API README; app uses the facade through a thin adapter | App works unchanged; README example compiles as a test; no `package:flutter` in `wmr_companion`'s public exports except the plugin type (met: the phase-2 facade has no Flutter dependency at all) |
 | 3 | BLE package | Move `lib/ble/` into `wmr_ble`; keep `UniversalBleTransport` and fakes; add permission/adapter-state docs; inject app lifecycle | Android debug APK connects and streams on hardware (user-reported); fake tests green |
 | 4 | Reference app | Move the current app to `apps/wmr_companion_app` (M10.5, ONY-71); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
-| 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
-| 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures | iOS latency/background requirement met or explicitly declined with numbers |
+| 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport **— device gate waived for this release line (owner, 2026-10-23); config/compile checks are in CI, no device run, no latency decision** | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
+| 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures **— not started: its trigger (phase-5 measurements) does not exist** | iOS latency/background requirement met or explicitly declined with numbers |
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats) and `wmr_companion_hid_android` (existing HID output) **landed** | App consumes the UI kit; HID package tested as before; neither is required by the facade |
-| 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
+| 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery **— packaging half landed (clean dry-runs, fresh-app check); the actual `pub publish` is on hold (owner, 2026-10-23)** | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
 
-Phase 1 landed in #39 (`packages/wmr_core`) and phase 2 in the facade PR
-(`packages/wmr_companion`); the remaining rows are still ahead.
+Phase 1 landed in #39 (`packages/wmr_core`), phase 2 in the facade PR
+(`packages/wmr_companion`), phase 3 in #42, phase 4 in #43, phase 7 in #45/#48
+and the publishable/packaging half of phase 8 in #49/#54.
 
 Sequencing notes:
 
@@ -429,8 +441,11 @@ Sequencing notes:
   before phase 3.
 - Phase 4 can be deferred if moving the app is disruptive; the root app can
   keep depending on path packages for several PRs.
-- Phase 5 is the first real iOS evidence. Until then, iOS is design-only and
-  must be labelled as such.
+- Phase 5 is the first real iOS evidence. **Its device gate was waived for this
+  release line by the owner (2026-10-23), so iOS is shipped as designed and
+  CI-compiled but not hardware-verified.** Until a device run happens, iOS is
+  design-only and must be labelled as such; a later release that claims iOS
+  support needs that run (and the latency decision) first.
 
 ## 11. Testing and CI
 
@@ -471,24 +486,34 @@ Sequencing notes:
 1. **Package names and publishing:** are `wmr_core`, `wmr_ble`,
    `wmr_companion` (and optional `wmr_companion_ui`,
    `wmr_companion_hid_android`) the names to freeze, and is publishing to
-   pub.dev intended, or private/path-only for now?
+   pub.dev intended, or private/path-only for now? — **settled: `wmr_fusion`,
+   `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
+   `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
-   straight to the ONY-38 `WMRCompanionKit` transport on iOS?
+   straight to the ONY-38 `WMRCompanionKit` transport on iOS? — **settled that
+   `universal_ble` is the v1 transport on both platforms. It is still
+   unmeasured on iOS because the device run was waived, so "measure" remains
+   open for any later release.**
 3. **App placement:** move the app to `apps/` (cleaner boundary) or keep it at
    the repo root during extraction (less churn)? — **settled: moved to
    `apps/wmr_companion_app` in M10.5 (ONY-71).**
 4. **Android HID:** keep the HID output as a supported optional package, or
-   park it once the in-process API exists?
+   park it once the in-process API exists? — **settled: kept as the optional
+   `wmr_companion_hid_android` package (ONY-41 phase 7).**
 5. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
    also need a non-Flutter SDK (then the native kits become products too)?
 
 Settled: **iOS 18 is the minimum** (owner, ONY-38). **Android and iOS are both
-in v1 scope** (owner, 2026-10-23 on ONY-41).
+in v1 scope** (owner, 2026-10-23 on ONY-41). **Publication to pub.dev is the
+release target and `0.1.0` is held for now** (owner, ONY-50 and ONY-41,
+2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
+2026-10-23 on ONY-41).
 
 ## 14. What this framework does not claim
 
-- Phases 1–4 and both optional packages are implemented; publishing and
-  phase 5's iOS evidence are still targets, not facts.
+- Phases 1–4, 7 and the packaging half of phase 8 are implemented. The iOS
+  device run (phase 5) was waived for this release rather than passed, and
+  `0.1.0` is not published.
 - It is not an iOS virtual gamepad and cannot make one appear.
 - It does not promise iOS background operation, MTU, or connection interval.
 - It does not fix the upstream controller-to-ESP32 report loss
