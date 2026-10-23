@@ -176,7 +176,7 @@ iOS evidence and needs a device; it is not a CI-only result.
    the outcome here and in `docs/STATUS.md`.
 
 No iOS device run has happened yet; until then iOS is design- and
-CI-compile-only, not a hardware claim.
+CI-config-validated, not a hardware claim.
 
 ## Known limits
 
