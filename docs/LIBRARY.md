@@ -486,8 +486,9 @@ Sequencing notes:
 1. **Package names and publishing:** are `wmr_core`, `wmr_ble`,
    `wmr_companion` (and optional `wmr_companion_ui`,
    `wmr_companion_hid_android`) the names to freeze, and is publishing to
-   pub.dev intended, or private/path-only for now? — **settled: the six names
-   above, and pub.dev is the target; `0.1.0` is held.**
+   pub.dev intended, or private/path-only for now? — **settled: `wmr_fusion`,
+   `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
+   `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
    straight to the ONY-38 `WMRCompanionKit` transport on iOS? — **settled that
    `universal_ble` is the v1 transport on both platforms. It is still
