@@ -341,8 +341,8 @@ class GattClient(
             gatt.readRemoteRssi()
         }
 
-        // Standard override in Android SDK 33+ (compileSdk = 35)
-        override fun onConnectionUpdated(
+        // Dispatched dynamically by Android runtime on Oreo+ (API 26+) where onConnectionUpdated exists
+        fun onConnectionUpdated(
             gatt: BluetoothGatt,
             interval: Int,
             latency: Int,
