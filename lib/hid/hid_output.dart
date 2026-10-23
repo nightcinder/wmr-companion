@@ -7,8 +7,8 @@ import 'package:wmr_core/domain/gamepad.dart';
 
 import '../ui/debug/debug_providers.dart';
 import '../ui/gamepad/gamepad_providers.dart';
-import 'hid_gamepad_transport.dart';
-import 'hid_report.dart';
+
+import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 
 final hidTransportProvider = Provider<HidGamepadTransport>(
   (ref) => MethodChannelHidGamepad(),

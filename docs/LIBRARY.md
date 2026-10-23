@@ -1,15 +1,15 @@
 # Companion as a Flutter library
 
-Status: **phases 1–4 and the optional UI package are implemented.** `packages/wmr_core`
+Status: **phases 1–4 and both optional packages are implemented.** `packages/wmr_core`
 holds the pure-Dart protocol, domain, `BleTransport` interface, controller
 service and the pure services; `packages/wmr_companion` is the public facade
 (`WmrCompanion`, config, models, typed errors) with an API README and tests;
 `packages/wmr_ble` owns the `universal_ble` adapter/transport and the app
 lifecycle hook; `packages/wmr_companion_ui` holds optional orientation, link,
-stats and gamepad widgets; and `example/` is a minimal Flutter host. The app
+stats and gamepad widgets; `packages/wmr_companion_hid_android` holds the
+optional Android HID output; and `example/` is a minimal Flutter host. The app
 depends on the packages by path and drives its real connection through the
-facade. The Android HID add-on and publishing are still targets; phase 5 needs
-an iOS 18 device run.
+facade. Publishing is still a target; phase 5 needs an iOS 18 device run.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
@@ -357,7 +357,7 @@ wmr-companion/
     wmr_ble/                     # phase 3: universal_ble transport, link status, lifecycle hook (landed)
     wmr_companion/               # phase 2: umbrella facade (landed)
     wmr_companion_ui/            # phase 7: optional widgets (landed)
-    wmr_companion_hid_android/   # phase 7: optional HID output
+    wmr_companion_hid_android/   # phase 7: optional Android HID output (landed)
     WMRCompanionKit/             # native Swift kit (ONY-38, PR #37)
   docs/                          # unchanged, plus this file
   tool/                          # capture/analysis, probes
@@ -413,7 +413,7 @@ phase says so.
 | 4 | Reference app | Keep the current app as `apps/wmr_companion_app` (or root app during transition); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
 | 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
 | 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures | iOS latency/background requirement met or explicitly declined with numbers |
-| 7 | Optional packages | `wmr_companion_ui` (3D view/stats) **landed**; `wmr_companion_hid_android` (existing HID output) still ahead | App consumes the UI kit; HID package tested as before; neither is required by the facade |
+| 7 | Optional packages | `wmr_companion_ui` (3D view/stats) and `wmr_companion_hid_android` (existing HID output) **landed** | App consumes the UI kit; HID package tested as before; neither is required by the facade |
 | 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
 
 Phase 1 landed in #39 (`packages/wmr_core`) and phase 2 in the facade PR
@@ -486,8 +486,8 @@ in v1 scope** (owner, 2026-10-23 on ONY-41).
 
 ## 14. What this framework does not claim
 
-- Phases 1–4 and the optional UI package are implemented; the rest of the
-  package tree and API is still a target, not a fact.
+- Phases 1–4 and both optional packages are implemented; publishing and
+  phase 5's iOS evidence are still targets, not facts.
 - It is not an iOS virtual gamepad and cannot make one appear.
 - It does not promise iOS background operation, MTU, or connection interval.
 - It does not fix the upstream controller-to-ESP32 report loss

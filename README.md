@@ -22,6 +22,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 | `packages/wmr_companion/` | Public facade (`WmrCompanion`) over the pipeline; Android and iOS library path ([README](packages/wmr_companion/README.md)) |
 | `packages/wmr_ble/` | `universal_ble` adapter/transport, link status and lifecycle hook ([README](packages/wmr_ble/README.md)) |
 | `packages/wmr_companion_ui/` | Optional orientation, link, hand-stats and gamepad widgets ([README](packages/wmr_companion_ui/README.md)) |
+| `packages/wmr_companion_hid_android/` | Optional Android Bluetooth HID gamepad output ([README](packages/wmr_companion_hid_android/README.md)) |
 | `example/` | Minimal Flutter host: one facade, a connect and a gamepad `StreamBuilder` on the fake bridge ([README](example/README.md)) |
 | `lib/services/` | App-side config report, key store and settings wiring |
 | `lib/ui/` | Connect, debug, capture, latency and gamepad screens |
@@ -36,7 +37,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze
-flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_companion && dart test; cd packages/wmr_ble && flutter test; cd packages/wmr_companion_ui && flutter test; cd packages/wmr_fusion && dart test; cd example && flutter test
+flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_companion && dart test; cd packages/wmr_ble && flutter test; cd packages/wmr_companion_ui && flutter test; cd packages/wmr_companion_hid_android && flutter test; cd packages/wmr_fusion && dart test; cd example && flutter test
 flutter build apk --debug
 flutter run -d <device>           # BLE needs a physical phone
 ```

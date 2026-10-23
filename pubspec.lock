@@ -587,6 +587,13 @@ packages:
       relative: true
     source: path
     version: "0.1.0"
+  wmr_companion_hid_android:
+    dependency: "direct main"
+    description:
+      path: "packages/wmr_companion_hid_android"
+      relative: true
+    source: path
+    version: "0.1.0"
   wmr_companion_ui:
     dependency: "direct main"
     description:

@@ -18,7 +18,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:wmr_core/domain/gamepad.dart';
+import 'package:wmr_companion/wmr_companion.dart';
 
 const int hidReportId = 1;
 const int hidReportSize = 9;
