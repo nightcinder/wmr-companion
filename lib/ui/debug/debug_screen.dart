@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 
-import '../../domain/hand_pipeline.dart';
-import '../../domain/orientation.dart';
-import '../../services/controller_service.dart';
+import 'package:wmr_core/domain/hand_pipeline.dart';
+import 'package:wmr_core/domain/orientation.dart';
+import 'package:wmr_core/services/controller_service.dart';
+
 import '../connect/connect_providers.dart';
 import '../gamepad/gamepad_screen.dart';
-import '../../ble/fake_wmr_bridge.dart';
+
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+
 import 'config_panel.dart';
 import 'debug_providers.dart';
 import 'orientation_painter.dart';

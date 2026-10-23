@@ -4,7 +4,8 @@ import 'dart:typed_data';
 import 'package:universal_ble/universal_ble.dart' as ub;
 
 import 'ble_adapter.dart';
-import 'ble_transport.dart';
+
+import 'package:wmr_core/ble/ble_transport.dart';
 
 /// [BleAdapter] backed by the `universal_ble` package (3.1.x).
 ///

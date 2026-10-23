@@ -3,11 +3,11 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/ble/ble_transport.dart';
-import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion/protocol/wmr_fragment.dart';
-import 'package:wmr_companion/services/capture_files.dart';
-import 'package:wmr_companion/services/controller_service.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/protocol/wmr_fragment.dart';
+import 'package:wmr_core/services/capture_files.dart';
+import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion/ui/capture/capture_providers.dart';
 
 class _Clock implements MonotonicClock {

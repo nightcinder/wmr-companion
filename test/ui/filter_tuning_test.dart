@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/domain/hand_pipeline.dart';
+import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_companion/ui/debug/debug_providers.dart';
 import 'package:wmr_companion/ui/debug/stream_settings.dart';
 

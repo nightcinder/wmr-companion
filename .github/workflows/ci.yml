@@ -28,9 +28,21 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core
       - run: flutter analyze
       - run: flutter test
+      - name: wmr_core package
+        working-directory: packages/wmr_core
+        run: |
+          dart pub get
+          dart analyze
+          dart test
+      - name: wmr_core stays pure Dart
+        run: |
+          if grep -rnE "package:(flutter|flutter_riverpod|universal_ble|path_provider|share_plus)/" packages/wmr_core/lib; then
+            echo "wmr_core must not import Flutter, Riverpod or plugins"
+            exit 1
+          fi
       - name: wmr_fusion package
         working-directory: packages/wmr_fusion
         run: |

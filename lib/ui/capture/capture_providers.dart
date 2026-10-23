@@ -5,11 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../ble/ble_transport.dart';
-import '../../protocol/wmr_fragment.dart';
-import '../../services/capture_files.dart';
-import '../../services/capture_recorder.dart';
-import '../../services/controller_service.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/protocol/wmr_fragment.dart';
+import 'package:wmr_core/services/capture_files.dart';
+import 'package:wmr_core/services/capture_recorder.dart';
+import 'package:wmr_core/services/controller_service.dart';
+
 import '../connect/connect_providers.dart';
 
 /// What a capture reads from: the frame stream ControllerService already

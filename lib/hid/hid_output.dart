@@ -3,7 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/gamepad.dart';
+import 'package:wmr_core/domain/gamepad.dart';
+
 import '../ui/debug/debug_providers.dart';
 import '../ui/gamepad/gamepad_providers.dart';
 import 'hid_gamepad_transport.dart';

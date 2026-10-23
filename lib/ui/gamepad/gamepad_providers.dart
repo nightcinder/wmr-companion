@@ -3,8 +3,9 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../domain/gamepad.dart';
-import '../../services/gamepad_settings_store.dart';
+import 'package:wmr_core/domain/gamepad.dart';
+import 'package:wmr_core/services/gamepad_settings_store.dart';
+
 import '../debug/debug_providers.dart';
 
 /// Where the settings are saved: the app documents directory, or nowhere

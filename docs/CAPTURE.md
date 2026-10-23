@@ -11,7 +11,7 @@ been fed to the real `analyze_capture.py`.
 Read (read-only) from WMR_Bridge PR 6, branch `link-diagnostics` (the PR that
 adds the MTU to the header): `tools/capture_ble.py`, `tools/analyze_capture.py`,
 `docs/DECODING.md`. If that branch changes, re-read it and update this file and
-`lib/services/capture_recorder.dart` together.
+`packages/wmr_core/lib/services/capture_recorder.dart` together.
 
 ## File format
 
@@ -88,9 +88,9 @@ the begin action.
 
 ## Implementation
 
-- `lib/services/capture_recorder.dart`: format, phases, statistics,
+- `packages/wmr_core/lib/services/capture_recorder.dart`: format, phases, statistics,
   `CaptureRecorder`, `CaptureSink`. Pure Dart; tests use `MemoryCaptureSink`.
-- `lib/services/capture_files.dart`: `FileCaptureSink` (buffered `IOSink`;
+- `packages/wmr_core/lib/services/capture_files.dart`: `FileCaptureSink` (buffered `IOSink`;
   each frame is one short `write`, no flush) and `CaptureStore` (naming,
   listing).
 - `lib/ui/capture/`: controller and screen. The recorder listens to

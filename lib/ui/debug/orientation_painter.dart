@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 
-import '../../domain/orientation.dart';
+import 'package:wmr_core/domain/orientation.dart';
 
 /// Draws a cube and its body axes rotated by [orientation], with a simple
 /// perspective projection. X red, Y green, Z blue; the +Z face is shaded.

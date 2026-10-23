@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../ble/ble_transport.dart';
-import '../../domain/imu_calibration.dart';
-import '../../services/config_client.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/domain/imu_calibration.dart';
+import 'package:wmr_core/services/config_client.dart';
+
 import '../../services/config_key_store.dart';
 import '../../services/config_report.dart';
 import 'stream_settings.dart';

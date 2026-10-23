@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ble/universal_ble_transport.dart';
 import '../capture/capture_screen.dart';
-import '../../services/controller_service.dart';
+
+import 'package:wmr_core/services/controller_service.dart';
+
 import '../debug/debug_providers.dart';
 import '../debug/debug_screen.dart';
 import '../latency/latency_screen.dart';

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../services/latency_recorder.dart';
+import 'package:wmr_core/services/latency_recorder.dart';
+
 import '../debug/debug_providers.dart';
 import 'latency_providers.dart';
 

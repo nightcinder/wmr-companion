@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/domain/gamepad.dart';
+import 'package:wmr_core/domain/gamepad.dart';
 import 'package:wmr_companion/hid/hid_report.dart';
 
 GamepadState pad({

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'ble_transport.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 
 /// Bluetooth radio state, independent of any BLE package.
 enum BleAvailability {

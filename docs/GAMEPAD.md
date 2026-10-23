@@ -10,7 +10,7 @@ FF12/FF14 record -> HandPipeline (timing, fusion, stick centre + dead zone)
                  -> mapGamepad(left, right, GamepadConfig) -> GamepadState
 ```
 
-- `lib/domain/gamepad.dart`: pure Dart, stateless (`mapGamepad`, `triggerValue`, `trackpadButtons`, `tiltStick`). The same inputs and config always give the same state, so it can move to an isolate or a native hot path later.
+- `packages/wmr_core/lib/domain/gamepad.dart`: pure Dart, stateless (`mapGamepad`, `triggerValue`, `trackpadButtons`, `tiltStick`). The same inputs and config always give the same state, so it can move to an isolate or a native hot path later.
 - `lib/ui/gamepad/`: providers (latest input per hand from `ControllerService.decodedSamples`, about 30 Hz) and the Gamepad screen, opened from the debug screen's app bar (gamepad icon). Needs FF12 or FF14 mode; FF11 carries no decoded inputs.
 - The parser, the subscription code and `ControllerService` are unchanged.
 
