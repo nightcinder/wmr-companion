@@ -25,7 +25,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 | `lib/ui/` | Connect, debug, capture, latency and gamepad screens |
 | `lib/hid/` | Bluetooth HID gamepad output |
 | `packages/wmr_fusion/` | Pure-Dart Madgwick and Mahony filters |
-| `docs/` | Status, plan, protocol notes, capture, latency, gamepad, camera research |
+| `docs/` | Status, plan, protocol notes, capture, latency, gamepad, camera research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable Flutter package split |
 | `HANDOFF.md` | Rules, environment, state, not-yet-run list, cleanup list |
 
 ## Build and test
