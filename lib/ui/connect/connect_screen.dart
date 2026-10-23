@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../ble/universal_ble_transport.dart';
+import 'package:wmr_ble/wmr_ble.dart';
+
 import '../capture/capture_screen.dart';
 
 import 'package:wmr_core/services/controller_service.dart';

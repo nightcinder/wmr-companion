@@ -2,11 +2,10 @@ import 'dart:typed_data';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/domain/axis_mapping.dart';
 import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/synthetic_motion.dart';
@@ -14,7 +13,7 @@ import 'package:wmr_core/protocol/decoded_batch.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
 
-import '../ble/fake_adapter.dart';
+import 'package:wmr_ble/testing.dart';
 
 Future<void> pump() => Future<void>.delayed(Duration.zero);
 
@@ -441,12 +440,12 @@ void main() {
   });
 
   group('mode switch on the real transport', () {
-    late FakeAdapter adapter;
+    late FakeBleAdapter adapter;
     late UniversalBleTransport real;
     late ControllerService svc;
 
     setUp(() async {
-      adapter = FakeAdapter();
+      adapter = FakeBleAdapter();
       real = UniversalBleTransport(adapter: adapter);
       svc = ControllerService(real, fakeBridgeDeviceId);
       await svc.start();
@@ -481,7 +480,7 @@ void main() {
     });
 
     test('0x80 on enable is reported as otherStreamActive', () async {
-      final fresh = FakeAdapter();
+      final fresh = FakeBleAdapter();
       final tr = UniversalBleTransport(adapter: fresh);
       final s = ControllerService(
         tr,

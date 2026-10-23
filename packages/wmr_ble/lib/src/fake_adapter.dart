@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'ble_adapter.dart';
+
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
 /// Scriptable [BleAdapter] that records every call in order.
-class FakeAdapter implements BleAdapter {
+class FakeBleAdapter implements BleAdapter {
   final List<String> calls = [];
 
   bool permissionsGranted = true;

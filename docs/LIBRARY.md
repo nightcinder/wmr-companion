@@ -1,12 +1,13 @@
 # Companion as a Flutter library
 
-Status: **phases 1 and 2 landed; the rest is design.** `packages/wmr_core`
-holds the pure-Dart protocol, domain, `BleTransport` interface, controller
-service and the pure services, and `packages/wmr_companion` is the public
-facade (`WmrCompanion`, config, models, typed errors) with an API README and
-tests. The app depends on both by path and drives its real connection through
-the facade. The BLE package, UI package, Android HID add-on and publishing are
-still targets; the current app remains the reference consumer.
+Status: **phases 1–3 implemented.** `packages/wmr_core` holds the pure-Dart
+protocol, domain, `BleTransport` interface, controller service and the pure
+services; `packages/wmr_companion` is the public facade (`WmrCompanion`,
+config, models, typed errors) with an API README and tests; and
+`packages/wmr_ble` owns the `universal_ble` adapter/transport and the app
+lifecycle hook. The app depends on all three by path and drives its real
+connection through the facade. The UI package, Android HID add-on and
+publishing are still targets; the current app remains the reference consumer.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
@@ -229,8 +230,9 @@ class WmrCompanionConfig {
 ```
 
 `requestedMtu` and `requestHighPriority` are deliberately **not** in the
-phase-2 config: `BleTransport` has no request call yet, and a config field that
-does nothing would be a lie. They arrive with `wmr_ble` in phase 3.
+phase-2 config: `BleTransport` has no request call, and a config field that
+does nothing would be a lie. `wmr_ble` requests MTU 517 and high priority on
+every connect; exposing them through the facade is a later API decision.
 
 API rules:
 
@@ -349,7 +351,7 @@ wmr-companion/
   packages/
     wmr_core/                    # phase 1: pure Dart (landed)
     wmr_fusion/                  # existing, kept pure Dart (landed)
-    wmr_ble/                     # phase 3: Flutter plugin
+    wmr_ble/                     # phase 3: universal_ble transport, link status, lifecycle hook (landed)
     wmr_companion/               # phase 2: umbrella facade (landed)
     wmr_companion_ui/            # phase 7: optional widgets
     wmr_companion_hid_android/   # phase 7: optional HID output
@@ -481,7 +483,8 @@ in v1 scope** (owner, 2026-10-23 on ONY-41).
 
 ## 14. What this framework does not claim
 
-- It is not implemented; the package tree and API are a target, not a fact.
+- Phases 1–3 are implemented; the rest of the package tree and API is still a
+  target, not a fact.
 - It is not an iOS virtual gamepad and cannot make one appear.
 - It does not promise iOS background operation, MTU, or connection interval.
 - It does not fix the upstream controller-to-ESP32 report loss

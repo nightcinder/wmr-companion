@@ -1,13 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 
-import '../ble/fake_adapter.dart';
+import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_ble/testing.dart';
+
 import 'raw_mode_notifier.dart';
 
 /// Drives the app's real-device controller over the fake adapter. These are
@@ -15,12 +16,14 @@ import 'raw_mode_notifier.dart';
 /// both the published counters and the in-session stick centre must come from
 /// the new service, not from the one that was disposed.
 void main() {
-  late FakeAdapter adapter;
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  late FakeBleAdapter adapter;
   late UniversalBleTransport transport;
   late ProviderContainer container;
 
   setUp(() {
-    adapter = FakeAdapter();
+    adapter = FakeBleAdapter();
     transport = UniversalBleTransport(
       adapter: adapter,
       scanTimeout: const Duration(minutes: 5),

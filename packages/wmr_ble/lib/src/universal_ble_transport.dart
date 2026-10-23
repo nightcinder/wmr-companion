@@ -146,6 +146,10 @@ class UniversalBleTransport implements BleTransport {
   StreamController<BleScanResult>? _scanCtl;
   StreamSubscription<BleScanResult>? _scanSub;
   Timer? _scanTimer;
+  List<String> _scanServices = const [];
+  List<String> _scanNamePrefixes = const [];
+  bool _scanPaused = false;
+  int _scanSeen = 0;
 
   /// Runs [op] after every earlier GATT operation finished.
   Future<T> _serial<T>(Future<T> Function() op) {
@@ -248,34 +252,25 @@ class UniversalBleTransport implements BleTransport {
     final services = withServices.isEmpty
         ? [wmrBridgeServiceUuid]
         : withServices;
+    _scanServices = services;
+    _scanNamePrefixes = [wmrBridgeDeviceName];
+    _scanSeen = 0;
+    _scanPaused = false;
     late final StreamController<BleScanResult> ctl;
     ctl = StreamController<BleScanResult>(
       onListen: () async {
-        var seen = 0;
         try {
           await _preflight();
           _scanSub = _adapter.scanResults.listen((r) {
-            seen++;
+            _scanSeen++;
             ctl.add(r);
           });
           await _adapter.startScan(
-            withServices: services,
-            withNamePrefixes: [wmrBridgeDeviceName],
+            withServices: _scanServices,
+            withNamePrefixes: _scanNamePrefixes,
           );
           _emit(BleLinkPhase.scanning);
-          _scanTimer = Timer(scanTimeout, () async {
-            await stopScan();
-            if (ctl.isClosed) return;
-            if (seen == 0) {
-              ctl.addError(
-                _fail(
-                  BleLinkPhase.scanTimeout,
-                  'No bridge found in ${scanTimeout.inSeconds} s',
-                ),
-              );
-            }
-            await ctl.close();
-          });
+          _armScanTimer(ctl);
         } on BleTransportException catch (e) {
           ctl.addError(e);
           await ctl.close();
@@ -290,8 +285,67 @@ class UniversalBleTransport implements BleTransport {
     return ctl.stream;
   }
 
+  void _armScanTimer(StreamController<BleScanResult> ctl) {
+    _scanTimer?.cancel();
+    _scanTimer = Timer(scanTimeout, () async {
+      await stopScan();
+      if (ctl.isClosed) return;
+      if (_scanSeen == 0) {
+        ctl.addError(
+          _fail(
+            BleLinkPhase.scanTimeout,
+            'No bridge found in ${scanTimeout.inSeconds} s',
+          ),
+        );
+      }
+      await ctl.close();
+    });
+  }
+
+  /// Suspends scanning while the host is not active and resumes it with the
+  /// same filters when the host comes back.
+  ///
+  /// Hosts forward their app-lifecycle state through this; the package does
+  /// not import `dart:ui` or Flutter widgets itself. Connections are
+  /// deliberately left alone: the link may survive a short background period,
+  /// and dropping it would turn a resume into a reconnect.
+  Future<void> handleAppLifecycle(BleAppLifecycle state) async {
+    final ctl = _scanCtl;
+    if (state == BleAppLifecycle.resumed) {
+      if (!_scanPaused) return;
+      _scanPaused = false;
+      if (ctl == null || ctl.isClosed) return;
+      try {
+        await _adapter.startScan(
+          withServices: _scanServices,
+          withNamePrefixes: _scanNamePrefixes,
+        );
+        _emit(BleLinkPhase.scanning);
+        _armScanTimer(ctl);
+      } catch (e) {
+        ctl.addError(
+          _fail(BleLinkPhase.connectFailed, 'Scan restart failed: $e'),
+        );
+      }
+      return;
+    }
+
+    final scanning =
+        ctl != null && !ctl.isClosed && _status.phase == BleLinkPhase.scanning;
+    if (!scanning || _scanPaused) return;
+    _scanPaused = true;
+    _scanTimer?.cancel();
+    _scanTimer = null;
+    try {
+      await _adapter.stopScan();
+    } catch (_) {
+      // The platform may already have stopped the scan when it suspended us.
+    }
+  }
+
   @override
   Future<void> stopScan() async {
+    _scanPaused = false;
     _scanTimer?.cancel();
     _scanTimer = null;
     final sub = _scanSub;
