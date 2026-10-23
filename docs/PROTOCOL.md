@@ -61,7 +61,7 @@ Read from the 3.1.2 source in the pub cache, not from memory.
 | Permissions | `hasPermissions`, `requestPermissions` | Handled by the plugin: Android 12+ BLUETOOTH_SCAN/BLUETOOTH_CONNECT (and older location) are requested from the activity, based on what the manifest declares; iOS via CoreBluetooth authorization. `permission_handler` is not needed and not added. Needs an activity in the foreground; denial throws `UniversalBleException`. |
 | Bluetooth state | `getBluetoothAvailabilityState`, `availabilityStream` | Maps to `bluetoothOff` / `permissionDenied` (unauthorized) / `bluetoothUnavailable`. |
 | Connection interval | `onConnectionParametersChange` | Android API 26+ only, a global static callback fired when the stack reports an update. `connectionIntervalUs` is filled only after the first such callback and stays null on iOS and before any update. Not queryable on demand. |
-| PHY | none | gap: `BleConnectionInfo.phy` stays null on every platform. |
+| PHY | none | Permanent hardware property, not a to-do: the bridge is a Classic ESP32 (Bluetooth 4.2), and 2M PHY is a Bluetooth 5.0 feature. A null `BleConnectionInfo.phy` means "not observable" by the stack/transport rather than "1M confirmed by reading". |
 
 ## Real transport (`UniversalBleTransport`)
 
