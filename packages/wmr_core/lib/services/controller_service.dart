@@ -512,6 +512,7 @@ class ControllerService {
   int _batchErrors = 0;
   final List<String?> _lastDeviceForHand = List.filled(wmrNumControllers, null);
   final StreamController<DecodedSample> _samples = StreamController.broadcast();
+  final StreamController<String> _deviceRemovals = StreamController.broadcast();
 
   StreamMode _mode;
   ModeFault? _fault;
@@ -533,6 +534,13 @@ class ControllerService {
   /// Decoded samples of one hand.
   Stream<DecodedSample> samplesFor(int hand) =>
       _samples.stream.where((s) => s.record.hand == hand);
+
+  /// Emits a bridge id when [removeDevice] removes it.
+  ///
+  /// Consumers that share [decodedSamples] use this to tell which hand just
+  /// lost its source, so they can release that hand without stopping the
+  /// other one.
+  Stream<String> get deviceRemovals => _deviceRemovals.stream;
 
   StreamMode get mode => _mode;
   ModeFault? get fault => _fault;
@@ -620,6 +628,7 @@ class ControllerService {
         _resetHandBaseline(h);
       }
     }
+    if (!_deviceRemovals.isClosed) _deviceRemovals.add(deviceId);
     if (disconnectTransport) {
       await transport.disconnect(deviceId);
     }
@@ -1133,5 +1142,6 @@ class ControllerService {
     await _frames.close();
     await _samples.close();
     await _modeChanges.close();
+    await _deviceRemovals.close();
   }
 }

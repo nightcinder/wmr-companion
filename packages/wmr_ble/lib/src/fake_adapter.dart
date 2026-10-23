@@ -18,6 +18,11 @@ class FakeBleAdapter implements BleAdapter {
   List<BleServiceInfo> services = fakeBridgeDevice.services;
   Object? connectError;
 
+  /// Upcoming [connect] calls that fail with [connectError] (or a generic
+  /// error when that is null). Lets a test make just the first automatic
+  /// re-dial fail and check that the retry loop dials again.
+  int connectFailureCount = 0;
+
   /// When set, [availability] waits for this completer before answering.
   Completer<void>? availabilityGate;
 
@@ -47,11 +52,19 @@ class FakeBleAdapter implements BleAdapter {
     AdapterConnectionParams(deviceId: deviceId, intervalUs: intervalUs),
   );
 
-  /// Simulates the bridge dropping the link.
-  void dropLink() {
+  /// Simulates the bridge dropping the link. With [deviceId] only that
+  /// bridge's session sees the event; without it every session does (the
+  /// single-bridge tests).
+  void dropLink({String? deviceId}) {
     calls.add('link-dropped');
     _enabled.clear();
-    _links.add(const AdapterConnectionEvent(connected: false, error: 'gone'));
+    _links.add(
+      AdapterConnectionEvent(
+        connected: false,
+        error: 'gone',
+        deviceId: deviceId,
+      ),
+    );
   }
 
   @override
@@ -92,6 +105,10 @@ class FakeBleAdapter implements BleAdapter {
   Future<void> connect(String deviceId) async {
     calls.add('connect');
     _enabled.clear();
+    if (connectFailureCount > 0) {
+      connectFailureCount--;
+      throw connectError ?? StateError('connect failed');
+    }
     if (connectError != null) throw connectError!;
     _links.add(const AdapterConnectionEvent(connected: true));
   }
@@ -104,7 +121,7 @@ class FakeBleAdapter implements BleAdapter {
 
   @override
   Stream<AdapterConnectionEvent> connectionEvents(String deviceId) =>
-      _links.stream;
+      _links.stream.where((e) => e.deviceId == null || e.deviceId == deviceId);
 
   @override
   Future<int> requestMtu(String deviceId, int mtu) async {

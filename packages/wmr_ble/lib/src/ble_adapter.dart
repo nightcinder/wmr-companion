@@ -24,12 +24,20 @@ enum BleAppLifecycle { resumed, inactive, paused, detached }
 
 /// A connect or disconnect reported by the platform.
 class AdapterConnectionEvent {
-  const AdapterConnectionEvent({required this.connected, this.error});
+  const AdapterConnectionEvent({
+    required this.connected,
+    this.error,
+    this.deviceId,
+  });
 
   final bool connected;
 
   /// Platform error text when the change was not requested by the app.
   final String? error;
+
+  /// Which device the event belongs to, where the platform reports it.
+  /// Null means the event applies to every listener on the stream.
+  final String? deviceId;
 }
 
 /// A connection interval reported by the platform (Android only).

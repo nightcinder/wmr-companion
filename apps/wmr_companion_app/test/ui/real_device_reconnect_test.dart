@@ -1,26 +1,42 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_companion_app/hid/hid_output.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
+import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
+import 'package:wmr_core/services/controller_service.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
 
-import 'raw_mode_notifier.dart';
+import '../hid/fake_hid.dart';
+
+class TestModeNotifier extends StreamModeNotifier {
+  TestModeNotifier(this.mode);
+
+  final StreamMode mode;
+
+  @override
+  StreamMode build() => mode;
+}
 
 /// Drives the app's real-device controller over the fake adapter. These are
 /// regression tests for the facade hand-over: after an automatic reconnect
 /// both the published counters and the in-session stick centre must come from
-/// the new service, not from the one that was disposed.
+/// the new service, not from the one that was disposed. The HID tests cover
+/// the other half of a reconnect: forwarding must re-point at the new service
+/// by itself, two bridges must survive one link dropping, and an explicit
+/// disconnect must still stop HID and stop re-dialling.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late FakeBleAdapter adapter;
   late UniversalBleTransport transport;
-  late ProviderContainer container;
 
   setUp(() {
     adapter = FakeBleAdapter();
@@ -28,17 +44,23 @@ void main() {
       adapter: adapter,
       scanTimeout: const Duration(minutes: 5),
     );
-    container = ProviderContainer(
+    addTearDown(transport.dispose);
+  });
+
+  ProviderContainer makeContainer({
+    StreamMode mode = StreamMode.raw,
+    FakeHid? hid,
+  }) {
+    final container = ProviderContainer(
       overrides: [
         realTransportProvider.overrideWithValue(transport),
-        streamModeProvider.overrideWith(RawModeNotifier.new),
+        streamModeProvider.overrideWith(() => TestModeNotifier(mode)),
+        if (hid != null) hidTransportProvider.overrideWithValue(hid),
       ],
     );
-    addTearDown(() async {
-      container.dispose();
-      await transport.dispose();
-    });
-  });
+    addTearDown(container.dispose);
+    return container;
+  }
 
   void sendFrames(int from, int count) {
     for (var i = 0; i < count; i++) {
@@ -52,10 +74,36 @@ void main() {
     }
   }
 
+  DecodedRecord decoded(
+    int seq, {
+    int hand = 1,
+    int trigger = 0,
+    int buttons = 0,
+  }) => DecodedRecord(
+    hand: hand,
+    sequence: seq,
+    rxTimeUs: seq * 5000,
+    deviceTicks: seq * 50000,
+    gyro: const [0, 0, 0],
+    accel: const [0, 0, 9.8],
+    buttons: buttons,
+    trigger: trigger,
+  );
+
+  void feed(DecodedRecord record, {String deviceId = fakeBridgeDeviceId}) =>
+      adapter.emitNotification(
+        wmrBridgeDecodedCharUuid,
+        encodeDecodedRecord(record),
+        deviceId: deviceId,
+      );
+
   Future<void> wait([int millis = 300]) =>
       Future<void>.delayed(Duration(milliseconds: millis));
 
+  Future<void> pump() => Future<void>.delayed(Duration.zero);
+
   test('published stats follow the service created by a reconnect', () async {
+    final container = makeContainer();
     final controller = container.read(realDeviceProvider.notifier);
     await controller.connect(fakeBridgeDeviceId);
     expect(container.read(realDeviceProvider).connected, isTrue);
@@ -74,6 +122,7 @@ void main() {
   });
 
   test('a stick centre set after connect survives a reconnect', () async {
+    final container = makeContainer();
     final controller = container.read(realDeviceProvider.notifier);
     await controller.connect(fakeBridgeDeviceId);
     expect(container.read(realDeviceProvider).connected, isTrue);
@@ -86,5 +135,123 @@ void main() {
     expect(container.read(realDeviceProvider).connected, isTrue);
 
     expect(controller.service!.decodedStats.hands[0].stickCentre, [0.2, 0.1]);
+  });
+
+  test('HID forwarding follows the service created by a reconnect', () async {
+    final hid = FakeHid();
+    final container = makeContainer(mode: StreamMode.decoded, hid: hid);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+
+    final out = container.read(hidOutputProvider.notifier);
+    await out.start(DebugSource.real);
+    hid.emit(const HidStatus(HidState.connected, deviceName: 'PC'));
+    await pump();
+    feed(decoded(1, trigger: 200));
+    await pump();
+    final held = hid.reports.last[8];
+    expect(held, greaterThan(0));
+
+    adapter.dropLink();
+    await wait(800);
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(container.read(hidOutputProvider).running, isTrue);
+
+    // Before the fix this sample reached the new service only, while the HID
+    // subscription still pointed at the disposed one: no report was sent.
+    feed(decoded(2, trigger: 60));
+    await wait(50);
+    expect(hid.reports.last[8], greaterThan(0));
+    expect(hid.reports.last[8], isNot(held));
+    expect(container.read(hidOutputProvider).reportsSent, greaterThan(0));
+  });
+
+  test('a failed automatic re-dial is retried with backoff', () async {
+    final container = makeContainer();
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    final connectsBefore = adapter.calls.where((c) => c == 'connect').length;
+    // The first automatic attempt fails; the next one, one second later,
+    // succeeds. Before the fix the bridge stayed un-dialled for good.
+    adapter.connectFailureCount = 1;
+    adapter.dropLink();
+    await wait(2200);
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(
+      adapter.calls.where((c) => c == 'connect').length,
+      connectsBefore + 2,
+    );
+  });
+
+  test('with two bridges, one drop releases that hand only', () async {
+    final hid = FakeHid();
+    final container = makeContainer(mode: StreamMode.decoded, hid: hid);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeLeftDeviceId);
+    await controller.connect(fakeBridgeRightDeviceId);
+    expect(
+      container.read(realDeviceProvider).connectedDeviceIds,
+      containsAll([fakeBridgeLeftDeviceId, fakeBridgeRightDeviceId]),
+    );
+
+    final out = container.read(hidOutputProvider.notifier);
+    await out.start(DebugSource.real);
+    hid.emit(const HidStatus(HidState.connected, deviceName: 'PC'));
+    await pump();
+    feed(decoded(1, hand: 0, trigger: 200), deviceId: fakeBridgeLeftDeviceId);
+    feed(decoded(1, hand: 1, trigger: 200), deviceId: fakeBridgeRightDeviceId);
+    await pump();
+    final heldLeft = hid.reports.last[7]; // LEFT trigger
+    final heldRight = hid.reports.last[8]; // RIGHT trigger
+    expect(heldLeft, greaterThan(0));
+    expect(heldRight, greaterThan(0));
+
+    adapter.dropLink(deviceId: fakeBridgeRightDeviceId);
+    await wait(100); // still inside the 500 ms reconnect delay
+    expect(container.read(hidOutputProvider).running, isTrue);
+    expect(hid.reports.last[7], heldLeft); // the remaining hand keeps going
+    expect(hid.reports.last[8], 0); // the missing hand is released
+
+    feed(decoded(2, hand: 0, trigger: 240), deviceId: fakeBridgeLeftDeviceId);
+    await wait(20);
+    expect(hid.reports.last[7], greaterThan(heldLeft));
+    expect(hid.reports.last[8], 0);
+
+    await wait(800);
+    expect(
+      container
+          .read(realDeviceProvider)
+          .isDeviceConnected(fakeBridgeRightDeviceId),
+      isTrue,
+    );
+    feed(decoded(2, hand: 1, trigger: 60), deviceId: fakeBridgeRightDeviceId);
+    await wait(50);
+    expect(hid.reports.last[7], greaterThan(heldLeft));
+    expect(hid.reports.last[8], greaterThan(0));
+  });
+
+  test('an intentional disconnect does not re-dial and stops HID', () async {
+    final hid = FakeHid();
+    final container = makeContainer(mode: StreamMode.decoded, hid: hid);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+
+    final out = container.read(hidOutputProvider.notifier);
+    await out.start(DebugSource.real);
+    hid.emit(const HidStatus(HidState.connected, deviceName: 'PC'));
+    await pump();
+
+    final connectsBefore = adapter.calls.where((c) => c == 'connect').length;
+    await controller.disconnect();
+    await wait(1200);
+
+    expect(container.read(realDeviceProvider).connected, isFalse);
+    expect(controller.service, isNull);
+    expect(adapter.calls.where((c) => c == 'connect').length, connectsBefore);
+    expect(container.read(hidOutputProvider).running, isFalse);
+    expect(hid.calls, contains('stop'));
   });
 }
