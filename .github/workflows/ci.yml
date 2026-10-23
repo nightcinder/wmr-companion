@@ -147,7 +147,7 @@ jobs:
           flutter test
           flutter build apk --debug
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: wmr-companion-debug-apk
           path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-debug.apk
@@ -172,7 +172,7 @@ jobs:
         working-directory: tool/gatt_probe
         run: ./gradlew assembleDebug --stacktrace
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: wmr-gatt-probe-debug-apk
           path: tool/gatt_probe/app/build/outputs/apk/debug/app-debug.apk
