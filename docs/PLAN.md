@@ -3,7 +3,7 @@
 > Current state, hardware results and the roadmap live in [STATUS.md](STATUS.md). This file is the plan and architecture reference; where the two differ, STATUS.md is newer. Packaging the pipeline as reusable Flutter packages is framed in [LIBRARY.md](LIBRARY.md).
 
 ## Goal
-A Flutter app (Android first, iOS next) that connects over BLE GATT to ESP32 firmware (BTstack) exposing WMR controllers, and:
+A Flutter library and reference app (Android and iOS both in v1 scope, iOS 18 floor; see `docs/LIBRARY.md` §13) that connects over BLE GATT to ESP32 firmware (BTstack) exposing WMR controllers, and:
 1. Shows live 3DoF orientation of each controller in a **debug mode**.
 2. Measures BLE latency/jitter so we can decide whether Flutter + `universal_ble` is good enough or the hot path needs native (Kotlin/Kable).
 3. Later: turns the data into gamepad-style input on the phone.
@@ -56,6 +56,8 @@ wmr-companion/
   packages/wmr_companion_ui/ # optional orientation/link/stats/gamepad widgets
   packages/wmr_companion_hid_android/ # optional Android Bluetooth HID output
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
+  packages/WMRCompanionKit/ # native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers
+  example/              # minimal Flutter host app (~20 lines to gamepad state)
   docs/STATUS.md    # current state and roadmap
   docs/PLAN.md      # this file
   docs/PROTOCOL.md  # links to WMR_Bridge docs + app-side decisions
@@ -66,19 +68,26 @@ wmr-companion/
 ## GATT protocol (source of truth: the WMR_Bridge repo)
 Firmware: https://github.com/nightcinder/WMR_Bridge. Read `docs/PROTOCOL.md`, `docs/ANDROID.md`, `wmr_bridge.gatt`, `tests/test_protocol.c` and `samples/controller_frames.txt` there before writing any protocol code. Do not invent or restate layouts here; `docs/PROTOCOL.md` in this repo should link to the firmware docs and record only app-side decisions.
 
-The firmware is a **raw pipe**: it does not decode, filter or time-stamp. What the app can rely on:
-- Device name `WMR Bridge`, service `0000FF10-0000-1000-8000-00805F9B34FB`, characteristic `0000FF11-...` (notify + read). A read of FF11 returns a 16-byte status, not stream data.
-- Notifications are **fragments**: 12-byte header (magic 0x52, hand u8, sequence u32 LE, total_len u16, offset u16, chunk_len u16) plus a chunk. Reassemble per hand using the receiver rules in the firmware doc. A frame is 46 bytes: 0xA1, report ID 0x01, 44 payload bytes (the raw WMR HID input report).
+GATT characteristics on service `0000FF10-0000-1000-8000-00805F9B34FB`:
+- `FF11` (`0000FF11-...`, notify + read): raw fragmented HID stream (46 bytes: 0xA1, report ID 0x01, 44 payload bytes) with 12-byte fragment header. A read returns 16-byte status.
+- `FF12` (`0000FF12-...`, notify only): decoded 56-byte records (version 1: hand, buttons, sequence, ESP32 receive time, `device_ticks` at 100 ns, gyro rad/s, accel, temperature, stick, trackpad, trigger, battery). Needs MTU 59+.
+- `FF14` (`0000FF14-...`, notify only): batched decoded FF12 records (version 2: 2-byte header + up to 9 records per notification at MTU 517). **The app's default stream.**
+- `FF13` (`0000FF13-...`, read + write): controller calibration config blob, read in windows with CRC-32 (WMR_Bridge #16, #17).
+- `FF15` (`0000FF15-...`, write without response + notify): echo characteristic for round-trip latency measurement (WMR_Bridge #13).
+- `FF16` (`0000FF16-...`, read only): bridge firmware version string (UTF-8 `PROJECT_VER`, at most 31 bytes; WMR_Bridge #38, companion #46). Exposes `WmrProtocolVersion` and feature matrix on the link snapshot.
+
+Stream mutual exclusion: `FF11`, `FF12`, and `FF14` are mutually exclusive (a second enable fails with ATT error 0x80; write 0x0000 to the active CCC first). `FF13`, `FF15`, and `FF16` are independent. Multi-bridge connections (connecting multiple ESP32 bridges concurrently to eliminate Classic Bluetooth radio contention) merge streams into shared per-hand pipelines in `ControllerService`.
+
+What the client can rely on:
 - Per-hand sequence numbers (first frame is 1). Gaps mean loss before the BLE stack; they reset only when the ESP32 reboots; compare with modular arithmetic.
 - There is **no quaternion and no ESP32 timestamp** in the raw FF11 stream (FF12/FF14 records carry `rx_time_us`). Round trip is measured over the separate FF15 echo characteristic (WMR_Bridge #13).
-- Connection sequence (from the firmware's ANDROID.md): connect, requestMtu(517), wait for the negotiated MTU, request High connection priority, discover services, enable notifications (CCC 0x0001). Repeat all of it after every reconnect. Serialize GATT operations and do no heavy work in the notification callback. The bridge serves one phone at a time; the phone can connect to two independent bridges concurrently (e.g. Left and Right ESP32 bridges) to eliminate upstream Classic Bluetooth radio contention.
+- Connection sequence (from the firmware's ANDROID.md): connect, requestMtu(517), wait for the negotiated MTU, request High connection priority, discover services, enable notifications (CCC 0x0001). Repeat all of it after every reconnect. Serialize GATT operations and do no heavy work in the notification callback. The bridge serves one phone at a time; the phone can connect to two independent bridges concurrently.
 
-## Decoded stream (implemented: FF12; planned: FF14 batching)
+## Decoded stream (FF12 and FF14 batching)
 WMR report decoding is done in the ESP32 firmware, not in the app. The layout is fixed in WMR_Bridge `docs/PROTOCOL.md`, mirrored and explained in this repo's [PROTOCOL.md](PROTOCOL.md):
-- `FF12`, notify only, next to the raw `FF11` stream, which keeps working. The two are mutually exclusive (a second enable fails with ATT error 0x80).
-- 56-byte version-1 records: hand, buttons, sequence (per hand), ESP32 receive time, `device_ticks` (100 ns, the sensor clock), gyro (rad/s), accel (scale about 10 m/s^2 at rest, not 9.81), temperature, stick, trackpad, trigger, battery. Needs MTU 59 or more.
+- `FF12`, notify only, 56-byte records. Mutually exclusive with `FF11` and `FF14`.
+- `FF14`, notify only, batches of FF12 records (version 2, up to 9 per notification at MTU 517; app default stream).
 - Raw IMU is sent, not a quaternion: fusion runs on the phone.
-- Planned: FF12 version 2 batching on a new characteristic `FF14` (several records per notification), motivated by bench results showing notification airtime costs controller reports. Not to be used until specified in the firmware docs.
 ## Orientation pipeline (app side)
 1. Per-hand fragment reassembler (pure Dart port of `wmr_reassembler_push`); reuse the firmware's test vectors and sample frames.
 2. Decoded samples: the firmware decodes the HID reports (see "Decoded stream" above). The app parses the decoded format and feeds IMU samples to fusion. The raw FF11 frames stay available as a debug view.
@@ -118,17 +127,15 @@ Check on pub.dev for current versions before pinning. Verify which Android contr
 
 ## Platform setup
 - **Android**: `BLUETOOTH_SCAN` (neverForLocation), `BLUETOOTH_CONNECT`; `ACCESS_FINE_LOCATION` with `maxSdkVersion=30`. `minSdk` per universal_ble's requirements. Test on a **physical phone**: emulators don't do real BLE.
-- **iOS** (later): `NSBluetoothAlwaysUsageDescription` in Info.plist. iOS controls connection interval, so measure rather than assume.
+- **iOS**: `NSBluetoothAlwaysUsageDescription` in Info.plist. Target iOS 18.0+ (owner floor, both Android and iOS in v1 scope; `docs/LIBRARY.md` §13). iOS controls connection interval, so measure rather than assume.
 
 ## Milestones
-Status of each is in [STATUS.md](STATUS.md) (1 to 3 done, plus the Capture screen).
+Milestone planning is governed by ONY-50 (see [STATUS.md](STATUS.md) and `HANDOFF.md` §7). The initial milestones (M1–M6) established the baseline pipeline, latency probe, and iOS companion kit. Active work is tracked under M10–M13:
 
-1. Scaffold project (`flutter create` into this repo), CI green, `FakeTransport` drives the debug 3D view (no hardware needed).
-2. Scan/connect to the ESP32, subscribe, parse packets, show raw values.
-3. Debug 3DoF view on real data + stats panel.
-4. Latency test screen + CSV export.
-5. Write up results; decide Flutter vs native hot path.
-6. iOS build, then gamepad-style mapping.
+- **M10 — Library v1 & API freeze**: Federated package tree (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`, `WMRCompanionKit`), FF16 firmware version reporting (#46), pub workspace and publish readiness (`docs/PUBLISHING.md`), and the reference app move to `apps/wmr_companion_app`. Open: owner approval for final pub.dev publishing.
+- **M11 — Two bridges as a product**: Multi-bridge connection support in `ControllerService`, per-bridge attribution across records/stats/links/latency export (ONY-70, #51). Open: firmware flasher variants (`build.py --variant`), browser installer variants, auto-reconnect.
+- **M12 — The verification campaign (Open)**: Turn run sheets into empirical hardware answers across three sittings: Sitting A (single bridge latency & tracking quality), Sitting B (two bridges A/B/A/B on two ESP32s to test radio contention), and Sitting C (PC HID output & soak).
+- **M13 — Release and distribution (Open)**: Tagged firmware release with packaged manifest and FF16 version, compatibility matrix keyed on FF16, bridge security disposition, and GitHub Pages installer.
 
 ## GitHub and CI
 - Repo: `wmr-companion` (public, MIT), default branch `main`. Squash merges.

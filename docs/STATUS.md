@@ -1,21 +1,21 @@
 ﻿# Project status
 
-Last updated: 2026-10-23 for the reusable-library close-out (ONY-41, [LIBRARY.md](LIBRARY.md)); the milestone and hardware tables otherwise reflect the 2026-10-22 session, see [../HANDOFF.md](../HANDOFF.md). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-23 (updated for M10–M13 milestones and reusable library close-out ONY-41; see [../HANDOFF.md](../HANDOFF.md)). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
-A pipeline from Windows Mixed Reality motion controllers to an Android phone, built to end in gamepad-style 3DoF input:
+A pipeline from Windows Mixed Reality motion controllers to an Android or iOS device, built to end in gamepad-style 3DoF input:
 
 ```
-WMR controller (L / R)                ESP32 (BTstack)                         Phone (Flutter app)
-  Classic BT HID, ~200 Hz  ---->  decode IMU/buttons, bounded queue  ---->  BLE notify FF11 raw / FF12 decoded
+WMR controller (L / R)                ESP32 (BTstack)                         Phone / Host (Flutter / Swift)
+  Classic BT HID, ~200 Hz  ---->  decode IMU/buttons, bounded queue  ---->  BLE notify FF11 raw / FF12 decoded / FF14 batched
                                   repo: nightcinder/WMR_Bridge             fuse (Madgwick/Mahony), debug 3D view
                                                                            repo: nightcinder/wmr-companion
 ```
 
 - **WMR_Bridge** (firmware, C, BTstack on ESP32): connects to both controllers over Classic Bluetooth HID, optionally decodes the IMU and inputs, and serves them over a BLE GATT service. Source of truth for the wire protocol.
-- **wmr-companion** (this repo, Flutter): connects to the bridge, reassembles or parses the stream, fuses orientation on the phone, shows a debug 3D view and link statistics, and records raw captures.
-- Android first, iOS later. Debug-mode 3DoF tracking first, gamepad mapping later.
+- **wmr-companion** (this repo): federated package tree with six Dart packages (`packages/wmr_core`, `packages/wmr_companion`, `packages/wmr_ble`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`) plus Swift `packages/WMRCompanionKit`, a minimal Flutter host (`example/`), and the reference app (`apps/wmr_companion_app`). Connects to the bridge, reassembles or parses the stream, fuses orientation on the host, shows a debug 3D view and link statistics, and records raw captures.
+- Android and iOS are both in scope for v1 (the owner settled iOS 18 as the floor, `docs/LIBRARY.md` §13). Debug-mode 3DoF tracking first, gamepad mapping later.
 - Third-party: `universal_ble` (BLE), `vector_math`, Riverpod, Flutter. The firmware is derived from BlueKitchen BTstack and keeps its non-commercial license; this app is MIT.
 
 ## How the work is run
@@ -28,18 +28,14 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ### Milestones (see [PLAN.md](PLAN.md))
 
-| # | Milestone | State |
+Work is planned across milestones M10–M13 (governed by ONY-50; see `HANDOFF.md` §7 and `docs/PLAN.md`). The earlier milestones (M1–M6: scaffold, GATT stream, 3DoF orientation, latency screen, iOS probe) established the baseline pipeline; active work is organized under M10–M13:
+
+| Milestone | Scope | State |
 |---|---|---|
-| 1 | Scaffold, CI, fake transport, debug 3D view on synthetic data | Done |
-| 2 | Scan/connect, subscribe, parse, show raw values | Done; used on hardware |
-| 3 | Real orientation from the decoded FF12 stream, stats panel | Done (merged); orientation checked visually on hardware, see below |
-| - | Raw capture screen (capture_ble.py-format files) | Done; used on hardware |
-| - | FF14 batched stream (parser, three-way exclusion, Batched FF14 mode, fake bridge) | Merged (#8). Firmware FF14 was run with nRF Connect (see the A/B/A below). FF14 is the app's default stream (#12) and the app requests ATT MTU 517 on every connect (#15, up to 9 records per batch). The app ran on FF14 for the first time in the 2026-10-22 round-trip run (user-reported); its latency export records MTU 517. The MTU readout on the Connect screen itself and B4/B9 have not been checked, and on Android 14+ the stack may ignore the MTU request |
-| 4 | Latency screen and CSV export | Done; first hardware run (FF14, 2026-10-22, user-reported): 479 of 479 FF15 pings answered, round trip p50 40.8 ms, p95 72.8 ms, see [LATENCY.md](LATENCY.md) "First hardware run". Inter-arrival, sequence gaps, tick-based loss, one-way delay variation and round trip, CSV + JSON export. PR #28 added no-stream latency mode, stream selector (None / FF11 / FF12 / FF14), and configurable ping interval (built and unit/widget tested; **not yet run on hardware**). Run sheet in [LATENCY.md](LATENCY.md) |
-| - | Multi-bridge support (removes two-controller contention penalty) | Done (#ONY-18); transport and `ControllerService` support concurrent multi-bridge connections (e.g. Left and Right ESP32 bridges), merging notification streams into shared hand pipelines. Connection UI and Riverpod providers updated to discover and connect/disconnect multiple bridges concurrently. Unit/mock transport and widget tests passing; **not yet run on hardware** |
-| 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
-| 6 | iOS companion framework & probe | In progress (ONY-38). Built `WMRCompanionKit` (pure Swift framework in `packages/WMRCompanionKit` targeting iOS 18.0+, macOS 12.0+, and visionOS 1.0+ with CoreBluetooth transport, FF11/FF12/FF14/FF15/FF13 parsers, Madgwick/Mahony fusion, dual-bridge coordinator, and full unit test suite), native SwiftUI probe app (`tool/ios_probe/`), iOS 18 Podfile and project deployment target, Info.plist BLE permissions, and CI job (`.github/workflows/ci.yml`). Flutter iOS compile verification added ([IOS.md](IOS.md)) |
-| - | Reusable Flutter library (ONY-41) | Phases 1–4 and 7 landed, plus the packaging half of phase 8: `packages/wmr_core` (pure Dart), `packages/wmr_companion` (facade; the app drives its real connection through it), `packages/wmr_ble` (`universal_ble` transport, link status, app-lifecycle hook), `example/` (minimal Flutter host), `packages/wmr_companion_ui` (optional widgets) and `packages/wmr_companion_hid_android` (optional Android HID output); the repo is one pub workspace and all six packages have clean `pub publish --dry-run`s. **`0.1.0` is not published (owner hold), and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified.** See [LIBRARY.md](LIBRARY.md) and [PUBLISHING.md](PUBLISHING.md) |
+| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Six Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.1.0` is on owner hold, and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
+| **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). **Open:** Firmware flasher variants (`build.py --variant`), browser installer variants, auto-reconnect. |
+| **M12 — The verification campaign** | Empirical hardware verification across three sittings | **Open.** Sitting A (single bridge latency & tracking quality); Sitting B (two bridges A/B/A/B on two ESP32s to test radio contention); Sitting C (PC HID output & soak). |
+| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | **Open.** Tagged firmware release with packaged manifest and FF16 version; compatibility matrix keyed on FF16; bridge security disposition in `docs/SECURITY.md`; README updates based on verified hardware results. |
 
 ### What has been checked on hardware (user-reported)
 
@@ -101,6 +97,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Missing-report definition differs between app and firmware | Done (#7): tick delta missing-report calculation unified to match firmware (`wmr_devloss.c`: median of deltas within 1.5x 10th-percentile over 256-delta window); not compared against live bridge |
 | Yaw drifts (no magnetometer); gyro bias estimated from the first stationary second | Known limitation |
 | FF13 controller calibration blob | Firmware merged (WMR_Bridge #16, #17); both blocks read to READY on a bench run (user-reported). App: client, CRC check, de-obfuscation and JSON parsing built and unit tested with synthetic data and now seen on real blocks, a "Read config" button on the debug screen read both blocks over FF13 with CRC OK (LEFT 7147 bytes 8bc13223, RIGHT 7148 bytes 75e8ab85) and decoded gyro and accelerometer calibration with Monado's key (user-reported 2026-10-22; mix matrices near identity, Rt rotations mirrored between hands); the Monado XOR key table is not in the repo; calibration applied behind a per-hand switch in fusion (#27, default off), not yet run on hardware ([PROTOCOL.md](PROTOCOL.md) "FF13 config block in the app") |
+| FF16 bridge firmware version | Read-only UTF-8 string with no terminator (at most 31 bytes; WMR_Bridge #38). Read once after connect; publishes WmrProtocolVersion (firmware version and FF11–FF16 feature matrix) on WmrLinkSnapshot and WmrCompanion.protocol (#46). Tested against fake bridge; not yet run on hardware |
 | Round trip: where the 40 ms goes (phone write and notification delivery, air, notification traffic). Needs an FF11/FF12 run and a run with no stream at the same position; the screen now has a no-stream latency mode and a stream selector (PR #28, built, **not yet run on hardware**) | [LATENCY.md](LATENCY.md) "First hardware run", "Run sheet" |
 | Controller discovery by name instead of compiled-in addresses (done; addresses are stored in the ESP32's NVS) | Firmware merged (WMR_Bridge #14); checks D1-D11 reported as passed by the project owner (user-reported, 2026-10-22, no output pasted) |
 | No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
@@ -108,20 +105,33 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Remaining firmware bench checklists (FF12 5-7, 11, 12, 15-18; L1-L5; B4, B6-B11; C7; X-series done) | WMR_Bridge `docs/TESTING.md` |
 | Checks still not run, with commands and pass criteria | WMR_Bridge `docs/runs/sheets/closeout.md` |
 
-## Roadmap
+## Roadmap: M10–M13
 
-Near term:
-1. FF14 batching: firmware and app support merged and run (user-reported); the A/B/A above is inconclusive for RIGHT because the second A drifted. Next: B4/B9 with the app.
-2. LEFT's extra loss: auto latency and modem sleep off were each tried twice, interleaved with baselines (2026-10-22, user-reported): no effect shown, and the session drifted (LEFT's RSSI 5 to 10 dB weaker from run 5 on, baselines 15.4 to 25.6 %). Next: a long baseline run with nothing changed to measure the drift. That long run (user-reported) showed RIGHT's loss falling from about 20 % to about 11 % when LEFT went to sleep. Single-controller runs with the phone on FF14 at MTU 517, on the firmware of WMR_Bridge PR #21 (FF13 streaming fix), user-reported, 5 to 8 min each: LEFT alone about 0.5 %, RIGHT alone about 10.8 %, both connected about 19 % each (same build and position). Working hypothesis, not proven: the two Classic links and the phone compete for the ESP32's radio. Tracked in WMR_Bridge issue #18.
-3. App: stick dead zone and learned centre, and unified missing-report definition (both done, #7; not yet tested on hardware); surface link quality (loss %, rssi, lq) in the debug panel.
+The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-plan`; see [../HANDOFF.md](../HANDOFF.md) §7 and [PLAN.md](PLAN.md)). The sequence of work:
 
-Then:
-4. More latency runs with the latency screen: runs on FF12, FF11, and no-stream mode (PR #28) at the same position for comparison with the first FF14 run.
-5. Hardware evaluation of FF13 calibration in fusion (#27), fusion tuning, optional magnetometer-free yaw handling.
-6. Bridge security.
-7. iOS build; gamepad: hardware check of the in-app mapping (GAMEPAD.md checklist), then try the Bluetooth HID output on a phone and a host (GAMEPAD.md checklist).
+1. **M10 — Library v1 & API freeze**:
+   - Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted and tested.
+   - FF16 bridge firmware version reading landed in #46 (`WmrProtocolVersion`).
+   - Reference app moved to `apps/wmr_companion_app` in #53 (M10.5).
+   - Dart pub workspace, export-boundary checks, and strict publish dry-run landed in #54 (`docs/PUBLISHING.md`).
+   - **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6).
+2. **M11 — Two bridges as a product**:
+   - Multi-bridge support in `ControllerService` landed (#34).
+   - Per-bridge attribution on records, stats, links, and latency CSV export landed in #51 (ONY-70).
+   - **Open:** Firmware flasher variant builds (`build.py --variant both|left|right`), browser installer variants, auto-reconnect, and multi-bridge run sheet update.
+3. **M12 — The verification campaign (Open)**:
+   - Turn run sheets into empirical hardware answers across three sittings:
+     - *Sitting A (one bridge, no reflash):* latency v2 (app vs probe) and tracking quality.
+     - *Sitting B (two bridges):* multi-bridge A/B/A/B protocol on two ESP32s to test the radio contention hypothesis.
+     - *Sitting C:* robustness soak and gamepad HID checklist on a PC.
+     - *Write-ups:* #18 disposition, M7 decision, M8 defaults, STATUS in both repos.
+4. **M13 — Release and distribution (Open)**:
+   - Tagged firmware release with packaged manifest and FF16 version; GitHub Pages installer.
+   - Compatibility matrix published in both repos keyed on FF16 version.
+   - Bridge security disposition in `docs/SECURITY.md`.
+   - README rewrite in both repos around verified hardware results.
 
-## Not yet run on hardware (as of 2026-10-22)
+## Not yet run on hardware (as of 2026-10-23)
 
 Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
 
@@ -130,6 +140,8 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream (the screen now supports all four via PR #28 no-stream latency mode and stream selector; not yet run).
 - FF13 IMU calibration applied in fusion behind a per-hand switch (PR #27).
 - Stick dead zone, learned rest centre, and unified missing-report definition (PR #7).
+- FF16 firmware version read on a live bridge (PR #46).
+- Per-bridge attribution on multi-bridge hardware (PR #51).
 
 ## Where things are
 
@@ -137,6 +149,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 |---|---|
 | Plan and architecture rules | [PLAN.md](PLAN.md), `CLAUDE.md` |
 | Reusable Flutter library: package split, facade API, phases | [LIBRARY.md](LIBRARY.md) |
+| Package publishing and dry-run validation | [PUBLISHING.md](PUBLISHING.md) |
 | App-side protocol decisions, FF12 in the app, axis mapping | [PROTOCOL.md](PROTOCOL.md) |
 | Raw capture format and screen | [CAPTURE.md](CAPTURE.md) |
 | Latency screen, CSV/JSON export format | [LATENCY.md](LATENCY.md) |
