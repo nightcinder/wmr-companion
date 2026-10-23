@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../domain/axis_mapping.dart';
-import '../../domain/hand_pipeline.dart';
-import '../../domain/imu_calibration.dart';
-import '../../domain/stick_centre.dart';
-import '../../services/controller_service.dart';
-import '../../services/stick_settings_store.dart';
+import 'package:wmr_core/domain/axis_mapping.dart';
+import 'package:wmr_core/domain/hand_pipeline.dart';
+import 'package:wmr_core/domain/imu_calibration.dart';
+import 'package:wmr_core/domain/stick_centre.dart';
+import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_core/services/stick_settings_store.dart';
 
 /// Which bridge stream the app wants. Applied to the service when it is
 /// created and on change; the Capture screen needs [StreamMode.raw]. The

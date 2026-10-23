@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../ble/ble_transport.dart';
-import '../../domain/hand_pipeline.dart';
-import '../../services/controller_service.dart';
-import '../../services/echo_client.dart';
-import '../../services/latency_files.dart';
-import '../../services/latency_recorder.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/domain/hand_pipeline.dart';
+import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_core/services/echo_client.dart';
+import 'package:wmr_core/services/latency_files.dart';
+import 'package:wmr_core/services/latency_recorder.dart';
+
 import '../connect/connect_providers.dart';
 import '../debug/debug_providers.dart';
 

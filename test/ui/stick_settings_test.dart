@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/domain/stick_centre.dart';
-import 'package:wmr_companion/services/stick_settings_store.dart';
+import 'package:wmr_core/domain/stick_centre.dart';
+import 'package:wmr_core/services/stick_settings_store.dart';
 import 'package:wmr_companion/ui/debug/stream_settings.dart';
 
 class MemoryStickStore implements StickSettingsStore {

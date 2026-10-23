@@ -2,10 +2,13 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../ble/ble_transport.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+
 import '../../ble/universal_ble_adapter.dart';
 import '../../ble/universal_ble_transport.dart';
-import '../../services/controller_service.dart';
+
+import 'package:wmr_core/services/controller_service.dart';
+
 import '../debug/stream_settings.dart';
 
 /// The real BLE transport. Created on first use, so the fake-bridge path

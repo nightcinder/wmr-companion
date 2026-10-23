@@ -4,8 +4,8 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/domain/gamepad.dart';
-import 'package:wmr_companion/services/gamepad_settings_store.dart';
+import 'package:wmr_core/domain/gamepad.dart';
+import 'package:wmr_core/services/gamepad_settings_store.dart';
 import 'package:wmr_companion/ui/gamepad/gamepad_providers.dart';
 
 class MemoryStore implements GamepadSettingsStore {

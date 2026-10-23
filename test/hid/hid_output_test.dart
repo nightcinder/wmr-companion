@@ -3,15 +3,15 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/ble/fake_transport.dart';
-import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_companion/hid/hid_gamepad_transport.dart';
 import 'package:wmr_companion/hid/hid_output.dart';
 import 'package:wmr_companion/hid/hid_report.dart';
 
-import 'package:wmr_companion/protocol/decoded_record.dart';
-import 'package:wmr_companion/protocol/gatt.dart';
-import 'package:wmr_companion/services/controller_service.dart';
+import 'package:wmr_core/protocol/decoded_record.dart';
+import 'package:wmr_core/protocol/gatt.dart';
+import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion/ui/debug/debug_providers.dart';
 import 'package:wmr_companion/ui/gamepad/gamepad_providers.dart';
 

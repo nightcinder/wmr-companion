@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vector_math/vector_math_64.dart';
 
-import '../../ble/ble_transport.dart';
-import '../../ble/fake_transport.dart';
-import '../../ble/fake_wmr_bridge.dart';
-import '../../domain/orientation.dart';
-import '../../domain/synthetic_motion.dart';
-import '../../services/controller_service.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/domain/orientation.dart';
+import 'package:wmr_core/domain/synthetic_motion.dart';
+import 'package:wmr_core/services/controller_service.dart';
+
 import '../connect/connect_providers.dart';
 import 'stream_settings.dart';
 

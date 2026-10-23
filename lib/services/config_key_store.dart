@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 
-import '../protocol/config_decode.dart';
+import 'package:wmr_core/protocol/config_decode.dart';
 
 /// Where `tool/fetch_wmr_config_key.dart` writes the key. Gitignored: the
 /// table is Monado's (BSL-1.0) and is not committed to this repository.

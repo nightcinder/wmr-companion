@@ -1,5 +1,6 @@
-import '../protocol/config_decode.dart';
-import 'config_client.dart';
+import 'package:wmr_core/protocol/config_decode.dart';
+import 'package:wmr_core/services/config_client.dart';
+
 import 'config_key_store.dart';
 
 String _v(List<double> v) => v.map((x) => x.toStringAsFixed(4)).join(', ');

@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:wmr_companion/ble/ble_adapter.dart';
-import 'package:wmr_companion/ble/ble_transport.dart';
-import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
 /// Scriptable [BleAdapter] that records every call in order.
 class FakeAdapter implements BleAdapter {

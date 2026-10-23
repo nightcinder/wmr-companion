@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../protocol/wmr_fragment.dart';
-import '../../services/capture_recorder.dart';
+import 'package:wmr_core/protocol/wmr_fragment.dart';
+import 'package:wmr_core/services/capture_recorder.dart';
+
 import 'capture_providers.dart';
 
 /// Guided raw capture, same procedure as WMR_Bridge tools/capture_ble.py.

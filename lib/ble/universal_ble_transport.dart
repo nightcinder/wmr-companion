@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import '../protocol/bridge_status.dart';
-import '../protocol/gatt.dart';
+import 'package:wmr_core/protocol/bridge_status.dart';
+import 'package:wmr_core/protocol/gatt.dart';
+
 import 'ble_adapter.dart';
-import 'ble_transport.dart';
+
+import 'package:wmr_core/ble/ble_transport.dart';
 
 /// Where the link to the bridge currently is. The failure phases double as
 /// the reason carried by [BleTransportException].

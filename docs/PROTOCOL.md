@@ -9,8 +9,8 @@ This file records only what the app does with it.
 
 ## Mirrored firmware revision
 
-`lib/protocol/` mirrors WMR_Bridge commit `62b5177` (2026-10-21). When the
-firmware protocol changes, update `lib/protocol/`, the tests and this line
+`packages/wmr_core/lib/protocol/` mirrors WMR_Bridge commit `62b5177` (2026-10-21). When the
+firmware protocol changes, update `packages/wmr_core/lib/protocol/`, the tests and this line
 together. The FF12 parts (`decoded_record.dart`, the FF12 UUID) mirror the
 `ff12-decoded-stream` branch at `8fcb6a1` (merged as `a0cba83`); see the FF12
 section. The FF14 parts (`decoded_batch.dart`, the FF14 UUID and minimum MTU)
@@ -18,13 +18,13 @@ mirror `main` at `8f5921a`; see the FF14 section.
 
 | Firmware | App |
 | --- | --- |
-| `wmr_bridge.gatt` UUIDs, device name | `lib/protocol/gatt.dart` |
-| FF11 16-byte status read | `BridgeStatus.parse` (`lib/protocol/bridge_status.dart`) |
+| `wmr_bridge.gatt` UUIDs, device name | `packages/wmr_core/lib/protocol/gatt.dart` |
+| FF11 16-byte status read | `BridgeStatus.parse` (`packages/wmr_core/lib/protocol/bridge_status.dart`) |
 | `wmr_proto_notification_capacity`, `wmr_proto_encode_fragment` | `notificationCapacity`, `encodeFragment`, `encodeFrame` |
-| `wmr_reassembler_push` and its counters | `WmrReassembler.push` (`lib/protocol/wmr_fragment.dart`) |
-| `tests/test_protocol.c` | `test/protocol/wmr_fragment_test.dart` (ported case by case) |
-| `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`lib/protocol/decoded_batch.dart`) |
-| `tests/test_batch.c` golden bytes and MTU table | `test/protocol/decoded_batch_test.dart` |
+| `wmr_reassembler_push` and its counters | `WmrReassembler.push` (`packages/wmr_core/lib/protocol/wmr_fragment.dart`) |
+| `tests/test_protocol.c` | `packages/wmr_core/test/protocol/wmr_fragment_test.dart` (ported case by case) |
+| `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`packages/wmr_core/lib/protocol/decoded_batch.dart`) |
+| `tests/test_batch.c` golden bytes and MTU table | `packages/wmr_core/test/protocol/decoded_batch_test.dart` |
 | `samples/controller_frames.txt` | `test/fixtures/controller_frames.txt` (copy) |
 
 The encoder is in the app only so `FakeWmrBridge` and the tests can produce
@@ -105,7 +105,7 @@ the spec text on `main` matches. The firmware's own text still says it is
 host-tested and built but never run on hardware, and the app side has never
 seen a real FF12 notification either. Everything below is the spec as
 written, not a measurement. If the firmware changes, update
-`lib/protocol/decoded_record.dart`, its test and this section together.
+`packages/wmr_core/lib/protocol/decoded_record.dart`, its test and this section together.
 
 | Item | UUID | Properties |
 | --- | --- | --- |
@@ -134,7 +134,7 @@ fragmentation. Little-endian; floats are IEEE 754 binary32.
 | 55 | u8 | `battery` | raw, scale not established |
 
 Golden bytes: `decoded_golden` in the firmware's `tests/test_protocol.c`; the
-same array is in `test/protocol/decoded_record_test.dart`, so firmware and app
+same array is in `packages/wmr_core/test/protocol/decoded_record_test.dart`, so firmware and app
 are checked against identical bytes. Parser: `parseDecodedRecord`. It rejects,
 like `wmr_decoded_unpack`, any length other than 56, a version other than 1 and
 a hand above 1.
@@ -191,9 +191,9 @@ calibration was parsed and shown but not applied to the fusion.
 
 | Piece | File |
 | --- | --- |
-| Wire format, CRC-32, cursor, golden bytes (cross-checked with the firmware's C code) | `lib/protocol/config_block.dart` |
-| De-obfuscation (skip 2 bytes, XOR `key[i % 1024]`) and JSON to calibration | `lib/protocol/config_decode.dart` |
-| Reads a hand's blob in 496-byte windows, checks CRC, polls while READING | `lib/services/config_client.dart` |
+| Wire format, CRC-32, cursor, golden bytes (cross-checked with the firmware's C code) | `packages/wmr_core/lib/protocol/config_block.dart` |
+| De-obfuscation (skip 2 bytes, XOR `key[i % 1024]`) and JSON to calibration | `packages/wmr_core/lib/protocol/config_decode.dart` |
+| Reads a hand's blob in 496-byte windows, checks CRC, polls while READING | `packages/wmr_core/lib/services/config_client.dart` |
 | GATT read on the transport | `BleTransport.read` |
 | FF13 in the fake bridge | `FakeWmrBridge(configBlobs: ...)` |
 
@@ -222,7 +222,7 @@ Not done, deliberately:
 The debug screen has a per-hand "Apply FF13 calibration" switch. It is
 **default off**, is enabled only after a successful "Read config" for that
 hand, and is not persisted (like the other debug-screen settings; only the
-gamepad settings are saved). When it is on, `lib/domain/imu_calibration.dart`
+gamepad settings are saved). When it is on, `packages/wmr_core/lib/domain/imu_calibration.dart`
 maps each raw sample before fusion:
 
 ```text
@@ -347,7 +347,7 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
 
 ### Stick centre
 
-**Not verified on hardware.** `StickNormalizer` (`lib/domain/stick_centre.dart`,
+**Not verified on hardware.** `StickNormalizer` (`packages/wmr_core/lib/domain/stick_centre.dart`,
 one per hand inside `HandPipeline`) turns the raw `stick` i16 pair into -1..1.
 A stick can rest off-centre; the only figure we have is one user-reported
 measurement (RIGHT y about 0.148 of full scale), not a property established
@@ -409,7 +409,7 @@ FF12 carries gyro and accel in the controller's raw sensor axes:
 directions and signs of those axes are unverified. The 3D view is X right, Y
 up, Z toward the viewer.
 
-**Default** (`AxisMapping.defaultMapping`, `lib/domain/axis_mapping.dart`):
+**Default** (`AxisMapping.defaultMapping`, `packages/wmr_core/lib/domain/axis_mapping.dart`):
 
 | View axis | Sensor axis |
 | --- | --- |
@@ -463,8 +463,8 @@ The filter works in a z-up frame; `viewToFilter` maps view (X, Y, Z) to
 
 **Not verified on hardware; the firmware side has not been run on hardware
 either.** Spec: WMR_Bridge docs/PROTOCOL.md, "Echo, FF15" (merged in #13).
-Code: `lib/protocol/echo.dart` (pure Dart, golden bytes from the spec),
-`lib/services/echo_client.dart`.
+Code: `packages/wmr_core/lib/protocol/echo.dart` (pure Dart, golden bytes from the spec),
+`packages/wmr_core/lib/services/echo_client.dart`.
 
 - **Request** is 4 bytes (`version` 1, reserved, `ping_id` u16), written
   *without response*; the **answer** is a 20-byte notification with the

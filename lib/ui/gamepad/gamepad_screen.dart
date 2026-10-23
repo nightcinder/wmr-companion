@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../domain/gamepad.dart';
+import 'package:wmr_core/domain/gamepad.dart';
+
 import '../../hid/hid_gamepad_transport.dart';
 import '../../hid/hid_output.dart';
 import '../debug/debug_providers.dart';

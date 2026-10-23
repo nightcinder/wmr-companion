@@ -1,10 +1,10 @@
 # Companion as a Flutter library
 
-Status: **framework / design, not implemented.** This page records the target
-architecture for shipping the companion's controller pipeline as Flutter
-packages that other apps import, and the decision that makes iOS viable. No
-package in this document has been extracted yet; the current app remains the
-only consumer.
+Status: **phase 1 landed; the rest is design.** `packages/wmr_core` now holds
+the pure-Dart protocol, domain, `BleTransport` interface, controller service and
+the pure services listed in §10, and the app depends on it by path. Everything
+else in this document is still a target: no facade, BLE package, UI package or
+plugin has been extracted, and the current app remains the only consumer.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
@@ -87,8 +87,11 @@ framework.
 
 ## 3. What is reusable today
 
-Inventory of the current `lib/` tree (imports checked; see
-`grep '^import .package:' lib`):
+Inventory as it stood before phase 1 (imports checked; see
+`grep '^import .package:' lib`). Protocol, domain, `BleTransport`, the controller
+service and the pure services have since moved to `packages/wmr_core/`; the
+paths below are the original ones, quoted in the rest of the document where the
+plan was written:
 
 | Layer | Files | Dependencies | Reuse |
 | --- | --- | --- | --- |
@@ -389,6 +392,8 @@ phase says so.
 | 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures | iOS latency/background requirement met or explicitly declined with numbers |
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats), `wmr_companion_hid_android` (existing HID output) | App consumes the UI kit; HID package tested as before; neither is required by the facade |
 | 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
+
+Phase 1 landed in #39 (`packages/wmr_core`); the remaining rows are still ahead.
 
 Sequencing notes:
 

@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/ble/fake_transport.dart';
-import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion/protocol/config_block.dart';
-import 'package:wmr_companion/services/config_client.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/protocol/config_block.dart';
+import 'package:wmr_core/services/config_client.dart';
 import 'package:wmr_companion/services/config_key_store.dart';
 import 'package:wmr_companion/services/config_report.dart';
 

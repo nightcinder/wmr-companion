@@ -3,15 +3,15 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/ble/ble_transport.dart';
-import 'package:wmr_companion/ble/fake_transport.dart';
-import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion/domain/hand_pipeline.dart';
-import 'package:wmr_companion/protocol/gatt.dart';
-import 'package:wmr_companion/protocol/wmr_fragment.dart';
-import 'package:wmr_companion/services/controller_service.dart';
-import 'package:wmr_companion/services/latency_files.dart';
-import 'package:wmr_companion/services/latency_recorder.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/domain/hand_pipeline.dart';
+import 'package:wmr_core/protocol/gatt.dart';
+import 'package:wmr_core/protocol/wmr_fragment.dart';
+import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_core/services/latency_files.dart';
+import 'package:wmr_core/services/latency_recorder.dart';
 import 'package:wmr_companion/ui/debug/debug_providers.dart';
 import 'package:wmr_companion/ui/latency/latency_providers.dart';
 

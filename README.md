@@ -18,10 +18,9 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 
 | Path | Contents |
 | --- | --- |
-| `lib/ble/` | `BleTransport` interface, `universal_ble` implementation, fake transport and fake bridge |
-| `lib/protocol/` | GATT identifiers, FF11 fragment reassembler, FF12 record parser (pure Dart) |
-| `lib/domain/` | Tick timing, gyro bias, axis mapping, per-hand pipeline, orientation helpers |
-| `lib/services/` | `ControllerService`, capture recorder and files |
+| `packages/wmr_core/` | Pure-Dart protocol, domain, `BleTransport` interface and controller services (no Flutter) |
+| `lib/ble/` | `universal_ble` adapter/transport; fakes live in `wmr_core` |
+| `lib/services/` | App-side config report, key store and settings wiring |
 | `lib/ui/` | Connect, debug, capture, latency and gamepad screens |
 | `lib/hid/` | Bluetooth HID gamepad output |
 | `packages/wmr_fusion/` | Pure-Dart Madgwick and Mahony filters |
@@ -34,7 +33,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze
-flutter test                      # also: cd packages/wmr_fusion && dart test
+flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_fusion && dart test
 flutter build apk --debug
 flutter run -d <device>           # BLE needs a physical phone
 ```

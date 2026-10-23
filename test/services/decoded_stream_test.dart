@@ -3,16 +3,16 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion/ble/ble_adapter.dart';
-import 'package:wmr_companion/ble/ble_transport.dart';
-import 'package:wmr_companion/ble/fake_transport.dart';
-import 'package:wmr_companion/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_companion/ble/universal_ble_transport.dart';
-import 'package:wmr_companion/domain/axis_mapping.dart';
-import 'package:wmr_companion/domain/hand_pipeline.dart';
-import 'package:wmr_companion/domain/synthetic_motion.dart';
-import 'package:wmr_companion/protocol/decoded_batch.dart';
-import 'package:wmr_companion/protocol/gatt.dart';
-import 'package:wmr_companion/services/controller_service.dart';
+import 'package:wmr_core/domain/axis_mapping.dart';
+import 'package:wmr_core/domain/hand_pipeline.dart';
+import 'package:wmr_core/domain/synthetic_motion.dart';
+import 'package:wmr_core/protocol/decoded_batch.dart';
+import 'package:wmr_core/protocol/gatt.dart';
+import 'package:wmr_core/services/controller_service.dart';
 
 import '../ble/fake_adapter.dart';
 
