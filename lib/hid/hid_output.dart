@@ -59,6 +59,7 @@ class HidOutput extends Notifier<HidOutputState> {
   StreamSubscription<dynamic>? _sampleSub;
   final List<HandInput?> _latest = [null, null];
   Uint8List? _lastSent;
+  GamepadState? _previous;
 
   @override
   HidOutputState build() {
@@ -93,6 +94,7 @@ class HidOutput extends Notifier<HidOutputState> {
     await _sampleSub?.cancel();
     _latest[0] = _latest[1] = null;
     _lastSent = null;
+    _previous = null;
     if (service != null) {
       _sampleSub = service.decodedSamples.listen((s) {
         _latest[s.record.hand] = HandInput.fromSample(s);
@@ -107,6 +109,7 @@ class HidOutput extends Notifier<HidOutputState> {
   Future<void> stop() async {
     await _sampleSub?.cancel();
     _sampleSub = null;
+    _previous = null;
     state = state.copyWith(running: false);
     await _transport.stop();
   }
@@ -127,9 +130,14 @@ class HidOutput extends Notifier<HidOutputState> {
 
   void _push() {
     if (!state.running || state.status.state != HidState.connected) return;
-    final report = encodeHidReport(
-      mapGamepad(_latest[0], _latest[1], ref.read(gamepadConfigProvider)),
+    final mapped = mapGamepad(
+      _latest[0],
+      _latest[1],
+      ref.read(gamepadConfigProvider),
+      previous: _previous,
     );
+    _previous = mapped;
+    final report = encodeHidReport(mapped);
     final last = _lastSent;
     if (last != null && _same(last, report)) return;
     _lastSent = report;

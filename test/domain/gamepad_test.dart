@@ -91,6 +91,93 @@ void main() {
       expect(s.leftTrigger, closeTo(128 / 255, 1e-9));
       expect(s.rightTrigger, 1);
     });
+
+    test('defaults press at 0.55 and release at 0.45', () {
+      expect(cfg.triggerPressThreshold, 0.55);
+      expect(cfg.triggerReleaseThreshold, 0.45);
+    });
+
+    test('hysteresis: the band above release does not toggle a held press', () {
+      const c = GamepadConfig(
+        triggerDeadZone: 0,
+        triggerPressThreshold: 0.55,
+        triggerReleaseThreshold: 0.45,
+      );
+      // 128/255 = 0.50 sits inside the band: no press from rest.
+      var s = mapGamepad(hand(trigger: 128), null, c);
+      expect(s.buttons, isEmpty);
+
+      // Cross the press threshold once.
+      s = mapGamepad(hand(trigger: 153), null, c, previous: s); // 0.60
+      expect(s.buttons, contains(GamepadButton.l2));
+
+      // Resting anywhere in the band keeps the press: no flutter.
+      for (final raw in [141, 128, 115, 128, 140]) {
+        s = mapGamepad(hand(trigger: raw), null, c, previous: s);
+        expect(s.buttons, contains(GamepadButton.l2), reason: 'raw $raw');
+      }
+
+      // Drop to the release threshold: now it releases.
+      s = mapGamepad(hand(trigger: 114), null, c, previous: s); // 0.447
+      expect(s.buttons, isNot(contains(GamepadButton.l2)));
+
+      // Back into the band from released stays released.
+      s = mapGamepad(hand(trigger: 128), null, c, previous: s);
+      expect(s.buttons, isNot(contains(GamepadButton.l2)));
+    });
+
+    test('triggerPressed is inclusive at press and release', () {
+      const c = GamepadConfig(
+        triggerPressThreshold: 0.55,
+        triggerReleaseThreshold: 0.45,
+      );
+      expect(triggerPressed(0.55, c, wasPressed: false), isTrue);
+      expect(triggerPressed(0.549, c, wasPressed: false), isFalse);
+      expect(triggerPressed(0.45, c, wasPressed: true), isFalse);
+      expect(triggerPressed(0.451, c, wasPressed: true), isTrue);
+      // A dead trigger and a broken reading always release.
+      expect(triggerPressed(0, c, wasPressed: true), isFalse);
+      expect(triggerPressed(double.nan, c, wasPressed: true), isFalse);
+    });
+
+    test('hysteresis is tracked per hand', () {
+      const c = GamepadConfig(
+        triggerDeadZone: 0,
+        triggerPressThreshold: 0.55,
+        triggerReleaseThreshold: 0.45,
+      );
+      // Left pressed, right released; both then sit in the band.
+      final pressed = mapGamepad(hand(trigger: 153), hand(trigger: 100), c);
+      expect(pressed.buttons, {GamepadButton.l2});
+      final held = mapGamepad(
+        hand(trigger: 128),
+        hand(trigger: 128),
+        c,
+        previous: pressed,
+      );
+      expect(held.buttons, {GamepadButton.l2});
+    });
+
+    test('an inverted release threshold collapses to the press point', () {
+      final c = cfg.copyWith(
+        triggerPressThreshold: 0.3,
+        triggerReleaseThreshold: 0.45,
+      );
+      expect(
+        c.triggerReleaseThreshold,
+        lessThanOrEqualTo(c.triggerPressThreshold),
+      );
+      // No band: below 0.3 is released even with previous press.
+      expect(
+        mapGamepad(
+          hand(trigger: 50),
+          null,
+          c,
+          previous: mapGamepad(hand(trigger: 255), null, c),
+        ).buttons,
+        isEmpty,
+      );
+    });
   });
 
   group('trackpad', () {
@@ -240,6 +327,7 @@ void main() {
   test('config equality covers every field', () {
     expect(cfg, const GamepadConfig());
     expect(cfg == cfg.copyWith(triggerFullScale: 200), isFalse);
+    expect(cfg == cfg.copyWith(triggerReleaseThreshold: 0.4), isFalse);
     expect(cfg == cfg.copyWith(tilt: const TiltConfig(invertY: true)), isFalse);
     expect(cfg.hashCode, const GamepadConfig().hashCode);
   });

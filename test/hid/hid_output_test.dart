@@ -143,6 +143,24 @@ void main() {
     expect(hid.reports.last[0] & (1 << 7), isNot(0));
   });
 
+  test('a held trigger in the hysteresis band does not flicker', () async {
+    await out().start(DebugSource.fake);
+    hid.emit(const HidStatus(HidState.connected));
+    await pump();
+    // 153/255 = 0.60 crosses the 0.55 press point.
+    feed(record(1, trigger: 153));
+    await pump();
+    expect(hid.reports.last[0] & (1 << 7), isNot(0));
+    // 128/255 = 0.50 sits between release 0.45 and press 0.55: stays down.
+    feed(record(2, trigger: 128));
+    await pump();
+    expect(hid.reports.last[0] & (1 << 7), isNot(0));
+    // 114/255 = 0.447 reaches the release point: lets go.
+    feed(record(3, trigger: 114));
+    await pump();
+    expect(hid.reports.last[0] & (1 << 7), 0);
+  });
+
   test('send failures are counted and the report is retried', () async {
     await out().start(DebugSource.fake);
     hid.emit(const HidStatus(HidState.connected));

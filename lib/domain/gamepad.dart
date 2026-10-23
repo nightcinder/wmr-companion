@@ -109,7 +109,8 @@ class GamepadConfig {
   const GamepadConfig({
     this.triggerFullScale = 255,
     this.triggerDeadZone = 0.05,
-    this.triggerPressThreshold = 0.5,
+    this.triggerPressThreshold = 0.55,
+    this.triggerReleaseThreshold = 0.45,
     this.trackpadCentreRadius = 0.3,
     this.leftTrackpad = TrackpadRole.dpad,
     this.rightTrackpad = TrackpadRole.faceButtons,
@@ -126,6 +127,12 @@ class GamepadConfig {
 
   /// Analog trigger value (after the dead zone) at which L2/R2 press.
   final double triggerPressThreshold;
+
+  /// Analog trigger value (after the dead zone) at or below which L2/R2
+  /// release. It is kept at or below [triggerPressThreshold]: the band
+  /// between the two thresholds is the trigger's hysteresis, so a finger
+  /// resting near one value cannot make the button flutter.
+  final double triggerReleaseThreshold;
 
   /// A trackpad click closer to the centre than this (fraction of the
   /// radius) presses nothing.
@@ -146,23 +153,29 @@ class GamepadConfig {
     int? triggerFullScale,
     double? triggerDeadZone,
     double? triggerPressThreshold,
+    double? triggerReleaseThreshold,
     double? trackpadCentreRadius,
     TrackpadRole? leftTrackpad,
     TrackpadRole? rightTrackpad,
     bool? invertStickY,
     bool? invertTrackpadY,
     TiltConfig? tilt,
-  }) => GamepadConfig(
-    triggerFullScale: triggerFullScale ?? this.triggerFullScale,
-    triggerDeadZone: triggerDeadZone ?? this.triggerDeadZone,
-    triggerPressThreshold: triggerPressThreshold ?? this.triggerPressThreshold,
-    trackpadCentreRadius: trackpadCentreRadius ?? this.trackpadCentreRadius,
-    leftTrackpad: leftTrackpad ?? this.leftTrackpad,
-    rightTrackpad: rightTrackpad ?? this.rightTrackpad,
-    invertStickY: invertStickY ?? this.invertStickY,
-    invertTrackpadY: invertTrackpadY ?? this.invertTrackpadY,
-    tilt: tilt ?? this.tilt,
-  );
+  }) {
+    final press = triggerPressThreshold ?? this.triggerPressThreshold;
+    final release = triggerReleaseThreshold ?? this.triggerReleaseThreshold;
+    return GamepadConfig(
+      triggerFullScale: triggerFullScale ?? this.triggerFullScale,
+      triggerDeadZone: triggerDeadZone ?? this.triggerDeadZone,
+      triggerPressThreshold: press,
+      triggerReleaseThreshold: math.min(release, press),
+      trackpadCentreRadius: trackpadCentreRadius ?? this.trackpadCentreRadius,
+      leftTrackpad: leftTrackpad ?? this.leftTrackpad,
+      rightTrackpad: rightTrackpad ?? this.rightTrackpad,
+      invertStickY: invertStickY ?? this.invertStickY,
+      invertTrackpadY: invertTrackpadY ?? this.invertTrackpadY,
+      tilt: tilt ?? this.tilt,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -170,6 +183,7 @@ class GamepadConfig {
       other.triggerFullScale == triggerFullScale &&
       other.triggerDeadZone == triggerDeadZone &&
       other.triggerPressThreshold == triggerPressThreshold &&
+      other.triggerReleaseThreshold == triggerReleaseThreshold &&
       other.trackpadCentreRadius == trackpadCentreRadius &&
       other.leftTrackpad == leftTrackpad &&
       other.rightTrackpad == rightTrackpad &&
@@ -182,6 +196,7 @@ class GamepadConfig {
     triggerFullScale,
     triggerDeadZone,
     triggerPressThreshold,
+    triggerReleaseThreshold,
     trackpadCentreRadius,
     leftTrackpad,
     rightTrackpad,
@@ -259,9 +274,9 @@ class GamepadState {
   bool pressed(GamepadButton b) => buttons.contains(b);
 }
 
-/// Maps both hands onto one gamepad. Pure and stateless: the same inputs and
-/// config give the same state, so it can run anywhere (UI isolate now, a
-/// native or background hot path later).
+/// Maps both hands onto one gamepad. Pure: the same inputs, config and
+/// [previous] state give the same result, so it can run anywhere (UI isolate
+/// now, a native or background hot path later).
 ///
 /// Per hand: stick to that side's stick, squeeze to L1/R1, trigger to the
 /// analog L/R trigger (and L2/R2 past [GamepadConfig.triggerPressThreshold]),
@@ -270,11 +285,19 @@ class GamepadState {
 /// ([GamepadConfig.leftTrackpad], [GamepadConfig.rightTrackpad]). BT pairing
 /// is not mapped. Optional tilt drives one stick ([TiltConfig]); where both
 /// tilt and the physical stick move an axis, the larger magnitude wins.
+///
+/// [previous] is the previous frame's state, used only for the L2/R2 trigger
+/// hysteresis; pass the result of the previous call to keep a trigger that is
+/// already pressed from fluttering in the band between
+/// [GamepadConfig.triggerReleaseThreshold] and
+/// [GamepadConfig.triggerPressThreshold]. Without it every frame is judged
+/// against the press threshold alone.
 GamepadState mapGamepad(
   HandInput? left,
   HandInput? right,
-  GamepadConfig config,
-) {
+  GamepadConfig config, {
+  GamepadState? previous,
+}) {
   final buttons = <GamepadButton>{};
   final hands = [left, right];
   final sticks = <List<double>>[];
@@ -301,8 +324,13 @@ GamepadState mapGamepad(
 
     final t = triggerValue(input.trigger, config);
     triggers.add(t);
-    if (t > 0 && t >= config.triggerPressThreshold) {
-      buttons.add(isLeft ? GamepadButton.l2 : GamepadButton.r2);
+    final triggerButton = isLeft ? GamepadButton.l2 : GamepadButton.r2;
+    if (triggerPressed(
+      t,
+      config,
+      wasPressed: previous?.pressed(triggerButton) ?? false,
+    )) {
+      buttons.add(triggerButton);
     }
 
     final sy = config.invertStickY ? -input.stick[1] : input.stick[1];
@@ -353,6 +381,25 @@ double triggerValue(int raw, GamepadConfig config) {
   final dz = config.triggerDeadZone.clamp(0.0, 0.95);
   if (v <= dz) return 0;
   return ((v - dz) / (1 - dz)).clamp(0.0, 1.0);
+}
+
+/// Whether an analog trigger at [value] (0..1, after [triggerValue]) counts
+/// as pressed, given its state on the previous frame.
+///
+/// This is a Schmitt trigger: from released, [value] must reach
+/// [GamepadConfig.triggerPressThreshold]; from pressed, it stays pressed
+/// until it falls to [GamepadConfig.triggerReleaseThreshold] or below. The
+/// band between the two stops a finger resting near one threshold from
+/// fluttering L2/R2. A non-positive or non-finite reading always releases.
+bool triggerPressed(
+  double value,
+  GamepadConfig config, {
+  required bool wasPressed,
+}) {
+  if (!(value > 0)) return false;
+  final press = config.triggerPressThreshold;
+  final release = math.min(config.triggerReleaseThreshold, press);
+  return wasPressed ? value > release : value >= press;
 }
 
 /// sin(22.5 deg): a component above this share of the radius presses its
@@ -425,6 +472,7 @@ Map<String, Object?> gamepadConfigToJson(GamepadConfig config) => {
   'triggerFullScale': config.triggerFullScale,
   'triggerDeadZone': config.triggerDeadZone,
   'triggerPressThreshold': config.triggerPressThreshold,
+  'triggerReleaseThreshold': config.triggerReleaseThreshold,
   'trackpadCentreRadius': config.trackpadCentreRadius,
   'leftTrackpad': config.leftTrackpad.name,
   'rightTrackpad': config.rightTrackpad.name,
@@ -460,6 +508,12 @@ GamepadConfig? gamepadConfigFromJson(Object? json) {
       values.asNameMap()[v] ?? def;
 
   final t = json['tilt'] is Map ? json['tilt'] as Map : const {};
+  final press = num_(
+    json['triggerPressThreshold'],
+    d.triggerPressThreshold,
+    0.05,
+    1,
+  );
   return GamepadConfig(
     triggerFullScale: int_(
       json['triggerFullScale'],
@@ -468,11 +522,10 @@ GamepadConfig? gamepadConfigFromJson(Object? json) {
       255,
     ),
     triggerDeadZone: num_(json['triggerDeadZone'], d.triggerDeadZone, 0, 0.3),
-    triggerPressThreshold: num_(
-      json['triggerPressThreshold'],
-      d.triggerPressThreshold,
-      0.05,
-      1,
+    triggerPressThreshold: press,
+    triggerReleaseThreshold: math.min(
+      num_(json['triggerReleaseThreshold'], d.triggerReleaseThreshold, 0, 1),
+      press,
     ),
     trackpadCentreRadius: num_(
       json['trackpadCentreRadius'],

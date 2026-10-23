@@ -42,7 +42,8 @@ Every number is a guess. The trigger and trackpad ranges have not been measured 
 | Stick dead zone, learned rest centre | 0.05, on | Existing `StickConfig` on the debug screen, applied before the mapper |
 | Trigger full scale (raw) | 255 | Lower it if a trigger never reaches 255 |
 | Trigger dead zone | 0.05 | Fraction of full scale, output rescaled to 0..1 |
-| Trigger press (L2/R2) | 0.5 | Analog value after the dead zone. No hysteresis yet |
+| Trigger press (L2/R2) | 0.55 | Analog value after the dead zone: at or above this L2/R2 press |
+| Trigger release (L2/R2) | 0.45 | At or below this they release; the band between the two is the hysteresis that stops a resting finger from flickering L2/R2 |
 | Trackpad centre radius | 0.3 | A click nearer the centre presses nothing |
 | Trackpad role per hand | LEFT d-pad, RIGHT ABXY | Or off |
 | Invert stick Y, invert trackpad Y | off | For when the wire's y grows downwards |

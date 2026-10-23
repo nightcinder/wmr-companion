@@ -32,6 +32,7 @@ const custom = GamepadConfig(
   triggerFullScale: 200,
   triggerDeadZone: 0.1,
   triggerPressThreshold: 0.3,
+  triggerReleaseThreshold: 0.2,
   trackpadCentreRadius: 0.5,
   leftTrackpad: TrackpadRole.faceButtons,
   rightTrackpad: TrackpadRole.none,

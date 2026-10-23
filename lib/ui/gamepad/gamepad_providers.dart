@@ -128,14 +128,31 @@ final gamepadInputsProvider = StreamProvider.family<GamepadInputs, DebugSource>(
 );
 
 /// The mapped gamepad state for [source].
-final gamepadStateProvider = Provider.family<GamepadState, DebugSource>((
-  ref,
-  source,
-) {
-  final inputs = ref.watch(gamepadInputsProvider(source)).value;
-  return mapGamepad(
-    inputs?.left,
-    inputs?.right,
-    ref.watch(gamepadConfigProvider),
-  );
-});
+///
+/// Keeps the previous mapped state so L2/R2 use the trigger hysteresis in
+/// [GamepadConfig] instead of a single threshold.
+final gamepadStateProvider =
+    NotifierProvider.family<GamepadStateNotifier, GamepadState, DebugSource>(
+      GamepadStateNotifier.new,
+    );
+
+class GamepadStateNotifier extends Notifier<GamepadState> {
+  GamepadStateNotifier(this.source);
+
+  final DebugSource source;
+  GamepadState? _previous;
+
+  @override
+  GamepadState build() {
+    final inputs = ref.watch(gamepadInputsProvider(source)).value;
+    final config = ref.watch(gamepadConfigProvider);
+    final state = mapGamepad(
+      inputs?.left,
+      inputs?.right,
+      config,
+      previous: _previous,
+    );
+    _previous = state;
+    return state;
+  }
+}

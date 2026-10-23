@@ -59,6 +59,10 @@ void main() {
     expect(find.textContaining('x +0.50  y -0.25'), findsOneWidget);
     expect(find.text('trigger 1.00'), findsOneWidget);
     expect(find.textContaining('(no data)'), findsNothing);
+    expect(
+      find.textContaining('Trigger release (L2/R2) at 0.45'),
+      findsOneWidget,
+    );
 
     // 100/255 = 0.39 is below the 0.5 press point; lowering it presses R2.
     final container = ProviderScope.containerOf(
