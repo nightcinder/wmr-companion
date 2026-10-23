@@ -218,6 +218,66 @@ void main() {
       expect(container.read(axisMappingProvider).flip, [false, false, false]);
       await close(tester);
     });
+
+    testWidgets('fusion sliders tune and clamp to their bounds', (
+      tester,
+    ) async {
+      await open(tester, service);
+      await tester.tap(find.text('Debug settings'));
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(DebugScreen)),
+      );
+
+      expect(find.textContaining('Madgwick Beta 0.05'), findsOneWidget);
+      final beta = find.byKey(const ValueKey('madgwick-beta-slider'));
+      expect(beta, findsOneWidget);
+      await tester.ensureVisible(beta);
+      await tester.pumpAndSettle();
+
+      var rect = tester.getRect(beta);
+      await tester.tapAt(Offset(rect.left + 1, rect.center.dy));
+      await tester.pump();
+      expect(container.read(filterTuningProvider).beta, madgwickBetaMin);
+
+      await tester.tapAt(Offset(rect.right - 1, rect.center.dy));
+      await tester.pump();
+      expect(container.read(filterTuningProvider).beta, madgwickBetaMax);
+      expect(find.textContaining('Madgwick Beta 0.20'), findsOneWidget);
+
+      await tester.tap(find.text('Mahony'));
+      await tester.pumpAndSettle();
+      expect(beta, findsNothing);
+      expect(find.textContaining('Mahony Kp 1.00'), findsOneWidget);
+      expect(find.textContaining('Mahony Ki 0.00'), findsOneWidget);
+
+      final kp = find.byKey(const ValueKey('mahony-kp-slider'));
+      await tester.ensureVisible(kp);
+      await tester.pumpAndSettle();
+      rect = tester.getRect(kp);
+      await tester.tapAt(Offset(rect.right - 1, rect.center.dy));
+      await tester.pump();
+      expect(container.read(filterTuningProvider).mahonyKp, mahonyKpMax);
+
+      final ki = find.byKey(const ValueKey('mahony-ki-slider'));
+      await tester.ensureVisible(ki);
+      await tester.pumpAndSettle();
+      rect = tester.getRect(ki);
+      await tester.tapAt(Offset(rect.left + 1, rect.center.dy));
+      await tester.pump();
+      expect(container.read(filterTuningProvider).mahonyKi, mahonyKiMin);
+
+      await tester.ensureVisible(find.text('Madgwick'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Madgwick'));
+      await tester.pumpAndSettle();
+      expect(
+        container.read(filterTuningProvider).beta,
+        madgwickBetaMax,
+        reason: 'the Madgwick value is kept while Mahony is selected',
+      );
+      await close(tester);
+    });
   });
 
   group('faults are shown', () {

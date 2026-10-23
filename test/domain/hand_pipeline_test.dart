@@ -183,6 +183,56 @@ void main() {
     expect(yawDeg(p).abs(), lessThan(0.01));
   });
 
+  group('live filter tuning', () {
+    double angleBetween(vm.Quaternion a, vm.Quaternion b) {
+      final d = (a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w).abs().clamp(
+        0.0,
+        1.0,
+      );
+      return 2 * math.acos(d);
+    }
+
+    test('changing beta reaches the active Madgwick filter', () {
+      HandPipeline run(double beta) {
+        final p = HandPipeline();
+        // Settle the tilt and the runtime bias first.
+        for (var i = 0; i < 200; i++) {
+          p.add(record(ticks: i * nominalPeriodTicks), 0);
+        }
+        p.beta = beta;
+        // A sustained roll rate against level gravity: more beta pulls the
+        // estimate back toward the accelerometer.
+        for (var i = 200; i < 500; i++) {
+          p.add(
+            record(ticks: i * nominalPeriodTicks, gyro: const [0, 1.5, 0]),
+            0,
+          );
+        }
+        return p;
+      }
+
+      expect(HandPipeline().beta, 0.05);
+      expect(
+        angleBetween(run(0.01).orientation, run(0.2).orientation),
+        greaterThan(0.01),
+      );
+    });
+
+    test('Mahony gains reach the filter and survive a switch', () {
+      final p = HandPipeline();
+      p.mahonyKp = 3.0;
+      p.mahonyKi = 0.25;
+      expect(p.tuning, const FilterTuning(mahonyKp: 3.0, mahonyKi: 0.25));
+      p.setFilter(FilterKind.mahony);
+      expect(p.kind, FilterKind.mahony);
+      expect(p.mahonyKp, 3.0);
+      expect(p.mahonyKi, 0.25);
+      p.setFilter(FilterKind.madgwick);
+      expect(p.beta, 0.05);
+      expect(p.mahonyKp, 3.0);
+    });
+  });
+
   test('view-frame output is a unit quaternion', () {
     final p = HandPipeline();
     for (final r in sensorTurn(axis: 2, rate: 2.0)) {

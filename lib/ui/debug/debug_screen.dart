@@ -433,6 +433,8 @@ class AxisSettingsPanel extends ConsumerWidget {
     final mapping = ref.watch(axisMappingProvider);
     final notifier = ref.read(axisMappingProvider.notifier);
     final filter = ref.watch(filterKindProvider);
+    final tuning = ref.watch(filterTuningProvider);
+    final tuningNotifier = ref.read(filterTuningProvider.notifier);
     final stickConfig = ref.watch(stickConfigProvider);
     final stickNotifier = ref.read(stickSettingsProvider.notifier);
     final theme = Theme.of(context);
@@ -451,6 +453,47 @@ class AxisSettingsPanel extends ConsumerWidget {
           onSelectionChanged: (s) =>
               ref.read(filterKindProvider.notifier).set(s.first),
         ),
+        const SizedBox(height: 8),
+        if (filter == FilterKind.madgwick) ...[
+          Text('Madgwick Beta ${tuning.beta.toStringAsFixed(2)}'),
+          Slider(
+            key: const ValueKey('madgwick-beta-slider'),
+            value: tuning.beta,
+            min: madgwickBetaMin,
+            max: madgwickBetaMax,
+            divisions: 19,
+            onChanged: tuningNotifier.setBeta,
+          ),
+          Text(
+            'Higher beta trusts the gyro less and gravity more: faster tilt '
+            'recovery, but linear acceleration leaks into the estimate.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ] else ...[
+          Text('Mahony Kp ${tuning.mahonyKp.toStringAsFixed(2)}'),
+          Slider(
+            key: const ValueKey('mahony-kp-slider'),
+            value: tuning.mahonyKp,
+            min: mahonyKpMin,
+            max: mahonyKpMax,
+            divisions: 50,
+            onChanged: tuningNotifier.setMahonyKp,
+          ),
+          Text('Mahony Ki ${tuning.mahonyKi.toStringAsFixed(2)}'),
+          Slider(
+            key: const ValueKey('mahony-ki-slider'),
+            value: tuning.mahonyKi,
+            min: mahonyKiMin,
+            max: mahonyKiMax,
+            divisions: 100,
+            onChanged: tuningNotifier.setMahonyKi,
+          ),
+          Text(
+            'Kp pulls toward gravity; Ki estimates a constant gyro bias. The '
+            'pipeline already estimates bias, so Ki starts at zero.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
         const SizedBox(height: 8),
         Text(
           'Sensor to view axes: ${mapping.toString()}',

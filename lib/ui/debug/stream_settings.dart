@@ -67,6 +67,42 @@ class FilterKindNotifier extends Notifier<FilterKind> {
   void set(FilterKind kind) => state = kind;
 }
 
+/// Slider bounds. The notifier clamps, so a programmatic set cannot leave the
+/// range the sliders advertise.
+const double madgwickBetaMin = 0.01;
+const double madgwickBetaMax = 0.20;
+const double mahonyKpMin = 0.0;
+const double mahonyKpMax = 5.0;
+const double mahonyKiMin = 0.0;
+const double mahonyKiMax = 1.0;
+
+/// Live fusion filter gains, applied to both hands on the active service.
+/// Not persisted: like the axis table, tuning is a debug aid and starts from
+/// the filter defaults on every app run.
+final filterTuningProvider =
+    NotifierProvider<FilterTuningNotifier, FilterTuning>(
+      FilterTuningNotifier.new,
+    );
+
+class FilterTuningNotifier extends Notifier<FilterTuning> {
+  @override
+  FilterTuning build() => const FilterTuning();
+
+  void setBeta(double value) => state = state.copyWith(
+    beta: value.clamp(madgwickBetaMin, madgwickBetaMax).toDouble(),
+  );
+
+  void setMahonyKp(double value) => state = state.copyWith(
+    mahonyKp: value.clamp(mahonyKpMin, mahonyKpMax).toDouble(),
+  );
+
+  void setMahonyKi(double value) => state = state.copyWith(
+    mahonyKi: value.clamp(mahonyKiMin, mahonyKiMax).toDouble(),
+  );
+
+  void reset() => state = const FilterTuning();
+}
+
 /// Where the stick settings are saved: the app documents directory, or
 /// nowhere when that is unavailable (tests, unsupported platform).
 final stickSettingsStoreProvider = Provider<StickSettingsStore>(

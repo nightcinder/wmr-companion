@@ -409,6 +409,22 @@ void main() {
       service.setFilterKind(FilterKind.mahony);
       expect(service.pipeline(1).kind, FilterKind.mahony);
     });
+
+    test('filter tuning reaches both hand pipelines', () async {
+      await setUpService();
+      const tuning = FilterTuning(beta: 0.15, mahonyKp: 2.5, mahonyKi: 0.2);
+      service.setFilterTuning(tuning);
+      expect(service.filterTuning, tuning);
+      for (final hand in [0, 1]) {
+        final pipeline = service.pipeline(hand);
+        expect(pipeline.beta, 0.15);
+        expect(pipeline.mahonyKp, 2.5);
+        expect(pipeline.mahonyKi, 0.2);
+      }
+      service.setFilterKind(FilterKind.mahony);
+      expect(service.pipeline(0).kind, FilterKind.mahony);
+      expect(service.pipeline(1).mahonyKp, 2.5);
+    });
   });
 
   group('raw stream is unchanged', () {

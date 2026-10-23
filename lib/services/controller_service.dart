@@ -256,6 +256,7 @@ class ControllerService {
     this._mode = StreamMode.raw,
     this._mapping = AxisMapping.defaultMapping,
     this._filterKind = FilterKind.madgwick,
+    this._filterTuning = const FilterTuning(),
     StickConfig stickConfig = const StickConfig(),
     this.onStickCentre,
   }) : _stickConfig = stickConfig {
@@ -272,6 +273,7 @@ class ControllerService {
     for (final p in _pipelines) {
       p.mapping = _mapping;
       p.setFilter(_filterKind);
+      p.tuning = _filterTuning;
       p.stickConfig = stickConfig;
     }
   }
@@ -315,6 +317,7 @@ class ControllerService {
   ModeFault? _fault;
   AxisMapping _mapping;
   FilterKind _filterKind;
+  FilterTuning _filterTuning;
   StickConfig _stickConfig;
   final List<List<double>> _lastStick = [
     for (var h = 0; h < wmrNumControllers; h++) const [0.0, 0.0],
@@ -340,6 +343,7 @@ class ControllerService {
 
   AxisMapping get mapping => _mapping;
   FilterKind get filterKind => _filterKind;
+  FilterTuning get filterTuning => _filterTuning;
 
   HandPipeline pipeline(int hand) => _pipelines[hand];
 
@@ -571,6 +575,15 @@ class ControllerService {
     _filterKind = k;
     for (final p in _pipelines) {
       p.setFilter(k);
+    }
+  }
+
+  /// Applies [tuning] to both hands from the next sample on. The gain of the
+  /// filter that is not selected is kept for when it is next selected.
+  void setFilterTuning(FilterTuning tuning) {
+    _filterTuning = tuning;
+    for (final p in _pipelines) {
+      p.tuning = tuning;
     }
   }
 
