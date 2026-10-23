@@ -25,7 +25,7 @@ mirror `main` at `8f5921a`; see the FF14 section.
 | `tests/test_protocol.c` | `packages/wmr_core/test/protocol/wmr_fragment_test.dart` (ported case by case) |
 | `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`packages/wmr_core/lib/protocol/decoded_batch.dart`) |
 | `tests/test_batch.c` golden bytes and MTU table | `packages/wmr_core/test/protocol/decoded_batch_test.dart` |
-| `samples/controller_frames.txt` | `test/fixtures/controller_frames.txt` (copy) |
+| `samples/controller_frames.txt` | `apps/wmr_companion_app/test/fixtures/controller_frames.txt` (copy) |
 
 The encoder is in the app only so `FakeWmrBridge` and the tests can produce
 the exact notifications the ESP32 sends.
@@ -201,16 +201,18 @@ Not done, deliberately:
 
 - **The XOR key table is not in this repository.** It is Monado's
   `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0) and is
-  fetched, not committed: run `dart run tool/fetch_wmr_config_key.dart` once
+  fetched, not committed: from `apps/wmr_companion_app`, run
+  `dart run ../../tool/fetch_wmr_config_key.dart` once
   (or `--file` with a downloaded header); it writes the gitignored
-  `assets/monado/wmr_config_key.bin`, which the app bundles on the next build.
+  `apps/wmr_companion_app/assets/monado/wmr_config_key.bin`, which the app
+  bundles on the next build.
   `loadConfigKey` reports a missing or wrong-size key as a status, never an
   exception. The decoder takes the key as an argument; tests use a synthetic
   one. CI runs the same script before building the debug APK (a failed
   download does not fail CI), so the CI APK carries the key and decodes a
   block; the key is in that build artifact only, never in git. The BSL-1.0
-  notice ships with it as `assets/monado/NOTICE.txt`. This is the project's
-  reading of the licence, not legal advice.
+  notice ships with it as `apps/wmr_companion_app/assets/monado/NOTICE.txt`.
+  This is the project's reading of the licence, not legal advice.
 - **The debug screen now applies the calibration behind a switch** (default
   off), described in "Applying the calibration" below. It was not applied
   before that change.

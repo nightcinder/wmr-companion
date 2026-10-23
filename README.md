@@ -8,7 +8,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 
 - **Connect:** scan for `WMR Bridge`, negotiate MTU, request High connection priority, subscribe to the raw stream (FF11), the decoded stream (FF12) or the batched decoded stream (FF14, the default). They are mutually exclusive on the firmware; the app switches by writing 0 to the active CCC first. The app requests MTU 517 on every connect.
 - **Debug:** per-hand 3D orientation, quaternion and Euler readout, packet rate, sequence gaps, tick-derived missing-report count, dt statistics, gyro bias, axis-mapping flip toggles, "Reset orientation". Yaw drifts without a magnetometer.
-- **Debug > Read config:** reads each controller's config block over FF13 (CRC-checked) and decodes the gyro and accelerometer calibration. Needs Monado's key table, which is fetched, never committed: `dart run tool/fetch_wmr_config_key.dart` (CI does it for the debug APK). See [docs/PROTOCOL.md](docs/PROTOCOL.md) and [HANDOFF.md](HANDOFF.md).
+- **Debug > Read config:** reads each controller's config block over FF13 (CRC-checked) and decodes the gyro and accelerometer calibration. Needs Monado's key table, which is fetched, never committed: from `apps/wmr_companion_app`, run `dart run ../../tool/fetch_wmr_config_key.dart` (CI does it for the debug APK). See [docs/PROTOCOL.md](docs/PROTOCOL.md) and [HANDOFF.md](HANDOFF.md).
 - **Latency:** inter-arrival, sequence gaps, tick-based loss and the FF15 echo round trip, with CSV and JSON export ([docs/LATENCY.md](docs/LATENCY.md)).
 - **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, and an optional Bluetooth HID output ([docs/GAMEPAD.md](docs/GAMEPAD.md)); not run on hardware.
 - **Capture:** guided raw capture from FF11 in the same file format as the firmware's `tools/capture_ble.py`, shareable from the phone. See [docs/CAPTURE.md](docs/CAPTURE.md).
@@ -18,15 +18,16 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 
 | Path | Contents |
 | --- | --- |
+| `apps/wmr_companion_app/` | Flutter reference app: `lib/`, `test/`, `android/`, `ios/`, `assets/` and its `pubspec.yaml` |
+| `apps/wmr_companion_app/lib/services/` | App-side config report, key store and settings wiring |
+| `apps/wmr_companion_app/lib/ui/` | Connect, debug, capture, latency and gamepad screens |
+| `apps/wmr_companion_app/lib/hid/` | Bluetooth HID gamepad output |
 | `packages/wmr_core/` | Pure-Dart protocol, domain, `BleTransport` interface and controller services (no Flutter) |
 | `packages/wmr_companion/` | Public facade (`WmrCompanion`) over the pipeline; Android and iOS library path ([README](packages/wmr_companion/README.md)) |
 | `packages/wmr_ble/` | `universal_ble` adapter/transport, link status and lifecycle hook ([README](packages/wmr_ble/README.md)) |
 | `packages/wmr_companion_ui/` | Optional orientation, link, hand-stats and gamepad widgets ([README](packages/wmr_companion_ui/README.md)) |
 | `packages/wmr_companion_hid_android/` | Optional Android Bluetooth HID gamepad output ([README](packages/wmr_companion_hid_android/README.md)) |
 | `example/` | Minimal Flutter host: one facade, a connect and a gamepad `StreamBuilder` on the fake bridge ([README](example/README.md)) |
-| `lib/services/` | App-side config report, key store and settings wiring |
-| `lib/ui/` | Connect, debug, capture, latency and gamepad screens |
-| `lib/hid/` | Bluetooth HID gamepad output |
 | `packages/wmr_fusion/` | Pure-Dart Madgwick and Mahony filters |
 | `docs/` | Status, plan, protocol notes, capture, latency, gamepad, camera research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable Flutter package split |
 | `HANDOFF.md` | Rules, environment, state, not-yet-run list, cleanup list |
@@ -34,6 +35,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 ## Build and test
 
 ```
+cd apps/wmr_companion_app
 flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze

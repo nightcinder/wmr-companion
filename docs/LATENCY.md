@@ -1,6 +1,6 @@
 # Latency screen and export
 
-Milestone 4, plus the FF15 round trip. Screen: "Latency test" on the connect screen (real device when connected, or the fake bridge). Code: `packages/wmr_core/lib/services/latency_recorder.dart` (pure Dart), `packages/wmr_core/lib/services/echo_client.dart`, `packages/wmr_core/lib/protocol/echo.dart` (pure Dart), `packages/wmr_core/lib/services/latency_files.dart`, `lib/ui/latency/`. Not verified on hardware.
+Milestone 4, plus the FF15 round trip. Screen: "Latency test" on the connect screen (real device when connected, or the fake bridge). Code: `packages/wmr_core/lib/services/latency_recorder.dart` (pure Dart), `packages/wmr_core/lib/services/echo_client.dart`, `packages/wmr_core/lib/protocol/echo.dart` (pure Dart), `packages/wmr_core/lib/services/latency_files.dart`, `apps/wmr_companion_app/lib/ui/latency/`. Not verified on hardware.
 
 ## What it measures
 

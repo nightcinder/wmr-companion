@@ -576,42 +576,42 @@ packages:
   wmr_ble:
     dependency: "direct main"
     description:
-      path: "packages/wmr_ble"
+      path: "../../packages/wmr_ble"
       relative: true
     source: path
     version: "0.1.0"
   wmr_companion:
     dependency: "direct main"
     description:
-      path: "packages/wmr_companion"
+      path: "../../packages/wmr_companion"
       relative: true
     source: path
     version: "0.1.0"
   wmr_companion_hid_android:
     dependency: "direct main"
     description:
-      path: "packages/wmr_companion_hid_android"
+      path: "../../packages/wmr_companion_hid_android"
       relative: true
     source: path
     version: "0.1.0"
   wmr_companion_ui:
     dependency: "direct main"
     description:
-      path: "packages/wmr_companion_ui"
+      path: "../../packages/wmr_companion_ui"
       relative: true
     source: path
     version: "0.1.0"
   wmr_core:
     dependency: "direct main"
     description:
-      path: "packages/wmr_core"
+      path: "../../packages/wmr_core"
       relative: true
     source: path
     version: "0.1.0"
   wmr_fusion:
     dependency: "direct main"
     description:
-      path: "packages/wmr_fusion"
+      path: "../../packages/wmr_fusion"
       relative: true
     source: path
     version: "0.1.0"

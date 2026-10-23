@@ -31,7 +31,7 @@ coverage/
 Thumbs.db
 
 # Monado's config key (BSL-1.0), fetched by tool/fetch_wmr_config_key.dart
-assets/monado/wmr_config_key.bin
+apps/wmr_companion_app/assets/monado/wmr_config_key.bin
 
 # Package dependency locks are regenerated from the path dependencies
 packages/*/pubspec.lock

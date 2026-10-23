@@ -3,7 +3,7 @@
 Flutter companion library and reference app for ESP32 (BTstack) WMR controllers. Current state, hardware results and roadmap: `docs/STATUS.md`. Plan and architecture: `docs/PLAN.md`. Library architecture: `docs/LIBRARY.md`. Milestone plan: `/PAP/issues/ONY-50#document-plan`. Read before starting work.
 
 ## Architecture rules
-- The repo is structured as federated packages (`packages/wmr_core`, `packages/wmr_companion` facade, `packages/wmr_ble`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/WMRCompanionKit`, `example/`). The root app (`wmr_companion_app`) is the reference consumer driving its real connection through the facade.
+- The repo is structured as federated packages (`packages/wmr_core`, `packages/wmr_companion` facade, `packages/wmr_ble`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/WMRCompanionKit`, `example/`). The app under `apps/wmr_companion_app` (`wmr_companion_app`) is the reference consumer driving its real connection through the facade.
 - Layers: UI -> Riverpod state -> `WmrCompanion` facade (`packages/wmr_companion`) -> `ControllerService` (`packages/wmr_core`) -> (protocol parsers in `packages/wmr_core` + `BleTransport`).
 - `BleTransport` is an abstract interface living in `packages/wmr_core`. Implementations: `UniversalBleTransport` in `packages/wmr_ble` (default on Android/iOS), `FakeTransport` in `packages/wmr_companion/testing.dart` (tests/UI dev), and native CoreBluetooth via `packages/WMRCompanionKit` (iOS). Keep it swappable.
 - Protocol parser is pure Dart in `packages/wmr_core` (no Flutter, Riverpod, or plugin imports; verified by CI grep) and unit tested with golden byte arrays.
@@ -16,7 +16,7 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
 - Ask before changing the GATT protocol.
 
 ## Commands
-- Root app:
+- App (`apps/wmr_companion_app`; run these from that directory):
   - `flutter pub get`
   - `dart format --set-exit-if-changed .`
   - `flutter analyze`
