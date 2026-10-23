@@ -78,13 +78,13 @@ public struct ContentView: View {
 
                         HStack {
                             VStack(alignment: .leading) {
-                                Text("RTT p50:").font(.caption).foregroundColor(.secondary)
+                                Text("Total RTT p50:").font(.caption).foregroundColor(.secondary)
                                 Text(String(format: "%.1f ms", viewModel.p50RTT)).bold()
                             }
                             Spacer()
                             VStack(alignment: .leading) {
-                                Text("RTT p95:").font(.caption).foregroundColor(.secondary)
-                                Text(String(format: "%.1f ms", viewModel.p95RTT)).bold()
+                                Text("Net RTT p50:").font(.caption).foregroundColor(.secondary)
+                                Text(String(format: "%.1f ms", viewModel.p50NetRTT)).bold()
                             }
                             Spacer()
                             VStack(alignment: .leading) {
@@ -168,9 +168,11 @@ final class ProbeViewModel: ObservableObject {
     @Published var rightState = WMRControllerState(hand: .right)
 
     @Published var p50RTT: Double = 0
+    @Published var p50NetRTT: Double = 0
     @Published var p95RTT: Double = 0
     @Published var lastTurnaroundUs: UInt32 = 0
     private var rttHistory: [Double] = []
+    private var netRttHistory: [Double] = []
 
     init() {
         setupBindings()
@@ -191,11 +193,23 @@ final class ProbeViewModel: ObservableObject {
 
         client.leftControllerPublisher
             .receive(on: DispatchQueue.main)
-            .assign(to: &$leftState)
+            .sink { [weak self] state in
+                self?.leftState = state
+                if state.isConnected {
+                    self?.recorder.recordArrival(hand: .left, nanos: DispatchTime.now().uptimeNanoseconds)
+                }
+            }
+            .store(in: &cancellables)
 
         client.rightControllerPublisher
             .receive(on: DispatchQueue.main)
-            .assign(to: &$rightState)
+            .sink { [weak self] state in
+                self?.rightState = state
+                if state.isConnected {
+                    self?.recorder.recordArrival(hand: .right, nanos: DispatchTime.now().uptimeNanoseconds)
+                }
+            }
+            .store(in: &cancellables)
 
         client.echoLatencyPublisher
             .receive(on: DispatchQueue.main)
@@ -230,18 +244,27 @@ final class ProbeViewModel: ObservableObject {
     func connect(to bridge: WMRDiscoveredBridge) { client.connect(to: bridge) }
     func disconnect() { client.disconnect() }
     func setStreamMode(_ mode: WMRStreamMode) { client.setStreamMode(mode) }
-    func sendSinglePing() { client.sendEchoPing() }
+
+    func sendSinglePing() {
+        recorder.recordPingSent()
+        client.sendEchoPing()
+    }
 
     private func handleEchoSample(_ sample: WMREchoLatencySample) {
         recorder.recordEcho(sample)
         lastTurnaroundUs = sample.espTurnaroundUs
-        rttHistory.append(sample.roundTripTimeMs)
+        rttHistory.append(sample.totalRoundTripTimeMs)
+        netRttHistory.append(sample.netRoundTripTimeMs)
+
         if rttHistory.count > 100 { rttHistory.removeFirst() }
+        if netRttHistory.count > 100 { netRttHistory.removeFirst() }
 
         let sorted = rttHistory.sorted()
+        let sortedNet = netRttHistory.sorted()
         let count = sorted.count
         if count > 0 {
             p50RTT = sorted[Int(Double(count) * 0.50)]
+            p50NetRTT = sortedNet[Int(Double(count) * 0.50)]
             p95RTT = sorted[min(Int(Double(count) * 0.95), count - 1)]
         }
     }
@@ -252,6 +275,7 @@ final class ProbeViewModel: ObservableObject {
         guard periodicPingsEnabled else { return }
         let interval = Double(pingIntervalMs) / 1000.0
         pingTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.recorder.recordPingSent()
             self?.client.sendEchoPing()
         }
     }

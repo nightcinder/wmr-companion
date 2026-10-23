@@ -39,6 +39,10 @@ public final class WMRCompanionClient: @unchecked Sendable {
         session.echoLatencyPublisher.eraseToAnyPublisher()
     }
 
+    public var streamErrorPublisher: AnyPublisher<String, Never> {
+        session.bleManager.streamErrorPublisher.eraseToAnyPublisher()
+    }
+
     public func startScanning() {
         discoveredBridges.removeAll()
         session.bleManager.startScanning()
@@ -65,56 +69,99 @@ public final class WMRCompanionClient: @unchecked Sendable {
     }
 
     /// Reads controller config block over FF13 for specified hand and de-obfuscates with key.
-    public func fetchCalibration(hand: WMRHand, monadoKey: Data) async throws -> ControllerCalibration {
+    /// Implements bounded retries, subscription-first sequencing, and strict window validation.
+    public func fetchCalibration(
+        hand: WMRHand,
+        monadoKey: Data,
+        timeoutSeconds: TimeInterval = 10.0
+    ) async throws -> ControllerCalibration {
         var cursorOffset: UInt32 = 0
         var accumulatedBlob = Data()
         var expectedTotal: UInt32 = 0
         var expectedCrc: UInt32 = 0
+        var attempts = 0
+        let maxAttempts = 20
 
-        // Step 1: Write cursor 0 to initiate read
-        let cursorData = encodeConfigCursor(hand: hand, offset: 0)
-        session.bleManager.writeConfigCursor(data: cursorData)
+        // Step 1: Subscribe to windows BEFORE initiating write to prevent race
+        let windowStream = session.configWindowPublisher.values
+
+        // Step 2: Write initial cursor
+        let initialCursor = encodeConfigCursor(hand: hand, offset: 0)
+        session.bleManager.writeConfigCursor(data: initialCursor)
         session.bleManager.readConfigWindow()
 
-        for await window in session.configWindowPublisher.values {
-            guard window.hand == hand else { continue }
-            guard window.state == .ready else {
-                if window.state == .failed {
-                    throw ConfigDecodeError.jsonParseError("Controller reports config state failed")
-                }
-                // Still reading, write cursor again
-                try await Task.sleep(nanoseconds: 50_000_000) // 50ms
-                session.bleManager.writeConfigCursor(data: cursorData)
-                session.bleManager.readConfigWindow()
-                continue
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+
+        for await window in windowStream {
+            if Date() > deadline {
+                throw ConfigDecodeError.jsonParseError("Timeout waiting for controller calibration")
             }
 
-            expectedTotal = window.totalLen
-            expectedCrc = window.crc32
-            accumulatedBlob.append(window.data)
-            cursorOffset += UInt32(window.data.count)
+            guard window.hand == hand else { continue }
 
-            if cursorOffset >= expectedTotal {
+            switch window.state {
+            case .ready:
+                if accumulatedBlob.isEmpty {
+                    expectedTotal = window.totalLen
+                    expectedCrc = window.crc32
+                    guard expectedTotal > WMRConstants.configSkipBytes else {
+                        throw ConfigDecodeError.blockTooShort
+                    }
+                } else {
+                    guard window.totalLen == expectedTotal, window.crc32 == expectedCrc else {
+                        throw ConfigDecodeError.jsonParseError("Config block metadata changed mid-stream")
+                    }
+                }
+
+                guard window.offset == cursorOffset else {
+                    throw ConfigDecodeError.jsonParseError("Window offset mismatch: expected \(cursorOffset), got \(window.offset)")
+                }
+
+                accumulatedBlob.append(window.data)
+                cursorOffset += UInt32(window.data.count)
+
+                if cursorOffset >= expectedTotal {
+                    // All chunks received
+                    break
+                }
+
+                // Request next window
+                let nextCursor = encodeConfigCursor(hand: hand, offset: cursorOffset)
+                session.bleManager.writeConfigCursor(data: nextCursor)
+                session.bleManager.readConfigWindow()
+
+            case .failed:
+                throw ConfigDecodeError.jsonParseError("Controller reports config state failed")
+
+            case .reading, .notRead:
+                attempts += 1
+                if attempts > maxAttempts {
+                    throw ConfigDecodeError.jsonParseError("Exceeded maximum read attempts waiting for config ready")
+                }
+                try await Task.sleep(nanoseconds: 50_000_000) // 50ms wait
+                session.bleManager.writeConfigCursor(data: encodeConfigCursor(hand: hand, offset: cursorOffset))
+                session.bleManager.readConfigWindow()
+            }
+
+            if expectedTotal > 0 && cursorOffset >= expectedTotal {
                 break
             }
-
-            // Request next chunk
-            let nextCursor = encodeConfigCursor(hand: hand, offset: cursorOffset)
-            session.bleManager.writeConfigCursor(data: nextCursor)
-            session.bleManager.readConfigWindow()
         }
 
-        // Verify CRC
+        // Verify CRC-32
         let computedCrc = crc32(accumulatedBlob)
         guard computedCrc == expectedCrc else {
-            throw ConfigDecodeError.jsonParseError("CRC mismatch: expected \(expectedCrc), got \(computedCrc)")
+            throw ConfigDecodeError.jsonParseError("CRC-32 mismatch: expected \(expectedCrc), got \(computedCrc)")
         }
 
-        // De-obfuscate and parse
+        // De-obfuscate with Monado key table
         switch deobfuscateConfig(blob: accumulatedBlob, key: monadoKey) {
         case .success(let jsonString):
             switch parseControllerCalibration(jsonString: jsonString) {
             case .success(let calibration):
+                // Configure calibration on pipeline
+                let pipeline = (hand == .left) ? session.leftPipeline : session.rightPipeline
+                pipeline.imuCalibration = WMRImuCalibration(calibration: calibration)
                 return calibration
             case .failure(let err):
                 throw err

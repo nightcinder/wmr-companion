@@ -89,6 +89,10 @@ jobs:
         working-directory: packages/WMRCompanionKit
         run: swift test
 
+      - name: Build WMRCompanionProbe
+        working-directory: tool/ios_probe
+        run: swift build
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

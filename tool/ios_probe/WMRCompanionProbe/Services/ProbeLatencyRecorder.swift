@@ -20,11 +20,16 @@ public final class ProbeLatencyRecorder: @unchecked Sendable {
     private var echoSamples: [WMREchoLatencySample] = []
     private var leftArrivalsNanos: [UInt64] = []
     private var rightArrivalsNanos: [UInt64] = []
+    public private(set) var pingsSentCount: Int = 0
     private let startTime: Date
 
     public init(config: Config = Config()) {
         self.config = config
         self.startTime = Date()
+    }
+
+    public func recordPingSent() {
+        pingsSentCount += 1
     }
 
     public func recordEcho(_ sample: WMREchoLatencySample) {
@@ -39,20 +44,20 @@ public final class ProbeLatencyRecorder: @unchecked Sendable {
         }
     }
 
-    /// Generates echo CSV matching the format: `ping_id,sent_us,rtt_us,esp_rx_us,esp_turnaround_us,queue_depth`.
+    /// Generates echo CSV matching: `ping_id,sent_us,rtt_us,esp_rx_us,esp_turnaround_us,queue_depth`.
     public func exportEchoCSV() -> String {
         var lines = ["ping_id,sent_us,rtt_us,esp_rx_us,esp_turnaround_us,queue_depth"]
         for s in echoSamples {
             let sentUs = s.clientSendTimeNanos / 1000
-            let rttUs = UInt32(s.roundTripTimeMs * 1000.0)
-            lines.append("\(s.pingId),\(sentUs),\(rttUs),\(s.espTurnaroundUs),\(s.espTurnaroundUs),\(s.espQueueDepth)")
+            let rttUs = UInt32(s.totalRoundTripTimeMs * 1000.0)
+            lines.append("\(s.pingId),\(sentUs),\(rttUs),\(s.espRxTimeUs),\(s.espTurnaroundUs),\(s.espQueueDepth)")
         }
         return lines.joined(separator: "\n")
     }
 
     /// Generates summary JSON matching `wmr-latency` v2 schema.
     public func exportSummaryJSON(leftStats: (lossPercent: Double, gaps: Int), rightStats: (lossPercent: Double, gaps: Int)) -> String {
-        let rtts = echoSamples.map { $0.roundTripTimeMs }.sorted()
+        let rtts = echoSamples.map { $0.totalRoundTripTimeMs }.sorted()
         let count = rtts.count
 
         func percentile(_ p: Double) -> Double {
@@ -78,7 +83,7 @@ public final class ProbeLatencyRecorder: @unchecked Sendable {
             "dual_bridge": config.dualBridge,
             "ping_interval_ms": config.pingIntervalMs,
             "echo": [
-                "pings_sent": count,
+                "pings_sent": pingsSentCount,
                 "pings_answered": count,
                 "rtt_min_ms": minRtt,
                 "rtt_p50_ms": p50,

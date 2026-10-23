@@ -34,14 +34,14 @@ public final class WMRBleCentralManager: NSObject, @unchecked Sendable {
     private var activePeripheral: CBPeripheral?
 
     // Discovered characteristics
-    private var streamChar: CBCharacteristic?    // FF11
-    private var decodedChar: CBCharacteristic?   // FF12
-    private var configChar: CBCharacteristic?    // FF13
-    private var batchedChar: CBCharacteristic?   // FF14
-    private var echoChar: CBCharacteristic?      // FF15
+    public private(set) var streamChar: CBCharacteristic?    // FF11
+    public private(set) var decodedChar: CBCharacteristic?   // FF12
+    public private(set) var configChar: CBCharacteristic?    // FF13
+    public private(set) var batchedChar: CBCharacteristic?   // FF14
+    public private(set) var echoChar: CBCharacteristic?      // FF15
 
     // Stream state tracking
-    private var activeStreamChar: CBCharacteristic?
+    public private(set) var activeStreamChar: CBCharacteristic?
     private var targetStreamMode: WMRStreamMode = .batchedFF14
 
     // Combine Publishers
@@ -49,8 +49,9 @@ public final class WMRBleCentralManager: NSObject, @unchecked Sendable {
     public let discoveredBridgesPublisher = PassthroughSubject<WMRDiscoveredBridge, Never>()
     public let notificationPublisher = PassthroughSubject<WMRRawNotification, Never>()
     public let rssiPublisher = PassthroughSubject<Int, Never>()
+    public let streamErrorPublisher = PassthroughSubject<String, Never>()
 
-    // Negotiation state
+    // Negotiation state (queried after discovery)
     public private(set) var negotiatedMTU: Int = 23
 
     public override init() {
@@ -90,46 +91,32 @@ public final class WMRBleCentralManager: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Sets stream mode, handling the bridge's mutual exclusion requirement (writing 0x0000 to active CCC first).
+    public func refreshMTU() {
+        guard let p = activePeripheral else { return }
+        let maxWrite = p.maximumWriteValueLength(for: .withoutResponse)
+        self.negotiatedMTU = maxWrite + WMRConstants.attNotifyOverhead
+    }
+
+    /// Sets stream mode, strictly writing 0x0000 to the active CCC before enabling the new target characteristic.
     public func setStreamMode(_ mode: WMRStreamMode) {
         targetStreamMode = mode
         guard let p = activePeripheral, p.state == .connected else { return }
 
-        // Disable currently active stream if different
-        if let active = activeStreamChar {
-            let activeMode: WMRStreamMode
-            if active.uuid == WMRConstants.streamCharUUID { activeMode = .rawFF11 }
-            else if active.uuid == WMRConstants.decodedCharUUID { activeMode = .decodedFF12 }
-            else if active.uuid == WMRConstants.batchedCharUUID { activeMode = .batchedFF14 }
-            else { activeMode = .none }
-
-            if activeMode != mode {
-                p.setNotifyValue(false, for: active)
-                activeStreamChar = nil
-            } else {
-                return // Already in target mode
-            }
+        // Determine characteristic for requested mode
+        let nextChar: CBCharacteristic?
+        switch mode {
+        case .none: nextChar = nil
+        case .rawFF11: nextChar = streamChar
+        case .decodedFF12: nextChar = decodedChar
+        case .batchedFF14: nextChar = batchedChar
         }
 
-        // Enable new target characteristic
-        switch mode {
-        case .none:
-            break
-        case .rawFF11:
-            if let c = streamChar {
-                p.setNotifyValue(true, for: c)
-                activeStreamChar = c
-            }
-        case .decodedFF12:
-            if let c = decodedChar {
-                p.setNotifyValue(true, for: c)
-                activeStreamChar = c
-            }
-        case .batchedFF14:
-            if let c = batchedChar {
-                p.setNotifyValue(true, for: c)
-                activeStreamChar = c
-            }
+        if let active = activeStreamChar, active != nextChar {
+            // Disable active characteristic first
+            p.setNotifyValue(false, for: active)
+            // activeStreamChar is updated in didUpdateNotificationStateFor once disabled
+        } else if let next = nextChar, activeStreamChar == nil {
+            p.setNotifyValue(true, for: next)
         }
     }
 
@@ -182,9 +169,6 @@ extension WMRBleCentralManager: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         statePublisher.send(.discoveringServices)
-        // Query maximum write length for withoutResponse (standard iOS mechanism for MTU estimation)
-        let maxWrite = peripheral.maximumWriteValueLength(for: .withoutResponse)
-        self.negotiatedMTU = maxWrite + WMRConstants.attNotifyOverhead
         peripheral.discoverServices([WMRConstants.serviceUUID])
     }
 
@@ -202,6 +186,7 @@ extension WMRBleCentralManager: CBCentralManagerDelegate {
         batchedChar = nil
         echoChar = nil
         activeStreamChar = nil
+        negotiatedMTU = 23
     }
 }
 
@@ -230,35 +215,52 @@ extension WMRBleCentralManager: CBPeripheralDelegate {
                 self.decodedChar = c
             case WMRConstants.configCharUUID:
                 self.configChar = c
-                // Subscribe to config state changes
                 peripheral.setNotifyValue(true, for: c)
             case WMRConstants.batchedCharUUID:
                 self.batchedChar = c
             case WMRConstants.echoCharUUID:
                 self.echoChar = c
-                // Subscribe to echo responses
                 peripheral.setNotifyValue(true, for: c)
             default:
                 break
             }
         }
 
+        // Query MTU *after* services and characteristics are discovered
+        refreshMTU()
         statePublisher.send(.ready)
 
         // Enable target stream mode
         setStreamMode(targetStreamMode)
     }
 
+    public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            if let attError = error as? CBATTError, attError.code.rawValue == Int(WMRConstants.attErrorOtherStreamActive) {
+                streamErrorPublisher.send("ATT error 0x80: Another stream is already active on the bridge")
+            } else {
+                streamErrorPublisher.send("Notification state update failed: \(error.localizedDescription)")
+            }
+            if activeStreamChar == characteristic && !characteristic.isNotifying {
+                activeStreamChar = nil
+            }
+            return
+        }
+
+        if characteristic.isNotifying {
+            activeStreamChar = characteristic
+        } else if activeStreamChar == characteristic {
+            activeStreamChar = nil
+            // Transition: active disabled, now enable target characteristic
+            setStreamMode(targetStreamMode)
+        }
+    }
+
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         // High-precision nanosecond timestamp stamped immediately at callback entry
         let arrivalTimestamp = DispatchTime.now().uptimeNanoseconds
 
-        if let error = error as? CBATTError, error.code.rawValue == Int(WMRConstants.attErrorOtherStreamActive) {
-            // Other stream active error
-            return
-        }
-
-        guard let data = characteristic.value else { return }
+        guard error == nil, let data = characteristic.value else { return }
 
         let rawNotification = WMRRawNotification(
             characteristicUUID: characteristic.uuid,
@@ -270,6 +272,7 @@ extension WMRBleCentralManager: CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
         guard error == nil else { return }
+        refreshMTU()
         rssiPublisher.send(RSSI.intValue)
     }
 }

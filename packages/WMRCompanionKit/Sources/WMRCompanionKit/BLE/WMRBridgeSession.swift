@@ -4,7 +4,9 @@ import Combine
 /// Telemetry record for one FF15 echo round trip.
 public struct WMREchoLatencySample: Sendable {
     public let pingId: UInt16
-    public let roundTripTimeMs: Double
+    public let totalRoundTripTimeMs: Double
+    public let netRoundTripTimeMs: Double
+    public let espRxTimeUs: UInt64
     public let espTurnaroundUs: UInt32
     public let espQueueDepth: UInt16
     public let clientSendTimeNanos: UInt64
@@ -12,14 +14,18 @@ public struct WMREchoLatencySample: Sendable {
 
     public init(
         pingId: UInt16,
-        roundTripTimeMs: Double,
+        totalRoundTripTimeMs: Double,
+        netRoundTripTimeMs: Double,
+        espRxTimeUs: UInt64,
         espTurnaroundUs: UInt32,
         espQueueDepth: UInt16,
         clientSendTimeNanos: UInt64,
         clientRecvTimeNanos: UInt64
     ) {
         self.pingId = pingId
-        self.roundTripTimeMs = roundTripTimeMs
+        self.totalRoundTripTimeMs = totalRoundTripTimeMs
+        self.netRoundTripTimeMs = netRoundTripTimeMs
+        self.espRxTimeUs = espRxTimeUs
         self.espTurnaroundUs = espTurnaroundUs
         self.espQueueDepth = espQueueDepth
         self.clientSendTimeNanos = clientSendTimeNanos
@@ -39,6 +45,9 @@ public final class WMRBridgeSession: @unchecked Sendable {
     // Controller states
     public let leftStatePublisher = CurrentValueSubject<WMRControllerState, Never>(WMRControllerState(hand: .left))
     public let rightStatePublisher = CurrentValueSubject<WMRControllerState, Never>(WMRControllerState(hand: .right))
+
+    // Reassembled raw FF11 frames
+    public let completedFramePublisher = PassthroughSubject<WmrFrame, Never>()
 
     // Echo latency tracking
     private var nextPingId: UInt16 = 1
@@ -72,6 +81,7 @@ public final class WMRBridgeSession: @unchecked Sendable {
                 if state == .disconnected {
                     self?.leftPipeline.reset()
                     self?.rightPipeline.reset()
+                    self?.pendingPings.removeAll()
                     self?.leftStatePublisher.send(WMRControllerState(hand: .left, isConnected: false))
                     self?.rightStatePublisher.send(WMRControllerState(hand: .right, isConnected: false))
                 }
@@ -84,8 +94,8 @@ public final class WMRBridgeSession: @unchecked Sendable {
         case WMRConstants.streamCharUUID:
             // FF11 raw fragmented stream
             let result = reassembler.push(notif.data)
-            if case .frameComplete(_) = result {
-                // Handled in reassembler
+            if case .frameComplete(let frame) = result {
+                completedFramePublisher.send(frame)
             }
 
         case WMRConstants.decodedCharUUID:
@@ -131,12 +141,20 @@ public final class WMRBridgeSession: @unchecked Sendable {
 
     // MARK: - Echo Latency Testing
 
-    /// Sends an FF15 ping and records client timestamp.
+    /// Sends an FF15 ping and records client timestamp. Bounded to prevent memory leak.
     public func sendEchoPing() {
         let pingId = nextPingId
         nextPingId = (nextPingId == UInt16.max) ? 1 : (nextPingId + 1)
 
         let sendNanos = DispatchTime.now().uptimeNanoseconds
+
+        // Bound pending pings map (prune if > 100 items)
+        if pendingPings.count > 100 {
+            let keysToRemove = pendingPings.keys.prefix(50)
+            for k in keysToRemove {
+                pendingPings.removeValue(forKey: k)
+            }
+        }
         pendingPings[pingId] = sendNanos
 
         let request = encodeEchoRequest(pingId: pingId)
@@ -145,12 +163,17 @@ public final class WMRBridgeSession: @unchecked Sendable {
 
     private func handleEchoAnswer(_ answer: EchoAnswer, arrivalNanos: UInt64) {
         guard let sendNanos = pendingPings.removeValue(forKey: answer.pingId) else { return }
-        let roundTripNanos = (arrivalNanos >= sendNanos) ? (arrivalNanos - sendNanos) : 0
-        let roundTripMs = Double(roundTripNanos) / 1_000_000.0
+        let totalRoundTripNanos = (arrivalNanos >= sendNanos) ? (arrivalNanos - sendNanos) : 0
+        let totalRoundTripMs = Double(totalRoundTripNanos) / 1_000_000.0
+
+        let turnaroundMs = Double(answer.turnaroundUs) / 1000.0
+        let netRoundTripMs = max(0, totalRoundTripMs - turnaroundMs)
 
         let sample = WMREchoLatencySample(
             pingId: answer.pingId,
-            roundTripTimeMs: roundTripMs,
+            totalRoundTripTimeMs: totalRoundTripMs,
+            netRoundTripTimeMs: netRoundTripMs,
+            espRxTimeUs: answer.rxTimeUs,
             espTurnaroundUs: answer.turnaroundUs,
             espQueueDepth: answer.queueDepth,
             clientSendTimeNanos: sendNanos,
