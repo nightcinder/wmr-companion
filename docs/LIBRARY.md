@@ -8,8 +8,10 @@ only consumer.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
-`IOS.md` (the native `WMRCompanionKit` built for ONY-38, PR #37),
-[PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions).
+[PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions). The native iOS
+`WMRCompanionKit` and its `IOS.md` guide are added by PR #37 (ONY-38); they are
+not on this branch until that PR lands, so the iOS references below describe
+that pending work rather than files you can open here.
 
 ## 1. Decision in one page
 
@@ -32,8 +34,11 @@ is an in-process controller API, not an app and not a system-wide gamepad.
   app* to link this library and consume `GamepadState`/`WmrControllerUpdate`
   inside its own process. That is the "bypass": no OS-level injection is
   needed, so the missing iOS HID API stops being a blocker. Android can keep
-  the existing Bluetooth HID output as an **optional add-on package** for hosts
-  that are not Flutter, but it is no longer the primary delivery mechanism.
+  the existing Bluetooth HID output as an **optional Android-only plugin
+  package** for hosts that want the phone to appear as a system HID gamepad
+  (for example to a PC or console); it is still a Flutter plugin, so its
+  consumers are Flutter apps on Android, and it is no longer the primary
+  delivery mechanism.
 - **One Dart pipeline, platform-specific transports.** Keep protocol parsing and
   fusion in Dart so there is one implementation and one set of golden tests.
   Put the platform difference behind the existing `BleTransport` seam:
@@ -329,7 +334,7 @@ wmr-companion/
     wmr_companion/               # umbrella facade
     wmr_companion_ui/            # optional widgets
     wmr_companion_hid_android/   # optional HID output
-    WMRCompanionKit/             # native Swift kit (ONY-38), iOS reference
+    WMRCompanionKit/             # native Swift kit (ONY-38, PR #37); not yet here
   docs/                          # unchanged, plus this file
   tool/                          # capture/analysis, probes
 ```
