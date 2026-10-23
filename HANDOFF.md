@@ -14,7 +14,7 @@ The repository is no longer one monolithic Flutter app. It is a federated packag
 - `packages/wmr_companion`: Umbrella public facade (`WmrCompanion`), configuration, data models, typed exceptions, lifecycle, and broadcast stream subscriptions (`controllers`, `gamepad`, `link`). Host apps depend on this package.
 - `packages/wmr_ble`: Flutter plugin implementing `UniversalBleTransport` via `universal_ble`, connection lifecycle hooks, and adapter status.
 - `packages/wmr_fusion`: Pure Dart 3DoF orientation filters (Madgwick, Mahony).
-- `packages/wmr_companion_ui`: Reusable Flutter UI widgets (`OrientationView`, `LinkStatusView`, `HandStatsView`) extracted from the reference app's debug screen (in open PR #45).
+- `packages/wmr_companion_ui`: Reusable Flutter UI widgets (`OrientationView`, `LinkStatusView`, `HandStatsView`) extracted from the reference app's debug screen (merged in PR #45).
 - `packages/WMRCompanionKit`: Native Swift framework targeting iOS 18+, macOS 12+, visionOS 1+ (CoreBluetooth transport, FF11–FF15 parsers, fusion, dual-bridge coordination) from ONY-38 (PR #37).
 - `example/`: Minimal Flutter host demonstrating in-process controller consumption (~20 lines to gamepad state).
 - Root app (`wmr_companion_app`): The full reference consumer app (Connect, Debug, Capture, Latency, Gamepad screens) driving its real connection through the `WmrCompanion` facade.
@@ -22,7 +22,7 @@ The repository is no longer one monolithic Flutter app. It is a federated packag
 | Repo | What | Notes |
 |---|---|---|
 | `nightcinder/WMR_Bridge` | Firmware (C, built inside the BTstack ESP32 port) | Source of truth for the wire protocol (`docs/PROTOCOL.md`). BTstack-derived, non-commercial license. |
-| `nightcinder/wmr-companion` | Federated Flutter library and reference app, MIT, public | Packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui` in PR #45, `WMRCompanionKit`) + `example/` + root reference app. |
+| `nightcinder/wmr-companion` | Federated Flutter library and reference app, MIT, public | Packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `WMRCompanionKit`) + `example/` + root reference app. |
 
 GATT service FF10 on the bridge:
 - FF11: raw fragmented HID frames (46 bytes)
@@ -67,7 +67,7 @@ App (repo root of wmr-companion):
   - `cd packages/wmr_companion && dart test`
   - `cd packages/wmr_ble && flutter test`
   - `cd packages/wmr_fusion && dart test`
-  - `cd packages/wmr_companion_ui && flutter test` (in PR #45)
+  - `cd packages/wmr_companion_ui && flutter test`
   - `cd packages/WMRCompanionKit && swift test`
 - Example app: `cd example && flutter pub get && flutter test && flutter build apk --debug`
 - Build debug APK: `flutter build apk --debug` (CI does this; BLE needs a physical phone)
@@ -100,7 +100,7 @@ Refreshed 2026-10-23. The "checked" column is strictly what Nick reported on har
 
 | Area | Built | Checked on hardware |
 |---|---|---|
-| Reusable Flutter library (ONY-41) | Phases 1–4 merged on `main` (`packages/wmr_core` #39, `packages/wmr_companion` facade #41, `packages/wmr_ble` #42, `example/` host #43); phase 5 iOS example compile / run sheet (#44); phase 7 UI package in open PR #45 | Android debug APK connects and streams on hardware (user-reported); the app drives its real connection through the facade. iOS device run not yet done |
+| Reusable Flutter library (ONY-41) | Phases 1–4 merged on `main` (`packages/wmr_core` #39, `packages/wmr_companion` facade #41, `packages/wmr_ble` #42, `example/` host #43); phase 5 iOS example compile / run sheet (#44); phase 7 UI package merged (#45) | Android debug APK connects and streams on hardware (user-reported); the app drives its real connection through the facade. iOS device run not yet done |
 | iOS companion framework & probe (ONY-38) | `packages/WMRCompanionKit` Swift framework, SwiftUI probe (`tool/ios_probe`), iOS 18 deployment target, macOS CI compile job (#37, #44) | Unit-tested and CI-compiled; **no iOS device run has happened** |
 | Multi-bridge support (ONY-18, PR #34) | Concurrent multi-bridge connections (e.g. Left and Right ESP32 bridges), merging notification streams into shared hand pipelines; Connect screen UI and Riverpod providers updated | Fake/unit tested; **not yet run on hardware** (needs second ESP32) |
 | Native Android GATT probe (M7.1, PR #36) | Native Android GATT probe app (`tool/gatt_probe`) and CI job for latency baseline | Built and unit tested; not yet run on hardware |
@@ -140,7 +140,7 @@ Reports are lost between the controller and the ESP32 (Classic Bluetooth), befor
 | WMR_Bridge | #20 | Build/flash framework and browser installer | One-command `build.py` and browser installer landed (#37). Open: L/R variants (M11.1) and GitHub Pages release (M13.1) |
 | wmr-companion | #19 | iOS build | **Superseded by ONY-38 and ONY-41.** iOS 18 settled as floor, both platforms in v1; `WMRCompanionKit`, probe, and macOS CI compile check landed (#37, #44) |
 | wmr-companion | #20 | `universal_ble` gaps | Android GATT probe built (#36); latency run sheet v2 with decision rule merged (#35). Open: hardware sitting A (M12.2) |
-| wmr-companion | ONY-41 | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package in open PR #45. Open: phase 7b (HID android), release hygiene (M10.4), iOS device run |
+| wmr-companion | ONY-41 | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package merged (#45). Open: phase 7b (HID android), release hygiene (M10.4), iOS device run |
 | Both | ONY-56 | FF16 firmware version reporting | Firmware reports packaged version over FF16 (#38). Open: app/facade `WmrProtocolVersion` and feature matrix (M10.3) |
 
 Parked ideas: ESP32 as BLE HID gamepad (HOGP); 6DoF / camera fusion (`docs/CAMERAS.md`); single-ESP32 radio tuning (V1 stagger, coex flags); non-Flutter SDK products.
@@ -151,7 +151,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 
 ### M10 — Library v1: close the package tree and freeze the API
 *Question: can a fresh Flutter app add one dependency, read `GamepadState`, and know which firmware it needs?*
-- **10.1 Merge PR #45** (UI package `wmr_companion_ui`, reviewed in ONY-52) — depends on owner's approval.
+- **10.1 Merge PR #45** (UI package `wmr_companion_ui`, reviewed in ONY-52) — **merged on 2026-10-23**.
 - **10.2 Phase 7b**: extract `wmr_companion_hid_android` from `lib/hid/`, or park it with the reason recorded (depends on owner's answer).
 - **10.3 `WmrProtocolVersion` + FF16** (ONY-56): read the bridge's packaged version, expose it on the link snapshot, and publish the FF11–FF16 feature matrix (skip unknown records, never fatal).
 - **10.4 Release hygiene**: pub workspace, per-package CHANGELOG and version policy, `dart pub publish --dry-run` in CI, export-boundary test per package.
@@ -205,7 +205,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 ## 10. Standing decisions and facts from project memory
 
 - **iOS scope and floor**: The owner settled **iOS 18 as the floor and both platforms in v1 scope** (`docs/LIBRARY.md` §13). "iOS is deferred" is no longer the project decision. `packages/WMRCompanionKit` (pure Swift framework), the native SwiftUI probe app (`tool/ios_probe`), and macOS CI compile validation landed in ONY-38 (PR #37) and ONY-41 (PR #44); **no iOS device run has happened yet**.
-- **Package split**: The repo is no longer a single Flutter app. It is split into `packages/wmr_core` (pure Dart), `packages/wmr_companion` (public facade), `packages/wmr_ble` (transport), `packages/wmr_fusion` (filters), `packages/wmr_companion_ui` (optional widgets in PR #45), `packages/WMRCompanionKit` (Swift), and `example/` (minimal host). The root app is the reference consumer driving its real connection through the facade.
+- **Package split**: The repo is no longer a single Flutter app. It is split into `packages/wmr_core` (pure Dart), `packages/wmr_companion` (public facade), `packages/wmr_ble` (transport), `packages/wmr_fusion` (filters), `packages/wmr_companion_ui` (optional widgets, merged in PR #45), `packages/WMRCompanionKit` (Swift), and `example/` (minimal host). The root app is the reference consumer driving its real connection through the facade.
 - **Protocol defaults and hardware status**: FF14 is the app's default stream and requests ATT MTU 517 on connect. FF15 answered 479/479 pings in a hardware run (round trip p50 40.8 ms, user-reported). The line claiming neither has been run on hardware was wrong. FF16 exists on firmware `main` (#38); the app does not read it yet (ONY-56).
 - **Multi-bridge**: Connecting several bridges concurrently exists (#34 in app, #33 single-hand mode on firmware). It cannot deliver "zero loss" because RIGHT has an independent ~10.8 % loss floor on current evidence.
 - **Firmware flashing**: One-command `build.py` and a browser installer landed on firmware (#37); L/R variant packaging is M11.1.
@@ -227,6 +227,7 @@ Nick authorised the assistant to clean up on 2026-10-22; items below are what wa
 
 | Branch | Why it can go |
 |---|---|
+| `feat/wmr-companion-ui` | PR #45 merged |
 | `docs/ios-v1-run-sheet` | PR #44 merged |
 | `feat/wmr-example-host` | PR #43 merged |
 | `feat/wmr-ble-package` | PR #42 merged |
@@ -267,7 +268,6 @@ Nick authorised the assistant to clean up on 2026-10-22; items below are what wa
 ### Branches to KEEP (do NOT delete)
 - `nightcinder/wmr-companion`:
   - `origin/main` (default branch)
-  - `origin/feat/wmr-companion-ui` (**OPEN PR #45** — active PR!)
   - local `main`
   - local `feat/ony-56-ff16` (active task ONY-56)
 - `nightcinder/WMR_Bridge`:
