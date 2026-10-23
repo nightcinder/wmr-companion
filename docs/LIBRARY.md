@@ -1,13 +1,14 @@
 # Companion as a Flutter library
 
-Status: **phases 1–3 implemented.** `packages/wmr_core` holds the pure-Dart
+Status: **phases 1–4 implemented.** `packages/wmr_core` holds the pure-Dart
 protocol, domain, `BleTransport` interface, controller service and the pure
 services; `packages/wmr_companion` is the public facade (`WmrCompanion`,
-config, models, typed errors) with an API README and tests; and
+config, models, typed errors) with an API README and tests;
 `packages/wmr_ble` owns the `universal_ble` adapter/transport and the app
-lifecycle hook. The app depends on all three by path and drives its real
-connection through the facade. The UI package, Android HID add-on and
-publishing are still targets; the current app remains the reference consumer.
+lifecycle hook; and `example/` is a minimal Flutter host. The app depends on
+all three packages by path and drives its real connection through the facade.
+The UI package, Android HID add-on and publishing are still targets; the
+current app remains the reference consumer.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
@@ -347,7 +348,8 @@ imported by `wmr_core` or `wmr_companion`.
 
 ```
 wmr-companion/
-  apps/wmr_companion_app/        # current app, moved in phase 4; CI builds the APK here
+  apps/wmr_companion_app/        # future home of the reference app; it stays at the root during transition
+  example/                       # phase 4: minimal host (one facade, gamepad stream) (landed)
   packages/
     wmr_core/                    # phase 1: pure Dart (landed)
     wmr_fusion/                  # existing, kept pure Dart (landed)
@@ -483,7 +485,7 @@ in v1 scope** (owner, 2026-10-23 on ONY-41).
 
 ## 14. What this framework does not claim
 
-- Phases 1–3 are implemented; the rest of the package tree and API is still a
+- Phases 1–4 are implemented; the rest of the package tree and API is still a
   target, not a fact.
 - It is not an iOS virtual gamepad and cannot make one appear.
 - It does not promise iOS background operation, MTU, or connection interval.

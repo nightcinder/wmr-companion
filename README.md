@@ -21,6 +21,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 | `packages/wmr_core/` | Pure-Dart protocol, domain, `BleTransport` interface and controller services (no Flutter) |
 | `packages/wmr_companion/` | Public facade (`WmrCompanion`) over the pipeline; Android and iOS library path ([README](packages/wmr_companion/README.md)) |
 | `packages/wmr_ble/` | `universal_ble` adapter/transport, link status and lifecycle hook ([README](packages/wmr_ble/README.md)) |
+| `example/` | Minimal Flutter host: one facade, a connect and a gamepad `StreamBuilder` on the fake bridge ([README](example/README.md)) |
 | `lib/services/` | App-side config report, key store and settings wiring |
 | `lib/ui/` | Connect, debug, capture, latency and gamepad screens |
 | `lib/hid/` | Bluetooth HID gamepad output |
@@ -34,7 +35,7 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze
-flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_companion && dart test; cd packages/wmr_ble && flutter test; cd packages/wmr_fusion && dart test
+flutter test                      # also: cd packages/wmr_core && dart test; cd packages/wmr_companion && dart test; cd packages/wmr_ble && flutter test; cd packages/wmr_fusion && dart test; cd example && flutter test
 flutter build apk --debug
 flutter run -d <device>           # BLE needs a physical phone
 ```
