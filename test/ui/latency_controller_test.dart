@@ -12,8 +12,8 @@ import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_core/services/latency_recorder.dart';
-import 'package:wmr_companion/ui/debug/debug_providers.dart';
-import 'package:wmr_companion/ui/latency/latency_providers.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/latency/latency_providers.dart';
 
 class _Clock implements MonotonicClock {
   int now = 5000000;

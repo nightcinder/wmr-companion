@@ -6,9 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion/services/config_key_store.dart';
-import 'package:wmr_companion/ui/debug/config_panel.dart';
-import 'package:wmr_companion/ui/debug/stream_settings.dart';
+import 'package:wmr_companion_app/services/config_key_store.dart';
+import 'package:wmr_companion_app/ui/debug/config_panel.dart';
+import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 
 /// A synthetic key. NOT Monado's table.
 final _key = Uint8List.fromList([

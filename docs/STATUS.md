@@ -38,6 +38,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | 4 | Latency screen and CSV export | Done; first hardware run (FF14, 2026-10-22, user-reported): 479 of 479 FF15 pings answered, round trip p50 40.8 ms, p95 72.8 ms, see [LATENCY.md](LATENCY.md) "First hardware run". Inter-arrival, sequence gaps, tick-based loss, one-way delay variation and round trip, CSV + JSON export. PR #28 added no-stream latency mode, stream selector (None / FF11 / FF12 / FF14), and configurable ping interval (built and unit/widget tested; **not yet run on hardware**). Run sheet in [LATENCY.md](LATENCY.md) |
 | 5 | Decide Flutter vs native hot path | Not started; waiting for latency data |
 | 6 | iOS companion framework & probe | In progress (ONY-38). Built `WMRCompanionKit` (pure Swift framework in `packages/WMRCompanionKit` targeting iOS 18.0+, macOS 12.0+, and visionOS 1.0+ with CoreBluetooth transport, FF11/FF12/FF14/FF15/FF13 parsers, Madgwick/Mahony fusion, dual-bridge coordinator, and full unit test suite), native SwiftUI probe app (`tool/ios_probe/`), iOS 18 Podfile and project deployment target, Info.plist BLE permissions, and CI job (`.github/workflows/ci.yml`). Flutter iOS compile verification added ([IOS.md](IOS.md)) |
+| - | Reusable Flutter library (ONY-41) | Phase 1 (`packages/wmr_core`, pure Dart) and phase 2 (`packages/wmr_companion` facade, app driving its real connection through it) landed. Phases 3–8 (BLE package, reference app, iOS v1, optional packages, publish) are still ahead; see [LIBRARY.md](LIBRARY.md) |
 
 ### What has been checked on hardware (user-reported)
 
@@ -134,6 +135,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 | Topic | File |
 |---|---|
 | Plan and architecture rules | [PLAN.md](PLAN.md), `CLAUDE.md` |
+| Reusable Flutter library: package split, facade API, phases | [LIBRARY.md](LIBRARY.md) |
 | App-side protocol decisions, FF12 in the app, axis mapping | [PROTOCOL.md](PROTOCOL.md) |
 | Raw capture format and screen | [CAPTURE.md](CAPTURE.md) |
 | Latency screen, CSV/JSON export format | [LATENCY.md](LATENCY.md) |

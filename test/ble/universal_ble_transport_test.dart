@@ -3,10 +3,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/ble/ble_adapter.dart';
+import 'package:wmr_companion_app/ble/ble_adapter.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion/ble/universal_ble_transport.dart';
+import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/controller_service.dart';

@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion/ble/ble_adapter.dart';
+import 'package:wmr_companion_app/ble/ble_adapter.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion/ble/universal_ble_transport.dart';
+import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/domain/loss_window.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
-import 'package:wmr_companion/ui/debug/debug_providers.dart';
-import 'package:wmr_companion/ui/debug/debug_screen.dart';
-import 'package:wmr_companion/ui/debug/stream_settings.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
+import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 
 import '../ble/fake_adapter.dart';
 import 'raw_mode_notifier.dart';

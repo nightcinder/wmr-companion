@@ -8,7 +8,7 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/controller_service.dart';
-import 'package:wmr_companion/ui/capture/capture_providers.dart';
+import 'package:wmr_companion_app/ui/capture/capture_providers.dart';
 
 class _Clock implements MonotonicClock {
   int now = 5000000;
