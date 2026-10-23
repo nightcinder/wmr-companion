@@ -170,7 +170,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         cbTwoBridges.setOnCheckedChangeListener { _, isChecked ->
             Log.i(TAG, "Dual-bridge mode toggled: $isChecked")
             if (isChecked) {
-                Toast.makeText(this, "Dual-bridge mode enabled (connects primary bridge)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Dual-bridge mode toggled (future support - single bridge active)", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -386,7 +386,9 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         Thread {
             client.readRssiSafe(1000L)
             mainHandler.post {
-                actualStartRun()
+                if (!isFinishing && !isDestroyed) {
+                    actualStartRun()
+                }
             }
         }.start()
     }
