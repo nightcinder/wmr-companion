@@ -15,7 +15,6 @@ import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 enum class StreamMode {
     NONE,
@@ -43,6 +42,10 @@ class GattClient(
         fun onRssiRead(rssi: Int)
         fun onIntervalUpdated(intervalUs: Int)
         fun onEchoSample(sample: EchoSample)
+        fun onEchoTimeout(pingId: Int)
+        fun onEchoFailure(pingId: Int)
+        fun onEchoLateOrDuplicate(pingId: Int)
+        fun onEchoBadAnswer()
         fun onDecodedRecord(record: Protocol.DecodedRecord, arrivalUs: Long)
         fun onError(message: String)
     }
@@ -56,9 +59,6 @@ class GattClient(
     private var state = GattState.DISCONNECTED
 
     var streamMode = StreamMode.BATCHED
-        set(value) {
-            field = value
-        }
 
     var negotiatedMtu: Int? = null
         private set
@@ -73,9 +73,13 @@ class GattClient(
     private var batchedChar: BluetoothGattCharacteristic? = null
 
     // Pending ping tracking
-    private var pendingPingId: Int? = null
-    private var pendingT1Us: Long = 0L
-    private var pendingT1DoneUs: Long = 0L
+    private data class PendingPing(
+        val id: Int,
+        val t1Us: Long,
+        var t1DoneUs: Long = 0L
+    )
+
+    private var currentPendingPing: PendingPing? = null
     private var pingTimeoutRunnable: Runnable? = null
 
     // End of run RSSI latch
@@ -109,6 +113,7 @@ class GattClient(
         batchedChar = null
         negotiatedMtu = null
         priorityRequested = null
+        connectionIntervalUs = null
         updateState(GattState.DISCONNECTED, "Disconnected")
     }
 
@@ -140,18 +145,17 @@ class GattClient(
         val currentGatt = gatt ?: return false
         val char = echoChar ?: return false
 
+        val t1Us = SystemClock.elapsedRealtimeNanos() / 1000L
+
         synchronized(this) {
-            if (pendingPingId != null) {
+            if (currentPendingPing != null) {
                 // Client busy: ping skipped
                 return false
             }
-            pendingPingId = pingId
+            currentPendingPing = PendingPing(pingId, t1Us)
         }
 
         val requestBytes = Protocol.encodeEchoRequest(pingId)
-        val t1Us = SystemClock.elapsedRealtimeNanos() / 1000L
-        pendingT1Us = t1Us
-
         val writeSuccess: Boolean = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val res = currentGatt.writeCharacteristic(
@@ -171,21 +175,33 @@ class GattClient(
         }
 
         val t1DoneUs = SystemClock.elapsedRealtimeNanos() / 1000L
-        pendingT1DoneUs = t1DoneUs
+        synchronized(this) {
+            val pending = currentPendingPing
+            if (pending != null && pending.id == pingId) {
+                if (writeSuccess) {
+                    pending.t1DoneUs = t1DoneUs
+                } else {
+                    currentPendingPing = null
+                }
+            }
+        }
 
         if (!writeSuccess) {
-            synchronized(this) {
-                pendingPingId = null
-            }
+            mainHandler.post { listener.onEchoFailure(pingId) }
             return false
         }
 
         // Schedule timeout
         val timeoutTask = Runnable {
+            var timedOut = false
             synchronized(this@GattClient) {
-                if (pendingPingId == pingId) {
-                    pendingPingId = null
+                if (currentPendingPing?.id == pingId) {
+                    currentPendingPing = null
+                    timedOut = true
                 }
+            }
+            if (timedOut) {
+                mainHandler.post { listener.onEchoTimeout(pingId) }
             }
         }
         pingTimeoutRunnable = timeoutTask
@@ -195,7 +211,7 @@ class GattClient(
 
     private fun cancelPendingPing() {
         synchronized(this) {
-            pendingPingId = null
+            currentPendingPing = null
             pingTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             pingTimeoutRunnable = null
         }
@@ -277,7 +293,10 @@ class GattClient(
             gatt.setCharacteristicNotification(echoChar, true)
             val ccc = echoChar?.getDescriptor(Protocol.CCC_DESCRIPTOR_UUID)
             if (ccc != null) {
-                writeDescriptor(gatt, ccc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                val ok = writeDescriptor(gatt, ccc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                if (!ok) {
+                    updateState(GattState.DISCONNECTED, "Failed to initiate FF15 descriptor write")
+                }
             } else {
                 updateState(GattState.DISCONNECTED, "CCC descriptor for FF15 not found")
             }
@@ -298,7 +317,10 @@ class GattClient(
                     gatt.setCharacteristicNotification(bChar, true)
                     val bCcc = bChar.getDescriptor(Protocol.CCC_DESCRIPTOR_UUID)
                     if (bCcc != null) {
-                        writeDescriptor(gatt, bCcc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        val ok = writeDescriptor(gatt, bCcc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        if (!ok) {
+                            updateState(GattState.DISCONNECTED, "Failed to initiate FF14 descriptor write")
+                        }
                         return
                     }
                 }
@@ -306,6 +328,21 @@ class GattClient(
 
             // All requested subscriptions completed
             updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+        }
+
+        // Available on Android 8.0+ (API 26+)
+        fun onConnectionUpdated(
+            gatt: BluetoothGatt,
+            interval: Int,
+            latency: Int,
+            timeout: Int,
+            status: Int
+        ) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                val intervalUs = interval * 1250 // 1.25 ms per interval unit
+                connectionIntervalUs = intervalUs
+                mainHandler.post { listener.onIntervalUpdated(intervalUs) }
+            }
         }
 
         // For Android 13+ (API 33+)
@@ -336,26 +373,33 @@ class GattClient(
                 when (val res = Protocol.parseEchoAnswer(value)) {
                     is Protocol.EchoParseResult.Ok -> {
                         val answer = res.answer
-                        var sampleToEmit: EchoSample? = null
+                        var matchedSample: EchoSample? = null
+                        var isLateOrDup = false
                         synchronized(this@GattClient) {
-                            if (pendingPingId != null && pendingPingId == answer.pingId) {
-                                sampleToEmit = EchoSample(
-                                    t1Us = pendingT1Us,
-                                    t1DoneUs = pendingT1DoneUs,
+                            val pending = currentPendingPing
+                            if (pending != null && pending.id == answer.pingId) {
+                                matchedSample = EchoSample(
+                                    t1Us = pending.t1Us,
+                                    t1DoneUs = pending.t1DoneUs,
                                     t4Us = arrivalUs,
                                     answer = answer
                                 )
-                                pendingPingId = null
+                                currentPendingPing = null
                                 pingTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
                                 pingTimeoutRunnable = null
+                            } else {
+                                isLateOrDup = true
                             }
                         }
-                        sampleToEmit?.let { sample ->
-                            mainHandler.post { listener.onEchoSample(sample) }
+                        if (matchedSample != null) {
+                            mainHandler.post { listener.onEchoSample(matchedSample!!) }
+                        } else if (isLateOrDup) {
+                            mainHandler.post { listener.onEchoLateOrDuplicate(answer.pingId) }
                         }
                     }
                     is Protocol.EchoParseResult.Error -> {
                         Log.w(TAG, "Echo parse error: ${res.reason}")
+                        mainHandler.post { listener.onEchoBadAnswer() }
                     }
                 }
             } else if (uuid == Protocol.WMR_BATCHED_CHAR_UUID) {

@@ -33,7 +33,7 @@ object JsonWriter {
         sb.append("    \"rssi_end_dbm\": ${report.link.rssiEnd ?: "null"},\n")
         sb.append("    \"connection_interval_us\": ${report.link.connectionIntervalUs ?: "null"},\n")
         sb.append("    \"phy\": ${report.link.phy?.let { "\"$it\"" } ?: "null"},\n")
-        sb.append("    \"high_priority_requested\": ${report.link.priorityRequested ?: "null"}\n")
+        sb.append("    \"high_priority_requested\": ${report.link.highPriorityRequested ?: "null"}\n")
         sb.append("  },\n")
 
         // counters

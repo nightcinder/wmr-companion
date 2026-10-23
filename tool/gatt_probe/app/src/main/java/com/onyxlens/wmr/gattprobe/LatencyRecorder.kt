@@ -39,7 +39,7 @@ data class LatencyLink(
     val rssiEnd: Int? = null,
     val connectionIntervalUs: Int? = null,
     val phy: String? = null,
-    val priorityRequested: Boolean? = null
+    val highPriorityRequested: Boolean? = null
 )
 
 data class EchoSample(
@@ -206,49 +206,61 @@ class LatencyRecorder(
     private var _rowsDropped = 0
     private var _modeChanged = false
 
-    val echoUsed: Boolean get() = _echoUsed
-    val rowsDropped: Int get() = _rowsDropped
-    val rows: List<LatencyRow> get() = _rows
-    val echoRows: List<EchoRow> get() = _echoRows
+    val echoUsed: Boolean @Synchronized get() = _echoUsed
+    val rowsDropped: Int @Synchronized get() = _rowsDropped
+    val rows: List<LatencyRow> @Synchronized get() = ArrayList(_rows)
+    val echoRows: List<EchoRow> @Synchronized get() = ArrayList(_echoRows)
+    val echoTimeouts: Int @Synchronized get() = _echoTimeouts
+    val echoFailed: Int @Synchronized get() = _echoFailed
+    val echoSkipped: Int @Synchronized get() = _echoSkipped
 
+    @Synchronized
     fun useEcho() {
         _echoUsed = true
     }
 
+    @Synchronized
     fun addEcho(sample: EchoSample) {
         _echoUsed = true
         _echoRows.add(EchoRow(sample, originUs))
     }
 
+    @Synchronized
     fun addEchoTimeout() {
         _echoUsed = true
         _echoTimeouts++
     }
 
+    @Synchronized
     fun addEchoFailure() {
         _echoUsed = true
         _echoFailed++
     }
 
+    @Synchronized
     fun addEchoSkipped() {
         _echoUsed = true
         _echoSkipped++
     }
 
+    @Synchronized
     fun addEchoLateOrDuplicate() {
         _echoUsed = true
         _echoLateOrDup++
     }
 
+    @Synchronized
     fun addEchoBadAnswer() {
         _echoUsed = true
         _echoBadAnswers++
     }
 
+    @Synchronized
     fun markModeChanged() {
         _modeChanged = true
     }
 
+    @Synchronized
     fun addRecord(
         hand: Int,
         sequence: Long,
@@ -338,6 +350,7 @@ class LatencyRecorder(
         s.windowOffsets.add(offset)
     }
 
+    @Synchronized
     fun report(
         nowUs: Long,
         link: LatencyLink = LatencyLink(),
@@ -440,6 +453,7 @@ class LatencyRecorder(
         )
     }
 
+    @Synchronized
     fun toEchoCsv(): String {
         val sb = StringBuilder()
         sb.append(EchoRow.CSV_HEADER).append("\n")
@@ -449,6 +463,7 @@ class LatencyRecorder(
         return sb.toString()
     }
 
+    @Synchronized
     fun toSamplesCsv(): String {
         val sb = StringBuilder()
         sb.append(LatencyRow.CSV_HEADER).append("\n")

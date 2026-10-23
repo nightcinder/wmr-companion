@@ -20,7 +20,6 @@ import android.os.Looper
 import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
-import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.RadioButton
@@ -79,6 +78,11 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
     private var pingRunnable: Runnable? = null
     private var nextPingId = 1
     private var selectedIntervalMs = 250L
+
+    // Snapshotted at run start to prevent mid-run UI changes from altering report
+    private var runStartRssi: Int? = null
+    private var runStreamStr: String = "batched"
+    private var runEchoIntervalUs: Long = 250000L
 
     private var lastExportedJsonFile: File? = null
     private var lastExportedEchoFile: File? = null
@@ -154,6 +158,13 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                 R.id.rbInterval50 -> 50L
                 R.id.rbInterval1000 -> 1000L
                 else -> 250L
+            }
+        }
+
+        cbTwoBridges.setOnCheckedChangeListener { _, isChecked ->
+            Log.i(TAG, "Dual-bridge mode: $isChecked")
+            if (isChecked) {
+                Toast.makeText(this, "Dual-bridge mode selected (connects primary bridge)", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -303,6 +314,30 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         }
     }
 
+    override fun onEchoTimeout(pingId: Int) {
+        if (isRunInProgress) {
+            currentRecorder?.addEchoTimeout()
+        }
+    }
+
+    override fun onEchoFailure(pingId: Int) {
+        if (isRunInProgress) {
+            currentRecorder?.addEchoFailure()
+        }
+    }
+
+    override fun onEchoLateOrDuplicate(pingId: Int) {
+        if (isRunInProgress) {
+            currentRecorder?.addEchoLateOrDuplicate()
+        }
+    }
+
+    override fun onEchoBadAnswer() {
+        if (isRunInProgress) {
+            currentRecorder?.addEchoBadAnswer()
+        }
+    }
+
     override fun onDecodedRecord(record: Protocol.DecodedRecord, arrivalUs: Long) {
         if (isRunInProgress) {
             currentRecorder?.addRecord(
@@ -340,12 +375,16 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
         runStartTimeNanos = SystemClock.elapsedRealtimeNanos()
         val originUs = runStartTimeNanos / 1000L
-        val streamStr = if (rbStreamBatched.isChecked) "batched" else "none"
+
+        // Snapshot parameters at start of run
+        runStartRssi = client.lastRssi
+        runStreamStr = if (rbStreamBatched.isChecked) "batched" else "none"
+        runEchoIntervalUs = selectedIntervalMs * 1000L
 
         currentRecorder = LatencyRecorder(
             started = nowIso,
             originUs = originUs,
-            stream = streamStr
+            stream = runStreamStr
         ).apply {
             useEcho()
         }
@@ -425,7 +464,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
         val link = LatencyLink(
             mtu = gattClient?.negotiatedMtu,
-            rssiStart = gattClient?.lastRssi,
+            rssiStart = runStartRssi,
             rssiEnd = endRssi,
             connectionIntervalUs = gattClient?.connectionIntervalUs,
             highPriorityRequested = gattClient?.priorityRequested
@@ -434,7 +473,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         val report = recorder.report(
             nowUs = nowUs,
             link = link,
-            echoIntervalUs = selectedIntervalMs * 1000L
+            echoIntervalUs = runEchoIntervalUs
         )
 
         val jsonString = JsonWriter.toJsonString(report)
