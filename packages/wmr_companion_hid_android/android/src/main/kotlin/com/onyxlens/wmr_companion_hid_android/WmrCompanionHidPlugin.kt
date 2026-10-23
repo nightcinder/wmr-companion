@@ -51,6 +51,7 @@ class WmrCompanionHidPlugin :
     private var registered = false
     private var host: BluetoothDevice? = null
     private var pendingStart: MethodChannel.Result? = null
+    private var pendingDiscoverable: MethodChannel.Result? = null
     private var descriptor: ByteArray? = null
 
     // --- FlutterPlugin ---
@@ -95,6 +96,10 @@ class WmrCompanionHidPlugin :
     private fun detachActivity() {
         binding?.removeRequestPermissionsResultListener(this)
         binding = null
+        pendingStart?.error("cancelled", "activity detached", null)
+        pendingStart = null
+        pendingDiscoverable?.error("cancelled", "activity detached", null)
+        pendingDiscoverable = null
         stopHid()
         activity = null
     }
@@ -156,17 +161,7 @@ class WmrCompanionHidPlugin :
                 disconnect()
                 result.success(null)
             }
-            "requestDiscoverable" -> {
-                val a = activity
-                if (a == null) {
-                    result.error("no_activity", "no foreground activity", null)
-                    return
-                }
-                val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
-                    .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)
-                a.startActivity(intent)
-                result.success(null)
-            }
+            "requestDiscoverable" -> requestDiscoverable(result)
             else -> result.notImplemented()
         }
     }
@@ -187,16 +182,69 @@ class WmrCompanionHidPlugin :
         permissions: Array<out String>,
         grantResults: IntArray,
     ): Boolean {
-        if (requestCode != PERMISSION_REQUEST) return false
-        val result = pendingStart ?: return true
-        pendingStart = null
-        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            openProxy(result)
-        } else {
-            emit("error", message = "Bluetooth permission denied")
-            result.error("permission", "Bluetooth permission denied", null)
+        when (requestCode) {
+            PERMISSION_REQUEST -> {
+                val result = pendingStart ?: return true
+                pendingStart = null
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    openProxy(result)
+                } else {
+                    emit("error", message = "Bluetooth permission denied")
+                    result.error("permission", "Bluetooth permission denied", null)
+                }
+                return true
+            }
+            PERMISSION_REQUEST_DISCOVERABLE -> {
+                val result = pendingDiscoverable ?: return true
+                pendingDiscoverable = null
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    val a = activity
+                    if (a == null) {
+                        result.error("no_activity", "no foreground activity", null)
+                    } else {
+                        launchDiscoverable(a, result)
+                    }
+                } else {
+                    emit("error", message = "Bluetooth advertise permission denied")
+                    result.error("permission", "Bluetooth advertise permission denied", null)
+                }
+                return true
+            }
+            else -> return false
         }
-        return true
+    }
+
+    private fun requestDiscoverable(result: MethodChannel.Result) {
+        val a = activity
+        if (a == null) {
+            result.error("no_activity", "no foreground activity", null)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            a.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingDiscoverable?.error("cancelled", "superseded", null)
+            pendingDiscoverable = result
+            a.requestPermissions(
+                arrayOf(Manifest.permission.BLUETOOTH_ADVERTISE),
+                PERMISSION_REQUEST_DISCOVERABLE,
+            )
+            return
+        }
+        launchDiscoverable(a, result)
+    }
+
+    private fun launchDiscoverable(a: Activity, result: MethodChannel.Result) {
+        try {
+            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+                .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)
+            a.startActivity(intent)
+            result.success(null)
+        } catch (e: SecurityException) {
+            emit("error", message = "Bluetooth advertise permission missing")
+            result.error("permission", "Bluetooth advertise permission missing", null)
+        }
     }
 
     private fun start(result: MethodChannel.Result) {
@@ -360,5 +408,6 @@ class WmrCompanionHidPlugin :
         private const val METHOD_CHANNEL = "wmr_companion/hid_gamepad"
         private const val EVENT_CHANNEL = "wmr_companion/hid_gamepad/events"
         private const val PERMISSION_REQUEST = 4711
+        private const val PERMISSION_REQUEST_DISCOVERABLE = 4712
     }
 }

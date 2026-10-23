@@ -36,9 +36,10 @@ did not need to change.
 
 ## Platform notes
 
-- Android 9+ (`BluetoothHidDevice`). The plugin declares `BLUETOOTH_CONNECT`
-  and the legacy Bluetooth permissions for API <= 30; the host still explains
-  why it needs them.
+- Android 9+ (`BluetoothHidDevice`). The plugin declares `BLUETOOTH_CONNECT`,
+  `BLUETOOTH_ADVERTISE` (for `requestDiscoverable` on API 31+) and the legacy
+  Bluetooth permissions for API <= 30; the host still explains why it needs
+  them.
 - The plugin is `ActivityAware` and handles its own permission result, so the
   host does not need to override `onRequestPermissionsResult`.
 - iOS: not supported; `MethodChannelHidGamepad.status` reports `unsupported`
