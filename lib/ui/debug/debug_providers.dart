@@ -36,19 +36,30 @@ final fakeBridgeProvider = Provider<FakeWmrBridge>((ref) {
 /// The service on the fake transport, in the stream mode chosen in the UI.
 final fakeServiceProvider = FutureProvider<ControllerService>((ref) async {
   ref.watch(fakeBridgeProvider);
+  final settings = ref.read(stickSettingsProvider);
   final service = ControllerService(
     ref.watch(transportProvider),
     fakeBridgeDeviceId,
     mode: ref.read(streamModeProvider),
     mapping: ref.read(axisMappingProvider),
     filterKind: ref.read(filterKindProvider),
-    stickConfig: ref.read(stickConfigProvider),
+    stickConfig: settings.config,
+    onStickCentre: (hand, centre) => ref
+        .read(stickSettingsProvider.notifier)
+        .setCentre(hand, centre[0], centre[1]),
   );
+  applyStickCentres(service, settings.centres);
   applyFf13Settings(service, ref.read(ff13SettingsProvider));
   ref.onDispose(service.dispose);
   ref.listen(axisMappingProvider, (_, m) => service.setMapping(m));
   ref.listen(filterKindProvider, (_, k) => service.setFilterKind(k));
-  ref.listen(stickConfigProvider, (_, c) => service.setStickConfig(c));
+  ref.listen(
+    stickSettingsProvider.select((s) => s.config),
+    (_, c) => service.setStickConfig(c),
+  );
+  ref.listen(stickSettingsProvider.select((s) => s.centres), (_, centres) {
+    applyStickCentres(service, centres);
+  });
   ref.listen(ff13SettingsProvider, (_, s) => applyFf13Settings(service, s));
   await service.start();
   return service;

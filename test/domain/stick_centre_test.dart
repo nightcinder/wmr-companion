@@ -170,4 +170,42 @@ void main() {
     }
     expect(q.stickNormalizer.hasCentre, isFalse);
   });
+
+  test('a restored centre is removed without reporting a new one', () {
+    final seen = <List<double>>[];
+    final n = StickNormalizer(onCentreChanged: seen.add);
+    n.restoreCentre(0, 0.148);
+    expect(n.hasCentre, isTrue);
+    expect(n.centre[1], closeTo(0.148, 1e-9));
+    expect(n.centreUpdates, 1);
+    expect(seen, isEmpty);
+    // The saved offset is gone from the output, before a sample is seen.
+    const cfg = StickConfig(deadZone: 0, learn: false);
+    final out = hold(n, 0, raw(0.148), 0.01, config: cfg);
+    expect(out[0], 0);
+    expect(out[1], closeTo(0, 1e-4));
+    expect(n.centreUpdates, 1);
+  });
+
+  test('an invalid restored centre is ignored', () {
+    final n = StickNormalizer();
+    n.restoreCentre(double.nan, 0.1);
+    n.restoreCentre(0.1, double.infinity);
+    expect(n.hasCentre, isFalse);
+  });
+
+  test('learning and manual re-centring report the centre for saving', () {
+    final seen = <List<double>>[];
+    final n = StickNormalizer(onCentreChanged: seen.add);
+    hold(n, 0, raw(0.148), 1.2);
+    expect(seen, hasLength(1));
+    expect(seen.single[1], closeTo(0.148, 1e-3));
+
+    final m = StickNormalizer(onCentreChanged: seen.add);
+    hold(m, raw(-0.3), raw(0.4), 0.05, config: const StickConfig(learn: false));
+    m.recentre();
+    expect(seen, hasLength(2));
+    expect(seen.last[0], closeTo(-0.3, 1e-3));
+    expect(seen.last[1], closeTo(0.4, 1e-3));
+  });
 }

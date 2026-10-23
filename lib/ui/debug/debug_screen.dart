@@ -399,7 +399,7 @@ class AxisSettingsPanel extends ConsumerWidget {
     final notifier = ref.read(axisMappingProvider.notifier);
     final filter = ref.watch(filterKindProvider);
     final stickConfig = ref.watch(stickConfigProvider);
-    final stickNotifier = ref.read(stickConfigProvider.notifier);
+    final stickNotifier = ref.read(stickSettingsProvider.notifier);
     final theme = Theme.of(context);
     return ExpansionTile(
       title: const Text('Debug settings'),

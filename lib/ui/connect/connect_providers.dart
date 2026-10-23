@@ -76,7 +76,14 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     });
     ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
     ref.listen(filterKindProvider, (_, k) => _service?.setFilterKind(k));
-    ref.listen(stickConfigProvider, (_, c) => _service?.setStickConfig(c));
+    ref.listen(
+      stickSettingsProvider.select((s) => s.config),
+      (_, c) => _service?.setStickConfig(c),
+    );
+    ref.listen(stickSettingsProvider.select((s) => s.centres), (_, centres) {
+      final service = _service;
+      if (service != null) applyStickCentres(service, centres);
+    });
     ref.listen(ff13SettingsProvider, (_, s) {
       final service = _service;
       if (service != null) applyFf13Settings(service, s);
@@ -134,14 +141,19 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     await stopScan();
     _update(deviceId: deviceId);
     await _service?.dispose();
+    final settings = ref.read(stickSettingsProvider);
     final service = _service = ControllerService(
       _transport,
       deviceId,
       mode: ref.read(streamModeProvider),
       mapping: ref.read(axisMappingProvider),
       filterKind: ref.read(filterKindProvider),
-      stickConfig: ref.read(stickConfigProvider),
+      stickConfig: settings.config,
+      onStickCentre: (hand, centre) => ref
+          .read(stickSettingsProvider.notifier)
+          .setCentre(hand, centre[0], centre[1]),
     );
+    applyStickCentres(service, settings.centres);
     applyFf13Settings(service, ref.read(ff13SettingsProvider));
     try {
       await service.start();
