@@ -52,6 +52,7 @@ wmr-companion/
   packages/wmr_companion/    # public facade for host apps
   packages/wmr_ble/          # universal_ble adapter/transport and lifecycle hook
   packages/wmr_companion_ui/ # optional orientation/link/stats/gamepad widgets
+  packages/wmr_companion_hid_android/ # optional Android Bluetooth HID output
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
   test/
   docs/STATUS.md    # current state and roadmap

@@ -28,7 +28,7 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui example/lib example/test
+      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
       - run: flutter analyze
       - run: flutter test
       - name: wmr_core package
@@ -67,6 +67,20 @@ jobs:
           if find packages/wmr_companion/lib -maxdepth 1 -name '*.dart' \
               ! -name 'wmr_companion.dart' ! -name 'testing.dart' | grep .; then
             echo "only wmr_companion.dart and testing.dart may be top-level libraries"
+            exit 1
+          fi
+      - name: wmr_companion_hid_android package
+        working-directory: packages/wmr_companion_hid_android
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: wmr_companion_hid_android stays app-free
+        run: |
+          set -eu
+          test -d packages/wmr_companion_hid_android/lib
+          if grep -rnE "package:(flutter_riverpod|wmr_companion_app|wmr_core)/" packages/wmr_companion_hid_android/lib; then
+            echo "wmr_companion_hid_android must not import Riverpod, wmr_core internals or the app"
             exit 1
           fi
       - name: wmr_companion_ui package

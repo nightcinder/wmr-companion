@@ -1,4 +1,4 @@
-package com.onyxlens.wmr_companion
+package com.onyxlens.wmr_companion_hid_android
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -15,25 +15,34 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry
 
 /**
  * The phone as a Bluetooth HID gamepad (Android 9+, `BluetoothHidDevice`).
- * Dart side: lib/hid/hid_gamepad_transport.dart. The report descriptor is in
- * lib/hid/hid_report.dart and is passed in by `start`.
+ * Dart side: lib/src/hid_gamepad_transport.dart. The report descriptor is in
+ * lib/src/hid_report.dart and is passed in by `start`.
  *
- * Not tested on a phone: some vendors ship without the HID device profile.
+ * A Flutter plugin registers itself; the host app does not forward permission
+ * results. Not tested on a phone: some vendors ship without the HID device
+ * profile.
  */
-class HidGamepadPlugin(
-    private val activity: Activity,
-    messenger: BinaryMessenger,
-) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+class WmrCompanionHidPlugin :
+    FlutterPlugin,
+    MethodCallHandler,
+    EventChannel.StreamHandler,
+    ActivityAware,
+    PluginRegistry.RequestPermissionsResultListener {
 
-    private val methods = MethodChannel(messenger, "wmr_companion/hid_gamepad")
-    private val events = EventChannel(messenger, "wmr_companion/hid_gamepad/events")
+    private var methods: MethodChannel? = null
+    private var events: EventChannel? = null
+    private var activity: Activity? = null
+    private var binding: ActivityPluginBinding? = null
     private val main = Handler(Looper.getMainLooper())
     private var sink: EventChannel.EventSink? = null
 
@@ -43,15 +52,50 @@ class HidGamepadPlugin(
     private var pendingStart: MethodChannel.Result? = null
     private var descriptor: ByteArray? = null
 
-    init {
-        methods.setMethodCallHandler(this)
-        events.setStreamHandler(this)
+    // --- FlutterPlugin ---
+
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        methods = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL).also {
+            it.setMethodCallHandler(this)
+        }
+        events = EventChannel(binding.binaryMessenger, EVENT_CHANNEL).also {
+            it.setStreamHandler(this)
+        }
     }
 
-    fun dispose() {
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         stopHid()
-        methods.setMethodCallHandler(null)
-        events.setStreamHandler(null)
+        methods?.setMethodCallHandler(null)
+        events?.setStreamHandler(null)
+        methods = null
+        events = null
+    }
+
+    // --- ActivityAware ---
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        this.binding = binding
+        activity = binding.activity
+        binding.addRequestPermissionsResultListener(this)
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        detachActivity()
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        onAttachedToActivity(binding)
+    }
+
+    override fun onDetachedFromActivity() {
+        detachActivity()
+    }
+
+    private fun detachActivity() {
+        binding?.removeRequestPermissionsResultListener(this)
+        binding = null
+        stopHid()
+        activity = null
     }
 
     // --- EventChannel ---
@@ -112,9 +156,14 @@ class HidGamepadPlugin(
                 result.success(null)
             }
             "requestDiscoverable" -> {
+                val a = activity
+                if (a == null) {
+                    result.error("no_activity", "no foreground activity", null)
+                    return
+                }
                 val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
                     .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)
-                activity.startActivity(intent)
+                a.startActivity(intent)
                 result.success(null)
             }
             else -> result.notImplemented()
@@ -122,17 +171,23 @@ class HidGamepadPlugin(
     }
 
     private fun adapter(): BluetoothAdapter? =
-        (activity.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        (activity?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
-    private fun hasConnectPermission(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+    private fun hasConnectPermission(): Boolean {
+        val a = activity ?: return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            a.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
             PackageManager.PERMISSION_GRANTED
+    }
 
-    /** Called by MainActivity for the BLUETOOTH_CONNECT request made in [start]. */
-    fun onPermissionResult(requestCode: Int, grantResults: IntArray) {
-        if (requestCode != PERMISSION_REQUEST) return
-        val result = pendingStart ?: return
+    /** The plugin owns the permission request; the host does not forward it. */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ): Boolean {
+        if (requestCode != PERMISSION_REQUEST) return false
+        val result = pendingStart ?: return true
         pendingStart = null
         if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             openProxy(result)
@@ -140,6 +195,7 @@ class HidGamepadPlugin(
             emit("error", message = "Bluetooth permission denied")
             result.error("permission", "Bluetooth permission denied", null)
         }
+        return true
     }
 
     private fun start(result: MethodChannel.Result) {
@@ -147,10 +203,15 @@ class HidGamepadPlugin(
             result.error("args", "descriptor missing", null)
             return
         }
+        val a = activity
+        if (a == null) {
+            result.error("no_activity", "no foreground activity", null)
+            return
+        }
         if (!hasConnectPermission()) {
             pendingStart?.error("cancelled", "superseded", null)
             pendingStart = result
-            activity.requestPermissions(
+            a.requestPermissions(
                 arrayOf(Manifest.permission.BLUETOOTH_CONNECT),
                 PERMISSION_REQUEST,
             )
@@ -161,6 +222,11 @@ class HidGamepadPlugin(
 
     @SuppressLint("MissingPermission")
     private fun openProxy(result: MethodChannel.Result) {
+        val a = activity
+        if (a == null) {
+            result.error("no_activity", "no foreground activity", null)
+            return
+        }
         val bt = adapter()
         if (bt == null || !bt.isEnabled) {
             emit("error", message = "Bluetooth is off")
@@ -172,7 +238,7 @@ class HidGamepadPlugin(
             return
         }
         val ok = bt.getProfileProxy(
-            activity,
+            a,
             object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
                     if (profile != BluetoothProfile.HID_DEVICE) return
@@ -290,6 +356,8 @@ class HidGamepadPlugin(
     }
 
     companion object {
+        private const val METHOD_CHANNEL = "wmr_companion/hid_gamepad"
+        private const val EVENT_CHANNEL = "wmr_companion/hid_gamepad/events"
         private const val PERMISSION_REQUEST = 4711
     }
 }

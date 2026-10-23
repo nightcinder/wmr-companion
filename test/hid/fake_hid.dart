@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:wmr_companion_app/hid/hid_gamepad_transport.dart';
+import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 
 class FakeHid implements HidGamepadTransport {
   final _status = StreamController<HidStatus>.broadcast();

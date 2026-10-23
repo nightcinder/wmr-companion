@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_core/domain/gamepad.dart';
-import 'package:wmr_companion_app/hid/hid_gamepad_transport.dart';
+import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 import 'package:wmr_companion_app/hid/hid_output.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/services/controller_service.dart';
