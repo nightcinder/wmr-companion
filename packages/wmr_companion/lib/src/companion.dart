@@ -371,10 +371,15 @@ class WmrCompanion {
       filterKind: _config.fusion.kind,
       filterTuning: _config.fusion.tuning,
       stickConfig: _config.sticks,
-      onStickCentre: onStickCentre == null
-          ? null
-          : (hand, centre) =>
-                onStickCentre!(Hand.of(hand), List.unmodifiable(centre)),
+      // Record every learned or recentred value before forwarding it to the
+      // host. A facade reconnect builds a new service from _stickCentres, so
+      // a host that only persists the callback value would otherwise get the
+      // old centre back.
+      onStickCentre: (hand, centre) {
+        final h = Hand.of(hand);
+        _stickCentres[h.wireIndex] = List<double>.unmodifiable(centre);
+        onStickCentre?.call(h, List.unmodifiable(centre));
+      },
     );
     for (var h = 0; h < _stickCentres.length; h++) {
       final centre = _stickCentres[h];

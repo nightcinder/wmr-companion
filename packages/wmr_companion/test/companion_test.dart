@@ -204,6 +204,30 @@ void main() {
     );
   });
 
+  test('a recentred stick is restored after a reconnect', () async {
+    companion = WmrCompanion(ble: transport);
+    await companion.connect(_bridge);
+    for (var i = 0; i < 3; i++) {
+      fakeBridge.tick();
+    }
+    await _settle();
+
+    companion.recentreStick(Hand.left);
+    expect(
+      companion.debugControllerService!.decodedStats.hands[0].stickLearned,
+      isTrue,
+    );
+
+    await transport.disconnect(fakeBridgeDeviceId);
+    await _settle(700);
+
+    expect(companion.state, WmrConnectionState.ready);
+    // The new service starts empty; the facade must restore the centre it
+    // recorded from the recentre callback, even without a host listener.
+    final stats = companion.debugControllerService!.decodedStats.hands[0];
+    expect(stats.stickLearned, isTrue);
+  });
+
   test('dispose closes the link, the facade and is idempotent', () async {
     companion = WmrCompanion(ble: transport);
     await companion.connect(_bridge);
