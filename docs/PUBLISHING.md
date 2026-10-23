@@ -162,7 +162,13 @@ The two application hosts (`wmr_companion_app` and `example/`) are workspace mem
 
 ## 5. First Publication
 
-Publishing is a separate, owner-authorised step. Nothing in the repository publishes automatically, and `dart pub publish --dry-run` uploads nothing.
+**Status: on hold.** The owner decided on 2026-10-23 (ONY-41) to hold the
+`0.1.0` release. The same decision waived the iOS 18 device gate for this
+release line, so the hold is a choice about timing, not an unresolved gate:
+nothing is published, and a release still needs an explicit owner go-ahead.
+Nothing in the repository publishes automatically.
+
+Publishing is a separate, owner-authorised step. `dart pub publish --dry-run` uploads nothing.
 
 When the owner authorises publication after the API freeze, publish in the wave order from §2 — **no pubspec edits are required**:
 
