@@ -32,16 +32,25 @@ text = pubspec.read_text()
 anchor = "  cupertino_icons: ^1.0.8"
 if anchor not in text:
     raise SystemExit("unexpected generated pubspec: no cupertino_icons line")
-deps = "\n".join(
-    f"  {name}:\n    path: {root}/packages/{name}"
-    for name in (
-        "wmr_companion",
-        "wmr_ble",
-        "wmr_companion_ui",
-        "wmr_companion_hid_android",
-    )
+host = (
+    "wmr_companion",
+    "wmr_ble",
+    "wmr_companion_ui",
+    "wmr_companion_hid_android",
 )
-pubspec.write_text(text.replace(anchor, anchor + "\n" + deps))
+deps = "\n".join(
+    f"  {name}:\n    path: {root}/packages/{name}" for name in host
+)
+# The packages depend on each other by hosted constraints, which are not on
+# pub.dev yet. A host using them by path must override the whole internal
+# closure, because dependency overrides are not transitive.
+closure = host + ("wmr_core", "wmr_fusion")
+overrides = "dependency_overrides:\n" + "\n".join(
+    f"  {name}:\n    path: {root}/packages/{name}" for name in closure
+)
+pubspec.write_text(
+    text.replace(anchor, anchor + "\n" + deps + "\n" + overrides)
+)
 PY
 
 rm -f "$app/test/widget_test.dart"
