@@ -33,7 +33,9 @@ void main() {
   LatencyState state() => container.read(latencyControllerProvider);
 
   Future<void> until(bool Function() test) async {
-    for (var i = 0; i < 500 && !test(); i++) {
+    // A run finishes through a real periodic tick and a file save, so give it
+    // room on a loaded CI machine rather than assuming a sub-second turnaround.
+    for (var i = 0; i < 2500 && !test(); i++) {
       await Future<void>.delayed(const Duration(milliseconds: 2));
     }
     expect(test(), isTrue);
@@ -273,6 +275,27 @@ void main() {
       expect(service.mode, StreamMode.raw);
       expect(state().streamChoice, LatencyStream.raw);
     });
+
+    test(
+      'disposing while stop is in flight does not touch a disposed ref',
+      () async {
+        await setUpStream(mode: StreamMode.raw);
+        await controller().selectStream(DebugSource.fake, LatencyStream.none);
+        controller().selectDuration(null);
+        await controller().start(DebugSource.fake);
+        expect(state().stage, LatencyStage.running);
+
+        // The user leaves the screen while the run is being saved: the provider
+        // is disposed between stop()'s awaits. It must finish without reading
+        // state or the ref again.
+        final stopping = controller().stop();
+        container.dispose();
+        await expectLater(stopping, completes);
+
+        // tearDown disposes the container again; give it a fresh one.
+        container = ProviderContainer();
+      },
+    );
 
     test('leaving during a no-stream run restores the mode', () async {
       await setUpStream();
