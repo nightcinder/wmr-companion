@@ -1,6 +1,6 @@
 # WMR Companion App: Project Plan (for Claude Code)
 
-> Current state, hardware results and the roadmap live in [STATUS.md](STATUS.md). This file is the plan and architecture reference; where the two differ, STATUS.md is newer.
+> Current state, hardware results and the roadmap live in [STATUS.md](STATUS.md). This file is the plan and architecture reference; where the two differ, STATUS.md is newer. Packaging the pipeline as reusable Flutter packages is framed in [LIBRARY.md](LIBRARY.md).
 
 ## Goal
 A Flutter app (Android first, iOS next) that connects over BLE GATT to ESP32 firmware (BTstack) exposing WMR controllers, and:
