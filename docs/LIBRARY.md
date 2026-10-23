@@ -16,6 +16,11 @@ Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 Turn the app into a **federated set of Flutter packages** whose public surface
 is an in-process controller API, not an app and not a system-wide gamepad.
 
+- **Android and iOS are both in scope from the first release.** This is a
+  cross-platform Flutter library, not an Android app with an iOS follow-up. The
+  first version must build and run on both; desktop and web are out of scope.
+  Where the platforms differ (HID availability, MTU/interval control), the
+  difference is documented and hidden behind the facade.
 - **Core value is the pipeline, not the screens.** Scan, connect, FF11/FF12/FF14
   parsing, FF13 calibration, FF15 echo, loss/latency statistics, 3DoF fusion,
   gamepad mapping and multi-bridge coordination are reusable. The Connect,
@@ -63,6 +68,10 @@ The iOS constraint, stated precisely:
 - Therefore the only general iOS path is **in-app consumption**: the app that
   wants the input embeds the pipeline. A Flutter library is exactly that, and
   it also removes the phone-as-middleman HID link from the latency budget.
+
+The library therefore targets **Android and iOS together**: iOS is a first-class
+platform from v1, not a later port. Android keeps a better system-wide story
+(HID output, optional package) but that is an add-on, not the core promise.
 
 This is an architectural bypass, not a platform or security bypass. It also
 means the target audience is Flutter apps (games, emulators, XR/visionOS
@@ -223,6 +232,10 @@ API rules:
 
 ## 6. Platform strategy: one seam, two transports
 
+**Android and iOS are both v1 targets.** The transport sequence below is about
+implementation order inside v1, not platform scope: both platforms ship in the
+first public version.
+
 ```
 WmrCompanion
   -> ControllerService -> parsers + fusion + gamepad mapping   (Dart, shared)
@@ -367,13 +380,16 @@ phase says so.
 | 2 | Public facade | Add `WmrCompanion`, config, models, typed errors, `FakeTransport` example, API README; app uses the facade through a thin adapter | App works unchanged; README example compiles as a test; no `package:flutter` in `wmr_companion`'s public exports except the plugin type |
 | 3 | BLE package | Move `lib/ble/` into `wmr_ble`; keep `UniversalBleTransport` and fakes; add permission/adapter-state docs; inject app lifecycle | Android debug APK connects and streams on hardware (user-reported); fake tests green |
 | 4 | Reference app | Keep the current app as `apps/wmr_companion_app` (or root app during transition); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
-| 5 | iOS library | Add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport | iOS example builds and connects on a device (user-reported); latency decision recorded in `LATENCY.md` |
+| 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
 | 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures | iOS latency/background requirement met or explicitly declined with numbers |
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats), `wmr_companion_hid_android` (existing HID output) | App consumes the UI kit; HID package tested as before; neither is required by the facade |
 | 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
 
 Sequencing notes:
 
+- Phases 1–5 are v1. Phase 6 is a transport upgrade, not the iOS launch: if
+  measurements say `universal_ble` is good enough, iOS still ships in v1 and
+  phase 6 never runs.
 - Phase 1 must not change behavior. Do not "fix" the protocol while moving it.
 - Phase 2 is where the API becomes a contract; freeze names and error types
   before phase 3.
@@ -431,7 +447,8 @@ Sequencing notes:
 5. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
    also need a non-Flutter SDK (then the native kits become products too)?
 
-Settled: **iOS 18 is the minimum** (owner, ONY-38).
+Settled: **iOS 18 is the minimum** (owner, ONY-38). **Android and iOS are both
+in v1 scope** (owner, 2026-10-23 on ONY-41).
 
 ## 14. What this framework does not claim
 
