@@ -146,3 +146,36 @@ abstract class BleTransport {
 
   Future<void> dispose();
 }
+
+extension BleTransportMultiple on BleTransport {
+  /// Subscribes to [characteristicUuid] on multiple devices and merges their
+  /// notification streams.
+  Stream<BleNotification> subscribeMultiple(
+    Iterable<String> deviceIds,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    late final StreamController<BleNotification> ctl;
+    final subs = <StreamSubscription<BleNotification>>[];
+    ctl = StreamController<BleNotification>.broadcast(
+      onListen: () {
+        for (final id in deviceIds) {
+          subs.add(
+            subscribe(
+              id,
+              serviceUuid,
+              characteristicUuid,
+            ).listen(ctl.add, onError: ctl.addError),
+          );
+        }
+      },
+      onCancel: () async {
+        for (final s in subs) {
+          await s.cancel();
+        }
+        subs.clear();
+      },
+    );
+    return ctl.stream;
+  }
+}

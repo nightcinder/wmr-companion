@@ -104,23 +104,38 @@ class RealPanel extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          'State: ${_describe(status.phase)}',
+          'State: ${_describe(status.phase)}${s.connectedDeviceIds.length > 1 ? ' (${s.connectedDeviceIds.length} bridges)' : ''}',
           style: theme.textTheme.titleMedium?.copyWith(
             color: status.isFailure ? theme.colorScheme.error : null,
           ),
         ),
         if (status.message != null) Text(status.message!),
-        Text('MTU (negotiated): ${status.mtu ?? '-'}', style: mono),
-        Text(
-          'High priority: ${switch (status.priorityRequested) {
-            true => 'requested',
-            false => 'failed',
-            null => 'n/a',
-          }}',
-          style: mono,
-        ),
-        for (final w in status.warnings)
-          Text('Warning: $w', style: theme.textTheme.bodySmall),
+        if (s.connectedDeviceIds.length <= 1) ...[
+          Text('MTU (negotiated): ${status.mtu ?? '-'}', style: mono),
+          Text(
+            'High priority: ${switch (status.priorityRequested) {
+              true => 'requested',
+              false => 'failed',
+              null => 'n/a',
+            }}',
+            style: mono,
+          ),
+          for (final w in status.warnings)
+            Text('Warning: $w', style: theme.textTheme.bodySmall),
+        ] else ...[
+          for (final id in s.connectedDeviceIds) ...[
+            Builder(
+              builder: (context) {
+                final devStatus = s.deviceStatuses[id];
+                return Text(
+                  'Bridge $id: MTU ${devStatus?.mtu ?? '-'}, '
+                  'priority: ${devStatus?.priorityRequested == true ? "requested" : "n/a"}',
+                  style: mono,
+                );
+              },
+            ),
+          ],
+        ],
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -134,7 +149,11 @@ class RealPanel extends ConsumerWidget {
             if (s.connected || status.phase == BleLinkPhase.connectionLost)
               FilledButton(
                 onPressed: controller.disconnect,
-                child: const Text('Disconnect'),
+                child: Text(
+                  s.connectedDeviceIds.length > 1
+                      ? 'Disconnect all'
+                      : 'Disconnect',
+                ),
               ),
             if (status.phase == BleLinkPhase.connectionLost &&
                 s.deviceId != null)
@@ -185,12 +204,17 @@ class RealPanel extends ConsumerWidget {
             contentPadding: EdgeInsets.zero,
             title: Text(r.name ?? '(no name)'),
             subtitle: Text('${r.deviceId}   ${r.rssi ?? '-'} dBm'),
-            trailing: TextButton(
-              onPressed: s.busy || s.connected
-                  ? null
-                  : () => controller.connect(r.deviceId),
-              child: const Text('Connect'),
-            ),
+            trailing: s.isDeviceConnected(r.deviceId)
+                ? TextButton(
+                    onPressed: () => controller.disconnect(r.deviceId),
+                    child: const Text('Disconnect bridge'),
+                  )
+                : TextButton(
+                    onPressed: s.isDeviceBusy(r.deviceId)
+                        ? null
+                        : () => controller.connect(r.deviceId),
+                    child: const Text('Connect'),
+                  ),
           ),
         if (s.stats != null) ...[
           const SizedBox(height: 16),

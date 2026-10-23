@@ -28,13 +28,18 @@ class FakeBleAdapter implements BleAdapter {
   Object? mtuError;
 
   // Sync, like a platform callback: the transport must stamp in the callback.
-  final _values = StreamController<(String, Uint8List)>.broadcast(sync: true);
+  final _values = StreamController<(String?, String, Uint8List)>.broadcast(
+    sync: true,
+  );
   final _links = StreamController<AdapterConnectionEvent>.broadcast();
   final _scan = StreamController<BleScanResult>.broadcast();
   final _params = StreamController<AdapterConnectionParams>.broadcast();
 
-  void emitNotification(String characteristic, List<int> value) =>
-      _values.add((characteristic, Uint8List.fromList(value)));
+  void emitNotification(
+    String characteristic,
+    List<int> value, {
+    String? deviceId,
+  }) => _values.add((deviceId, characteristic, Uint8List.fromList(value)));
 
   void emitScanResult(BleScanResult r) => _scan.add(r);
 
@@ -178,7 +183,13 @@ class FakeBleAdapter implements BleAdapter {
 
   @override
   Stream<Uint8List> notifications(String deviceId, String characteristicUuid) =>
-      _values.stream.where((e) => e.$1 == characteristicUuid).map((e) => e.$2);
+      _values.stream
+          .where(
+            (e) =>
+                (e.$1 == null || e.$1 == deviceId) &&
+                e.$2 == characteristicUuid,
+          )
+          .map((e) => e.$3);
 
   @override
   Future<Uint8List> read(
