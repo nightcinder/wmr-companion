@@ -334,6 +334,7 @@ class LatencyController extends Notifier<LatencyState> {
   Future<void> selectStream(DebugSource source, LatencyStream choice) async {
     if (state.stage == LatencyStage.running) return;
     final input = await ref.read(latencyInputProvider)(source);
+    if (!ref.mounted) return;
     if (input == null) {
       state = state.copyWith(error: 'Not connected to the bridge.');
       return;
@@ -357,10 +358,12 @@ class LatencyController extends Notifier<LatencyState> {
       try {
         await setMode(wanted);
       } catch (e) {
+        if (!ref.mounted) return;
         state = state.copyWith(error: 'Cannot switch the stream: $e');
         return;
       }
     }
+    if (!ref.mounted) return;
     state = state.copyWith(streamChoice: choice, clearError: true);
   }
 
@@ -372,6 +375,7 @@ class LatencyController extends Notifier<LatencyState> {
   Future<void> start(DebugSource source) async {
     if (state.stage == LatencyStage.running) return;
     final input = await ref.read(latencyInputProvider)(source);
+    if (!ref.mounted) return;
     if (input == null) {
       state = state.copyWith(error: 'Not connected to the bridge.');
       return;
@@ -388,11 +392,13 @@ class LatencyController extends Notifier<LatencyState> {
       try {
         await setMode(choice.mode);
       } catch (e) {
+        if (!ref.mounted) return;
         state = state.copyWith(error: 'Cannot switch the stream: $e');
         return;
       }
       activeMode = choice.mode;
     }
+    if (!ref.mounted) return;
     _input = input;
     final links = <String, LatencyLink>{};
     for (final bridgeId in input.bridgeIds) {
@@ -405,6 +411,7 @@ class LatencyController extends Notifier<LatencyState> {
         priorityRequested: input.priorityRequested,
       );
     }
+    if (!ref.mounted) return;
     _links = links;
     _countersAtStart = input.counters();
     final recorder = _recorder = LatencyRecorder(
@@ -416,7 +423,9 @@ class LatencyController extends Notifier<LatencyState> {
     final factory = input.echoFactory;
     if (state.echoEnabled && factory != null) {
       final echo = _echo = factory(ref.read(echoTimeoutProvider));
-      if (await echo.start()) {
+      final started = await echo.start();
+      if (!ref.mounted) return;
+      if (started) {
         recorder.useEcho();
         _echoTimer = Timer.periodic(
           state.echoInterval,
@@ -460,6 +469,7 @@ class LatencyController extends Notifier<LatencyState> {
           if (m.mode.name != activeMode.name) recorder.markModeChanged();
         }),
       );
+    if (!ref.mounted) return;
     state = LatencyState(
       stage: LatencyStage.running,
       durationSeconds: state.durationSeconds,
@@ -496,6 +506,8 @@ class LatencyController extends Notifier<LatencyState> {
   }
 
   void _tick() {
+    // A tick can already be queued when the provider is disposed.
+    if (!ref.mounted) return;
     final input = _input;
     if (input == null || _recorder == null) return;
     final elapsed =
@@ -546,6 +558,12 @@ class LatencyController extends Notifier<LatencyState> {
       await s.cancel();
     }
     _subs.clear();
+    // `stop` releases the screen's resources before it can publish the
+    // result. Nothing below may use the ref or the state once the provider
+    // has been disposed in the meantime (for example, the user leaves the
+    // screen while a timed run is finishing); the dispose hook has already
+    // cancelled the timers, subscriptions and mode restore.
+    if (!ref.mounted) return;
     final recorder = _recorder!;
     final input = _input!;
     final links = <String, LatencyLink>{};
@@ -553,11 +571,13 @@ class LatencyController extends Notifier<LatencyState> {
       final info = await input.linkInfo(entry.key);
       links[entry.key] = entry.value.withEnd(rssiEnd: info?.rssi);
     }
+    if (!ref.mounted) return;
     _links = links;
     final report = _report();
     final echo = _echo;
     _echo = null;
     await echo?.dispose();
+    if (!ref.mounted) return;
     final elapsed = report.durationUs ~/ Duration.microsecondsPerSecond;
     _recorder = null;
     _input = null;
@@ -578,12 +598,15 @@ class LatencyController extends Notifier<LatencyState> {
         }
       }
     }
+    if (!ref.mounted) return;
     final restoredChoice = restore == null
         ? state.streamChoice
         : LatencyStream.fromMode(restore);
     try {
       final store = await ref.read(latencyStoreProvider.future);
+      if (!ref.mounted) return;
       final saved = await store.save(recorder, report);
+      if (!ref.mounted) return;
       state = state.copyWith(
         stage: LatencyStage.finished,
         elapsedSeconds: elapsed,
@@ -597,6 +620,7 @@ class LatencyController extends Notifier<LatencyState> {
       }
       await refreshRuns();
     } on FileSystemException catch (e) {
+      if (!ref.mounted) return;
       state = state.copyWith(
         stage: LatencyStage.finished,
         elapsedSeconds: elapsed,
