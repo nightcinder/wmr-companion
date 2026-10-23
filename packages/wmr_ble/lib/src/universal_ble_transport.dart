@@ -281,6 +281,7 @@ class UniversalBleTransport implements BleTransport {
 
   Future<void> _startScan(StreamController<BleScanResult> ctl) async {
     if (!_scanWanted || _scanPaused || ctl.isClosed) return;
+    if (_adapterScanning) return;
     try {
       await _preflight();
     } on BleTransportException catch (e) {
@@ -299,6 +300,7 @@ class UniversalBleTransport implements BleTransport {
       return;
     }
     if (!_scanWanted || _scanPaused || ctl.isClosed) return;
+    if (_adapterScanning) return;
 
     try {
       _scanSub ??= _adapter.scanResults.listen((r) {

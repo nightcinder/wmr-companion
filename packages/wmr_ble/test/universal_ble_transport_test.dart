@@ -473,6 +473,27 @@ void main() {
       await sub.cancel();
     });
 
+    test('scan() while paused and a resume start the adapter once', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+
+      await slow.handleAppLifecycle(BleAppLifecycle.paused);
+      final sub = slow.scan().listen((_) {});
+      await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+      await pump();
+
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(1),
+      );
+      expect(slow.status.phase, BleLinkPhase.scanning);
+      await sub.cancel();
+    });
+
     test('a failed resume reports the real preflight cause', () async {
       final slow = UniversalBleTransport(
         adapter: adapter,
