@@ -393,6 +393,8 @@ phase says so.
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats), `wmr_companion_hid_android` (existing HID output) | App consumes the UI kit; HID package tested as before; neither is required by the facade |
 | 8 | Publish | API freeze, docs, CHANGELOG, pub.dev, deprecation policy, example gallery | `dart pub publish --dry-run` clean; a fresh app can add the package and read gamepad state |
 
+Phase 1 landed in #39 (`packages/wmr_core`); the remaining rows are still ahead.
+
 Sequencing notes:
 
 - Phases 1–5 are v1. Phase 6 is a transport upgrade, not the iOS launch: if
