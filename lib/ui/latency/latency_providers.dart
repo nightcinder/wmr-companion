@@ -24,10 +24,12 @@ class LatencyInput {
     required this.modeChanges,
     required this.clock,
     required this.mode,
+    required this.bridgeIds,
     required this.linkInfo,
     required this.counters,
     this.setMode,
     this.priorityRequested,
+    this.echoBridgeId,
     this.echoFactory,
   });
 
@@ -44,12 +46,18 @@ class LatencyInput {
   /// not use the selector.
   final Future<void> Function(StreamMode)? setMode;
 
-  /// Null when the platform cannot say.
-  final Future<BleConnectionInfo?> Function() linkInfo;
+  /// The connected bridges, transport device id order.
+  final List<String> bridgeIds;
+
+  /// Link parameters of one bridge; null when the platform cannot say.
+  final Future<BleConnectionInfo?> Function(String bridgeId) linkInfo;
 
   /// Service error counters, by name; the run reports how much they grew.
   final Map<String, int> Function() counters;
   final bool? priorityRequested;
+
+  /// The bridge the echo pings go to, when echo is used.
+  final String? echoBridgeId;
 
   /// Makes the FF15 echo client for this connection; null when there is none
   /// (nothing to ping).
@@ -65,13 +73,15 @@ class LatencyInput {
       modeChanges: service.modeChanges,
       clock: service.transport.clock,
       mode: service.mode,
+      bridgeIds: service.deviceIds,
       setMode: service.setMode,
       priorityRequested: priorityRequested,
+      echoBridgeId: service.deviceId,
       echoFactory: (timeout) =>
           EchoClient(service.transport, service.deviceId, timeout: timeout),
-      linkInfo: () async {
+      linkInfo: (bridgeId) async {
         try {
-          return await service.transport.connectionInfo(service.deviceId);
+          return await service.transport.connectionInfo(bridgeId);
         } catch (_) {
           return null;
         }
@@ -267,7 +277,7 @@ final latencyControllerProvider =
 class LatencyController extends Notifier<LatencyState> {
   LatencyRecorder? _recorder;
   LatencyInput? _input;
-  LatencyLink _link = const LatencyLink();
+  Map<String, LatencyLink> _links = const {};
   Map<String, int> _countersAtStart = const {};
   final List<StreamSubscription<Object?>> _subs = [];
   Timer? _timer;
@@ -384,14 +394,18 @@ class LatencyController extends Notifier<LatencyState> {
       activeMode = choice.mode;
     }
     _input = input;
-    final info = await input.linkInfo();
-    _link = LatencyLink(
-      mtu: info?.mtu,
-      rssiStart: info?.rssi,
-      connectionIntervalUs: info?.connectionIntervalUs,
-      phy: info?.phy,
-      priorityRequested: input.priorityRequested,
-    );
+    final links = <String, LatencyLink>{};
+    for (final bridgeId in input.bridgeIds) {
+      final info = await input.linkInfo(bridgeId);
+      links[bridgeId] = LatencyLink(
+        mtu: info?.mtu,
+        rssiStart: info?.rssi,
+        connectionIntervalUs: info?.connectionIntervalUs,
+        phy: info?.phy,
+        priorityRequested: input.priorityRequested,
+      );
+    }
+    _links = links;
     _countersAtStart = input.counters();
     final recorder = _recorder = LatencyRecorder(
       started: DateTime.now(),
@@ -421,8 +435,12 @@ class LatencyController extends Notifier<LatencyState> {
     _subs
       ..add(
         input.frames.listen(
-          (f) =>
-              recorder.addFrame(f.frame.hand, f.frame.sequence, f.receivedAtUs),
+          (f) => recorder.addFrame(
+            f.frame.hand,
+            f.frame.sequence,
+            f.receivedAtUs,
+            bridgeId: f.bridgeId,
+          ),
         ),
       )
       ..add(
@@ -433,6 +451,7 @@ class LatencyController extends Notifier<LatencyState> {
             s.receivedAtUs,
             deviceTicks: s.record.deviceTicks,
             espRxUs: s.record.rxTimeUs,
+            bridgeId: s.bridgeId,
           ),
         ),
       )
@@ -502,8 +521,9 @@ class LatencyController extends Notifier<LatencyState> {
     final echo = _echo;
     return _recorder!.report(
       nowUs: _input!.clock.nowUs,
-      link: _link,
+      links: _links,
       counters: _counterGrowth(),
+      echoBridgeId: _input!.echoBridgeId,
       echoIntervalUs: state.echoInterval.inMicroseconds,
       echoCounters: echo == null
           ? const {}
@@ -528,8 +548,12 @@ class LatencyController extends Notifier<LatencyState> {
     _subs.clear();
     final recorder = _recorder!;
     final input = _input!;
-    final info = await input.linkInfo();
-    _link = _link.withEnd(rssiEnd: info?.rssi);
+    final links = <String, LatencyLink>{};
+    for (final entry in _links.entries) {
+      final info = await input.linkInfo(entry.key);
+      links[entry.key] = entry.value.withEnd(rssiEnd: info?.rssi);
+    }
+    _links = links;
     final report = _report();
     final echo = _echo;
     _echo = null;

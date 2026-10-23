@@ -14,21 +14,31 @@ import '../protocol/wmr_fragment.dart';
 
 /// A reassembled frame with the phone-side receive time of its last fragment.
 class ReceivedFrame {
-  const ReceivedFrame(this.frame, this.receivedAtUs);
+  const ReceivedFrame(this.frame, this.receivedAtUs, {this.bridgeId = ''});
 
   final WmrFrame frame;
   final int receivedAtUs;
+
+  /// Transport device id of the bridge this frame arrived from. Empty only
+  /// when a caller built the frame without an attributed bridge (tests or
+  /// synthetic data); [ControllerService] always fills it.
+  final String bridgeId;
 }
 
 /// Per-hand stream counters. Gaps come from the ESP32 sequence numbers only.
 class HandStats {
   const HandStats({
+    this.bridgeId,
     this.frames = 0,
     this.incomplete = 0,
     this.lastSequence,
     this.gaps = 0,
     this.outOfOrder = 0,
   });
+
+  /// Transport device id of the bridge these figures belong to. Null on the
+  /// merged hand view; set on every [StreamStats.byBridge] entry.
+  final String? bridgeId;
 
   final int frames;
   final int incomplete;
@@ -40,13 +50,30 @@ class HandStats {
   /// Received sequence numbers not greater than the previous one (duplicates,
   /// reordering, or an ESP32 reboot).
   final int outOfOrder;
+
+  /// Sequence gaps as a share of expected frames, 0 when nothing arrived.
+  double get sequenceLoss {
+    final total = frames + gaps;
+    return total == 0 ? 0 : gaps / total;
+  }
 }
 
 class StreamStats {
-  const StreamStats({required this.hands, this.errors = 0});
+  const StreamStats({
+    required this.hands,
+    this.errors = 0,
+    this.byBridge = const {},
+  });
 
   final List<HandStats> hands;
   final int errors;
+
+  /// The same figures per bridge, keyed by transport device id. Each entry is
+  /// a plain [StreamStats] whose own [byBridge] is empty.
+  final Map<String, StreamStats> byBridge;
+
+  /// The figures of one bridge, or null when it is not connected.
+  StreamStats? forBridge(String bridgeId) => byBridge[bridgeId];
 }
 
 /// Which bridge characteristic the app listens to. Only one at a time.
@@ -107,6 +134,7 @@ class ModeState {
 /// Per-hand numbers for the decoded stream.
 class DecodedHandStats {
   const DecodedHandStats({
+    this.bridgeId,
     this.records = 0,
     this.rateHz = 0,
     this.lastSequence,
@@ -129,6 +157,10 @@ class DecodedHandStats {
     this.stick = const [0, 0],
     this.windowLoss,
   });
+
+  /// Transport device id of the bridge these figures belong to. Null on the
+  /// merged hand view; set on every [DecodedStats.byBridge] entry.
+  final String? bridgeId;
 
   final int records;
 
@@ -186,6 +218,12 @@ class DecodedHandStats {
     final expected = received + lost;
     return expected == 0 ? 0 : lost / expected;
   }
+
+  /// Sequence gaps as a share of expected records, 0 when nothing arrived.
+  double get sequenceLoss {
+    final total = records + sequenceGaps;
+    return total == 0 ? 0 : sequenceGaps / total;
+  }
 }
 
 class DecodedStats {
@@ -198,9 +236,20 @@ class DecodedStats {
     this.batchRecords = 0,
     this.batchMax = 0,
     this.batchErrors = 0,
+    this.byBridge = const {},
   });
 
   final List<DecodedHandStats> hands;
+
+  /// The same figures per bridge, keyed by transport device id. Each entry is
+  /// a plain [DecodedStats] whose own [byBridge] is empty. Per-bridge entries
+  /// measure that bridge's records: rate, sequence gaps, timing and loss.
+  /// Fusion state (bias, stick, skipped-update counters) stays on the merged
+  /// hand view, which is per hand by definition.
+  final Map<String, DecodedStats> byBridge;
+
+  /// The figures of one bridge, or null when it is not connected.
+  DecodedStats? forBridge(String bridgeId) => byBridge[bridgeId];
 
   /// Record errors, FF12 and FF14 alike.
   final int wrongLength;
@@ -224,6 +273,55 @@ class DecodedStats {
   int get parseErrors => wrongLength + unknownVersion + badHand + batchErrors;
 }
 
+/// One bridge's link and its stream rate and loss, per hand.
+///
+/// The bridge id is the transport device id. [rateHz] and [loss] are in wire
+/// hand order (0 LEFT, 1 RIGHT); a hand the bridge does not feed has a zero
+/// rate and a null loss. [loss] is tick loss on the decoded streams and
+/// sequence loss on the raw stream, so different bridges on different streams
+/// are not compared with the same definition.
+class BridgeLinkSnapshot {
+  const BridgeLinkSnapshot({
+    required this.bridgeId,
+    required this.mode,
+    this.mtu,
+    this.rssi,
+    this.connectionIntervalUs,
+    this.phy,
+    this.rateHz = const [0, 0],
+    this.loss = const [null, null],
+  });
+
+  final String bridgeId;
+
+  /// The stream the service listens to on every bridge.
+  final StreamMode mode;
+
+  /// Link parameters, null where the platform does not expose them.
+  final int? mtu;
+  final int? rssi;
+  final int? connectionIntervalUs;
+  final String? phy;
+
+  /// Per-hand records (decoded) or frames (raw) per second.
+  final List<double> rateHz;
+
+  /// Per-hand loss, or null for a hand this bridge has not fed yet.
+  final List<double?> loss;
+
+  /// Total rate over both hands.
+  double get totalRateHz => rateHz.fold(0, (sum, rate) => sum + rate);
+
+  /// The worse of the measured hand losses, or null when neither is known.
+  double? get worstLoss {
+    double? worst;
+    for (final l in loss) {
+      if (l != null && (worst == null || l > worst)) worst = l;
+    }
+    return worst;
+  }
+}
+
 /// Records per second over a sliding window of about a second.
 class _RateMeter {
   int? _startUs;
@@ -245,6 +343,89 @@ class _RateMeter {
 
   /// 0 when nothing arrived for 2 s.
   double rate(int nowUs) => nowUs - _lastUs > 2000000 ? 0 : _rate;
+}
+
+/// Raw-stream counters of one bridge. Reassembly is per bridge, so fragments
+/// from two links cannot be mixed into the same frame.
+class _RawBridgeState {
+  _RawBridgeState(this.bridgeId);
+
+  final String bridgeId;
+  final WmrReassembler reassembler = WmrReassembler();
+  final List<int?> lastSeq = List.filled(wmrNumControllers, null);
+  final List<int> gaps = List.filled(wmrNumControllers, 0);
+  final List<int> outOfOrder = List.filled(wmrNumControllers, 0);
+  final List<_RateMeter> rates = [
+    for (var h = 0; h < wmrNumControllers; h++) _RateMeter(),
+  ];
+
+  /// A new subscription starts a new sequence baseline, as the bridge's
+  /// sequence keeps advancing while no stream is enabled.
+  void streamRestarted() => lastSeq.fillRange(0, lastSeq.length, null);
+
+  double rateHz(int hand, int nowUs) => rates[hand].rate(nowUs);
+
+  double? loss(int hand) {
+    final received = reassembler.framesComplete[hand];
+    final lost = gaps[hand];
+    final total = received + lost;
+    return total == 0 ? null : lost / total;
+  }
+}
+
+/// Decoded-stream counters of one bridge. Timing and loss are tracked per
+/// bridge as well as merged, so a bridge that drops records does not hide
+/// behind the other one's pipeline.
+class _DecodedBridgeState {
+  _DecodedBridgeState(this.bridgeId);
+
+  final String bridgeId;
+  final List<int?> lastSeq = List.filled(wmrNumControllers, null);
+  final List<int> gaps = List.filled(wmrNumControllers, 0);
+  final List<int> outOfOrder = List.filled(wmrNumControllers, 0);
+  final List<int> records = List.filled(wmrNumControllers, 0);
+  final List<_RateMeter> rates = [
+    for (var h = 0; h < wmrNumControllers; h++) _RateMeter(),
+  ];
+  final List<TickTimer> timers = [
+    for (var h = 0; h < wmrNumControllers; h++) TickTimer(),
+  ];
+  final List<LossWindow> lossWindows = [
+    for (var h = 0; h < wmrNumControllers; h++) LossWindow(),
+  ];
+
+  // Parse counters, FF12 and FF14 alike.
+  int wrongLength = 0;
+  int unknownVersion = 0;
+  int badHand = 0;
+  int batches = 0;
+  int batchRecords = 0;
+  int batchMax = 0;
+  int batchErrors = 0;
+
+  void streamRestarted() {
+    lastSeq.fillRange(0, lastSeq.length, null);
+    for (final t in timers) {
+      t.rebaseline();
+    }
+    for (final w in lossWindows) {
+      w.reset();
+    }
+  }
+
+  double rateHz(int hand, int nowUs) => rates[hand].rate(nowUs);
+
+  double? tickLoss(int hand) {
+    final received = records[hand];
+    final lost = timers[hand].missing;
+    final total = received + lost;
+    return total == 0 ? null : lost / total;
+  }
+
+  double? sequenceLoss(int hand) {
+    final total = records[hand] + gaps[hand];
+    return total == 0 ? null : gaps[hand] / total;
+  }
 }
 
 /// Subscribes to the bridge stream and turns it into frames (FF11) or fused
@@ -294,10 +475,19 @@ class ControllerService {
   List<String> get deviceIds => List.unmodifiable(_deviceIds);
   String get deviceId => _deviceIds.isNotEmpty ? _deviceIds.first : '';
 
-  final WmrReassembler _reassembler = WmrReassembler();
+  /// Raw and decoded counters per bridge, keyed by transport device id.
+  final Map<String, _RawBridgeState> _rawBridges = {};
+  final Map<String, _DecodedBridgeState> _decodedBridges = {};
+
+  // Merged per-hand counters, across every bridge (the fused view). They are
+  // kept separately from the per-bridge states so removing a bridge does not
+  // rewrite the history the merged view already showed.
   final List<int?> _lastSeq = List.filled(wmrNumControllers, null);
   final List<int> _gaps = List.filled(wmrNumControllers, 0);
   final List<int> _outOfOrder = List.filled(wmrNumControllers, 0);
+  final List<int> _rawFrames = List.filled(wmrNumControllers, 0);
+  final List<int> _rawIncomplete = List.filled(wmrNumControllers, 0);
+  int _rawErrors = 0;
   final StreamController<ReceivedFrame> _frames = StreamController.broadcast();
   final Map<String, StreamSubscription<BleNotification>> _subscriptions = {};
 
@@ -357,6 +547,12 @@ class ControllerService {
 
   HandPipeline pipeline(int hand) => _pipelines[hand];
 
+  _RawBridgeState _rawBridge(String bridgeId) =>
+      _rawBridges.putIfAbsent(bridgeId, () => _RawBridgeState(bridgeId));
+
+  _DecodedBridgeState _decodedBridge(String bridgeId) => _decodedBridges
+      .putIfAbsent(bridgeId, () => _DecodedBridgeState(bridgeId));
+
   /// Connects and subscribes to the current [mode]. Call again after every
   /// reconnect: the bridge forgets the subscription on disconnect, and the
   /// wanted stream is enabled from scratch. [StreamMode.none] connects
@@ -415,6 +611,8 @@ class ControllerService {
   }) async {
     if (!_deviceIds.contains(deviceId)) return;
     _deviceIds.remove(deviceId);
+    _rawBridges.remove(deviceId);
+    _decodedBridges.remove(deviceId);
     final sub = _subscriptions.remove(deviceId);
     await sub?.cancel();
     for (var h = 0; h < wmrNumControllers; h++) {
@@ -485,6 +683,10 @@ class ControllerService {
     for (final w in _lossWindows) {
       // The new stream has no five-second history yet.
       w.reset();
+    }
+    for (final id in _deviceIds) {
+      _rawBridge(id).streamRestarted();
+      _decodedBridge(id).streamRestarted();
     }
     _fault = null;
     for (final id in _deviceIds) {
@@ -571,9 +773,36 @@ class ControllerService {
   }
 
   void _onNotification(BleNotification n, String sourceDeviceId) {
-    if (_reassembler.push(n.value) != ReassemblyResult.frameComplete) return;
-    final frame = _reassembler.lastFrame!;
+    final bridge = _rawBridge(sourceDeviceId);
+    final beforeLeft = bridge.reassembler.framesIncomplete[wmrHandLeft];
+    final beforeRight = bridge.reassembler.framesIncomplete[wmrHandRight];
+    final beforeErrors = bridge.reassembler.errors;
+    final result = bridge.reassembler.push(n.value);
+    _rawIncomplete[wmrHandLeft] +=
+        bridge.reassembler.framesIncomplete[wmrHandLeft] - beforeLeft;
+    _rawIncomplete[wmrHandRight] +=
+        bridge.reassembler.framesIncomplete[wmrHandRight] - beforeRight;
+    _rawErrors += bridge.reassembler.errors - beforeErrors;
+    if (result != ReassemblyResult.frameComplete) return;
+    final frame = bridge.reassembler.lastFrame!;
     final hand = frame.hand;
+    _rawFrames[hand]++;
+
+    // Per-bridge figures: this bridge's own sequence line.
+    final bridgeLast = bridge.lastSeq[hand];
+    if (bridgeLast != null) {
+      final delta = sequenceDelta(bridgeLast, frame.sequence);
+      if (delta > 1) {
+        bridge.gaps[hand] += delta - 1;
+      } else if (delta <= 0) {
+        bridge.outOfOrder[hand]++;
+      }
+    }
+    bridge.lastSeq[hand] = frame.sequence;
+    bridge.rates[hand].add(n.receivedAtUs);
+
+    // Merged figures: the pipeline is fused per hand, so a change of source
+    // still starts a new baseline.
     _checkSourceDevice(hand, sourceDeviceId);
     final last = _lastSeq[hand];
     if (last != null) {
@@ -585,7 +814,7 @@ class ControllerService {
       }
     }
     _lastSeq[hand] = frame.sequence;
-    _frames.add(ReceivedFrame(frame, n.receivedAtUs));
+    _frames.add(ReceivedFrame(frame, n.receivedAtUs, bridgeId: sourceDeviceId));
   }
 
   void _onDecoded(BleNotification n, String sourceDeviceId) =>
@@ -595,14 +824,19 @@ class ControllerService {
   /// fusion use `device_ticks`, so that does not change the time step.
   void _onBatched(BleNotification n, String sourceDeviceId) {
     final parsed = parseDecodedBatch(n.value);
+    final bridge = _decodedBridge(sourceDeviceId);
     final records = parsed.records;
     if (records == null) {
       _batchErrors++;
+      bridge.batchErrors++;
       return;
     }
     _batches++;
     _batchRecords += records.length;
+    bridge.batches++;
+    bridge.batchRecords += records.length;
     if (records.length > _batchMax) _batchMax = records.length;
+    if (records.length > bridge.batchMax) bridge.batchMax = records.length;
     for (final r in records) {
       _onRecord(r, n.receivedAtUs, sourceDeviceId);
     }
@@ -614,18 +848,44 @@ class ControllerService {
     String sourceDeviceId,
   ) {
     final r = parsed.record;
+    final bridge = _decodedBridge(sourceDeviceId);
     if (r == null) {
       switch (parsed.error!) {
         case DecodedParseError.wrongLength:
           _wrongLength++;
+          bridge.wrongLength++;
         case DecodedParseError.unknownVersion:
           _unknownVersion++;
+          bridge.unknownVersion++;
         case DecodedParseError.badHand:
           _badHand++;
+          bridge.badHand++;
       }
       return;
     }
     final hand = r.hand;
+
+    // Per-bridge figures: this bridge's sequence line, timing and loss.
+    final bridgeLast = bridge.lastSeq[hand];
+    if (bridgeLast != null) {
+      final delta = sequenceDelta(bridgeLast, r.sequence);
+      if (delta > 1) {
+        bridge.gaps[hand] += delta - 1;
+      } else if (delta <= 0) {
+        bridge.outOfOrder[hand]++;
+      }
+    }
+    bridge.lastSeq[hand] = r.sequence;
+    bridge.records[hand]++;
+    bridge.rates[hand].add(receivedAtUs);
+    bridge.timers[hand].advance(r.deviceTicks, r.rxTimeUs);
+    bridge.lossWindows[hand].add(
+      receivedAtUs,
+      bridge.records[hand],
+      bridge.timers[hand].missing,
+    );
+
+    // Merged figures: the fused view stays per hand.
     _checkSourceDevice(hand, sourceDeviceId);
     final last = _dLastSeq[hand];
     if (last != null) {
@@ -639,7 +899,11 @@ class ControllerService {
     _dLastSeq[hand] = r.sequence;
     _dRecords[hand]++;
     _rates[hand].add(receivedAtUs);
-    final sample = _pipelines[hand].add(r, receivedAtUs);
+    final sample = _pipelines[hand].add(
+      r,
+      receivedAtUs,
+      bridgeId: sourceDeviceId,
+    );
     _lastStick[hand] = sample.stick;
     _lossWindows[hand].add(
       receivedAtUs,
@@ -710,20 +974,45 @@ class ControllerService {
 
   void resetYaw(int hand) => _pipelines[hand].resetYaw();
 
+  /// Raw (FF11) figures, merged per hand and per bridge.
   StreamStats get stats => StreamStats(
     hands: [
       for (var h = 0; h < wmrNumControllers; h++)
         HandStats(
-          frames: _reassembler.framesComplete[h],
-          incomplete: _reassembler.framesIncomplete[h],
+          frames: _rawFrames[h],
+          incomplete: _rawIncomplete[h],
           lastSequence: _lastSeq[h],
           gaps: _gaps[h],
           outOfOrder: _outOfOrder[h],
         ),
     ],
-    errors: _reassembler.errors,
+    errors: _rawErrors,
+    byBridge: {for (final id in _deviceIds) id: statsForBridge(id)},
   );
 
+  /// Raw figures of one bridge. A bridge that has delivered nothing yet is
+  /// all zeroes, not null, so a freshly connected row still renders.
+  StreamStats statsForBridge(String bridgeId) {
+    final bridge = _rawBridge(bridgeId);
+    return StreamStats(
+      hands: [
+        for (var h = 0; h < wmrNumControllers; h++)
+          HandStats(
+            bridgeId: bridgeId,
+            frames: bridge.reassembler.framesComplete[h],
+            incomplete: bridge.reassembler.framesIncomplete[h],
+            lastSequence: bridge.lastSeq[h],
+            gaps: bridge.gaps[h],
+            outOfOrder: bridge.outOfOrder[h],
+          ),
+      ],
+      errors: bridge.reassembler.errors,
+    );
+  }
+
+  /// Decoded (FF12/FF14) figures, merged per hand and per bridge. The merged
+  /// figures keep the fused pipeline's timing and fusion state; a per-bridge
+  /// entry measures that bridge's own records and link.
   DecodedStats get decodedStats {
     final now = transport.clock.nowUs;
     return DecodedStats(
@@ -760,6 +1049,78 @@ class ControllerService {
       batchRecords: _batchRecords,
       batchMax: _batchMax,
       batchErrors: _batchErrors,
+      byBridge: {for (final id in _deviceIds) id: decodedStatsForBridge(id)},
+    );
+  }
+
+  /// Decoded figures of one bridge, measured on its own records rather than
+  /// on the fused per-hand pipeline.
+  DecodedStats decodedStatsForBridge(String bridgeId) {
+    final now = transport.clock.nowUs;
+    final bridge = _decodedBridge(bridgeId);
+    return DecodedStats(
+      hands: [
+        for (var h = 0; h < wmrNumControllers; h++)
+          DecodedHandStats(
+            bridgeId: bridgeId,
+            records: bridge.records[h],
+            rateHz: bridge.rates[h].rate(now),
+            lastSequence: bridge.lastSeq[h],
+            sequenceGaps: bridge.gaps[h],
+            outOfOrder: bridge.outOfOrder[h],
+            missingFromTicks: bridge.timers[h].missing,
+            periodTicks: bridge.timers[h].periodTicks,
+            dt: bridge.timers[h].dtStats,
+            tickClockRatio: bridge.timers[h].tickClockRatio,
+            discontinuities: bridge.timers[h].discontinuities,
+            windowLoss: bridge.lossWindows[h].statsAt(now),
+          ),
+      ],
+      wrongLength: bridge.wrongLength,
+      unknownVersion: bridge.unknownVersion,
+      badHand: bridge.badHand,
+      batches: bridge.batches,
+      batchRecords: bridge.batchRecords,
+      batchMax: bridge.batchMax,
+      batchErrors: bridge.batchErrors,
+    );
+  }
+
+  /// Link parameters, rate and loss of every connected bridge.
+  Future<List<BridgeLinkSnapshot>> bridgeLinks() async => [
+    for (final id in _deviceIds) await bridgeLink(id),
+  ];
+
+  /// One bridge's link snapshot. Platform link fields are null when the
+  /// transport does not expose them or the bridge is not connected.
+  Future<BridgeLinkSnapshot> bridgeLink(String bridgeId) async {
+    BleConnectionInfo? info;
+    try {
+      info = await transport.connectionInfo(bridgeId);
+    } catch (_) {
+      // Not connected, or the platform does not expose the fields.
+    }
+    final now = transport.clock.nowUs;
+    final raw = _rawBridge(bridgeId);
+    final decoded = _decodedBridge(bridgeId);
+    final records = _mode.carriesRecords;
+    return BridgeLinkSnapshot(
+      bridgeId: bridgeId,
+      mode: _mode,
+      mtu: info?.mtu,
+      rssi: info?.rssi,
+      connectionIntervalUs: info?.connectionIntervalUs,
+      phy: info?.phy,
+      rateHz: [
+        for (var h = 0; h < wmrNumControllers; h++)
+          records ? decoded.rateHz(h, now) : raw.rateHz(h, now),
+      ],
+      loss: [
+        for (var h = 0; h < wmrNumControllers; h++)
+          records
+              ? decoded.tickLoss(h) ?? decoded.sequenceLoss(h)
+              : raw.loss(h),
+      ],
     );
   }
 

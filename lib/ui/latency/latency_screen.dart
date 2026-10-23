@@ -234,10 +234,40 @@ class LatencyReportView extends StatelessWidget {
     ];
   }
 
+  /// One bridge's link and the figures of the hands it fed.
+  Widget _bridge(String bridgeId, LatencyLink link) {
+    final owned = report.hands
+        .where((h) => h.bridgeId == bridgeId && h.records > 0)
+        .toList();
+    final records = owned.fold<int>(0, (sum, h) => sum + h.records);
+    final rate = owned.fold<double>(0, (sum, h) => sum + h.ratePerSecond);
+    double? loss;
+    for (final h in owned) {
+      final l = h.tickLoss ?? h.sequenceLoss;
+      if (loss == null || l > loss) loss = l;
+    }
+    final figures = records == 0
+        ? ''
+        : '$records rx  ${rate.toStringAsFixed(1)}/s  '
+              'loss ${_pct(loss!)}   ';
+    return Text(
+      'bridge $bridgeId   MTU ${link.mtu ?? '-'}   '
+      'RSSI ${link.rssiStart ?? '-'}'
+      '${link.rssiEnd == null ? '' : ' -> ${link.rssiEnd}'} dBm   '
+      '$figures'
+      'interval ${link.connectionIntervalUs == null ? '-' : _ms(link.connectionIntervalUs!)} ms   '
+      'high priority ${switch (link.priorityRequested) {
+        true => 'yes',
+        false => 'failed',
+        null => 'n/a',
+      }}',
+      style: style,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final link = report.link;
     final growth = report.counters.entries.where((e) => e.value != 0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -254,17 +284,11 @@ class LatencyReportView extends StatelessWidget {
           ),
         ] else
           Text('Stream: ${report.stream}', style: style),
-        Text(
-          'MTU ${link.mtu ?? '-'}   RSSI ${link.rssiStart ?? '-'}'
-          '${link.rssiEnd == null ? '' : ' -> ${link.rssiEnd}'} dBm   '
-          'interval ${link.connectionIntervalUs == null ? '-' : _ms(link.connectionIntervalUs!)} ms   '
-          'high priority ${switch (link.priorityRequested) {
-            true => 'yes',
-            false => 'failed',
-            null => 'n/a',
-          }}',
-          style: style,
-        ),
+        if (report.links.isEmpty)
+          Text('link n/a', style: style)
+        else
+          for (final entry in report.links.entries)
+            _bridge(entry.key, entry.value),
         if (report.modeChanged)
           Text(
             'The stream mode changed during the run; the figures mix two '
@@ -279,6 +303,7 @@ class LatencyReportView extends StatelessWidget {
               LatencyHandSummary.handName(h.hand),
               style: theme.textTheme.titleSmall,
             ),
+            Text('  bridge ${h.bridgeId ?? '-'}', style: style),
             Text(
               '${h.records} rx  ${h.ratePerSecond.toStringAsFixed(1)}/s  '
               '${h.arrivals} arrivals',

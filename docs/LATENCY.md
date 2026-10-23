@@ -17,7 +17,7 @@ A run lasts 30 s, 60 s, 120 s or until Stop. The ping interval is 50, 250 (defau
 | Missing (ticks), period | decoded | Reports missing by the controller's own tick deltas, firmware definition (`TickTimer`). Includes loss between the controller and the ESP32, which sequence numbers cannot show |
 | Delay above min | decoded | `arrival - rx_time_us` minus the smallest value in its 10 s window: time between the ESP32 receiving a report and the phone seeing it, without the fixed part. Queueing and connection-event wait show up here |
 | Delay variation | decoded | `|change of arrival - rx_time_us|` between consecutive records of one hand |
-| Link | all | MTU, RSSI at start and end, connection interval and PHY where the platform reports them, whether high priority was requested |
+| Link, per bridge | all | One row per bridge (keyed by the transport device id): MTU, RSSI at start and end, connection interval and PHY where the platform reports them, whether high priority was requested. The debug and latency screens also show that bridge's rate and loss |
 | Counters | all | How much the service's incomplete-frame, reassembly-error and parse-error counters grew during the run |
 
 The ESP32 and phone clocks have unrelated origins and drift apart (tens of ppm), so `rx_time_us` is never compared with a phone time directly: only differences inside a 10 s window, or between consecutive records, are used. WMR_Bridge `docs/PROTOCOL.md` describes `rx_time_us` as meant for this ("the one-way part of issue #1").
@@ -46,14 +46,15 @@ One earlier data point, a single 24 ms turnaround seen in nRF Connect (user-repo
 
 Each run is saved when it ends to `latency/` under the app documents directory, as `latency-YYYYMMDD-HHMMSS.csv` and `.json`, plus `latency-YYYYMMDD-HHMMSS-echo.csv` when the run used the echo. "Export" opens the share sheet with all of them.
 
-CSV, one row per frame or record (up to 250 000 rows; more are counted in `rows_dropped` but still in the summary). The format is unchanged; a no-stream run has only the header:
+CSV, one row per frame or record (up to 250 000 rows; more are counted in `rows_dropped` but still in the summary). Since format version 3 every row names the bridge; a no-stream run has only the header:
 
 ```
-hand,sequence,arrival_us,inter_arrival_us,seq_delta,device_ticks,device_dt_us,esp_rx_us
-LEFT,1,0,,,1000,,1000000
-LEFT,2,10000,10000,1,101000,10000,1010000
+hand,bridge_id,sequence,arrival_us,inter_arrival_us,seq_delta,device_ticks,device_dt_us,esp_rx_us
+LEFT,fake-wmr-bridge-left,1,0,,,1000,,1000000
+LEFT,fake-wmr-bridge-left,2,10000,10000,1,101000,10000,1010000
 ```
 
+- `bridge_id`: transport device id of the bridge that delivered the frame or record.
 - `arrival_us`: phone monotonic time since the run started.
 - `inter_arrival_us`: since the previous distinct arrival of this hand; `0` when the record shares a notification with the previous one; empty for the first.
 - `seq_delta`: sequence change from the previous record of this hand (1 is normal).
@@ -67,9 +68,15 @@ ping_id,t1_us,t1_done_us,t4_us,end_to_end_us,esp_rx_us,turnaround_us,rtt_us,queu
 
 `t1_us`, `t1_done_us` (write call returned) and `t4_us` are phone time since the run started; `esp_rx_us` is the raw ESP32 clock; `clock_offset_us` is the per-ping estimate above.
 
-JSON (format `wmr-latency`, version 2: `round_trip` is an object, percentiles gained `min_us` and `p95_us`): run metadata (`started`, `stream`, `duration_us`), `round_trip` (`measured`, and when true `rtt`, `end_to_end`, `turnaround`, `max_queue_depth`, `sent`, `answered`, `timeouts`, `failed_writes`, `counters`, `ping_interval_us`), `link`, `counters`, `rows_dropped`, `mode_changed`, and per hand `records`, `arrivals`, `span_us`, `rate_per_s`, `inter_arrival` and (decoded) `delay_above_window_min` / `delay_variation` as `{count, min_us, p50_us, p90_us, p95_us, p99_us, max_us}`, `stalls_over_50000us`, `sequence_gaps`, `sequence_loss`, `out_of_order`, `missing_from_ticks`, `tick_loss`, `period_us`. Fields that do not apply are `null`.
+JSON (format `wmr-latency`, version 3: `link` is keyed by bridge id, hand summaries name their bridge, and the CSV gained `bridge_id`): run metadata (`started`, `stream`, `duration_us`), `round_trip` (`measured`, and when true its `bridge_id`, `rtt`, `end_to_end`, `turnaround`, `max_queue_depth`, `sent`, `answered`, `timeouts`, `failed_writes`, `counters`, `ping_interval_us`), `link`, `counters`, `rows_dropped`, `mode_changed`, and per hand `bridge_id`, `bridge_records`, `records`, `arrivals`, `span_us`, `rate_per_s`, `inter_arrival` and (decoded) `delay_above_window_min` / `delay_variation` as `{count, min_us, p50_us, p90_us, p95_us, p99_us, max_us}`, `stalls_over_50000us`, `sequence_gaps`, `sequence_loss`, `out_of_order`, `missing_from_ticks`, `tick_loss`, `period_us`. Fields that do not apply are `null`.
 
-`stream` is `"none"`, `"raw"`, `"decoded"` or `"batched"`. A no-stream run still has the `hands` array (all counters zero), so the schema is the same for every mode. `link` keeps the existing fields (MTU, RSSI at start and end, connection interval and PHY where the platform reports them, high priority requested).
+`link` is an object keyed by bridge id (the transport device id). Each value keeps the fields of the old single link: `mtu`, `rssi_start_dbm`, `rssi_end_dbm`, `connection_interval_us`, `phy`, `high_priority_requested`. A bridge that was connected all run has one entry; a no-stream run still has entries (the links exist even when FF11/FF12/FF14 are off).
+
+`hand.bridge_id` is the bridge that fed that hand during the run. `hand.bridge_records` counts records per bridge id, so a hand that moved between bridges is not hidden: normally one entry, more after a swap. The FF15 round trip still pings one bridge (the service's primary device); `round_trip.bridge_id` names it.
+
+Version 2 files from earlier runs are not read by this app: it lists and shares saved runs, and has no JSON loader to keep compatible. They remain valid `wmr-latency` v2 documents for other tools.
+
+`stream` is `"none"`, `"raw"`, `"decoded"` or `"batched"`. A no-stream run still has the `hands` array (all counters zero), so the schema is the same for every mode.
 
 ## First hardware run (user-reported)
 

@@ -33,7 +33,7 @@ void main() {
     }
     final report = r.report(
       nowUs: 100000,
-      link: const LatencyLink(mtu: 517, rssiStart: -55),
+      links: const {'bridge-a': LatencyLink(mtu: 517, rssiStart: -55)},
       counters: const {'incomplete_frames': 0, 'decoded_parse_errors': 2},
     );
     await tester.pumpWidget(
@@ -51,6 +51,55 @@ void main() {
       find.text('During the run: decoded_parse_errors +2'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('report view has a row per bridge and names the feeding bridge', (
+    tester,
+  ) async {
+    final r = LatencyRecorder(
+      started: DateTime(2026, 10, 23),
+      originUs: 0,
+      stream: 'decoded',
+    );
+    for (var i = 1; i <= 3; i++) {
+      r.addRecord(
+        wmrHandLeft,
+        i,
+        i * 5000,
+        deviceTicks: i * 50000,
+        espRxUs: i * 5000,
+        bridgeId: 'bridge-left',
+      );
+      r.addRecord(
+        wmrHandRight,
+        i,
+        i * 5000,
+        deviceTicks: i * 50000,
+        espRxUs: i * 5000,
+        bridgeId: 'bridge-right',
+      );
+    }
+    final report = r.report(
+      nowUs: 20000,
+      links: const {
+        'bridge-left': LatencyLink(mtu: 247, rssiStart: -40),
+        'bridge-right': LatencyLink(mtu: 247, rssiStart: -55),
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: LatencyReportView(report))),
+    );
+
+    expect(
+      find.textContaining('bridge bridge-left   MTU 247   RSSI -40 dBm'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('bridge bridge-right   MTU 247   RSSI -55 dBm'),
+      findsOneWidget,
+    );
+    expect(find.text('  bridge bridge-left'), findsOneWidget);
+    expect(find.text('  bridge bridge-right'), findsOneWidget);
   });
 
   testWidgets('report view shows the round-trip distribution', (tester) async {

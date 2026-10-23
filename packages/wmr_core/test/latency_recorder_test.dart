@@ -178,13 +178,20 @@ void main() {
   group('export', () {
     test('CSV header and rows', () {
       final r = _recorder();
-      r.addFrame(wmrHandLeft, 7, 1002000);
-      r.addRecord(wmrHandRight, 3, 1003000, deviceTicks: 123, espRxUs: 456);
+      r.addFrame(wmrHandLeft, 7, 1002000, bridgeId: 'bridge-l');
+      r.addRecord(
+        wmrHandRight,
+        3,
+        1003000,
+        deviceTicks: 123,
+        espRxUs: 456,
+        bridgeId: 'bridge-r',
+      );
       expect(r.toCsv().split('\n'), [
-        'hand,sequence,arrival_us,inter_arrival_us,seq_delta,device_ticks,'
-            'device_dt_us,esp_rx_us',
-        'LEFT,7,2000,,,,,',
-        'RIGHT,3,3000,,,123,,456',
+        'hand,bridge_id,sequence,arrival_us,inter_arrival_us,seq_delta,'
+            'device_ticks,device_dt_us,esp_rx_us',
+        'LEFT,bridge-l,7,2000,,,,,',
+        'RIGHT,bridge-r,3,3000,,,123,,456',
         '',
       ]);
     });
@@ -202,20 +209,22 @@ void main() {
 
     test('JSON summary', () {
       final r = _recorder()..markModeChanged();
-      r.addFrame(wmrHandLeft, 1, 1000000);
-      r.addFrame(wmrHandLeft, 3, 1005000);
+      r.addFrame(wmrHandLeft, 1, 1000000, bridgeId: 'bridge-l');
+      r.addFrame(wmrHandLeft, 3, 1005000, bridgeId: 'bridge-l');
       final rep = r.report(
         nowUs: 3000000,
-        link: const LatencyLink(
-          mtu: 517,
-          rssiStart: -60,
-          priorityRequested: true,
-        ).withEnd(rssiEnd: -62),
+        links: {
+          'bridge-l': const LatencyLink(
+            mtu: 517,
+            rssiStart: -60,
+            priorityRequested: true,
+          ).withEnd(rssiEnd: -62),
+        },
         counters: const {'incomplete_frames': 2},
       );
       final json = jsonDecode(rep.toJsonString()) as Map<String, Object?>;
       expect(json['format'], 'wmr-latency');
-      expect(json['version'], 2);
+      expect(json['version'], 3);
       expect(json['stream'], 'decoded');
       expect(json['duration_us'], 2000000);
       expect(json['mode_changed'], true);
@@ -225,16 +234,20 @@ void main() {
       });
       expect(json['counters'], {'incomplete_frames': 2});
       expect(json['link'], {
-        'mtu': 517,
-        'rssi_start_dbm': -60,
-        'rssi_end_dbm': -62,
-        'connection_interval_us': null,
-        'phy': null,
-        'high_priority_requested': true,
+        'bridge-l': {
+          'mtu': 517,
+          'rssi_start_dbm': -60,
+          'rssi_end_dbm': -62,
+          'connection_interval_us': null,
+          'phy': null,
+          'high_priority_requested': true,
+        },
       });
       final hands = json['hands'] as List<Object?>;
       final left = hands.first as Map<String, Object?>;
       expect(left['hand'], 'LEFT');
+      expect(left['bridge_id'], 'bridge-l');
+      expect(left['bridge_records'], {'bridge-l': 2});
       expect(left['records'], 2);
       expect(left['sequence_gaps'], 1);
       expect(left['sequence_loss'], 0.3333);

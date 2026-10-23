@@ -105,6 +105,43 @@ final linkStatusProvider = StreamProvider.family<LinkStatus, DebugSource>((
   return controller.stream;
 });
 
+/// Per-bridge link figures (MTU, RSSI, rate, loss), refreshed every two
+/// seconds while the screen is open.
+final bridgeLinksProvider =
+    StreamProvider.family<List<BridgeLinkSnapshot>, DebugSource>((ref, source) {
+      final service = ref.watch(controllerServiceProvider(source));
+      if (service == null) return Stream.value(const []);
+      late final StreamController<List<BridgeLinkSnapshot>> controller;
+      Timer? poll;
+      var closed = false;
+
+      Future<void> read() async {
+        if (closed) return;
+        final links = await service.bridgeLinks();
+        if (!closed) controller.add(links);
+      }
+
+      controller = StreamController<List<BridgeLinkSnapshot>>(
+        onListen: () {
+          unawaited(read());
+          poll = Timer.periodic(
+            const Duration(seconds: 2),
+            (_) => unawaited(read()),
+          );
+        },
+        onCancel: () {
+          closed = true;
+          poll?.cancel();
+        },
+      );
+      ref.onDispose(() {
+        closed = true;
+        poll?.cancel();
+        controller.close();
+      });
+      return controller.stream;
+    });
+
 final fakeBridgeProvider = Provider<FakeWmrBridge>((ref) {
   final bridge = FakeWmrBridge(
     ref.watch(fakeTransportProvider),
