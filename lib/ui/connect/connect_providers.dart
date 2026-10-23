@@ -90,12 +90,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       (_, c) => _companion?.setStickConfig(c),
     );
     ref.listen(stickSettingsProvider.select((s) => s.centres), (_, centres) {
-      final service = this.service;
-      if (service != null) applyStickCentres(service, centres);
+      final companion = _companion;
+      if (companion != null) _applyStickCentres(companion, centres);
     });
     ref.listen(ff13SettingsProvider, (_, s) {
-      final service = this.service;
-      if (service != null) applyFf13Settings(service, s);
+      final companion = _companion;
+      if (companion != null) _applyFf13(companion, s);
     });
     ref.onDispose(() {
       _scanSub?.cancel();
@@ -121,6 +121,32 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         tuning: ref.read(filterTuningProvider),
       ),
     );
+  }
+
+  /// Keeps the facade's stored centres in step, not only the live service: a
+  /// facade reconnect builds a new service from that stored state. Sending a
+  /// change to [service] directly would lose it on the next reconnect.
+  void _applyStickCentres(WmrCompanion companion, List<List<double>?> centres) {
+    for (var h = 0; h < centres.length; h++) {
+      final centre = centres[h];
+      if (centre == null) {
+        companion.clearStickCentre(Hand.of(h));
+      } else {
+        companion.setStickCentre(Hand.of(h), centre[0], centre[1]);
+      }
+    }
+  }
+
+  /// Same for FF13: the facade stores the block per hand and restores it when
+  /// it reconnects.
+  void _applyFf13(WmrCompanion companion, Ff13Settings settings) {
+    for (var h = 0; h < settings.calibrations.length; h++) {
+      companion.setFf13Calibration(
+        Hand.of(h),
+        settings.calibrations[h],
+        apply: settings.apply[h],
+      );
+    }
   }
 
   void _update({List<BleScanResult>? results, String? deviceId}) {
@@ -184,22 +210,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           .read(stickSettingsProvider.notifier)
           .setCentre(hand.wireIndex, centre[0], centre[1]),
     );
-    for (var h = 0; h < settings.centres.length; h++) {
-      final centre = settings.centres[h];
-      if (centre == null) {
-        companion.clearStickCentre(Hand.of(h));
-      } else {
-        companion.setStickCentre(Hand.of(h), centre[0], centre[1]);
-      }
-    }
-    final ff13 = ref.read(ff13SettingsProvider);
-    for (var h = 0; h < ff13.calibrations.length; h++) {
-      companion.setFf13Calibration(
-        Hand.of(h),
-        ff13.calibrations[h],
-        apply: ff13.apply[h],
-      );
-    }
+    _applyStickCentres(companion, settings.centres);
+    _applyFf13(companion, ref.read(ff13SettingsProvider));
 
     try {
       await companion.connect(WmrBridgeDevice(id: deviceId));
@@ -247,12 +259,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     } on WmrException {
       // Typed failure; the mode state below carries the fault for the banner.
     }
+    // Re-read after the await: a reconnect during the switch replaces the
+    // service, and the state must describe the one that is live now.
+    final current = this.service;
     state = RealDeviceState(
       status: _transport.status,
       results: state.results,
       deviceId: state.deviceId,
-      stats: service.stats,
-      mode: service.modeState,
+      stats: current?.stats ?? state.stats,
+      mode: current?.modeState ?? state.mode,
     );
   }
 

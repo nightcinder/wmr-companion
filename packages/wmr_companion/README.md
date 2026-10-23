@@ -107,7 +107,7 @@ One class, one config, a handful of models.
 | `setStickCentre` / `clearStickCentre` / `recentreStick` | Stick rest centre, before or after connecting. |
 | `setFf13Calibration` | Per-hand FF13 calibration, stored across reconnects. |
 | `recalibrate` / `resetYaw` | Gyro bias and yaw, per hand. |
-| `dispose()` | Release the session, subscriptions and timers. The transport is the caller's. |
+| `dispose()` | Close the BLE link and release the session, subscriptions and timers. The transport is the caller's. |
 
 State machine: `idle → scanning → connecting → ready`, with `reconnecting`
 after an unexpected drop (one retry when `autoReconnect` is on) and `failed`

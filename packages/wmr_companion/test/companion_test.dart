@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:test/test.dart';
 import 'package:wmr_companion/testing.dart';
 import 'package:wmr_companion/wmr_companion.dart';
+import 'package:wmr_core/ble/ble_transport.dart' show BleConnectionState;
 
 Future<void> _settle([int millis = 20]) =>
     Future<void>.delayed(Duration(milliseconds: millis));
@@ -185,6 +186,7 @@ void main() {
   test('an unexpected disconnect reconnects once', () async {
     companion = WmrCompanion(ble: transport);
     await companion.connect(_bridge);
+    companion.setStickCentre(Hand.left, 0.12, -0.34);
     final states = <WmrConnectionState>[];
     companion.connection.listen(states.add);
 
@@ -194,9 +196,15 @@ void main() {
     expect(states, contains(WmrConnectionState.reconnecting));
     expect(companion.state, WmrConnectionState.ready);
     expect(companion.deviceId, fakeBridgeDeviceId);
+    // The in-session centre survives the new connection, not only the value
+    // captured by the first connect() call.
+    expect(
+      companion.debugControllerService!.decodedStats.hands[0].stickCentre,
+      [0.12, -0.34],
+    );
   });
 
-  test('dispose closes the facade and is idempotent', () async {
+  test('dispose closes the link, the facade and is idempotent', () async {
     companion = WmrCompanion(ble: transport);
     await companion.connect(_bridge);
     var closed = false;
@@ -205,6 +213,11 @@ void main() {
     await _settle();
     expect(closed, isTrue);
     expect(companion.state, WmrConnectionState.idle);
+    expect(companion.deviceId, isNull);
+    expect(
+      await transport.connectionState(fakeBridgeDeviceId).first,
+      BleConnectionState.disconnected,
+    );
     await companion.dispose();
     await sub.cancel();
   });

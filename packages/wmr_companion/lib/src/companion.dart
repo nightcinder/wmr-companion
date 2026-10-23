@@ -22,8 +22,8 @@ import 'models.dart';
 ///
 /// Lifecycle is explicit: [initialize] → [startScan]/[connect] →
 /// [setStreamMode] → [dispose]. No work starts in the constructor. The
-/// injected [BleTransport] stays owned by the caller: [dispose] releases the
-/// subscription, service and timers, not the transport.
+/// injected [BleTransport] stays owned by the caller: [dispose] closes the
+/// active link, subscriptions, service and timers, but not the transport.
 class WmrCompanion {
   WmrCompanion({
     required BleTransport ble,
@@ -241,6 +241,9 @@ class WmrCompanion {
     } catch (error) {
       throw WmrTransportException('Could not switch stream', cause: error);
     }
+    // A reconnect during the await replaced the service; the new one already
+    // started from the updated config, so its fault belongs to that session.
+    if (!identical(service, _service)) return;
     final fault = service.fault;
     if (fault != null) throw _reportFault(fault);
   }
@@ -331,15 +334,26 @@ class WmrCompanion {
   /// Resets the view-frame yaw of [hand] without touching pitch and roll.
   void resetYaw(Hand hand) => _service?.resetYaw(hand.wireIndex);
 
-  /// Releases the session, subscriptions and timers. The transport is left
-  /// alone: whoever created it disposes it.
+  /// Releases the session, subscriptions and timers and closes the BLE link.
+  /// The transport itself is left alone: whoever created it disposes it.
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
     await _scanSub?.cancel();
     _scanSub = null;
+    final deviceId = _deviceId;
     await _disposeSession();
+    _deviceId = null;
+    _bridge = null;
     _state = WmrConnectionState.idle;
+    if (deviceId != null) {
+      try {
+        await _transport.disconnect(deviceId);
+      } catch (_) {
+        // Disposal is best-effort: a link that already dropped needs no
+        // further error surfaced to a caller that is tearing down.
+      }
+    }
     await _bridges.close();
     await _connection.close();
     await _controllers.close();
