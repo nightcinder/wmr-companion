@@ -3,15 +3,14 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/controller_service.dart';
 
-import 'fake_adapter.dart';
+import 'package:wmr_ble/testing.dart';
 
 class StepClock extends MonotonicClock {
   int now = 0;
@@ -33,12 +32,12 @@ const sequence = [
 Future<void> pump() => Future<void>.delayed(Duration.zero);
 
 void main() {
-  late FakeAdapter adapter;
+  late FakeBleAdapter adapter;
   late StepClock clock;
   late UniversalBleTransport t;
 
   setUp(() {
-    adapter = FakeAdapter();
+    adapter = FakeBleAdapter();
     clock = StepClock();
     t = UniversalBleTransport(
       adapter: adapter,
@@ -390,5 +389,132 @@ void main() {
         );
       },
     );
+
+    test(
+      'suspends scanning while inactive and resumes with the same filters',
+      () async {
+        final slow = UniversalBleTransport(
+          adapter: adapter,
+          clock: clock,
+          scanTimeout: const Duration(minutes: 1),
+        );
+        addTearDown(slow.dispose);
+
+        final sub = slow.scan().listen((_) {});
+        await pump();
+        expect(slow.status.phase, BleLinkPhase.scanning);
+        final firstStart = adapter.calls.lastWhere(
+          (c) => c.startsWith('startScan'),
+        );
+
+        await slow.handleAppLifecycle(BleAppLifecycle.inactive);
+        expect(adapter.calls, contains('stopScan'));
+        expect(slow.status.phase, BleLinkPhase.idle);
+
+        await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+        final starts = adapter.calls
+            .where((c) => c.startsWith('startScan'))
+            .toList();
+        expect(starts, hasLength(2));
+        expect(starts.last, firstStart);
+        expect(slow.status.phase, BleLinkPhase.scanning);
+
+        await sub.cancel();
+      },
+    );
+
+    test('a pause during preflight prevents the scan from starting', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+      adapter.availabilityGate = Completer<void>();
+
+      final sub = slow.scan().listen((_) {});
+      await pump();
+      final pause = slow.handleAppLifecycle(BleAppLifecycle.paused);
+      adapter.availabilityGate!.complete();
+      await pause;
+      await pump();
+
+      expect(adapter.calls.where((c) => c.startsWith('startScan')), isEmpty);
+
+      await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(1),
+      );
+      await sub.cancel();
+    });
+
+    test('a quick pause/resume pair ends scanning, not stopped', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+
+      final sub = slow.scan().listen((_) {});
+      await pump();
+
+      await Future.wait([
+        slow.handleAppLifecycle(BleAppLifecycle.paused),
+        slow.handleAppLifecycle(BleAppLifecycle.resumed),
+      ]);
+
+      expect(slow.status.phase, BleLinkPhase.scanning);
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(2),
+      );
+      await sub.cancel();
+    });
+
+    test('scan() while paused and a resume start the adapter once', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+
+      await slow.handleAppLifecycle(BleAppLifecycle.paused);
+      final sub = slow.scan().listen((_) {});
+      await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+      await pump();
+
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(1),
+      );
+      expect(slow.status.phase, BleLinkPhase.scanning);
+      await sub.cancel();
+    });
+
+    test('a failed resume reports the real preflight cause', () async {
+      final slow = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(slow.dispose);
+      final errors = <Object>[];
+      final sub = slow.scan().listen((_) {}, onError: errors.add);
+      await pump();
+
+      await slow.handleAppLifecycle(BleAppLifecycle.paused);
+      adapter.availabilityState = BleAvailability.poweredOff;
+      await slow.handleAppLifecycle(BleAppLifecycle.resumed);
+      await pump();
+
+      expect(
+        (errors.single as BleTransportException).phase,
+        BleLinkPhase.bluetoothOff,
+      );
+      await sub.cancel();
+    });
   });
 }

@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'ble_adapter.dart';
+
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
 /// Scriptable [BleAdapter] that records every call in order.
-class FakeAdapter implements BleAdapter {
+class FakeBleAdapter implements BleAdapter {
   final List<String> calls = [];
 
   bool permissionsGranted = true;
@@ -16,6 +17,9 @@ class FakeAdapter implements BleAdapter {
   int negotiatedMtu = 185;
   List<BleServiceInfo> services = fakeBridgeDevice.services;
   Object? connectError;
+
+  /// When set, [availability] waits for this completer before answering.
+  Completer<void>? availabilityGate;
 
   /// When set, [requestMtu] waits for this completer before answering.
   Completer<void>? mtuGate;
@@ -59,7 +63,10 @@ class FakeAdapter implements BleAdapter {
   }
 
   @override
-  Future<BleAvailability> availability() async => availabilityState;
+  Future<BleAvailability> availability() async {
+    await availabilityGate?.future;
+    return availabilityState;
+  }
 
   @override
   Stream<BleAvailability> get availabilityChanges => const Stream.empty();

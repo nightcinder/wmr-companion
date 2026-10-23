@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 
-import '../ble/fake_adapter.dart';
+import 'package:wmr_ble/testing.dart';
+
 import 'raw_mode_notifier.dart';
 
 void main() {
-  late FakeAdapter adapter;
+  late FakeBleAdapter adapter;
 
   Future<void> open(WidgetTester tester, {bool rawDefault = true}) async {
-    adapter = FakeAdapter();
+    adapter = FakeBleAdapter();
     final transport = UniversalBleTransport(
       adapter: adapter,
       scanTimeout: const Duration(minutes: 5),

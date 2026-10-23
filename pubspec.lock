@@ -494,7 +494,7 @@ packages:
     source: hosted
     version: "1.4.0"
   universal_ble:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: universal_ble
       sha256: f8f20fe5b198a22371fade3176b3c20106a89a0400d3a279d9460350b42c1663
@@ -573,6 +573,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.4.0"
+  wmr_ble:
+    dependency: "direct main"
+    description:
+      path: "packages/wmr_ble"
+      relative: true
+    source: path
+    version: "0.1.0"
   wmr_companion:
     dependency: "direct main"
     description:

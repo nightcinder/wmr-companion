@@ -1,12 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_companion/wmr_companion.dart';
 
-import '../../ble/universal_ble_adapter.dart';
-import '../../ble/universal_ble_transport.dart';
+import 'package:wmr_ble/wmr_ble.dart';
 
 import 'package:wmr_core/services/controller_service.dart';
 
@@ -67,6 +67,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleScanResult> _seen = {};
   StreamSubscription<BleScanResult>? _scanSub;
   StreamSubscription<BleLinkStatus>? _statusSub;
+  AppLifecycleListener? _lifecycle;
   WmrCompanion? _companion;
   Timer? _statsTimer;
 
@@ -82,6 +83,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         mode: state.mode,
       );
     });
+    // The BLE package has no widget dependency; the host forwards its
+    // lifecycle so a scan pauses in the background and resumes on return.
+    _lifecycle?.dispose();
+    final lifecycle = _lifecycle = AppLifecycleListener(
+      onStateChange: (s) => unawaited(
+        transport.handleAppLifecycle(switch (s) {
+          AppLifecycleState.resumed => BleAppLifecycle.resumed,
+          AppLifecycleState.inactive => BleAppLifecycle.inactive,
+          AppLifecycleState.paused => BleAppLifecycle.paused,
+          AppLifecycleState.detached => BleAppLifecycle.detached,
+          AppLifecycleState.hidden => BleAppLifecycle.inactive,
+        }),
+      ),
+    );
     ref.listen(axisMappingProvider, (_, m) => _companion?.setAxisMapping(m));
     ref.listen(filterKindProvider, (_, _) => _applyFusion());
     ref.listen(filterTuningProvider, (_, _) => _applyFusion());
@@ -98,6 +113,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       if (companion != null) _applyFf13(companion, s);
     });
     ref.onDispose(() {
+      lifecycle.dispose();
       _scanSub?.cancel();
       _statusSub?.cancel();
       _statsTimer?.cancel();

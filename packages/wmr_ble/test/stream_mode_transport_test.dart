@@ -1,13 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 
-import 'fake_adapter.dart';
+import 'package:wmr_ble/testing.dart';
 
 const id = fakeBridgeDeviceId;
 const ff11 = wmrBridgeStreamCharUuid;
@@ -24,12 +23,12 @@ class StepClock extends MonotonicClock {
 }
 
 void main() {
-  late FakeAdapter adapter;
+  late FakeBleAdapter adapter;
   late StepClock clock;
   late UniversalBleTransport t;
 
   setUp(() {
-    adapter = FakeAdapter();
+    adapter = FakeBleAdapter();
     clock = StepClock();
     t = UniversalBleTransport(adapter: adapter, clock: clock);
   });

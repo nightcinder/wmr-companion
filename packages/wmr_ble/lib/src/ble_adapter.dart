@@ -13,6 +13,15 @@ enum BleAvailability {
   poweredOn,
 }
 
+/// App lifecycle as the host reports it.
+///
+/// The BLE package never reaches into Flutter's widget binding. A host that
+/// has a lifecycle (the reference app does) forwards these states to
+/// [UniversalBleTransport.handleAppLifecycle]. Scanning is suspended while the
+/// app is not active and resumes with the same filters when the host returns;
+/// connections are left alone.
+enum BleAppLifecycle { resumed, inactive, paused, detached }
+
 /// A connect or disconnect reported by the platform.
 class AdapterConnectionEvent {
   const AdapterConnectionEvent({required this.connected, this.error});

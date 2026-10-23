@@ -12,10 +12,11 @@ dependencies:
   flutter_riverpod: ^3.4.3
   path_provider: ^2.1.6
   share_plus: ^13.3.1
-  universal_ble: ^3.1.2
   vector_math: ^2.4.3
   wmr_core:
     path: packages/wmr_core
+  wmr_ble:
+    path: packages/wmr_ble
   wmr_companion:
     path: packages/wmr_companion
   wmr_fusion:

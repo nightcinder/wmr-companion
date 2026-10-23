@@ -1,0 +1,18 @@
+name: wmr_ble
+description: universal_ble transport for the WMR Bridge, with the platform seam kept testable.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  universal_ble: ^3.1.2
+  wmr_core:
+    path: ../wmr_core
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

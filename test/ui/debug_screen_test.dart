@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wmr_companion_app/ble/ble_adapter.dart';
+import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
-import 'package:wmr_companion_app/ble/universal_ble_transport.dart';
 import 'package:wmr_core/domain/loss_window.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/protocol/gatt.dart';
@@ -14,7 +13,8 @@ import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 
-import '../ble/fake_adapter.dart';
+import 'package:wmr_ble/testing.dart';
+
 import 'raw_mode_notifier.dart';
 
 void tall(WidgetTester tester) {
@@ -281,12 +281,12 @@ void main() {
   });
 
   group('faults are shown', () {
-    late FakeAdapter adapter;
+    late FakeBleAdapter adapter;
     late UniversalBleTransport real;
     late ControllerService service;
 
     setUp(() async {
-      adapter = FakeAdapter();
+      adapter = FakeBleAdapter();
       real = UniversalBleTransport(adapter: adapter);
       service = ControllerService(real, fakeBridgeDeviceId);
       await service.start();
