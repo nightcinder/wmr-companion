@@ -28,7 +28,7 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
+      - run: dart format --output=none --set-exit-if-changed lib test packages/wmr_fusion packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
       - run: flutter analyze
       - run: flutter test
       - name: wmr_core package
@@ -117,6 +117,30 @@ jobs:
           dart pub get
           dart analyze
           dart test
+      - name: pub.dev publish dry-run (6 packages)
+        run: |
+          # Verify package publishability on pub.dev.
+          # wmr_fusion has no inter-package path dependencies and must pass cleanly.
+          # wmr_core, wmr_companion, wmr_ble, wmr_companion_ui, and wmr_companion_hid_android
+          # retain path dependencies until their first published release (see docs/PUBLISHING.md).
+          # dart pub publish --dry-run flags path dependencies; we allow them to fail soft until published.
+          echo "=== Publish dry-run: wmr_fusion ==="
+          (cd packages/wmr_fusion && dart pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_core (fails soft on path deps: see docs/PUBLISHING.md) ==="
+          (cd packages/wmr_core && dart pub publish --dry-run) || true
+
+          echo "=== Publish dry-run: wmr_companion (fails soft on path deps: see docs/PUBLISHING.md) ==="
+          (cd packages/wmr_companion && dart pub publish --dry-run) || true
+
+          echo "=== Publish dry-run: wmr_ble (fails soft on path deps: see docs/PUBLISHING.md) ==="
+          (cd packages/wmr_ble && flutter pub publish --dry-run) || true
+
+          echo "=== Publish dry-run: wmr_companion_ui (fails soft on path deps: see docs/PUBLISHING.md) ==="
+          (cd packages/wmr_companion_ui && flutter pub publish --dry-run) || true
+
+          echo "=== Publish dry-run: wmr_companion_hid_android (fails soft on path deps: see docs/PUBLISHING.md) ==="
+          (cd packages/wmr_companion_hid_android && flutter pub publish --dry-run) || true
       # Monado's config key (BSL-1.0) is not committed. It is fetched here so the
       # test APK can decode a controller config block; it ends up only inside the
       # APK artifact, together with assets/monado/NOTICE.txt. A failed download

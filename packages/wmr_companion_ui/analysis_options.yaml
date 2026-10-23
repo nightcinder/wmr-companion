@@ -3,6 +3,8 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   exclude:
     - build/**
+  errors:
+    invalid_dependency: ignore
   language:
     strict-casts: true
     strict-inference: true

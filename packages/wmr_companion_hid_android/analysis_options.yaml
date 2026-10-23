@@ -9,6 +9,8 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+  errors:
+    invalid_dependency: ignore
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
