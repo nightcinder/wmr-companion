@@ -1,0 +1,5 @@
+# Local development only: the published package uses the hosted
+# version constraints in pubspec.yaml. Not part of the archive.
+dependency_overrides:
+  wmr_fusion:
+    path: ../wmr_fusion

@@ -9,8 +9,7 @@ environment:
 
 dependencies:
   vector_math: ^2.4.3
-  wmr_fusion:
-    path: ../wmr_fusion
+  wmr_fusion: ^0.1.0
 
 dev_dependencies:
   test: ^1.25.0

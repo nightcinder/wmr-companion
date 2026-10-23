@@ -11,8 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   universal_ble: ^3.1.2
-  wmr_core:
-    path: ../wmr_core
+  wmr_core: ^0.1.0
 
 dev_dependencies:
   flutter_test:
