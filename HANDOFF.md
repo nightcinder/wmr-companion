@@ -13,16 +13,18 @@ The repository is no longer one monolithic Flutter app. It is a federated packag
 - `packages/wmr_core`: Pure Dart protocol parsers (FF11/FF12/FF13/FF14/FF15), domain logic (timing, gyro bias, axis mapping, stick centres, gamepad mapping), `BleTransport` interface, `ControllerService`, and loss/latency statistics. No Flutter, Riverpod, or plugin imports (enforced by CI).
 - `packages/wmr_companion`: Umbrella public facade (`WmrCompanion`), configuration, data models, typed exceptions, lifecycle, and broadcast stream subscriptions (`controllers`, `gamepad`, `link`). Host apps depend on this package.
 - `packages/wmr_ble`: Flutter plugin implementing `UniversalBleTransport` via `universal_ble`, connection lifecycle hooks, and adapter status.
+- `packages/wmr_ws`: Pure Dart WebSocket transport (`WmrWsTransport`) for the Linux/Raspberry Pi Wi-Fi bridge daemon behind `BleTransport` seam (host-tested/loopback-only).
 - `packages/wmr_fusion`: Pure Dart 3DoF orientation filters (Madgwick, Mahony).
 - `packages/wmr_companion_ui`: Reusable Flutter UI widgets (`OrientationView`, `LinkStatusView`, `HandStatsView`) extracted from the reference app's debug screen (merged in PR #45).
+- `packages/wmr_companion_hid_android`: Optional Android Bluetooth HID gamepad output plugin (`BluetoothHidDevice`, merged in PR #48).
 - `packages/WMRCompanionKit`: Native Swift framework targeting iOS 18+, macOS 12+, visionOS 1+ (CoreBluetooth transport, FF11–FF15 parsers, fusion, dual-bridge coordination) from ONY-38 (PR #37).
 - `example/`: Minimal Flutter host demonstrating in-process controller consumption (~20 lines to gamepad state).
-- App (`apps/wmr_companion_app`): The full reference consumer app (Connect, Debug, Capture, Latency, Gamepad screens) driving its real connection through the `WmrCompanion` facade.
+- App (`apps/wmr_companion_app`): The full reference consumer app (Connect with BLE and Wi-Fi host:port, Debug, Capture, Latency, Gamepad screens) driving its real connection through the `WmrCompanion` facade or ControllerService.
 
 | Repo | What | Notes |
 |---|---|---|
-| `nightcinder/WMR_Bridge` | Firmware (C, built inside the BTstack ESP32 port) | Source of truth for the wire protocol (`docs/PROTOCOL.md`). BTstack-derived, non-commercial license. |
-| `nightcinder/wmr-companion` | Federated Flutter library and reference app, MIT, public | Packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `WMRCompanionKit`) + `example/` + root reference app. |
+| `nightcinder/WMR_Bridge` | Firmware (C, built inside the BTstack ESP32 port) & Linux/Pi daemon (`pi/`) | Source of truth for the wire protocol (`docs/PROTOCOL.md`). BTstack-derived, non-commercial license. |
+| `nightcinder/wmr-companion` | Federated Flutter library and reference app, MIT, public | Packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`, `WMRCompanionKit`) + `example/` + root reference app. |
 
 GATT service FF10 on the bridge:
 - FF11: raw fragmented HID frames (46 bytes)
@@ -32,7 +34,7 @@ GATT service FF10 on the bridge:
 - FF15: echo characteristic for round-trip latency measurement (479/479 pings answered on hardware, user-reported)
 - FF16: bridge firmware version string (exists on firmware `main` via PR #38; app/library support dispatched in ONY-56)
 
-FF11/FF12/FF14 are mutually exclusive (a second enable fails with ATT error 0x80; write 0x0000 to the active one first). FF13, FF15, and FF16 are independent. Multi-bridge support (connecting multiple ESP32 bridges concurrently and merging notification streams into shared per-hand pipelines) is implemented in `ControllerService` (PR #34). App layers: UI -> Riverpod -> `WmrCompanion` facade -> `ControllerService` -> (parser + `BleTransport`). `BleTransport` is an abstract interface in `wmr_core`, implemented by `UniversalBleTransport` in `wmr_ble`, `FakeTransport` in `wmr_companion/testing.dart`, and native transport via `WMRCompanionKit`.
+FF11/FF12/FF14 are mutually exclusive (a second enable fails with ATT error 0x80; write 0x0000 to the active one first). FF13, FF15, and FF16 are independent. Multi-bridge support (connecting multiple ESP32 bridges concurrently and merging notification streams into shared per-hand pipelines) is implemented in `ControllerService` (PR #34). App layers: UI -> Riverpod -> `WmrCompanion` facade -> `ControllerService` -> (parser + `BleTransport`). `BleTransport` is an abstract interface in `wmr_core`, implemented by `UniversalBleTransport` in `wmr_ble`, `WmrWsTransport` in `wmr_ws`, `FakeTransport` in `wmr_companion/testing.dart`, and native transport via `WMRCompanionKit`. Note: `BleTransport` is currently GATT-shaped; the question of whether to rename it before `0.1.0` remains an open design question with the owner (no rename made). Wi-Fi bridge streaming is host-tested / loopback-only until physical Pi sitting P1–P10.
 
 ## 2. Rules (from the project owner; keep them)
 
@@ -180,6 +182,13 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 - **13.2 Compatibility matrix** published in both repos, keyed on FF16 version.
 - **13.3 Bridge security decision** in `docs/SECURITY.md`.
 - **13.4 README rewrite** in both repos around verified hardware results.
+
+### M14 — Linux / Raspberry Pi Wi-Fi host bridge
+*Question: does moving the host bridge to a Raspberry Pi over 5 GHz Wi-Fi eliminate upstream radio contention?*
+- **14.1 `packages/wmr_ws`**: WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged in #61).
+- **14.3 App Wi-Fi bridge entry**: host:port entry, token auth, TLS switch, and loopback checks (merged in #62).
+- **14.5 Companion docs and publish order**: align docs and publishing waves for seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and rename-before-0.1.0 is open with owner.
+- **P1–P10 hardware verification**: physical Raspberry Pi testing sitting (P6 upstream loss comparison); Wi-Fi link is host-tested/loopback-only until then.
 
 ## 8. Lessons from this session (so you don't repeat them)
 

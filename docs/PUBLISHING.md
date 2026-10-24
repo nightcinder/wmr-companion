@@ -13,10 +13,11 @@ The repository contains modular Dart and Flutter packages that are intended to b
 - `wmr_core` (pure-Dart protocol, controller pipelines, and BLE seam)
 - `wmr_companion` (public framework-agnostic facade)
 - `wmr_ble` (Flutter `universal_ble` transport)
+- `wmr_ws` (pure-Dart WebSocket transport for Linux/Pi Wi-Fi daemon, landed in PR #61)
 - `wmr_companion_ui` (optional Flutter UI widgets, landed in PR #45)
 - `wmr_companion_hid_android` (optional Android BLE HID output plugin, landed in PR #48)
 
-All six package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required.
+All seven package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. Note: `BleTransport` is currently GATT-shaped and the rename-before-0.1.0 question remains open with the owner; no rename is made here.
 
 The root application (`wmr_companion_app`) and `example/` (`wmr_companion_example`) remain application hosts and retain `publish_to: none`.
 
@@ -34,9 +35,9 @@ Because a published package cannot depend on a package version that does not yet
      │
 [wmr_core] (pure Dart, depends on wmr_fusion)
      ▲
-     ├──────────────────────────┐
-     │                          │
-[wmr_companion] (facade)    [wmr_ble] (Flutter BLE transport)
+     ├──────────────────────────┬──────────────────────────┐
+     │                          │                          │
+[wmr_companion] (facade)    [wmr_ble] (Flutter BLE)    [wmr_ws] (pure-Dart WebSocket)
      ▲
      ├──────────────────────────┐
      │                          │
@@ -63,14 +64,17 @@ Because a published package cannot depend on a package version that does not yet
    - **Step 3a: `packages/wmr_ble`**
      - Already declares `wmr_core: ^0.1.0` and depends on the Flutter SDK.
      - Publish once `wmr_core 0.1.0` is indexed.
-   - **Step 3b: `packages/wmr_companion_ui`**
+   - **Step 3b: `packages/wmr_ws`**
+     - Pure Dart package. Already declares `wmr_core: ^0.1.0`.
+     - Publish once `wmr_core 0.1.0` is indexed.
+   - **Step 3c: `packages/wmr_companion_ui`**
      - Already declares `wmr_companion: ^0.1.0` and depends on the Flutter SDK.
      - Publish once `wmr_companion 0.1.0` is indexed.
-   - **Step 3c: `packages/wmr_companion_hid_android`**
+   - **Step 3d: `packages/wmr_companion_hid_android`**
      - Already declares `wmr_companion: ^0.1.0` and is an Android Flutter plugin.
      - Publish once `wmr_companion 0.1.0` is indexed.
 
-*(Note: Steps 3a, 3b, and 3c are mutually independent and can be published in parallel once Wave 1 and Wave 2 are indexed on pub.dev.)*
+*(Note: Steps 3a, 3b, 3c, and 3d are mutually independent and can be published in parallel once Wave 1 and Wave 2 are indexed on pub.dev.)*
 
 ---
 
@@ -128,7 +132,7 @@ dependencies:
 
 **Benefits, as realised here:**
 1. **Workspace-native resolution:** A hosted constraint such as `wmr_fusion: ^0.1.0` resolves to the local workspace member directory. No `dependency_overrides` or path juggling is needed.
-2. **Seamless transitive resolution:** Every package, both app hosts and all six packages resolve the whole internal graph locally.
+2. **Seamless transitive resolution:** Every package, both app hosts and all seven packages resolve the whole internal graph locally.
 3. **Single source of truth:** One lockfile at the repository root (`pubspec.lock`) replaces the per-package and example locks.
 4. **Publish-ready:** `dart pub publish` understands workspaces and the published archive keeps the hosted constraint, not the local path. `resolution: workspace` is workspace metadata and does not make the package depend on the repository layout.
 
@@ -146,11 +150,12 @@ dependencies:
 | `wmr_core` | `wmr_fusion: ^0.1.0` |
 | `wmr_companion` | `wmr_core: ^0.1.0` |
 | `wmr_ble` | `wmr_core: ^0.1.0` |
+| `wmr_ws` | `wmr_core: ^0.1.0` |
 | `wmr_companion_ui` | `wmr_companion: ^0.1.0` |
 | `wmr_companion_hid_android` | `wmr_companion: ^0.1.0` |
 
-All six packages are fully prepared for publication:
-- `publish_to: none` has been removed from all six packages.
+All seven packages are fully prepared for publication:
+- `publish_to: none` has been removed from all seven packages.
 - Each package contains its own `LICENSE` file matching the root MIT license.
 - Each package contains a `CHANGELOG.md` with an honest `0.1.0` entry.
 - Each package specifies `repository:` and `issue_tracker:` pointing to the GitHub repository.
@@ -185,6 +190,7 @@ When the owner authorises publication after the API freeze, publish in the wave 
 3. **Wave 3** (order within the wave does not matter):
    ```sh
    cd packages/wmr_ble && flutter pub publish
+   cd packages/wmr_ws && dart pub publish
    cd packages/wmr_companion_ui && flutter pub publish
    cd packages/wmr_companion_hid_android && flutter pub publish
    ```
@@ -197,7 +203,7 @@ After the first release, `flutter pub get` in the app and `example/` still resol
 
 The CI workflow (`.github/workflows/ci.yml`) is the gate for this document:
 
-- **Strict dry-run for every package in the publish set.** The `pub.dev publish dry-run (every package in the publish set)` step runs `dart pub publish --dry-run` for `wmr_fusion`, `wmr_core`, and `wmr_companion`, and `flutter pub publish --dry-run` for `wmr_ble`, `wmr_companion_ui`, and `wmr_companion_hid_android`. It has no `|| true`: any dry-run error (or warning, which pub reports with a non-zero exit) fails the job. The workspace resolution is what lets the five dependent packages pass before anything is on pub.dev.
+- **Strict dry-run for every package in the publish set.** The `pub.dev publish dry-run (every package in the publish set)` step runs `dart pub publish --dry-run` for `wmr_fusion`, `wmr_core`, `wmr_companion`, and `wmr_ws`, and `flutter pub publish --dry-run` for `wmr_ble`, `wmr_companion_ui`, and `wmr_companion_hid_android`. It has no `|| true`: any dry-run error (or warning, which pub reports with a non-zero exit) fails the job. The workspace resolution is what lets the six dependent packages pass before anything is on pub.dev.
 - **Export-boundary tests per package.** Each package's test suite includes `test/export_boundary_test.dart`, run by the existing per-package `dart test` / `flutter test` steps. It reads every file under the package's own `lib/` and fails on a forbidden import, so the boundary is checked where the package is developed rather than by a CI-only shell grep.
 - **Package tests and analysis.** Each package still runs its own `analyze` and test suite; the app and `example/` run theirs.
 - **A fresh app consumes the packages.** `tool/fresh_app_check.sh` creates a throwaway Flutter app, depends on the four host-facing packages by path, connects a `WmrCompanion` to `FakeTransport`, reads a gamepad frame and imports the BLE/UI/HID entry points. It proves the host-facing surface still works for a consumer that is not part of the workspace.

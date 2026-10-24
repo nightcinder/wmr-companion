@@ -5,13 +5,15 @@ holds the pure-Dart protocol, domain, `BleTransport` interface, controller
 service and the pure services; `packages/wmr_companion` is the public facade
 (`WmrCompanion`, config, models, typed errors) with an API README and tests;
 `packages/wmr_ble` owns the `universal_ble` adapter/transport and the app
-lifecycle hook; `packages/wmr_companion_ui` holds optional orientation, link,
+lifecycle hook; `packages/wmr_ws` provides the pure-Dart WebSocket transport for
+the Linux/Raspberry Pi Wi-Fi bridge daemon; `packages/wmr_companion_ui` holds optional orientation, link,
 stats and gamepad widgets; `packages/wmr_companion_hid_android` holds the
 optional Android HID output; and `example/` is a minimal Flutter host. The app
 depends on the packages by path and drives its real connection through the
-facade. The repository is a Dart pub workspace with one lockfile, and all six
+facade. The repository is a Dart pub workspace with one lockfile, and all seven
 packages are publishable (clean `pub publish --dry-run`, export-boundary tests,
-fresh-app check in CI).
+fresh-app check in CI). Note: `BleTransport` is currently GATT-shaped; whether
+to rename it prior to `0.1.0` remains an open design question with the owner.
 
 **Release status (owner, 2026-10-23 on ONY-41).** `0.1.0` is **not published**
 to pub.dev: publication is on hold. The iOS 18 device gate (phase 5) is
@@ -125,13 +127,14 @@ rewrite.
 ## 4. Target package topology
 
 ```
-apps/wmr_companion_app                  reference app: Connect, Debug, Capture,
-  |                                     Latency, Gamepad; hardware QA target
+apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), Debug,
+  |                                     Capture, Latency, Gamepad; hardware QA target
   +-- wmr_companion_ui (optional)       reusable widgets (3D view, link panel)
   +-- wmr_companion                     umbrella Flutter package, public API
   |     +-- wmr_core                    pure Dart: protocol + domain + services
   |     |     +-- wmr_fusion            pure Dart: Madgwick/Mahony
   |     +-- wmr_ble                     Flutter plugin: universal_ble + native
+  |     +-- wmr_ws                      pure Dart: WebSocket transport (Linux/Pi Wi-Fi daemon)
   +-- wmr_companion_hid_android         optional: phone-as-HID-gamepad output
 ```
 
@@ -140,6 +143,7 @@ apps/wmr_companion_app                  reference app: Connect, Debug, Capture,
 | `wmr_core` | Dart | yes (after API freeze) | GATT ids, parsers, reassembler, config decode, echo, hand pipeline, loss/latency maths, gamepad mapping, `BleTransport` interface, `ControllerService` | Flutter, Riverpod, plugins, `dart:ui` |
 | `wmr_fusion` | Dart | yes | 3DoF filters only | any package (zero dependencies) |
 | `wmr_ble` | Flutter plugin | yes | `UniversalBleTransport`, native iOS/Android transports, permissions, adapter-state and app-lifecycle handling | UI, Riverpod, app settings |
+| `wmr_ws` | Dart | yes | `WmrWsTransport`: WebSocket transport for Linux/Pi Wi-Fi daemon behind `BleTransport` seam | Flutter, Riverpod, plugins, `dart:ui` |
 | `wmr_companion` | Dart (Flutter once the BLE plugin lands) | yes | Facade (`WmrCompanion`), models/DTOs, defaults, lifecycle, capture/latency recorders with injected sinks | UI widgets, Riverpod |
 | `wmr_companion_ui` | Flutter | optional | Debug 3D view, stats panel, gamepad tester | Core internals; talks to the facade |
 | `wmr_companion_hid_android` | Flutter plugin | optional | Existing `BluetoothHidDevice` output | Core internals |
@@ -277,8 +281,9 @@ first public version.
 ```
 WmrCompanion
   -> ControllerService -> parsers + fusion + gamepad mapping   (Dart, shared)
-  -> BleTransport                                              (interface)
-       +-- UniversalBleTransport   Android + iOS, phase 1
+  -> BleTransport                                              (interface, GATT-shaped)
+       +-- UniversalBleTransport   Android + iOS, BLE phase 1
+       +-- WmrWsTransport          Linux / Raspberry Pi Wi-Fi WebSocket (host-tested)
        +-- NativeIosTransport      CoreBluetooth via WMRCompanionKit, phase 2
        +-- NativeAndroidTransport  optional, if the M7 baseline demands it
        +-- FakeTransport           tests, replay, UI development
@@ -286,8 +291,9 @@ WmrCompanion
 
 `BleTransport` already has the right shape: scan, connect, discover,
 subscribe → `Stream<Uint8List>` with arrival timestamp, write, disconnect, plus
-MTU/RSSI/connection info. The native transports implement the same interface;
-nothing above knows which one is in use.
+MTU/RSSI/connection info. The native transports and `WmrWsTransport` implement the same interface;
+nothing above knows which one is in use. Note that `BleTransport` is currently GATT-shaped;
+renaming before `0.1.0` remains an open design question with the owner.
 
 **Phase 1 (lowest risk): `universal_ble` on both platforms.** The Dart pipeline
 already runs on Android at ~200 Hz per hand. On iOS, `universal_ble` uses
@@ -365,6 +371,7 @@ wmr-companion/
     wmr_core/                    # phase 1: pure Dart (landed)
     wmr_fusion/                  # existing, kept pure Dart (landed)
     wmr_ble/                     # phase 3: universal_ble transport, link status, lifecycle hook (landed)
+    wmr_ws/                      # M14.1: WebSocket transport for Linux/Pi Wi-Fi daemon (landed)
     wmr_companion/               # phase 2: umbrella facade (landed)
     wmr_companion_ui/            # phase 7: optional widgets (landed)
     wmr_companion_hid_android/   # phase 7: optional Android HID output (landed)
@@ -396,9 +403,14 @@ the directory move changed paths, not imports.
      placeholder (`0.0.0+<sha>`).
   3. *`v0.1.0-rc1` (`547ab09`) and later:* First build whose FF16 reports a real
      version (`0.1.0-rc1`).
-  All six packages at `0.1.0` in source speak to every era. Two critical statuses
+  4. *Linux / Raspberry Pi Wi-Fi host bridge (`wmr_ws`, M14):* Connects over WebSocket
+     (`ws://<host>:8765/wmr`). Handshake `hello` returns daemon `version` (synthesized as
+     FF16), `protocol: 1`, and `streams: ["raw", "decoded", "batched"]` (synthesized as FF10
+     GATT services FF11, FF12, FF14, FF15, FF16; no FF13 config block). Wi-Fi link is
+     host-tested/loopback-only until the Pi hardware sitting (P6).
+  All seven packages at `0.1.0` in source speak to every era. Two critical statuses
   must be stated, not implied:
-  - **The library is not published:** All six packages are at `0.1.0` in source/git
+  - **The library is not published:** All seven packages are at `0.1.0` in source/git
     only; publication to pub.dev is on hold by owner decision (2026-10-23, ONY-41;
     see [PUBLISHING.md](PUBLISHING.md) §5). Nothing is available on pub.dev.
   - **The firmware release is a prerelease:** `v0.1.0-rc1` is flagged prerelease
@@ -406,8 +418,8 @@ the directory move changed paths, not imports.
     been flashed or confirmed by CI).
   Unknown fields or characteristics are ignored, so a newer bridge does not crash
   an older client.
-- **Publish on pub.dev** after the API freeze. The six packages no longer carry
-  `publish_to: none` and their dry-runs are clean (#49/#54); the actual `0.1.0`
+- **Publish on pub.dev** after the API freeze. The seven packages no longer carry
+  `publish_to: none` and their dry-runs are clean (#49/#54/#61); the actual `0.1.0`
   upload is on hold by owner decision (2026-10-23), see [PUBLISHING.md](PUBLISHING.md) §5.
   Keep the app's and `example/`'s `publish_to: none`.
 - **License:** MIT for the Dart packages and app. The Monado XOR key table is
