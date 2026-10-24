@@ -11,6 +11,7 @@ workspace:
   - packages/wmr_core
   - packages/wmr_companion
   - packages/wmr_ble
+  - packages/wmr_ws
   - packages/wmr_companion_ui
   - packages/wmr_companion_hid_android
   - example

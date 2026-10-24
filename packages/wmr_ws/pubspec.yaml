@@ -1,0 +1,16 @@
+name: wmr_ws
+description: WebSocket (Wi-Fi) transport for the WMR Bridge Linux/Raspberry Pi daemon.
+version: 0.1.0
+repository: https://github.com/nightcinder/wmr-companion
+issue_tracker: https://github.com/nightcinder/wmr-companion/issues
+
+environment:
+  sdk: ^3.13.5
+
+resolution: workspace
+
+dependencies:
+  wmr_core: ^0.1.0
+
+dev_dependencies:
+  test: ^1.25.0
