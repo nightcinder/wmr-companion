@@ -12,7 +12,8 @@ Flutter companion app for ESP32 (BTstack) WMR motion controllers. It connects to
 - **Latency:** inter-arrival, sequence gaps, tick-based loss and the FF15 echo round trip, with CSV and JSON export ([docs/LATENCY.md](docs/LATENCY.md)).
 - **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, and an optional Bluetooth HID output ([docs/GAMEPAD.md](docs/GAMEPAD.md)); not run on hardware.
 - **Capture:** guided raw capture from FF11 in the same file format as the firmware's `tools/capture_ble.py`, shareable from the phone. See [docs/CAPTURE.md](docs/CAPTURE.md).
-- A fake bridge (raw and decoded) drives the UI and tests without hardware.
+- A fake bridge (raw and decoded) drives tests without hardware. The app
+  itself only connects to real devices.
 
 ## Repo layout
 

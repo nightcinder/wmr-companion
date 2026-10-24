@@ -40,7 +40,7 @@ final modeStateProvider = StreamProvider.family<ModeState, DebugSource>((
 });
 
 class DebugScreen extends ConsumerWidget {
-  const DebugScreen({super.key, this.source = DebugSource.fake});
+  const DebugScreen({super.key, this.source = DebugSource.real});
 
   final DebugSource source;
 

@@ -45,7 +45,7 @@ void main() {
             ),
           ),
         ],
-        child: const MaterialApp(home: DebugScreen()),
+        child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
       ),
     );
     await tester.pump();
@@ -314,7 +314,7 @@ void main() {
             controllerServiceProvider(DebugSource.fake)
                 .overrideWithValue(service),
           ],
-          child: const MaterialApp(home: DebugScreen()),
+          child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
         ),
       );
       await tester.pump();

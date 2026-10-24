@@ -13,7 +13,7 @@ import 'gamepad_providers.dart';
 /// Debug view of the gamepad mapping: what a game would see, plus the
 /// thresholds. Stays inside the app; nothing is sent to the OS.
 class GamepadScreen extends ConsumerWidget {
-  const GamepadScreen({super.key, this.source = DebugSource.fake});
+  const GamepadScreen({super.key, this.source = DebugSource.real});
 
   final DebugSource source;
 
