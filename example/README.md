@@ -11,4 +11,4 @@ flutter run
 ```
 
 This is the phase-4 reference example from `docs/LIBRARY.md`. The full
-diagnostic app stays at the repository root for now.
+diagnostic app lives in `apps/wmr_companion_app`.

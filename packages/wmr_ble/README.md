@@ -1,6 +1,6 @@
 # wmr_ble
 
-`universal_ble` transport for the [WMR Bridge](https://github.com/nightcinder/wmr-companion),
+`universal_ble` transport for the [WMR Bridge](https://github.com/nightcinder/WMR_Bridge),
 behind the `BleTransport` seam from `wmr_core`. Android and iOS are both v1
 targets; desktop and web are out of scope.
 

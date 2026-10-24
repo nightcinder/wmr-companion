@@ -1,8 +1,8 @@
 ﻿# wmr-companion
 
-Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR motion controllers. It connects to the [WMR_Bridge](https://github.com/nightcinder/WMR_Bridge) firmware over BLE GATT or to the Linux/Pi bridge over a WebSocket on Wi-Fi, fuses controller orientation on the phone (3DoF, Madgwick/Mahony), shows a debug 3D view with link statistics, and records raw captures. Android and iOS are both in v1 scope (iOS 18 floor, [docs/LIBRARY.md](docs/LIBRARY.md) §13; `packages/WMRCompanionKit` and CI compile landed, device gate waived for `0.1.0`, no iOS device run yet); the end goal is gamepad-style 3DoF input. The pipeline is also being extracted into Flutter packages that other apps can import in-process on **Android and iOS** (see [docs/LIBRARY.md](docs/LIBRARY.md), [packages/wmr_companion](packages/wmr_companion/README.md), [packages/wmr_ble](packages/wmr_ble/README.md) and [packages/wmr_ws](packages/wmr_ws/README.md)); the app is the reference consumer.
+Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR motion controllers. It connects to the [WMR_Bridge](https://github.com/nightcinder/WMR_Bridge) firmware over BLE GATT or to the Linux/Pi bridge over a WebSocket on Wi-Fi, fuses controller orientation on the phone (3DoF, Madgwick/Mahony), shows a debug 3D view with link statistics, and records raw captures. The end goal is gamepad-style 3DoF input. The pipeline is extracted into seven Dart packages that other apps can import in-process on **Android and iOS** ([docs/LIBRARY.md](docs/LIBRARY.md); [packages/wmr_companion](packages/wmr_companion/README.md), [packages/wmr_ble](packages/wmr_ble/README.md) and [packages/wmr_ws](packages/wmr_ws/README.md)); the app is the reference consumer. A native Swift framework (`packages/WMRCompanionKit`) covers iOS 18+, macOS 12+ and visionOS 1+.
 
-**Status (v0.2.0):** milestones 1 to 4 and the Capture screen are done and used on hardware (user-reported): the decoded-stream pipeline (FF12, and FF14 batches as the default) and 3D view, the controller config read over FF13 with calibration decoded, and the latency screen with the FF15 round trip (first run: 479 of 479 pings, p50 40.8 ms). An in-app gamepad mapping layer and a Bluetooth HID output ([docs/GAMEPAD.md](docs/GAMEPAD.md)) are built but not run on hardware; Android and iOS are both in v1 scope (iOS 18 floor, `packages/WMRCompanionKit` and CI compile landed, device gate waived for `0.1.0`, no iOS device run yet). Controller-to-ESP32 report loss (about 19 % per controller with both connected) is the main open problem. Start with [HANDOFF.md](HANDOFF.md), then [docs/STATUS.md](docs/STATUS.md) for the state, hardware results and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
+**Status (v0.1.0, 2026-10-24):** the core pipeline (FF12, and FF14 batches as the default stream) and 3D view, the controller config read over FF13 with calibration decoded, the latency screen with the FF15 round trip (first run: 479 of 479 pings, p50 40.8 ms), the Capture screen and the package split are built; the hardware results are user-reported. An in-app gamepad mapping layer and a Bluetooth HID output ([docs/GAMEPAD.md](docs/GAMEPAD.md)) are built but not run on hardware. Android and iOS are both in v1 scope (iOS 18 floor; the device gate was waived for `0.1.0`, so iOS is CI-compiled but has no device run). The seven Dart packages are publish-ready (CI runs `dart pub publish --dry-run` for each) but are not on pub.dev: `0.1.0` is on owner hold. Controller-to-ESP32 report loss (about 19 % per controller with both connected) is the main open problem. Start with [HANDOFF.md](HANDOFF.md), then [docs/STATUS.md](docs/STATUS.md) for the state, hardware results and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
 
 ## What is in the app
 
@@ -32,7 +32,8 @@ Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR mot
 | `example/` | Minimal Flutter host: one facade, a connect and a gamepad `StreamBuilder` on the fake bridge ([README](example/README.md)) |
 | `packages/wmr_fusion/` | Pure-Dart Madgwick and Mahony filters |
 | `packages/WMRCompanionKit/` | Native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers |
-| `docs/` | Status, plan, protocol notes, capture, latency, gamepad, camera research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable Flutter package split |
+| `tool/` | Monado config-key fetch, `fresh_app_check.sh`, and the native Android GATT / iOS probe apps |
+| `docs/` | Status, plan, protocol notes, capture, latency, gamepad, iOS, publishing and camera research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable package split |
 | `HANDOFF.md` | Rules, environment, state, not-yet-run list, cleanup list |
 
 ## Build and test
@@ -47,9 +48,9 @@ flutter build apk --debug
 flutter run -d <device>           # BLE needs a physical phone
 ```
 
-From the repo root, the package suites are: `cd packages/wmr_core && dart test`; `cd packages/wmr_companion && dart test`; `cd packages/wmr_ble && flutter test`; `cd packages/wmr_ws && dart test`; `cd packages/wmr_companion_ui && flutter test`; `cd packages/wmr_companion_hid_android && flutter test`; `cd packages/wmr_fusion && dart test`; `cd example && flutter test`.
+From the repo root, the package suites are: `cd packages/wmr_core && dart test`; `cd packages/wmr_companion && dart test`; `cd packages/wmr_ble && flutter test`; `cd packages/wmr_ws && dart test`; `cd packages/wmr_companion_ui && flutter test`; `cd packages/wmr_companion_hid_android && flutter test`; `cd packages/wmr_fusion && dart test`; `cd example && flutter test`. On macOS, `cd packages/WMRCompanionKit && swift test` covers the Swift framework.
 
-CI runs the same checks and uploads a debug APK. Each CI APK is signed differently, so installing a new one over an old one needs `adb uninstall com.onyxlens.wmr_companion` first.
+CI also runs `dart analyze`/`flutter analyze` in each package, a `dart pub publish --dry-run` for all seven packages, and `tool/fresh_app_check.sh`, then uploads a debug APK. The `v0.1.0` GitHub release carries `wmr-companion-0.1.0-debug.apk` and the GATT probe APK. Each CI APK is signed differently, so installing a new one over an old one needs `adb uninstall com.onyxlens.wmr_companion` first.
 
 ## License
 
