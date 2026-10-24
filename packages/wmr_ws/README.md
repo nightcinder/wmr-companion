@@ -86,7 +86,10 @@ fragment capacity; it is a payload size, not an ATT MTU.
   `esp_timer` values; only differences within one clock are meaningful.
 - The FF15 answer's `rxTimeUs` is `serverTimeUs`; `turnaroundUs` and
   `queueDepth` are 0 because protocol 1's `pong` carries neither. `EchoSample`
-  still reports the observable end-to-end round trip.
+  still reports the observable end-to-end round trip. `EchoSample.offsetUs`
+  means "daemon clock minus phone clock", not "ESP32 minus phone clock"; it is
+  a different quantity from the BLE bridge's offset, so do not compare the two
+  bridges' offsets.
 
 ### Reconnect and sequence reset
 
@@ -102,7 +105,9 @@ reconnect tests in `test/reconnect_test.dart` pin that.
 The daemon has a 512-message queue per client and drops the **newest** message
 when full. The client does the same with `WmrWsTransport.queueSize` and counts
 the losses in `statsFor(deviceId).droppedByQueue`, so a slow consumer is
-visible rather than an unbounded heap. `WmrWsTransport.status()` exposes the
+visible rather than an unbounded heap. Every frame passes through that queue
+and is paced into the stream one at a time, so a slow-but-unpaused listener
+cannot grow the stream controller's internal buffer either. `WmrWsTransport.status()` exposes the
 daemon's own `dropped`/`delivered` counters.
 
 ## Tests

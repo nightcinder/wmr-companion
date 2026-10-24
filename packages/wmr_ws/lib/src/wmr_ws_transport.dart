@@ -53,7 +53,9 @@ Future<WebSocket> _defaultConnector(Uri uri) => WebSocket.connect(
 ///   [EchoAnswer.turnaroundUs] and [EchoAnswer.queueDepth] are 0 and
 ///   [EchoAnswer.rxTimeUs] is the daemon's `serverTimeUs`. That clock has the
 ///   daemon's own origin: do not compare it with the phone clock or with an
-///   ESP32 timestamp.
+///   ESP32 timestamp. `EchoSample.offsetUs` therefore means "daemon clock
+///   minus phone clock", not "ESP32 minus phone"; it is a different quantity
+///   from the BLE bridge's offset. `EchoSample.rttUs` is the observable.
 ///
 /// ## Timestamps
 ///
@@ -163,13 +165,7 @@ class WmrWsTransport implements BleTransport {
     _setState(deviceId, BleConnectionState.connecting);
 
     try {
-      final socket = await _connector(endpoint.uri).timeout(
-        connectTimeout,
-        onTimeout: () => throw WmrWsException(
-          'no WebSocket connection to ${endpoint.uri} within '
-          '${connectTimeout.inSeconds}s',
-        ),
-      );
+      final socket = await _openSocket(endpoint);
       session.socket = socket;
       session
         ..phase = _SessionPhase.awaitingHello
@@ -387,6 +383,38 @@ class WmrWsTransport implements BleTransport {
       await controller.close();
     }
     _stateControllers.clear();
+  }
+
+  /// Opens the socket, and closes one that arrives after [connectTimeout].
+  ///
+  /// `Future.timeout` cannot cancel a pending `WebSocket.connect`, so a late
+  /// completion is closed here instead of leaking an idle client.
+  Future<WebSocket> _openSocket(WmrWsEndpoint endpoint) async {
+    final opening = _connector(endpoint.uri);
+    var timedOut = false;
+    try {
+      return await opening.timeout(
+        connectTimeout,
+        onTimeout: () {
+          timedOut = true;
+          throw WmrWsException(
+            'no WebSocket connection to ${endpoint.uri} within '
+            '${connectTimeout.inSeconds}s',
+          );
+        },
+      );
+    } catch (_) {
+      if (timedOut) {
+        unawaited(
+          opening
+              .then<void>((socket) {
+                unawaited(socket.close(1000, 'connect timed out'));
+              })
+              .catchError((Object _) {}),
+        );
+      }
+      rethrow;
+    }
   }
 
   WmrWsEndpoint _endpointsFor(String deviceId) {

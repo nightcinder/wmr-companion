@@ -10,8 +10,10 @@ import 'package:wmr_core/ble/ble_transport.dart';
 /// grow without bound, and [dropped] makes the loss visible instead of
 /// pretending the stream kept up.
 ///
-/// A paused subscription still counts as "consumer not keeping up": the queue
-/// keeps filling and overflows at the same bound. Notifications keep their
+/// Every notification goes through the bounded queue. Delivery is paced one
+/// event at a time, so the stream controller's own buffer cannot grow either
+/// when the consumer is slow but not paused. A paused subscription also keeps
+/// filling the queue and overflows at the same bound. Notifications keep their
 /// [BleNotification.receivedAtUs] stamp from the socket, so a message that
 /// waited in this queue does not look newer than it is.
 class WmrWsNotificationSink {
@@ -23,11 +25,10 @@ class WmrWsNotificationSink {
   final ListQueue<BleNotification> _queue = ListQueue<BleNotification>();
   late final StreamController<BleNotification> _controller =
       StreamController<BleNotification>(
-        onListen: _drain,
         onPause: () => _paused = true,
         onResume: () {
           _paused = false;
-          _drain();
+          _schedule();
         },
         onCancel: () {
           _paused = false;
@@ -37,6 +38,7 @@ class WmrWsNotificationSink {
 
   bool _paused = false;
   bool _closed = false;
+  bool _scheduled = false;
   int _dropped = 0;
 
   /// Notifications discarded because [capacity] was already queued.
@@ -49,19 +51,17 @@ class WmrWsNotificationSink {
 
   Stream<BleNotification> get stream => _controller.stream;
 
-  /// Delivers [notification] immediately when the consumer is keeping up, or
-  /// queues it. Returns false when it was dropped.
+  /// Queues [notification], or drops it when the queue is full.
+  ///
+  /// Returns false when it was dropped.
   bool add(BleNotification notification) {
     if (_closed) return false;
-    if (_controller.hasListener && !_paused && _queue.isEmpty) {
-      _controller.add(notification);
-      return true;
-    }
     if (_queue.length >= capacity) {
       _dropped++;
       return false;
     }
     _queue.add(notification);
+    _schedule();
     return true;
   }
 
@@ -72,10 +72,19 @@ class WmrWsNotificationSink {
     _controller.addError(error, stackTrace);
   }
 
-  void _drain() {
-    while (!_closed && !_paused && _queue.isNotEmpty) {
-      _controller.add(_queue.removeFirst());
-    }
+  void _schedule() {
+    if (_scheduled || _paused || _closed || _queue.isEmpty) return;
+    _scheduled = true;
+    // A timer, not a microtask: it yields to socket reads, so a burst cannot
+    // be transferred into the stream controller's internal buffer in one go.
+    Timer.run(_deliverOne);
+  }
+
+  void _deliverOne() {
+    _scheduled = false;
+    if (_paused || _closed || _queue.isEmpty) return;
+    _controller.add(_queue.removeFirst());
+    _schedule();
   }
 
   /// Closes the stream. Never awaited: a paused consumer would otherwise
