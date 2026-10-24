@@ -22,13 +22,17 @@ class _DroppableWifiTransport extends FakeTransport {
   _DroppableWifiTransport({required super.devices});
 
   int connectCalls = 0;
+  int failNextConnects = 0;
   Object? connectError;
 
   @override
   Future<void> connect(String deviceId) async {
     connectCalls++;
     final error = connectError;
-    if (error != null) throw error;
+    if (failNextConnects > 0 && error != null) {
+      failNextConnects--;
+      throw error;
+    }
     await super.connect(deviceId);
   }
 }
@@ -375,12 +379,17 @@ void main() {
 
     final connectsBefore = wifi.connectCalls;
     wifi.connectError = WmrWsException('daemon restarting');
+    wifi.failNextConnects = 1;
     await wifi.disconnect('pi.local:8765');
-    await wait(50);
-
-    // Clear the error before the second attempt so the re-armed timer succeeds.
-    wifi.connectError = null;
-    await wait(120);
+    for (
+      var elapsed = 0;
+      elapsed < 1000 &&
+          (wifi.connectCalls < connectsBefore + 2 ||
+              !container.read(realDeviceProvider).connected);
+      elapsed += 20
+    ) {
+      await wait(20);
+    }
 
     expect(container.read(realDeviceProvider).connected, isTrue);
     expect(wifi.connectCalls, greaterThanOrEqualTo(connectsBefore + 2));
