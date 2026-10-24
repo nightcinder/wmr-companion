@@ -192,8 +192,25 @@ class HidOutput extends Notifier<HidOutputState> {
       _latest[hand] = null;
       _handBridge.remove(hand);
     }
-    // Judge trigger edges from scratch: the missing hand is released.
-    _previous = null;
+    // Only the removed hand's trigger edge is reset (it reads as released).
+    // The surviving hand keeps its L2/R2 hysteresis, or a trigger held in
+    // the 0.45..0.55 band would be reported released for one frame.
+    final previous = _previous;
+    if (previous != null) {
+      final buttons = {...previous.buttons};
+      for (final hand in hands) {
+        buttons.remove(hand == 0 ? GamepadButton.l2 : GamepadButton.r2);
+      }
+      _previous = GamepadState(
+        buttons: buttons,
+        leftStick: previous.leftStick,
+        rightStick: previous.rightStick,
+        leftTrigger: previous.leftTrigger,
+        rightTrigger: previous.rightTrigger,
+        leftConnected: previous.leftConnected,
+        rightConnected: previous.rightConnected,
+      );
+    }
     _push();
   }
 

@@ -109,6 +109,37 @@ final realDeviceProvider =
       RealDeviceController.new,
     );
 
+/// Timing of the automatic re-dial after an unexpected bridge drop.
+///
+/// The default is the documented production behaviour: six attempts with
+/// 500 ms, 1 s, 2 s, 4 s and 8 s backoff (about 23.5 s in total), then stop
+/// and leave the explicit Reconnect button to the user. Tests override it to
+/// exercise the cap without waiting for the real delays.
+class ReconnectPolicy {
+  const ReconnectPolicy({
+    this.baseDelay = const Duration(milliseconds: 500),
+    this.maxDelay = const Duration(seconds: 8),
+    this.maxAttempts = 6,
+  });
+
+  final Duration baseDelay;
+  final Duration maxDelay;
+  final int maxAttempts;
+
+  /// Delay before attempt [attempt], counting from zero, capped at
+  /// [maxDelay].
+  Duration delayFor(int attempt) {
+    final ms = baseDelay.inMilliseconds << attempt;
+    return Duration(
+      milliseconds: ms > maxDelay.inMilliseconds ? maxDelay.inMilliseconds : ms,
+    );
+  }
+}
+
+final reconnectPolicyProvider = Provider<ReconnectPolicy>(
+  (ref) => const ReconnectPolicy(),
+);
+
 /// Drives scan, connect and the [ControllerService] for the real bridge.
 class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleScanResult> _seen = {};
@@ -126,13 +157,6 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   bool _intentionalDisconnect = false;
   int _disconnectEpoch = 0;
 
-  /// Automatic re-dial attempts after one unexpected drop. Six attempts with
-  /// 500 ms, 1 s, 2 s, 4 s, 8 s and a final 8 s backoff: a bridge that is
-  /// rebooting gets about 23.5 s to come back, then the app stops re-dialling
-  /// and leaves the explicit Reconnect button to the user.
-  static const int _reconnectBaseDelayMs = 500;
-  static const int _reconnectMaxDelayMs = 8000;
-  static const int _maxReconnectAttempts = 6;
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
 
@@ -235,21 +259,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   void _scheduleReconnect(String id) {
     if (_intentionalDisconnect) return;
     _reconnectTimers[id]?.cancel();
+    final policy = ref.read(reconnectPolicyProvider);
     final attempt = _reconnectAttempts[id] ?? 0;
-    if (attempt >= _maxReconnectAttempts) {
+    if (attempt >= policy.maxAttempts) {
       _reconnectAttempts.remove(id);
       _reconnecting.remove(id);
       return;
     }
     _reconnectAttempts[id] = attempt + 1;
     _reconnecting.add(id);
-    final delayMs = _reconnectBaseDelayMs << attempt;
-    final delay = Duration(
-      milliseconds: delayMs > _reconnectMaxDelayMs
-          ? _reconnectMaxDelayMs
-          : delayMs,
-    );
-    _reconnectTimers[id] = Timer(delay, () async {
+    _reconnectTimers[id] = Timer(policy.delayFor(attempt), () async {
       _reconnectTimers.remove(id);
       if (_intentionalDisconnect) {
         _reconnecting.remove(id);

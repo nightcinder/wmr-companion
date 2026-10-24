@@ -50,11 +50,13 @@ void main() {
   ProviderContainer makeContainer({
     StreamMode mode = StreamMode.raw,
     FakeHid? hid,
+    ReconnectPolicy policy = const ReconnectPolicy(),
   }) {
     final container = ProviderContainer(
       overrides: [
         realTransportProvider.overrideWithValue(transport),
         streamModeProvider.overrideWith(() => TestModeNotifier(mode)),
+        reconnectPolicyProvider.overrideWithValue(policy),
         if (hid != null) hidTransportProvider.overrideWithValue(hid),
       ],
     );
@@ -153,7 +155,14 @@ void main() {
     expect(held, greaterThan(0));
 
     adapter.dropLink();
-    await wait(800);
+    await wait(100); // still inside the 500 ms reconnect delay
+    // The host is still connected, so the pad must go neutral instead of
+    // holding the last state from the bridge that vanished.
+    expect(hid.reports.last[0], 0); // buttons
+    expect(hid.reports.last[1], 0);
+    expect(hid.reports.last[7], 0); // LEFT trigger
+    expect(hid.reports.last[8], 0); // RIGHT trigger
+    await wait(700);
     expect(container.read(realDeviceProvider).connected, isTrue);
     expect(container.read(hidOutputProvider).running, isTrue);
 
@@ -164,6 +173,18 @@ void main() {
     expect(hid.reports.last[8], greaterThan(0));
     expect(hid.reports.last[8], isNot(held));
     expect(container.read(hidOutputProvider).reportsSent, greaterThan(0));
+  });
+
+  test('the production re-dial schedule is bounded as documented', () {
+    const policy = ReconnectPolicy();
+    expect(policy.maxAttempts, 6);
+    expect(
+      [
+        for (var attempt = 0; attempt < policy.maxAttempts; attempt++)
+          policy.delayFor(attempt).inMilliseconds,
+      ],
+      [500, 1000, 2000, 4000, 8000, 8000],
+    );
   });
 
   test('a failed automatic re-dial is retried with backoff', () async {
@@ -184,6 +205,30 @@ void main() {
       adapter.calls.where((c) => c == 'connect').length,
       connectsBefore + 2,
     );
+  });
+
+  test('automatic re-dial stops at the attempt cap', () async {
+    const policy = ReconnectPolicy(
+      baseDelay: Duration(milliseconds: 5),
+      maxDelay: Duration(milliseconds: 10),
+      maxAttempts: 3,
+    );
+    final container = makeContainer(policy: policy);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+    final connectsBefore = adapter.calls.where((c) => c == 'connect').length;
+
+    // Every attempt fails: the loop must stop after maxAttempts rather than
+    // re-dialling forever.
+    adapter.connectError = Exception('radio unavailable');
+    adapter.dropLink();
+    await wait(600);
+    final attempts = adapter.calls.where((c) => c == 'connect').length;
+    expect(attempts, connectsBefore + policy.maxAttempts);
+
+    await wait(300);
+    expect(adapter.calls.where((c) => c == 'connect').length, attempts);
+    expect(container.read(realDeviceProvider).connected, isFalse);
   });
 
   test('with two bridges, one drop releases that hand only', () async {
@@ -231,6 +276,38 @@ void main() {
     await wait(50);
     expect(hid.reports.last[7], greaterThan(heldLeft));
     expect(hid.reports.last[8], greaterThan(0));
+  });
+
+  test('a bridge drop keeps the surviving hand trigger hysteresis', () async {
+    final hid = FakeHid();
+    final container = makeContainer(mode: StreamMode.decoded, hid: hid);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeLeftDeviceId);
+    await controller.connect(fakeBridgeRightDeviceId);
+
+    final out = container.read(hidOutputProvider.notifier);
+    await out.start(DebugSource.real);
+    hid.emit(const HidStatus(HidState.connected, deviceName: 'PC'));
+    await pump();
+    // LEFT trigger crosses the 0.55 press point, then sits in the hysteresis
+    // band. Both bridges must have fed a hand so removing one is observable.
+    feed(decoded(1, hand: 0, trigger: 153), deviceId: fakeBridgeLeftDeviceId);
+    feed(decoded(1, hand: 1, trigger: 100), deviceId: fakeBridgeRightDeviceId);
+    await pump();
+    feed(decoded(2, hand: 0, trigger: 128), deviceId: fakeBridgeLeftDeviceId);
+    await pump();
+    const l2 = 1 << 6;
+    expect(hid.reports.last[0] & l2, isNot(0));
+
+    adapter.dropLink(deviceId: fakeBridgeRightDeviceId);
+    await wait(100);
+    // Before the fix this cleared the global previous state, so the surviving
+    // hand was judged from released and L2 flickered off in the band.
+    expect(hid.reports.last[0] & l2, isNot(0));
+
+    feed(decoded(3, hand: 0, trigger: 128), deviceId: fakeBridgeLeftDeviceId);
+    await pump();
+    expect(hid.reports.last[0] & l2, isNot(0));
   });
 
   test('an intentional disconnect does not re-dial and stops HID', () async {
