@@ -28,6 +28,7 @@ class RealDeviceState {
     this.deviceStatuses = const {},
     this.stats,
     this.mode,
+    this.disconnectEpoch = 0,
   }) : _primaryDeviceId = deviceId;
 
   final BleLinkStatus status;
@@ -54,6 +55,13 @@ class RealDeviceState {
 
   /// Per-device link status.
   final Map<String, BleLinkStatus> deviceStatuses;
+
+  /// Increments on every user-initiated disconnect (one bridge or all).
+  ///
+  /// Work that should not survive an explicit Disconnect can watch this and
+  /// compare it with [connected] instead of trying to tell an intentional
+  /// disconnect from a dropped link by the link state alone.
+  final int disconnectEpoch;
 
   final StreamStats? stats;
 
@@ -101,6 +109,37 @@ final realDeviceProvider =
       RealDeviceController.new,
     );
 
+/// Timing of the automatic re-dial after an unexpected bridge drop.
+///
+/// The default is the documented production behaviour: six attempts with
+/// 500 ms, 1 s, 2 s, 4 s and 8 s backoff (about 23.5 s in total), then stop
+/// and leave the explicit Reconnect button to the user. Tests override it to
+/// exercise the cap without waiting for the real delays.
+class ReconnectPolicy {
+  const ReconnectPolicy({
+    this.baseDelay = const Duration(milliseconds: 500),
+    this.maxDelay = const Duration(seconds: 8),
+    this.maxAttempts = 6,
+  });
+
+  final Duration baseDelay;
+  final Duration maxDelay;
+  final int maxAttempts;
+
+  /// Delay before attempt [attempt], counting from zero, capped at
+  /// [maxDelay].
+  Duration delayFor(int attempt) {
+    final ms = baseDelay.inMilliseconds << attempt;
+    return Duration(
+      milliseconds: ms > maxDelay.inMilliseconds ? maxDelay.inMilliseconds : ms,
+    );
+  }
+}
+
+final reconnectPolicyProvider = Provider<ReconnectPolicy>(
+  (ref) => const ReconnectPolicy(),
+);
+
 /// Drives scan, connect and the [ControllerService] for the real bridge.
 class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleScanResult> _seen = {};
@@ -116,6 +155,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, int> _deviceDisconnectGenerations = {};
   int _globalDisconnectGeneration = 0;
   bool _intentionalDisconnect = false;
+  int _disconnectEpoch = 0;
+
+  final Map<String, int> _reconnectAttempts = {};
+  final Set<String> _reconnecting = {};
 
   @override
   RealDeviceState build() {
@@ -127,6 +170,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         if (s.phase == BleLinkPhase.ready) {
           _connectedDeviceIds.add(id);
           _connectingDeviceIds.remove(id);
+          _reconnectAttempts.remove(id);
+          _reconnecting.remove(id);
         } else if (s.phase == BleLinkPhase.disconnected ||
             s.phase == BleLinkPhase.disconnecting ||
             s.phase == BleLinkPhase.connectionLost ||
@@ -139,9 +184,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
             unawaited(_service?.dispose());
             _service = null;
           }
-          if (s.phase == BleLinkPhase.connectionLost &&
-              !_intentionalDisconnect) {
-            _scheduleReconnect(id);
+          if (!_intentionalDisconnect) {
+            if (s.phase == BleLinkPhase.connectionLost) {
+              // The link dropped on its own: start a fresh retry campaign.
+              _scheduleReconnect(id);
+            } else if (s.isFailure && _reconnecting.contains(id)) {
+              // An automatic re-dial failed. Keep trying with backoff until
+              // the attempt cap, otherwise one transient failure would leave
+              // the bridge un-dialled for good.
+              _scheduleReconnect(id);
+            }
           }
         }
       }
@@ -191,6 +243,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         t.cancel();
       }
       _reconnectTimers.clear();
+      _reconnectAttempts.clear();
+      _reconnecting.clear();
       _service?.dispose();
     });
     return RealDeviceState(status: transport.status);
@@ -203,12 +257,24 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   ControllerService? get service => _service;
 
   void _scheduleReconnect(String id) {
+    if (_intentionalDisconnect) return;
     _reconnectTimers[id]?.cancel();
-    _reconnectTimers[id] = Timer(const Duration(milliseconds: 500), () async {
+    final policy = ref.read(reconnectPolicyProvider);
+    final attempt = _reconnectAttempts[id] ?? 0;
+    if (attempt >= policy.maxAttempts) {
+      _reconnectAttempts.remove(id);
+      _reconnecting.remove(id);
+      return;
+    }
+    _reconnectAttempts[id] = attempt + 1;
+    _reconnecting.add(id);
+    _reconnectTimers[id] = Timer(policy.delayFor(attempt), () async {
       _reconnectTimers.remove(id);
-      if (!_intentionalDisconnect) {
-        await connect(id);
+      if (_intentionalDisconnect) {
+        _reconnecting.remove(id);
+        return;
       }
+      await connect(id);
     });
   }
 
@@ -237,6 +303,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       deviceStatuses: Map.unmodifiable(_deviceStatuses),
       stats: _service?.stats ?? state.stats,
       mode: _service?.modeState ?? state.mode,
+      disconnectEpoch: _disconnectEpoch,
     );
   }
 
@@ -357,6 +424,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _deviceDisconnectGenerations[deviceId] =
           (_deviceDisconnectGenerations[deviceId] ?? 0) + 1;
       _reconnectTimers.remove(deviceId)?.cancel();
+      _reconnectAttempts.remove(deviceId);
+      _reconnecting.remove(deviceId);
+      _disconnectEpoch++;
 
       _connectingDeviceIds.remove(deviceId);
       _connectedDeviceIds.remove(deviceId);
@@ -379,6 +449,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       t.cancel();
     }
     _reconnectTimers.clear();
+    _reconnectAttempts.clear();
+    _reconnecting.clear();
+    _disconnectEpoch++;
 
     _intentionalDisconnect = true;
     try {
