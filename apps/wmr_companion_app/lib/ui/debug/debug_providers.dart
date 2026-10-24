@@ -50,7 +50,7 @@ final linkStatusProvider = StreamProvider.family<LinkStatus, DebugSource>((
 ) {
   final BleTransport transport = source == DebugSource.fake
       ? ref.watch(transportProvider)
-      : ref.watch(realTransportProvider);
+      : ref.watch(realLinkTransportProvider);
   final String? deviceId = source == DebugSource.fake
       ? fakeBridgeDeviceId
       : ref.watch(realDeviceProvider.select((s) => s.deviceId));

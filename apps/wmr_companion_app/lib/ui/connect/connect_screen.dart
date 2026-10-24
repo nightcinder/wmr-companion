@@ -92,6 +92,7 @@ class RealPanel extends ConsumerWidget {
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodyMedium?.copyWith(fontFamily: 'monospace');
     final status = s.status;
+    final link = s.activeTransport;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -103,6 +104,29 @@ class RealPanel extends ConsumerWidget {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
+        SegmentedButton<BridgeTransportKind>(
+          segments: const [
+            ButtonSegment(
+              value: BridgeTransportKind.ble,
+              label: Text('Bluetooth'),
+              icon: Icon(Icons.bluetooth),
+            ),
+            ButtonSegment(
+              value: BridgeTransportKind.wifi,
+              label: Text('Wi-Fi'),
+              icon: Icon(Icons.wifi),
+            ),
+          ],
+          selected: {link},
+          onSelectionChanged: s.busy
+              ? null
+              : (selection) => controller.selectTransport(selection.first),
+        ),
+        const SizedBox(height: 12),
+        if (link == BridgeTransportKind.wifi) ...[
+          _WifiConnectPanel(controller: controller, busy: s.busy),
+          const SizedBox(height: 12),
+        ],
         Text(
           'State: ${_describe(status.phase)}${s.connectedDeviceIds.length > 1 ? ' (${s.connectedDeviceIds.length} bridges)' : ''}',
           style: theme.textTheme.titleMedium?.copyWith(
@@ -110,6 +134,8 @@ class RealPanel extends ConsumerWidget {
           ),
         ),
         if (status.message != null) Text(status.message!),
+        if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null)
+          Text('Endpoint: ${s.wifiDeviceId}', style: mono),
         if (s.connectedDeviceIds.length <= 1) ...[
           Text('MTU (negotiated): ${status.mtu ?? '-'}', style: mono),
           Text(
@@ -140,12 +166,13 @@ class RealPanel extends ConsumerWidget {
         Wrap(
           spacing: 8,
           children: [
-            FilledButton.tonal(
-              onPressed: s.busy
-                  ? null
-                  : (s.scanning ? controller.stopScan : controller.startScan),
-              child: Text(s.scanning ? 'Stop scan' : 'Scan'),
-            ),
+            if (link == BridgeTransportKind.ble)
+              FilledButton.tonal(
+                onPressed: s.busy
+                    ? null
+                    : (s.scanning ? controller.stopScan : controller.startScan),
+                child: Text(s.scanning ? 'Stop scan' : 'Scan'),
+              ),
             if (s.connected || status.phase == BleLinkPhase.connectionLost)
               FilledButton(
                 onPressed: controller.disconnect,
@@ -198,24 +225,26 @@ class RealPanel extends ConsumerWidget {
           ],
         ],
         const SizedBox(height: 8),
-        if (s.results.isEmpty && s.scanning) const Text('Scanning...'),
-        for (final r in s.results)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(r.name ?? '(no name)'),
-            subtitle: Text('${r.deviceId}   ${r.rssi ?? '-'} dBm'),
-            trailing: s.isDeviceConnected(r.deviceId)
-                ? TextButton(
-                    onPressed: () => controller.disconnect(r.deviceId),
-                    child: const Text('Disconnect bridge'),
-                  )
-                : TextButton(
-                    onPressed: s.isDeviceBusy(r.deviceId)
-                        ? null
-                        : () => controller.connect(r.deviceId),
-                    child: const Text('Connect'),
-                  ),
-          ),
+        if (link == BridgeTransportKind.ble) ...[
+          if (s.results.isEmpty && s.scanning) const Text('Scanning...'),
+          for (final r in s.results)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(r.name ?? '(no name)'),
+              subtitle: Text('${r.deviceId}   ${r.rssi ?? '-'} dBm'),
+              trailing: s.isDeviceConnected(r.deviceId)
+                  ? TextButton(
+                      onPressed: () => controller.disconnect(r.deviceId),
+                      child: const Text('Disconnect bridge'),
+                    )
+                  : TextButton(
+                      onPressed: s.isDeviceBusy(r.deviceId)
+                          ? null
+                          : () => controller.connect(r.deviceId),
+                      child: const Text('Connect'),
+                    ),
+            ),
+        ],
         if (s.stats != null) ...[
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
@@ -238,6 +267,11 @@ class RealPanel extends ConsumerWidget {
         .push(MaterialPageRoute<void>(builder: (_) => const CaptureScreen()));
   }
 
+  /// Entry for a Pi Wi-Fi bridge: host, port and the optional shared token.
+  /// No discovery; the user types what the daemon printed at startup.
+  ///
+  /// This is a separate widget so the fields keep their contents while the
+  /// controller rebuilds every 250 ms on stream statistics.
   static String _describe(BleLinkPhase p) => switch (p) {
     BleLinkPhase.idle => 'idle',
     BleLinkPhase.scanning => 'scanning',
@@ -256,4 +290,136 @@ class RealPanel extends ConsumerWidget {
     BleLinkPhase.serviceNotFound => 'bridge service not found',
     BleLinkPhase.connectionLost => 'connection lost',
   };
+}
+
+/// Entry for a Pi Wi-Fi bridge: host, port and the optional shared token.
+/// No discovery; the user types what the daemon printed at startup.
+///
+/// This is a separate widget so the fields keep their contents while the
+/// controller rebuilds on stream statistics.
+class _WifiConnectPanel extends ConsumerStatefulWidget {
+  const _WifiConnectPanel({required this.controller, required this.busy});
+
+  final RealDeviceController controller;
+  final bool busy;
+
+  @override
+  ConsumerState<_WifiConnectPanel> createState() => _WifiConnectPanelState();
+}
+
+class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
+  final _host = TextEditingController();
+  final _port = TextEditingController(text: '8765');
+  final _token = TextEditingController();
+  bool _secure = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _host.dispose();
+    _port.dispose();
+    _token.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    final host = _host.text.trim();
+    final port = int.tryParse(_port.text.trim());
+    if (host.isEmpty) {
+      setState(() => _error = 'Enter the bridge host or IP address.');
+      return;
+    }
+    if (port == null || port < 1 || port > 65535) {
+      setState(() => _error = 'Port must be a number between 1 and 65535.');
+      return;
+    }
+    setState(() => _error = null);
+    try {
+      await widget.controller.connectWifi(
+        host: host,
+        port: port,
+        token: _token.text,
+        secure: _secure,
+      );
+    } on ArgumentError catch (error) {
+      if (mounted) setState(() => _error = '${error.message}');
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Pi Wi-Fi bridge', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(
+          'Host and control port of the wmr_bridge daemon, plus the shared '
+          'token when it runs with one. The token is not stored.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('wifi-host'),
+          controller: _host,
+          enabled: !widget.busy,
+          autocorrect: false,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            labelText: 'Host or IP',
+            hintText: 'wmr-pi.local',
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('wifi-port'),
+          controller: _port,
+          enabled: !widget.busy,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Port'),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('wifi-token'),
+          controller: _token,
+          enabled: !widget.busy,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: const InputDecoration(labelText: 'Token (optional)'),
+        ),
+        CheckboxListTile(
+          key: const Key('wifi-secure'),
+          contentPadding: EdgeInsets.zero,
+          value: _secure,
+          onChanged: widget.busy
+              ? null
+              : (value) => setState(() => _secure = value ?? false),
+          title: const Text('TLS (wss)'),
+          subtitle: const Text(
+            'Only when a TLS proxy fronts the daemon; wmr_bridge itself '
+            'serves plain ws://.',
+          ),
+        ),
+        if (!_secure)
+          Text(
+            'The token and the stream cross the network in cleartext over '
+            'ws://. Use a trusted LAN, or a TLS proxy with TLS on.',
+            style: theme.textTheme.bodySmall,
+          ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+        ],
+        const SizedBox(height: 8),
+        FilledButton(
+          onPressed: widget.busy ? null : _connect,
+          child: const Text('Connect over Wi-Fi'),
+        ),
+      ],
+    );
+  }
 }

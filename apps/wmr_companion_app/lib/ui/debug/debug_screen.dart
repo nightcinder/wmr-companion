@@ -58,6 +58,11 @@ class DebugScreen extends ConsumerWidget {
     final bridges =
         ref.watch(bridgeLinksProvider(source)).value ??
         const <BridgeLinkSnapshot>[];
+    final transportKinds = <String, BridgeTransportKind>{
+      if (source == DebugSource.fake)
+        fakeBridgeDeviceId: BridgeTransportKind.ble,
+      ...ref.watch(bridgeTransportKindsProvider),
+    };
 
     final vm.Quaternion raw = decoded
         ? view?.orientation ?? vm.Quaternion.identity()
@@ -160,7 +165,7 @@ class DebugScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
-          BridgeLinkTable(bridges, style: mono),
+          BridgeLinkTable(bridges, style: mono, transportKinds: transportKinds),
           if (decoded)
             if (view == null)
               const Text('Waiting for the decoded stream...')
@@ -170,6 +175,7 @@ class DebugScreen extends ConsumerWidget {
                 selectedHand: hand,
                 style: mono,
                 link: link,
+                transportKinds: transportKinds,
               )
           else
             _rawStats(ref, mono),
@@ -178,7 +184,7 @@ class DebugScreen extends ConsumerWidget {
             key: ValueKey('${source.name}$hand'),
             transport: source == DebugSource.fake
                 ? ref.watch(transportProvider)
-                : ref.watch(realTransportProvider),
+                : ref.watch(realLinkTransportProvider),
             deviceId: source == DebugSource.fake
                 ? fakeBridgeDeviceId
                 : ref.watch(realDeviceProvider).deviceId,
@@ -311,10 +317,19 @@ class ModeFaultBanner extends StatelessWidget {
 /// One row per bridge: link parameters and the rate/loss of each hand it
 /// feeds. The id is the transport device id.
 class BridgeLinkTable extends StatelessWidget {
-  const BridgeLinkTable(this.bridges, {super.key, this.style});
+  const BridgeLinkTable(
+    this.bridges, {
+    super.key,
+    this.style,
+    this.transportKinds = const {},
+  });
 
   final List<BridgeLinkSnapshot> bridges;
   final TextStyle? style;
+
+  /// Link kind by bridge id, from `bridgeTransportKindsProvider`. Empty in
+  /// tests that do not care; a known kind prefixes the row with its label.
+  final Map<String, BridgeTransportKind> transportKinds;
 
   static String _pct(double v) => '${(v * 100).toStringAsFixed(1)}%';
 
@@ -335,7 +350,8 @@ class BridgeLinkTable extends StatelessWidget {
       children: [
         for (final bridge in bridges)
           Text(
-            '${bridge.bridgeId}  ${bridge.mode.name}  '
+            '${_kindLabel(bridge.bridgeId)}${bridge.bridgeId}  '
+            '${bridge.mode.name}  '
             'MTU ${bridge.mtu ?? '-'}  '
             'RSSI ${bridge.rssi == null ? 'n/a' : '${bridge.rssi} dBm'}  '
             '${_hand(bridge, 0)}  ${_hand(bridge, 1)}',
@@ -344,6 +360,10 @@ class BridgeLinkTable extends StatelessWidget {
       ],
     );
   }
+
+  String _kindLabel(String bridgeId) => transportKinds[bridgeId] == null
+      ? ''
+      : '${transportKinds[bridgeId]!.label}  ';
 }
 
 class DecodedStatsView extends StatelessWidget {
@@ -353,6 +373,7 @@ class DecodedStatsView extends StatelessWidget {
     required this.selectedHand,
     this.style,
     this.link,
+    this.transportKinds = const {},
   });
 
   final DecodedStats stats;
@@ -361,6 +382,9 @@ class DecodedStatsView extends StatelessWidget {
 
   /// BLE link state and parameters, when the debug screen has a transport.
   final LinkStatus? link;
+
+  /// Link kind by bridge id, for the per-bridge rows.
+  final Map<String, BridgeTransportKind> transportKinds;
 
   static String _ms(double s) => (s * 1000).toStringAsFixed(2);
   static String _sgn(double v) => '${v >= 0 ? '+' : ''}${v.toStringAsFixed(4)}';
@@ -415,7 +439,10 @@ class DecodedStatsView extends StatelessWidget {
   }
 
   String _bridgeRow(String bridgeId, DecodedStats bridge) {
-    final parts = <String>['bridge $bridgeId'];
+    final kind = transportKinds[bridgeId];
+    final parts = <String>[
+      '${kind == null ? '' : '${kind.label}  '}bridge $bridgeId',
+    ];
     for (var h = 0; h < bridge.hands.length; h++) {
       final s = bridge.hands[h];
       if (s.records == 0 && s.missingFromTicks == 0) continue;

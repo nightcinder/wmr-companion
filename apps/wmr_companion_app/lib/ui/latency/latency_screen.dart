@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/services/latency_recorder.dart';
 
+import '../connect/connect_providers.dart';
 import '../debug/debug_providers.dart';
 import 'latency_providers.dart';
 
@@ -26,6 +28,11 @@ class LatencyScreen extends ConsumerWidget {
         ? null
         : LatencyStream.fromMode(service.mode);
     final selected = s.streamChoice ?? active ?? LatencyStream.batched;
+    final transportKinds = <String, BridgeTransportKind>{
+      if (source == DebugSource.fake)
+        fakeBridgeDeviceId: BridgeTransportKind.ble,
+      ...ref.watch(bridgeTransportKindsProvider),
+    };
 
     return PopScope(
       canPop: !running,
@@ -165,7 +172,11 @@ class LatencyScreen extends ConsumerWidget {
             ),
             if (s.report != null) ...[
               const SizedBox(height: 16),
-              LatencyReportView(s.report!, style: mono),
+              LatencyReportView(
+                s.report!,
+                style: mono,
+                transportKinds: transportKinds,
+              ),
             ],
             if (s.saved != null) ...[
               const SizedBox(height: 8),
@@ -199,10 +210,18 @@ class LatencyScreen extends ConsumerWidget {
 
 /// The per-hand figures of a run, as text rows.
 class LatencyReportView extends StatelessWidget {
-  const LatencyReportView(this.report, {super.key, this.style});
+  const LatencyReportView(
+    this.report, {
+    super.key,
+    this.style,
+    this.transportKinds = const {},
+  });
 
   final LatencyReport report;
   final TextStyle? style;
+
+  /// Link kind by bridge id, from `bridgeTransportKindsProvider`.
+  final Map<String, BridgeTransportKind> transportKinds;
 
   static String _ms(int us) => (us / 1000).toStringAsFixed(1);
   static String _pct(double v) => '${(v * 100).toStringAsFixed(1)} %';
@@ -250,7 +269,9 @@ class LatencyReportView extends StatelessWidget {
         ? ''
         : '$records rx  ${rate.toStringAsFixed(1)}/s  '
               'loss ${_pct(loss!)}   ';
+    final kind = transportKinds[bridgeId];
     return Text(
+      '${kind == null ? '' : '${kind.label}  '}'
       'bridge $bridgeId   MTU ${link.mtu ?? '-'}   '
       'RSSI ${link.rssiStart ?? '-'}'
       '${link.rssiEnd == null ? '' : ' -> ${link.rssiEnd}'} dBm   '
@@ -303,7 +324,11 @@ class LatencyReportView extends StatelessWidget {
               LatencyHandSummary.handName(h.hand),
               style: theme.textTheme.titleSmall,
             ),
-            Text('  bridge ${h.bridgeId ?? '-'}', style: style),
+            Text(
+              '  ${h.bridgeId == null || transportKinds[h.bridgeId] == null ? '' : '${transportKinds[h.bridgeId]!.label} '}'
+              'bridge ${h.bridgeId ?? '-'}',
+              style: style,
+            ),
             Text(
               '${h.records} rx  ${h.ratePerSecond.toStringAsFixed(1)}/s  '
               '${h.arrivals} arrivals',
