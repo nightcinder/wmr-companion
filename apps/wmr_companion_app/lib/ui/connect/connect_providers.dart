@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import '../debug/stream_settings.dart';
 
@@ -16,6 +17,63 @@ final realTransportProvider = Provider<UniversalBleTransport>((ref) {
   final transport = UniversalBleTransport(adapter: UniversalBleAdapter());
   ref.onDispose(transport.dispose);
   return transport;
+});
+
+/// Which link a bridge is connected over. The device id stays the existing
+/// `bridgeId`; this only labels it in the UI.
+enum BridgeTransportKind { ble, wifi }
+
+extension BridgeTransportKindLabel on BridgeTransportKind {
+  String get label => switch (this) {
+    BridgeTransportKind.ble => 'BLE',
+    BridgeTransportKind.wifi => 'Wi-Fi',
+  };
+}
+
+/// The transport behind each bridge id, published by [RealDeviceController]
+/// when it connects. Debug and latency screens read it to label a bridge
+/// without renaming or extending [BleTransport].
+final bridgeTransportKindsProvider =
+    NotifierProvider<BridgeTransportKinds, Map<String, BridgeTransportKind>>(
+      BridgeTransportKinds.new,
+    );
+
+class BridgeTransportKinds extends Notifier<Map<String, BridgeTransportKind>> {
+  @override
+  Map<String, BridgeTransportKind> build() => const {};
+
+  void set(String bridgeId, BridgeTransportKind kind) {
+    if (state[bridgeId] == kind) return;
+    state = {...state, bridgeId: kind};
+  }
+
+  void remove(String bridgeId) {
+    if (!state.containsKey(bridgeId)) return;
+    state = Map.of(state)..remove(bridgeId);
+  }
+}
+
+/// Builds a Wi-Fi transport for one host:port endpoint. Production uses the
+/// real WebSocket client; tests override this with a transport on a fake
+/// adapter so no socket is opened.
+final wifiTransportFactoryProvider =
+    Provider<BleTransport Function(WmrWsEndpoint)>(
+      (ref) =>
+          (endpoint) => WmrWsTransport(endpoints: [endpoint]),
+    );
+
+/// The transport behind the selected link, recomputed when the link or its
+/// Wi-Fi device changes. Debug screens read live parameters through it.
+final realLinkTransportProvider = Provider<BleTransport>((ref) {
+  final kind = ref.watch(realDeviceProvider.select((s) => s.activeTransport));
+  final wifiDeviceId = ref.watch(
+    realDeviceProvider.select((s) => s.wifiDeviceId),
+  );
+  if (kind == BridgeTransportKind.wifi && wifiDeviceId != null) {
+    return ref.read(realDeviceProvider.notifier).wifiTransport ??
+        ref.read(realTransportProvider);
+  }
+  return ref.read(realTransportProvider);
 });
 
 class RealDeviceState {
@@ -29,9 +87,18 @@ class RealDeviceState {
     this.stats,
     this.mode,
     this.disconnectEpoch = 0,
+    this.activeTransport = BridgeTransportKind.ble,
+    this.wifiDeviceId,
   }) : _primaryDeviceId = deviceId;
 
   final BleLinkStatus status;
+
+  /// The link selected in the connect screen. Only one transport is active at
+  /// a time: connecting Wi-Fi disconnects the BLE bridges, and vice versa.
+  final BridgeTransportKind activeTransport;
+
+  /// The Wi-Fi bridge id, once a Wi-Fi transport exists. Null in BLE mode.
+  final String? wifiDeviceId;
 
   /// Requested stream and its fault, from the service. Null before connect.
   final ModeState? mode;
@@ -160,49 +227,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
 
+  BleTransport? _wifiTransport;
+  StreamSubscription<BleConnectionState>? _wifiStateSub;
+  String? _wifiDeviceId;
+  BleLinkStatus _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
+
   @override
   RealDeviceState build() {
     final transport = ref.watch(realTransportProvider);
-    _statusSub = transport.statusChanges.listen((s) {
-      if (s.deviceId != null) {
-        final id = s.deviceId!;
-        _deviceStatuses[id] = s;
-        if (s.phase == BleLinkPhase.ready) {
-          _connectedDeviceIds.add(id);
-          _connectingDeviceIds.remove(id);
-          _reconnectAttempts.remove(id);
-          _reconnecting.remove(id);
-        } else if (s.phase == BleLinkPhase.disconnected ||
-            s.phase == BleLinkPhase.disconnecting ||
-            s.phase == BleLinkPhase.connectionLost ||
-            s.isFailure) {
-          _connectedDeviceIds.remove(id);
-          _connectingDeviceIds.remove(id);
-          unawaited(_service?.removeDevice(id, disconnectTransport: false));
-          if (_connectedDeviceIds.isEmpty && _connectingDeviceIds.isEmpty) {
-            _statsTimer?.cancel();
-            unawaited(_service?.dispose());
-            _service = null;
-          }
-          if (!_intentionalDisconnect) {
-            if (s.phase == BleLinkPhase.connectionLost) {
-              // The link dropped on its own: start a fresh retry campaign.
-              _scheduleReconnect(id);
-            } else if (s.isFailure && _reconnecting.contains(id)) {
-              // An automatic re-dial failed. Keep trying with backoff until
-              // the attempt cap, otherwise one transient failure would leave
-              // the bridge un-dialled for good.
-              _scheduleReconnect(id);
-            }
-          }
-        }
-      }
-      final effectiveStatus = _connectedDeviceIds.isNotEmpty
-          ? (_deviceStatuses[_connectedDeviceIds.first] ?? s)
-          : s;
-      _update(status: effectiveStatus);
-    });
-
+    _statusSub = transport.statusChanges.listen(_handleLinkStatus);
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
       onStateChange: (s) => unawaited(
@@ -238,6 +271,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       lifecycle.dispose();
       _scanSub?.cancel();
       _statusSub?.cancel();
+      _wifiStateSub?.cancel();
       _statsTimer?.cancel();
       for (final t in _reconnectTimers.values) {
         t.cancel();
@@ -246,15 +280,102 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _reconnectAttempts.clear();
       _reconnecting.clear();
       _service?.dispose();
+      _wifiTransport?.dispose();
     });
     return RealDeviceState(status: transport.status);
   }
 
-  UniversalBleTransport get _transport => ref.read(realTransportProvider);
+  /// The active link: the BLE transport, or the Wi-Fi transport once one is
+  /// configured. [BleTransport] stays the seam for both.
+  BleTransport get _transport =>
+      state.activeTransport == BridgeTransportKind.wifi &&
+          _wifiTransport != null
+      ? _wifiTransport!
+      : ref.read(realTransportProvider);
+
+  /// The transport behind the current link, for consumers that need to read
+  /// the same device (the debug config panel).
+  BleTransport get transport => _transport;
+
+  /// The Wi-Fi transport, once [connectWifi] has made one. Null in BLE mode.
+  BleTransport? get wifiTransport => _wifiTransport;
 
   /// The service behind the current connection, for consumers that share its
   /// frame stream (the capture screen). Null before the first connect.
   ControllerService? get service => _service;
+
+  /// One place for a link status, whether it came from the BLE stack or was
+  /// synthesized from a Wi-Fi connection state.
+  void _handleLinkStatus(BleLinkStatus s) {
+    if (state.activeTransport == BridgeTransportKind.wifi &&
+        s.deviceId != null &&
+        s.deviceId != _wifiDeviceId) {
+      // A late BLE event from the link we switched away from.
+      return;
+    }
+    if (s.deviceId != null) {
+      final id = s.deviceId!;
+      _deviceStatuses[id] = s;
+      if (s.phase == BleLinkPhase.ready) {
+        _connectedDeviceIds.add(id);
+        _connectingDeviceIds.remove(id);
+        _reconnectAttempts.remove(id);
+        _reconnecting.remove(id);
+      } else if (s.phase == BleLinkPhase.disconnected ||
+          s.phase == BleLinkPhase.disconnecting ||
+          s.phase == BleLinkPhase.connectionLost ||
+          s.isFailure) {
+        _connectedDeviceIds.remove(id);
+        _connectingDeviceIds.remove(id);
+        unawaited(_service?.removeDevice(id, disconnectTransport: false));
+        if (_connectedDeviceIds.isEmpty && _connectingDeviceIds.isEmpty) {
+          _statsTimer?.cancel();
+          unawaited(_service?.dispose());
+          _service = null;
+        }
+        if (!_intentionalDisconnect) {
+          if (s.phase == BleLinkPhase.connectionLost) {
+            // The link dropped on its own: start a fresh retry campaign.
+            _scheduleReconnect(id);
+          } else if (s.isFailure && _reconnecting.contains(id)) {
+            // An automatic re-dial failed. Keep trying with backoff until
+            // the attempt cap, otherwise one transient failure would leave
+            // the bridge un-dialled for good.
+            _scheduleReconnect(id);
+          }
+        }
+      }
+    }
+    _lastStatus = s;
+    final effectiveStatus = _connectedDeviceIds.isNotEmpty
+        ? (_deviceStatuses[_connectedDeviceIds.first] ?? s)
+        : s;
+    _update(status: effectiveStatus);
+  }
+
+  void _onWifiConnectionState(String id, BleConnectionState s) {
+    if (_wifiDeviceId != id) return;
+    switch (s) {
+      case BleConnectionState.connected:
+        // [connect] promotes to ready after the stream subscription succeeds,
+        // exactly as the BLE transport's status does.
+        return;
+      case BleConnectionState.connecting:
+        _handleLinkStatus(BleLinkStatus(BleLinkPhase.connecting, deviceId: id));
+      case BleConnectionState.disconnecting:
+        _handleLinkStatus(
+          BleLinkStatus(BleLinkPhase.disconnecting, deviceId: id),
+        );
+      case BleConnectionState.disconnected:
+        final wasReady = _connectedDeviceIds.contains(id);
+        _handleLinkStatus(
+          BleLinkStatus(
+            wasReady ? BleLinkPhase.connectionLost : BleLinkPhase.disconnected,
+            deviceId: id,
+          ),
+        );
+    }
+  }
 
   void _scheduleReconnect(String id) {
     if (_intentionalDisconnect) return;
@@ -282,12 +403,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     BleLinkStatus? status,
     List<BleScanResult>? results,
     String? deviceId,
+    BridgeTransportKind? activeTransport,
   }) {
     final activeStatus =
         status ??
         (_connectedDeviceIds.isNotEmpty
-            ? (_deviceStatuses[_connectedDeviceIds.first] ?? _transport.status)
-            : _transport.status);
+            ? (_deviceStatuses[_connectedDeviceIds.first] ?? _lastStatus)
+            : _lastStatus);
     state = RealDeviceState(
       status: activeStatus,
       results: results ?? state.results,
@@ -304,6 +426,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       stats: _service?.stats ?? state.stats,
       mode: _service?.modeState ?? state.mode,
       disconnectEpoch: _disconnectEpoch,
+      activeTransport: activeTransport ?? state.activeTransport,
+      wifiDeviceId: _wifiDeviceId,
     );
   }
 
@@ -315,6 +439,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _update(results: const []);
     _scanSub = _transport.scan().listen((r) {
       _seen[r.deviceId] = r;
+      ref
+          .read(bridgeTransportKindsProvider.notifier)
+          .set(r.deviceId, state.activeTransport);
       _update(
         results: _seen.values.toList()
           ..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999)),
@@ -340,6 +467,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     final deviceDisconnectGen = _deviceDisconnectGenerations[deviceId] ?? 0;
     final globalDisconnectGen = _globalDisconnectGeneration;
     _connectingDeviceIds.add(deviceId);
+    ref
+        .read(bridgeTransportKindsProvider.notifier)
+        .set(deviceId, state.activeTransport);
     _update(deviceId: deviceId);
     try {
       if (_service == null) {
@@ -366,10 +496,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           _service = null;
           _update();
           return; // already in the status
-        } catch (_) {
+        } catch (error) {
           _connectedDeviceIds.remove(deviceId);
           _service?.dispose();
           _service = null;
+          _reportWifiFailure(deviceId, error);
           _update();
           return;
         }
@@ -380,8 +511,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           _connectedDeviceIds.remove(deviceId);
           _update();
           return;
-        } catch (_) {
+        } catch (error) {
           _connectedDeviceIds.remove(deviceId);
+          _reportWifiFailure(deviceId, error);
           _update();
           return;
         }
@@ -393,6 +525,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           globalDisconnectGen != _globalDisconnectGeneration) {
         await _transport.disconnect(deviceId);
         return;
+      }
+      if (state.activeTransport == BridgeTransportKind.wifi &&
+          _wifiTransport != null) {
+        await _promoteWifiReady(deviceId);
       }
     } finally {
       _connectingDeviceIds.remove(deviceId);
@@ -406,6 +542,91 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       const Duration(milliseconds: 250),
       (_) => publish(),
     );
+  }
+
+  void _reportWifiFailure(String deviceId, Object error) {
+    if (state.activeTransport != BridgeTransportKind.wifi) return;
+    final status = BleLinkStatus(
+      BleLinkPhase.connectFailed,
+      deviceId: deviceId,
+      message: '$error',
+    );
+    _lastStatus = status;
+    _deviceStatuses[deviceId] = status;
+  }
+
+  Future<void> _promoteWifiReady(String deviceId) async {
+    int? mtu;
+    try {
+      mtu = (await _transport.connectionInfo(deviceId)).mtu;
+    } catch (_) {
+      // The figures are optional; the link is up either way.
+    }
+    _handleLinkStatus(
+      BleLinkStatus(BleLinkPhase.ready, deviceId: deviceId, mtu: mtu),
+    );
+  }
+
+  Future<void> _disposeWifiTransport() async {
+    final id = _wifiDeviceId;
+    _wifiDeviceId = null;
+    final sub = _wifiStateSub;
+    _wifiStateSub = null;
+    final transport = _wifiTransport;
+    _wifiTransport = null;
+    if (id != null) {
+      ref.read(bridgeTransportKindsProvider.notifier).remove(id);
+    }
+    // Cancelling the async* connection-state stream can wait on a delivery
+    // turn; the id guard above already makes late events harmless.
+    unawaited(sub?.cancel());
+    await transport?.dispose();
+  }
+
+  /// Chooses the link the connect screen shows. Only one link is active at a
+  /// time; switching disconnects what the other one had.
+  Future<void> selectTransport(BridgeTransportKind kind) async {
+    if (state.activeTransport == kind) return;
+    await stopScan();
+    await disconnect();
+    if (kind == BridgeTransportKind.ble) {
+      await _disposeWifiTransport();
+    }
+    _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
+    _update(activeTransport: kind);
+  }
+
+  /// Connects to a Pi Wi-Fi bridge by host:port, with the optional shared
+  /// token. The token is only handed to the transport; it is never logged or
+  /// kept in app state.
+  Future<void> connectWifi({
+    required String host,
+    required int port,
+    String? token,
+  }) async {
+    final trimmedToken = token?.trim();
+    final endpoint = WmrWsEndpoint(
+      host: host.trim(),
+      port: port,
+      token: trimmedToken == null || trimmedToken.isEmpty ? null : trimmedToken,
+    );
+    final id = endpoint.resolvedDeviceId;
+
+    await disconnect();
+    await _disposeWifiTransport();
+    _lastStatus = const BleLinkStatus(BleLinkPhase.connecting);
+    _wifiDeviceId = id;
+    final transport = _wifiTransport = ref.read(wifiTransportFactoryProvider)(
+      endpoint,
+    );
+    _wifiStateSub = transport
+        .connectionState(id)
+        .listen((s) => _onWifiConnectionState(id, s));
+    ref
+        .read(bridgeTransportKindsProvider.notifier)
+        .set(id, BridgeTransportKind.wifi);
+    _update(activeTransport: BridgeTransportKind.wifi);
+    await connect(id);
   }
 
   /// Switches between the FF11, FF12 and FF14 streams (CCC order is

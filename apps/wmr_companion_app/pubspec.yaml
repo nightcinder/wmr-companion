@@ -17,6 +17,7 @@ dependencies:
   vector_math: ^2.4.3
   wmr_core: ^0.1.0
   wmr_ble: ^0.1.0
+  wmr_ws: ^0.1.0
   wmr_companion: ^0.1.0
   wmr_companion_ui: ^0.1.0
   wmr_companion_hid_android: ^0.1.0
