@@ -1,6 +1,6 @@
 # wmr_companion
 
-Public facade for reading [WMR Bridge](https://github.com/nightcinder/wmr-companion)
+Public facade for reading [WMR Bridge](https://github.com/nightcinder/WMR_Bridge)
 controller input **in-process**. Android and iOS are both v1 targets.
 
 This package is the umbrella API from `docs/LIBRARY.md`. It wraps

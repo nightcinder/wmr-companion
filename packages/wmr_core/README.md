@@ -1,6 +1,6 @@
 # wmr_core
 
-Pure-Dart protocol, controller pipeline, orientation estimation, and gamepad mapping for the [WMR Bridge](https://github.com/nightcinder/wmr-companion).
+Pure-Dart protocol, controller pipeline, orientation estimation, and gamepad mapping for the [WMR Bridge](https://github.com/nightcinder/WMR_Bridge).
 
 This package contains the core domain logic, protocol decoders, and transport abstractions used by `wmr_companion`. It has no Flutter SDK dependency and runs in pure Dart environments.
 
