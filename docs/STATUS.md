@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-23 (updated for M10–M13 milestones and reusable library close-out ONY-41; see [../HANDOFF.md](../HANDOFF.md)). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-24 (updated for M10–M15 milestones and reusable library close-out ONY-41; see [../HANDOFF.md](../HANDOFF.md)). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -28,15 +28,16 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ### Milestones (see [PLAN.md](PLAN.md))
 
-Work is planned across milestones M10–M13 (governed by ONY-50; see `HANDOFF.md` §7 and `docs/PLAN.md`). The earlier milestones (M1–M6: scaffold, GATT stream, 3DoF orientation, latency screen, iOS probe) established the baseline pipeline; active work is organized under M10–M13:
+Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md` §7 and `docs/PLAN.md`). The earlier milestones (M1–M6: scaffold, GATT stream, 3DoF orientation, latency screen, iOS probe) established the baseline pipeline; active work is organized under M10–M15:
 
 | Milestone | Scope | State |
 |---|---|---|
-| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Six Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.1.0` is on owner hold, and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
-| **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). **Open:** Firmware flasher variants (`build.py --variant`), browser installer variants, auto-reconnect. |
-| **M12 — The verification campaign** | Empirical hardware verification across three sittings | **Open.** Sitting A (single bridge latency & tracking quality); Sitting B (two bridges A/B/A/B on two ESP32s to test radio contention); Sitting C (PC HID output & soak). |
-| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | **Open.** Tagged firmware release with packaged manifest and FF16 version; compatibility matrix keyed on FF16; bridge security disposition in `docs/SECURITY.md`; README updates based on verified hardware results. |
+| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.1.0` is on owner hold, and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
+| **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
+| **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
+| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done). **Open:** M13.3 security decision (after M12) and M13.4 README rewrite around M12 results. |
 | **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). Note: `BleTransport` interface is GATT-shaped and the rename-before-0.1.0 question remains open with the owner (no rename made). |
+| **M15 — PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
 
 ### What has been checked on hardware (user-reported)
 
@@ -107,12 +108,12 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | Remaining firmware bench checklists (FF12 5-7, 11, 12, 15-18; L1-L5; B4, B6-B11; C7; X-series done) | WMR_Bridge `docs/TESTING.md` |
 | Checks still not run, with commands and pass criteria | WMR_Bridge `docs/runs/sheets/closeout.md` |
 
-## Roadmap: M10–M13
+## Roadmap: M10–M15
 
 The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-plan`; see [../HANDOFF.md](../HANDOFF.md) §7 and [PLAN.md](PLAN.md)). The sequence of work:
 
 1. **M10 — Library v1 & API freeze**:
-   - Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted and tested.
+   - Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted and tested.
    - FF16 bridge firmware version reading landed in #46 (`WmrProtocolVersion`).
    - Reference app moved to `apps/wmr_companion_app` in #53 (M10.5).
    - Dart pub workspace, export-boundary checks, and strict publish dry-run landed in #54 (`docs/PUBLISHING.md`).
@@ -120,23 +121,32 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 2. **M11 — Two bridges as a product**:
    - Multi-bridge support in `ControllerService` landed (#34).
    - Per-bridge attribution on records, stats, links, and latency CSV export landed in #51 (ONY-70).
-   - **Open:** Firmware flasher variant builds (`build.py --variant both|left|right`), browser installer variants, auto-reconnect, and multi-bridge run sheet update.
+   - Firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`).
+   - Per-bridge auto-reconnect and HID resume merged (#60 / ONY-101).
+   - Complete as engineering; hardware bench verification (Sitting B′ / Sitting B) remains open.
 3. **M12 — The verification campaign (Open)**:
-   - Turn run sheets into empirical hardware answers across three sittings:
+   - Turn run sheets into empirical hardware answers across campaign index (`WMR_Bridge` `docs/runs/README.md`, #42):
      - *Sitting A (one bridge, no reflash):* latency v2 (app vs probe) and tracking quality.
-     - *Sitting B (two bridges):* multi-bridge A/B/A/B protocol on two ESP32s to test the radio contention hypothesis.
+     - *Sitting P (Pi bridge):* Pi bridge hardware verification (Pi being bought).
+     - *Sitting R (one board, no purchase):* RIGHT-alone asymmetry (`right-asymmetry.md` #41).
+     - *Sitting B′ (one board):* one board `--variant left`.
      - *Sitting C:* robustness soak and gamepad HID checklist on a PC.
+     - *Close-out:* remaining not-yet-run checks.
+     - *Sitting B (two bridges):* multi-bridge A/B/A/B on two ESP32s — **parked**, no second Classic ESP32.
      - *Write-ups:* #18 disposition, M7 decision, M8 defaults, STATUS in both repos.
 4. **M13 — Release and distribution (Open)**:
-   - Tagged firmware release with packaged manifest and FF16 version; GitHub Pages installer.
-   - Compatibility matrix published in both repos keyed on FF16 version.
-   - Bridge security disposition in `docs/SECURITY.md`.
-   - README rewrite in both repos around verified hardware results.
+   - `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12).
+   - Compatibility matrix published in both repos keyed on FF16 (#59, `WMR_Bridge` #45 & #49, M13.2 done).
+   - **Open:** M13.3 bridge security decision in `docs/SECURITY.md` (after M12).
+   - **Open:** M13.4 README rewrite in both repos around verified M12 hardware results.
 5. **M14 — Raspberry Pi Wi-Fi host bridge (In progress)**:
    - **M14.1 `packages/wmr_ws`:** WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged #61).
    - **M14.3 App Wi-Fi bridge entry:** host:port connection UI, optional token authentication, TLS switch, loopback checks (merged #62).
    - **M14.5 Companion docs and publish order:** Update docs (`README.md`, `STATUS.md`, `PLAN.md`, `LIBRARY.md`, `PUBLISHING.md`) and publish waves for the seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and rename-before-0.1.0 question is open with owner.
    - **Open:** Empirical P-campaign verification on physical Raspberry Pi hardware (P1–P10). Wi-Fi link is host-tested/loopback-only until the Pi sitting.
+6. **M15 — PSVR2 Sense controller framework**:
+   - PSVR2 Sense firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom).
+   - M15.2–15.4 parked (owner has no PSVR2 controllers).
 
 ## Not yet run on hardware (as of 2026-10-23)
 

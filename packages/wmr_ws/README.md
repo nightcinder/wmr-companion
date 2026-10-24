@@ -43,8 +43,9 @@ await controller.start();
 
 There is no discovery: `WmrWsEndpoint` carries the host and port, and
 `scan()` just reports the configured endpoints so the existing scan flow keeps
-working. mDNS/zeroconf and app connect UI are follow-ups, not part of this
-package.
+working. mDNS/zeroconf and automatic endpoint discovery remain follow-ups, not
+part of this package; the reference app's Connect screen Wi-Fi `host:port` entry
+landed in PR #62 (M14.3).
 
 ## The seam, and where it leaks
 

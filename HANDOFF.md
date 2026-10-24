@@ -1,6 +1,6 @@
 # Handoff for a new orchestrator
 
-Written 2026-10-22 by the outgoing "director" session; updated 2026-10-23 by General Helmuth von Moltke for ONY-55. Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
+Written 2026-10-22 by the outgoing "director" session; updated 2026-10-23 by General Helmuth von Moltke for ONY-55 and 2026-10-24 for ONY-135. Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
 
 Everything the project owner (Nick) has not reported is **not verified on hardware**. Results below are labelled "user-reported" when Nick pasted or told us the figure.
 
@@ -32,7 +32,7 @@ GATT service FF10 on the bridge:
 - FF14: batches of FF12 records (`version` 2, up to 9 per notification at MTU 517); **app default stream**
 - FF13: controller config blob (read in windows, CRC-32)
 - FF15: echo characteristic for round-trip latency measurement (479/479 pings answered on hardware, user-reported)
-- FF16: bridge firmware version string (exists on firmware `main` via PR #38; app/library support dispatched in ONY-56)
+- FF16: bridge firmware version string (exists on firmware `main` via PR #38; app/library support landed in PR #46, `WmrProtocolVersion`)
 
 FF11/FF12/FF14 are mutually exclusive (a second enable fails with ATT error 0x80; write 0x0000 to the active one first). FF13, FF15, and FF16 are independent. Multi-bridge support (connecting multiple ESP32 bridges concurrently and merging notification streams into shared per-hand pipelines) is implemented in `ControllerService` (PR #34). App layers: UI -> Riverpod -> `WmrCompanion` facade -> `ControllerService` -> (parser + `BleTransport`). `BleTransport` is an abstract interface in `wmr_core`, implemented by `UniversalBleTransport` in `wmr_ble`, `WmrWsTransport` in `wmr_ws`, `FakeTransport` in `wmr_companion/testing.dart`, and native transport via `WMRCompanionKit`. Note: `BleTransport` is currently GATT-shaped; the question of whether to rename it before `0.1.0` remains an open design question with the owner (no rename made). Wi-Fi bridge streaming is host-tested / loopback-only until physical Pi sitting P1–P10.
 
@@ -98,7 +98,7 @@ Phone side: MTU 517 and High connection priority are needed every connection (th
 
 ## 5. State, as of this handoff
 
-Refreshed 2026-10-23. The "checked" column is strictly what Nick reported on hardware.
+Refreshed 2026-10-24. The "checked" column is strictly what Nick reported on hardware.
 
 | Area | Built | Checked on hardware |
 |---|---|---|
@@ -137,13 +137,13 @@ Reports are lost between the controller and the ESP32 (Classic Bluetooth), befor
 
 | Repo | Issue | Topic | Current state |
 |---|---|---|---|
-| WMR_Bridge | #18 | Two-controller contention and multi-bridge | Single-hand bridge mode merged (#33); app multi-bridge merged (#34). Open: flasher variant builds (M11.1), browser installer variants (M11.2), per-bridge attribution (M11.3), and the two-bridge hardware sitting (M12.3) |
+| WMR_Bridge | #18 | Two-controller contention and multi-bridge | Single-hand bridge mode merged (#33); app multi-bridge merged (#34). Flasher variants and browser installer merged (`WMR_Bridge` #40), per-bridge attribution merged (#51), per-bridge auto-reconnect merged (#60). Open: two-bridge hardware sitting (M12.3 / Sitting B, parked — no second Classic ESP32) |
 | WMR_Bridge | #19 | Unknowns in `docs/DECODING.md` | Deep dive into Monado decoding merged (#26); tracking quality run sheet merged (#35). Open: hardware sitting M12.2 / Sitting A |
-| WMR_Bridge | #20 | Build/flash framework and browser installer | One-command `build.py` and browser installer landed (#37). Open: L/R variants (M11.1) and GitHub Pages release (M13.1) |
+| WMR_Bridge | #20 | Build/flash framework and browser installer | One-command `build.py` and browser installer variants landed (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`); M13.1 prerelease done |
 | wmr-companion | #19 | iOS build | **Superseded by ONY-38 and ONY-41.** iOS 18 settled as floor, both platforms in v1; `WMRCompanionKit`, probe, and macOS CI compile check landed (#37, #44) |
 | wmr-companion | #20 | `universal_ble` gaps | Android GATT probe built (#36); latency run sheet v2 with decision rule merged (#35). Open: hardware sitting A (M12.2) |
-| wmr-companion | ONY-41 | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package merged (#45). Open: phase 7b (HID android), release hygiene (M10.4), iOS device run |
-| Both | ONY-56 | FF16 firmware version reporting | Firmware reports packaged version over FF16 (#38). Open: app/facade `WmrProtocolVersion` and feature matrix (M10.3) |
+| wmr-companion | ONY-41 | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package merged (#45); phase 7b HID Android package merged (#48); release hygiene merged (#49/#50/#52/#54). Open: iOS device run (device gate waived for `0.1.0`) |
+| Both | ONY-56 | FF16 firmware version reporting | Firmware reports packaged version over FF16 (`WMR_Bridge` #38); app/facade `WmrProtocolVersion` and feature matrix landed in #46 |
 
 Parked ideas: ESP32 as BLE HID gamepad (HOGP); 6DoF / camera fusion (`docs/CAMERAS.md`); single-ESP32 radio tuning (V1 stagger, coex flags); non-Flutter SDK products.
 
@@ -154,34 +154,39 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 ### M10 — Library v1: close the package tree and freeze the API
 *Question: can a fresh Flutter app add one dependency, read `GamepadState`, and know which firmware it needs?*
 - **10.1 Merge PR #45** (UI package `wmr_companion_ui`, reviewed in ONY-52) — **merged on 2026-10-23**.
-- **10.2 Phase 7b**: extract `wmr_companion_hid_android` from `apps/wmr_companion_app/lib/hid/`, or park it with the reason recorded (depends on owner's answer).
-- **10.3 `WmrProtocolVersion` + FF16** (ONY-56): read the bridge's packaged version, expose it on the link snapshot, and publish the FF11–FF16 feature matrix (skip unknown records, never fatal).
-- **10.4 Release hygiene**: pub workspace, per-package CHANGELOG and version policy, `dart pub publish --dry-run` in CI, export-boundary test per package.
-- **10.5 App placement decision**: move to `apps/wmr_companion_app` or stay at root (depends on owner's answer).
-- **10.6 Phase 8 publish**: pub.dev release, only if the owner wants public publishing.
+- **10.2 Phase 7b**: `wmr_companion_hid_android` extracted from `apps/wmr_companion_app/lib/hid/` and merged (#48).
+- **10.3 `WmrProtocolVersion` + FF16** (ONY-56): read the bridge's packaged version, expose it on the link snapshot, and publish the FF11–FF16 feature matrix (skip unknown records, never fatal) — **merged (#46)**.
+- **10.4 Release hygiene**: pub workspace, per-package CHANGELOG and version policy, `dart pub publish --dry-run` in CI, export-boundary test per package — **merged (#49/#50/#52/#54, `docs/PUBLISHING.md`)**.
+- **10.5 App placement decision**: move to `apps/wmr_companion_app` — **merged (#53)**.
+- **10.6 Phase 8 publish**: pub.dev release, only if the owner wants public publishing — **on owner hold**.
 
 ### M11 — Two bridges as a product: flash them, tell them apart, keep them
 *Question: can someone flash two boards as LEFT and RIGHT without ESP-IDF, see per-bridge figures, and have both reconnect on their own?*
-- **11.1 Flasher variants**: `build.py --variant both|left|right` on firmware, name artifacts/manifests per variant, tests, document in `docs/FLASHING.md`.
-- **11.2 Browser installer**: offer all three images from one page.
-- **11.3 Per-bridge attribution**: end-to-end `bridgeId` on records, stats, link snapshots and latency exports; per-bridge rows in debug and latency screens.
-- **11.4 Auto-reconnect**: per-bridge auto-reconnect, HID output resuming without Stop/Start.
-- **11.5 Run sheet update**: update `docs/runs/sheets/multi-bridge.md` to flasher variants.
+- **11.1 Flasher variants**: `build.py --variant both|left|right` on firmware, name artifacts/manifests per variant, tests, document in `docs/FLASHING.md` — **merged (`WMR_Bridge` #40)**.
+- **11.2 Browser installer**: offer all three images from one page — **merged, hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`)**.
+- **11.3 Per-bridge attribution**: end-to-end `bridgeId` on records, stats, link snapshots and latency exports; per-bridge rows in debug and latency screens — **merged (#51)**.
+- **11.4 Auto-reconnect**: per-bridge auto-reconnect, HID output resuming without Stop/Start — **merged (#60 / ONY-101)**.
+- **11.5 Run sheet update**: `docs/runs/sheets/multi-bridge.md` updated to flasher variants (`WMR_Bridge` #40).
+- **Open**: hardware bench verification (Sitting B′ / Sitting B).
 
 ### M12 — The verification campaign: turn six run sheets into one answer
 *Question: of everything merged since 2026-10-22, what actually works?*
-- **12.1 Campaign index**: single index in `docs/runs/README.md` ordered by reflash cost.
+- **12.1 Campaign index**: single index in `WMR_Bridge` `docs/runs/README.md` ordered by reflash cost — **merged (#42)**.
 - **12.2 Sitting A (one bridge, no reflash)**: latency v2 (app vs probe) + tracking quality.
-- **12.3 Sitting B (two bridges)**: multi-bridge A/B/A/B protocol, twice on separate power-ups (needs a second ESP32).
+- **12.3 Sitting B (two bridges)**: multi-bridge A/B/A/B protocol, twice on separate power-ups (needs a second ESP32) — **parked, no second Classic ESP32**.
 - **12.4 Sitting C**: robustness soak + gamepad HID checklist on a PC.
 - **12.5 Write-ups**: #18 disposition, M7 decision, M8 defaults, STATUS in both repos.
+- **Sitting P (Pi bridge)**: Pi bridge hardware verification (Pi being bought).
+- **Sitting R (one board)**: RIGHT-alone asymmetry (`right-asymmetry.md`, `WMR_Bridge` #41).
+- **Sitting B′ (one board)**: one board flashed `--variant left`.
+- **Close-out**: remaining not-yet-run checks (WMR_Bridge `docs/runs/sheets/closeout.md`).
 
 ### M13 — Release and distribution
 *Question: can a stranger get a working bridge and a working host app from the two repos?*
-- **13.1 Tagged firmware release** with packaged manifest and FF16 version; installer on GitHub Pages.
-- **13.2 Compatibility matrix** published in both repos, keyed on FF16 version.
-- **13.3 Bridge security decision** in `docs/SECURITY.md`.
-- **13.4 README rewrite** in both repos around verified hardware results.
+- **13.1 Tagged firmware release** with packaged manifest and FF16 version; installer on GitHub Pages — **`v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12)**.
+- **13.2 Compatibility matrix** published in both repos, keyed on FF16 version — **merged (#59, `WMR_Bridge` #45 & #49)**.
+- **13.3 Bridge security decision** in `docs/SECURITY.md` — **open, after M12**.
+- **13.4 README rewrite** in both repos around verified hardware results — **open, around M12 results**.
 
 ### M14 — Linux / Raspberry Pi Wi-Fi host bridge
 *Question: does moving the host bridge to a Raspberry Pi over 5 GHz Wi-Fi eliminate upstream radio contention?*
@@ -189,6 +194,10 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 - **14.3 App Wi-Fi bridge entry**: host:port entry, token auth, TLS switch, and loopback checks (merged in #62).
 - **14.5 Companion docs and publish order**: align docs and publishing waves for seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and rename-before-0.1.0 is open with owner.
 - **P1–P10 hardware verification**: physical Raspberry Pi testing sitting (P6 upstream loss comparison); Wi-Fi link is host-tested/loopback-only until then.
+
+### M15 — PSVR2 Sense controller framework
+- **15.1 Firmware framework** merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom).
+- **15.2–15.4 parked** — the owner has no PSVR2 controllers.
 
 ## 8. Lessons from this session (so you don't repeat them)
 
@@ -201,7 +210,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 
 | What | Where |
 |---|---|
-| Milestone plan (M10–M13) | `/PAP/issues/ONY-50#document-plan` |
+| Milestone plan (M10–M15) | `/PAP/issues/ONY-50#document-plan` |
 | Library design & phases | [docs/LIBRARY.md](docs/LIBRARY.md) |
 | Hardware results and open problems | [docs/STATUS.md](docs/STATUS.md) |
 | Architecture and data flow | [docs/PLAN.md](docs/PLAN.md) |
@@ -214,10 +223,10 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 ## 10. Standing decisions and facts from project memory
 
 - **iOS scope and floor**: The owner settled **iOS 18 as the floor and both platforms in v1 scope** (`docs/LIBRARY.md` §13). "iOS is deferred" is no longer the project decision. `packages/WMRCompanionKit` (pure Swift framework), the native SwiftUI probe app (`tool/ios_probe`), and macOS CI compile validation landed in ONY-38 (PR #37) and ONY-41 (PR #44); **no iOS device run has happened yet**.
-- **Package split**: The repo is no longer a single Flutter app. It is split into `packages/wmr_core` (pure Dart), `packages/wmr_companion` (public facade), `packages/wmr_ble` (transport), `packages/wmr_fusion` (filters), `packages/wmr_companion_ui` (optional widgets, merged in PR #45), `packages/WMRCompanionKit` (Swift), and `example/` (minimal host). The app under `apps/wmr_companion_app` is the reference consumer driving its real connection through the facade.
-- **Protocol defaults and hardware status**: FF14 is the app's default stream and requests ATT MTU 517 on connect. FF15 answered 479/479 pings in a hardware run (round trip p50 40.8 ms, user-reported). The line claiming neither has been run on hardware was wrong. FF16 exists on firmware `main` (#38); the app does not read it yet (ONY-56).
+- **Package split**: The repo is no longer a single Flutter app. It is split into `packages/wmr_core` (pure Dart), `packages/wmr_companion` (public facade), `packages/wmr_ble` (BLE transport), `packages/wmr_ws` (WebSocket transport for the Linux/Pi bridge), `packages/wmr_fusion` (filters), `packages/wmr_companion_ui` (optional widgets, PR #45), `packages/wmr_companion_hid_android` (optional Android HID output, #48), `packages/WMRCompanionKit` (Swift), and `example/` (minimal host). The app under `apps/wmr_companion_app` is the reference consumer driving its real connection through the facade.
+- **Protocol defaults and hardware status**: FF14 is the app's default stream and requests ATT MTU 517 on connect. FF15 answered 479/479 pings in a hardware run (round trip p50 40.8 ms, user-reported). The line claiming neither has been run on hardware was wrong. FF16 exists on firmware `main` (#38) and the app reads it once after connect, publishing `WmrProtocolVersion` on `WmrLinkSnapshot` and `WmrCompanion.protocol` (#46).
 - **Multi-bridge**: Connecting several bridges concurrently exists (#34 in app, #33 single-hand mode on firmware). It cannot deliver "zero loss" because RIGHT has an independent ~10.8 % loss floor on current evidence.
-- **Firmware flashing**: One-command `build.py` and a browser installer landed on firmware (#37); L/R variant packaging is M11.1.
+- **Firmware flashing**: One-command `build.py` and a browser installer landed on firmware (`WMR_Bridge` #37); L/R variant packaging and the three-image browser installer merged (`WMR_Bridge` #40) and are hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`).
 - **Monado key**: Nick chose the fetch script (`tool/fetch_wmr_config_key.dart`); the XOR key table is gitignored and never committed (section 3).
 - **FF13 regression history**: Since WMR_Bridge #17 controllers stopped streaming after the config read; fixed by #21 (re-sends enable commands). User-reported working with LEFT ~204/s. Test C7 (`WMR_CFG_FF13_READ=0`) is still not run.
 - **FF13 IMU calibration**: Applied behind a per-hand switch in fusion (#27, default off); not yet verified on hardware.
@@ -255,6 +264,7 @@ Nick authorised the assistant to clean up on 2026-10-22; items below are what wa
 | `feat/ony-12-stick-settings-persistence` | PR #30 merged |
 | `feat/ony-38-ios-companion-framework` | PR #37 merged |
 | `pr35` | PR #35 merged |
+| `feat/ony-56-ff16` | PR #46 merged |
 | `tool/ony-24-gatt-probe` | PR #36 merged |
 
 **Local workspace branches in `WMR_Bridge`:**
@@ -278,7 +288,6 @@ Nick authorised the assistant to clean up on 2026-10-22; items below are what wa
 - `nightcinder/wmr-companion`:
   - `origin/main` (default branch)
   - local `main`
-  - local `feat/ony-56-ff16` (active task ONY-56)
 - `nightcinder/WMR_Bridge`:
   - `origin/main` (default branch)
   - local `main`
