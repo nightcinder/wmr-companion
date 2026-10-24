@@ -12,8 +12,7 @@ optional Android HID output; and `example/` is a minimal Flutter host. The app
 depends on the packages by path and drives its real connection through the
 facade. The repository is a Dart pub workspace with one lockfile, and all seven
 packages are publishable (clean `pub publish --dry-run`, export-boundary tests,
-fresh-app check in CI). Note: `BleTransport` is currently GATT-shaped; whether
-to rename it prior to `0.1.0` remains an open design question with the owner.
+fresh-app check in CI). Note: `BleTransport` is currently GATT-shaped, but its name is settled for `0.1.0`; the owner decided on ONY-146 to keep it as-is.
 
 **Release status (owner, 2026-10-23 on ONY-41).** `0.1.0` is **not published**
 to pub.dev: publication is on hold. The iOS 18 device gate (phase 5) is
@@ -292,8 +291,8 @@ WmrCompanion
 `BleTransport` already has the right shape: scan, connect, discover,
 subscribe → `Stream<Uint8List>` with arrival timestamp, write, disconnect, plus
 MTU/RSSI/connection info. The native transports and `WmrWsTransport` implement the same interface;
-nothing above knows which one is in use. Note that `BleTransport` is currently GATT-shaped;
-renaming before `0.1.0` remains an open design question with the owner.
+nothing above knows which one is in use. Note that `BleTransport` is GATT-shaped, but its
+name is settled for `0.1.0` (owner decision on ONY-146); no rename.
 
 **Phase 1 (lowest risk): `universal_ble` on both platforms.** The Dart pipeline
 already runs on Android at ~200 Hz per hand. On iOS, `universal_ble` uses

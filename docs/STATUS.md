@@ -36,7 +36,7 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 | **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
 | **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
 | **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done). **Open:** M13.3 security decision (after M12) and M13.4 README rewrite around M12 results. |
-| **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). Note: `BleTransport` interface is GATT-shaped and the rename-before-0.1.0 question remains open with the owner (no rename made). |
+| **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
 | **M15 — PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
 
 ### What has been checked on hardware (user-reported)
@@ -142,7 +142,7 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 5. **M14 — Raspberry Pi Wi-Fi host bridge (In progress)**:
    - **M14.1 `packages/wmr_ws`:** WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged #61).
    - **M14.3 App Wi-Fi bridge entry:** host:port connection UI, optional token authentication, TLS switch, loopback checks (merged #62).
-   - **M14.5 Companion docs and publish order:** Update docs (`README.md`, `STATUS.md`, `PLAN.md`, `LIBRARY.md`, `PUBLISHING.md`) and publish waves for the seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and rename-before-0.1.0 question is open with owner.
+   - **M14.5 Companion docs and publish order:** Update docs (`README.md`, `STATUS.md`, `PLAN.md`, `LIBRARY.md`, `PUBLISHING.md`) and publish waves for the seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped, and that its name is settled for `0.1.0` (owner decision on ONY-146).
    - **Open:** Empirical P-campaign verification on physical Raspberry Pi hardware (P1–P10). Wi-Fi link is host-tested/loopback-only until the Pi sitting.
 6. **M15 — PSVR2 Sense controller framework**:
    - PSVR2 Sense firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom).
@@ -160,7 +160,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - FF16 firmware version read on a live bridge (PR #46).
 - Per-bridge attribution on multi-bridge hardware (PR #51).
 - Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
-- `BleTransport` rename-before-0.1.0: `BleTransport` is GATT-shaped and the rename question is still open with the owner; no rename made.
+- `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); no rename made.
 
 ## Where things are
 
