@@ -6,7 +6,9 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 import 'raw_mode_notifier.dart';
@@ -167,5 +169,62 @@ void main() {
     expect(seen!.secure, isTrue);
     expect(seen!.uri.scheme, 'wss');
     expect(find.textContaining('cleartext'), findsNothing);
+  });
+
+  testWidgets('switching from BLE to Wi-Fi hides the old BLE endpoint', (
+    tester,
+  ) async {
+    final adapter = FakeBleAdapter();
+    final wifi = FakeTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765')],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          realTransportProvider.overrideWithValue(
+            UniversalBleTransport(
+              adapter: adapter,
+              scanTimeout: const Duration(minutes: 5),
+            ),
+          ),
+          wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.tap(find.text('Real device'));
+    await tester.pump();
+
+    await tester.tap(find.text('Scan'));
+    await tester.pump();
+    await tester.pump();
+    adapter.emitScanResult(
+      const BleScanResult(
+        deviceId: fakeBridgeDeviceId,
+        name: 'WMR Bridge',
+        rssi: -48,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Connect'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    expect(find.text('State: connected, streaming'), findsOneWidget);
+    expect(find.textContaining('Endpoint:'), findsNothing);
+
+    await tester.tap(find.text('Wi-Fi'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('Endpoint:'), findsNothing);
+    expect(find.text('State: idle'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 }
