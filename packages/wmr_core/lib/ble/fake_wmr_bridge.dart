@@ -7,6 +7,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 import '../domain/orientation.dart';
 import '../domain/synthetic_motion.dart';
 import '../protocol/config_block.dart';
+import '../protocol/controller_control.dart';
 import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
 import '../protocol/echo.dart';
@@ -29,6 +30,7 @@ const List<BleServiceInfo> fakeBridgeDeviceServices = [
       wmrBridgeEchoCharUuid,
       wmrBridgeConfigCharUuid,
       wmrBridgeVersionCharUuid,
+      wmrBridgeControllerCharUuid,
     ],
   ),
 ];
@@ -122,6 +124,7 @@ class FakeWmrBridge {
     this.echoEnabled = true,
     List<Uint8List?> configBlobs = const [null, null],
     List<ConfigState>? configStates,
+    this.discoveryDuration = const Duration(milliseconds: 1500),
     this.hands = const [wmrHandLeft, wmrHandRight],
     this.firmwareVersion = 'fake-1.0.0',
     this.firmwareVersionBytes,
@@ -146,7 +149,8 @@ class FakeWmrBridge {
         final lower = uuid.toLowerCase();
         if (id == deviceId &&
             (lower == wmrBridgeConfigCharUuid ||
-                lower == wmrBridgeVersionCharUuid)) {
+                lower == wmrBridgeVersionCharUuid ||
+                lower == wmrBridgeControllerCharUuid)) {
           return _onRead(id, uuid);
         }
         return null;
@@ -173,8 +177,150 @@ class FakeWmrBridge {
   int _cfgHand = 0;
   int _cfgOffset = 0;
 
+  /// How long FF17 discovery reports `inquiry` before it stores an address and
+  /// returns to idle. [Duration.zero] finishes inside the write, for tests.
+  final Duration discoveryDuration;
+
+  /// FF17 state: per hand flags (bit0 connected, bit1 connecting, bit2
+  /// descriptor), address source, model and address tail.
+  final List<int> _ctrlFlags = [0, 0];
+  final List<int> _ctrlAddrSource = [2, 2];
+  final List<int> _ctrlModel = [0, 0];
+  final List<List<int>> _ctrlAddrTail = [
+    [0x11, 0x22, 0x33],
+    [0x44, 0x55, 0x66],
+  ];
+  int _discoveryState = 0;
+  int _discoveryRound = 0;
+  int _lastCommand = 0;
+  int _lastResult = 0;
+  Timer? _discoveryTimer;
+
+  Uint8List _encodeControllerStatus() => Uint8List.fromList([
+    1,
+    _ctrlFlags[0],
+    _ctrlAddrSource[0],
+    _ctrlModel[0],
+    ..._ctrlAddrTail[0],
+    0,
+    _ctrlFlags[1],
+    _ctrlAddrSource[1],
+    _ctrlModel[1],
+    ..._ctrlAddrTail[1],
+    0,
+    _discoveryState,
+    _discoveryRound,
+    _lastCommand,
+    _lastResult,
+    0,
+  ]);
+
+  void _emitControllerStatus() => transport.emit(
+    deviceId,
+    wmrBridgeControllerCharUuid,
+    _encodeControllerStatus(),
+  );
+
+  Never _refuseControllerCommand(
+    ControllerCommand? command,
+    ControllerResult result,
+  ) {
+    _lastCommand = command?.opcode ?? 0;
+    _lastResult = result.code;
+    _emitControllerStatus();
+    throw ControllerCommandException(command, result);
+  }
+
+  void _onControllerWrite(Uint8List value) {
+    if (value.isEmpty || value.length > 2) {
+      _refuseControllerCommand(null, ControllerResult.invalidParam);
+    }
+    ControllerCommand? command;
+    for (final c in ControllerCommand.values) {
+      if (c.opcode == value[0]) command = c;
+    }
+    if (command == null) {
+      _refuseControllerCommand(null, ControllerResult.invalidParam);
+    }
+    final hand = value.length == 2 ? value[1] : null;
+    if (hand != null && hand > 1) {
+      _refuseControllerCommand(command, ControllerResult.invalidParam);
+    }
+    if (command.needsHand && hand == null) {
+      _refuseControllerCommand(command, ControllerResult.invalidParam);
+    }
+    switch (command) {
+      case ControllerCommand.discover:
+        if (_discoveryState != 0 || _ctrlFlags.any((f) => f & 2 != 0)) {
+          _refuseControllerCommand(command, ControllerResult.busy);
+        }
+        _discoveryState = 1;
+        _discoveryRound++;
+        _lastCommand = command.opcode;
+        _lastResult = ControllerResult.ok.code;
+        _emitControllerStatus();
+        if (discoveryDuration == Duration.zero) {
+          _finishDiscovery();
+        } else {
+          _discoveryTimer = Timer(discoveryDuration, _finishDiscovery);
+        }
+      case ControllerCommand.connect:
+        final h = hand!;
+        if (_ctrlFlags[h] & 1 != 0) {
+          _refuseControllerCommand(command, ControllerResult.busy);
+        }
+        _ctrlFlags[h] = 1 | 4;
+        _lastCommand = command.opcode;
+        _lastResult = ControllerResult.ok.code;
+        _emitControllerStatus();
+      case ControllerCommand.disconnect:
+        final h = hand!;
+        if (_ctrlFlags[h] == 0) {
+          _refuseControllerCommand(command, ControllerResult.notConnected);
+        }
+        _ctrlFlags[h] = 0;
+        _lastCommand = command.opcode;
+        _lastResult = ControllerResult.ok.code;
+        _emitControllerStatus();
+      case ControllerCommand.forgetAddresses:
+        if (_ctrlFlags.any((f) => f & 3 != 0)) {
+          _refuseControllerCommand(command, ControllerResult.busy);
+        }
+        for (var h = 0; h < 2; h++) {
+          _ctrlAddrSource[h] = 0;
+          _ctrlAddrTail[h] = [0, 0, 0];
+        }
+        _lastCommand = command.opcode;
+        _lastResult = ControllerResult.ok.code;
+        _emitControllerStatus();
+      case ControllerCommand.forgetBond:
+        final h = hand!;
+        if (_ctrlFlags[h] & 3 != 0) {
+          _refuseControllerCommand(command, ControllerResult.busy);
+        }
+        _lastCommand = command.opcode;
+        _lastResult = ControllerResult.ok.code;
+        _emitControllerStatus();
+    }
+  }
+
+  void _finishDiscovery() {
+    _discoveryTimer?.cancel();
+    _discoveryTimer = null;
+    _discoveryState = 0;
+    _discoveryRound = 0;
+    for (var h = 0; h < 2; h++) {
+      _ctrlAddrSource[h] = 2;
+      _ctrlAddrTail[h] = [0x11 + h, 0x22 + h, 0x33 + h];
+    }
+    _emitControllerStatus();
+  }
+
   Uint8List _onRead(String id, String characteristicUuid) {
     final uuid = characteristicUuid.toLowerCase();
+    if (id == deviceId && uuid == wmrBridgeControllerCharUuid) {
+      return _encodeControllerStatus();
+    }
     if (id == deviceId && uuid == wmrBridgeVersionCharUuid) {
       final bytes =
           firmwareVersionBytes ??
@@ -222,6 +368,11 @@ class FakeWmrBridge {
   int echoesSent = 0;
 
   void _onWrite(FakeWrite w) {
+    if (w.deviceId == deviceId &&
+        w.characteristicUuid.toLowerCase() == wmrBridgeControllerCharUuid) {
+      _onControllerWrite(w.value);
+      return;
+    }
     if (w.deviceId == deviceId &&
         w.characteristicUuid.toLowerCase() == wmrBridgeConfigCharUuid) {
       if (w.value.length != wmrConfigCursorSize || w.value[0] > 1) {
@@ -288,6 +439,8 @@ class FakeWmrBridge {
   void stop() {
     _timer?.cancel();
     _timer = null;
+    _discoveryTimer?.cancel();
+    _discoveryTimer = null;
   }
 
   /// Sends one report per hand, on whichever stream is subscribed.
