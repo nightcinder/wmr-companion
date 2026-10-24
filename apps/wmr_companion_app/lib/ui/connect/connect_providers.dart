@@ -85,6 +85,7 @@ class RealDeviceState {
     this.connectingDeviceIds = const {},
     this.deviceStatuses = const {},
     this.stats,
+    this.decodedStats,
     this.mode,
     this.disconnectEpoch = 0,
     this.activeTransport = BridgeTransportKind.ble,
@@ -131,6 +132,9 @@ class RealDeviceState {
   final int disconnectEpoch;
 
   final StreamStats? stats;
+
+  /// FF12/FF14 figures, so the Stream panel is not blank in a decoded mode.
+  final DecodedStats? decodedStats;
 
   bool get scanning => status.phase == BleLinkPhase.scanning;
   bool get connected =>
@@ -424,6 +428,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       connectingDeviceIds: Set.unmodifiable(_connectingDeviceIds),
       deviceStatuses: Map.unmodifiable(_deviceStatuses),
       stats: _service?.stats ?? state.stats,
+      decodedStats: _service?.decodedStats ?? state.decodedStats,
       mode: _service?.modeState ?? state.mode,
       disconnectEpoch: _disconnectEpoch,
       activeTransport: activeTransport ?? state.activeTransport,

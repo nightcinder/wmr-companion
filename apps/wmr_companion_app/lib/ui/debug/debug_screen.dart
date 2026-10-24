@@ -685,3 +685,37 @@ class StatsTable extends StatelessWidget {
     );
   }
 }
+
+/// FF12/FF14 counters for the Stream panel on the connect screen. Blank raw
+/// FF11 counters there read as "no data" when a decoded stream is active.
+class DecodedStreamTable extends StatelessWidget {
+  const DecodedStreamTable(this.stats, {super.key, this.style});
+
+  final DecodedStats stats;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var h = 0; h < stats.hands.length; h++)
+          Text(
+            '${_handNames[h].padRight(5)}  records ${stats.hands[h].records}  '
+            'seq ${stats.hands[h].lastSequence ?? '-'}  '
+            'gaps ${stats.hands[h].sequenceGaps}  '
+            '${stats.hands[h].rateHz.toStringAsFixed(1)} Hz',
+            style: style,
+          ),
+        if (stats.batches > 0 || stats.batchErrors > 0)
+          Text(
+            'batches ${stats.batches}  '
+            'mean ${stats.batchMean?.toStringAsFixed(2) ?? '-'}  '
+            'max ${stats.batchMax}  rejected ${stats.batchErrors}',
+            style: style,
+          ),
+        Text('parse errors ${stats.parseErrors}', style: style),
+      ],
+    );
+  }
+}
