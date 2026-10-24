@@ -321,7 +321,22 @@ void main() {
     expect(input.stick, [0.1, -0.2]);
     expect(input.trackpad[0], 1);
     expect(input.trackpad[1], closeTo(-0.5, 1e-4));
+    expect(input.trackpadX, 1);
+    expect(input.trackpadY, closeTo(-0.5, 1e-4));
+    expect(input.trackpadClick, isFalse);
+    expect(input.trackpadTouch, isFalse);
     expect(input.orientation, same(q));
+  });
+
+  test('HandInput trackpad accessors reflect touch and click buttons', () {
+    const input = HandInput(
+      buttons: wmrBtnTrackpadClick | wmrBtnTrackpadTouch,
+      trackpad: [0.75, -0.25],
+    );
+    expect(input.trackpadClick, isTrue);
+    expect(input.trackpadTouch, isTrue);
+    expect(input.trackpadX, 0.75);
+    expect(input.trackpadY, -0.25);
   });
 
   test('config equality covers every field', () {

@@ -241,6 +241,18 @@ class HandInput {
   /// -1..1; both 0 when not touched.
   final List<double> trackpad;
 
+  /// Whether the user's finger is currently touching the trackpad/touchpad.
+  bool get trackpadTouch => pressed(wmrBtnTrackpadTouch);
+
+  /// Whether the trackpad/touchpad is physically clicked down.
+  bool get trackpadClick => pressed(wmrBtnTrackpadClick);
+
+  /// Normalized horizontal touchpad coordinate (-1.0 left to 1.0 right).
+  double get trackpadX => trackpad.isNotEmpty ? trackpad[0] : 0.0;
+
+  /// Normalized vertical touchpad coordinate (-1.0 bottom to 1.0 top).
+  double get trackpadY => trackpad.length > 1 ? trackpad[1] : 0.0;
+
   /// View-frame orientation (X right, Y up, Z toward the user), if fused.
   final vm.Quaternion? orientation;
 

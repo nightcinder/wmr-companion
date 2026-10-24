@@ -23,7 +23,16 @@ export 'package:wmr_core/domain/imu_calibration.dart' show ImuCalibration;
 export 'package:wmr_core/domain/loss_window.dart' show LossWindowStats;
 export 'package:wmr_core/domain/stick_centre.dart' show StickConfig;
 export 'package:wmr_core/domain/tick_timer.dart' show DtStats;
-export 'package:wmr_core/protocol/decoded_record.dart' show DecodedRecord;
+export 'package:wmr_core/protocol/decoded_record.dart'
+    show
+        DecodedRecord,
+        wmrBtnBtPairing,
+        wmrBtnHome,
+        wmrBtnMenu,
+        wmrBtnSqueeze,
+        wmrBtnThumbstickClick,
+        wmrBtnTrackpadClick,
+        wmrBtnTrackpadTouch;
 export 'package:wmr_core/protocol/firmware_version.dart'
     show WmrBridgeFeature, WmrBridgeFeatures, WmrProtocolVersion;
 export 'package:wmr_core/protocol/wmr_fragment.dart' show WmrFrame;
