@@ -9,10 +9,13 @@ This package is the umbrella API from `docs/LIBRARY.md`. It wraps
 can adapt the streams to whatever state layer it already uses. The reference
 app in this repository is the first consumer.
 
-Status: **phase 2**. The facade works on the fake transport and is dogfooded by
-the app's real connection path. The BLE package (`wmr_ble`), UI kit, Android HID
-add-on and publishing are later phases. Nothing here has been run on iOS
-hardware.
+Status: **0.1.0, landed**. All seven packages — `wmr_core`, `wmr_companion`,
+`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui` and
+`wmr_companion_hid_android` — are in the pub workspace and pass their export
+boundary checks; publishing to pub.dev is on hold per the owner's decision. The
+facade works on the fake transport and is dogfooded by the app's real connection
+path, including `WmrWsTransport` alongside `UniversalBleTransport` and
+`FakeTransport`. Nothing here has been run on iOS hardware.
 
 ## Why in-process input
 
@@ -95,7 +98,7 @@ One class, one config, a handful of models.
 
 | Member | Meaning |
 | --- | --- |
-| `initialize()` | Reset to idle. Adapter/permission checks arrive with `wmr_ble` (phase 3). |
+| `initialize()` | Reset to idle. Adapter/permission checks live in the BLE package (`wmr_ble`). |
 | `startScan()` / `stopScan()` | Scan and publish `bridges`, strongest RSSI first, de-duplicated by id. |
 | `connect(WmrBridgeDevice)` | Connect and enable the configured stream. Also the reconnect call. |
 | `setStreamMode(StreamMode)` | Switch FF11 raw, FF12 decoded, FF14 batched or none. |
