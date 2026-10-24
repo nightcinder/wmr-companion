@@ -449,6 +449,13 @@ class UniversalBleTransport implements BleTransport {
     var linkAttempted = false;
     try {
       await _preflight(deviceId: deviceId);
+      if (_sessions[deviceId] != session) {
+        throw _fail(
+          BleLinkPhase.connectionLost,
+          'Disconnected during setup',
+          deviceId: deviceId,
+        );
+      }
       await _linkSubs[deviceId]?.cancel();
       _linkSubs[deviceId] = _adapter
           .connectionEvents(deviceId)
@@ -464,12 +471,26 @@ class UniversalBleTransport implements BleTransport {
           deviceId: deviceId,
         );
       }
+      if (_sessions[deviceId] != session) {
+        throw _fail(
+          BleLinkPhase.connectionLost,
+          'Disconnected during setup',
+          deviceId: deviceId,
+        );
+      }
 
       _emit(BleLinkPhase.negotiatingMtu, deviceId: deviceId);
       try {
         session.mtu = await _adapter.requestMtu(deviceId, requestedMtu);
       } catch (e) {
         session.warnings.add('MTU request failed: $e');
+      }
+      if (_sessions[deviceId] != session) {
+        throw _fail(
+          BleLinkPhase.connectionLost,
+          'Disconnected during setup',
+          deviceId: deviceId,
+        );
       }
 
       if (_adapter.supportsConnectionPriority) {
@@ -479,6 +500,13 @@ class UniversalBleTransport implements BleTransport {
         } catch (e) {
           session.priorityRequested = false;
           session.warnings.add('Connection priority request failed: $e');
+        }
+        if (_sessions[deviceId] != session) {
+          throw _fail(
+            BleLinkPhase.connectionLost,
+            'Disconnected during setup',
+            deviceId: deviceId,
+          );
         }
       }
 
@@ -490,6 +518,13 @@ class UniversalBleTransport implements BleTransport {
         throw _fail(
           BleLinkPhase.connectFailed,
           'Service discovery failed: $e',
+          deviceId: deviceId,
+        );
+      }
+      if (_sessions[deviceId] != session) {
+        throw _fail(
+          BleLinkPhase.connectionLost,
+          'Disconnected during setup',
           deviceId: deviceId,
         );
       }
@@ -507,13 +542,6 @@ class UniversalBleTransport implements BleTransport {
           deviceId: deviceId,
         );
       }
-      if (_sessions[deviceId] != session) {
-        throw _fail(
-          BleLinkPhase.connectionLost,
-          'Disconnected during setup',
-          deviceId: deviceId,
-        );
-      }
 
       session.services = List.unmodifiable(services);
       session.ready = true;
@@ -527,6 +555,13 @@ class UniversalBleTransport implements BleTransport {
           // failed connection. Anything else keeps failing the setup.
           if (e.attError != attErrorOtherStreamActive) rethrow;
           _streams[key]?.addError(_streamFault(w, e));
+        }
+        if (_sessions[deviceId] != session) {
+          throw _fail(
+            BleLinkPhase.connectionLost,
+            'Disconnected during setup',
+            deviceId: deviceId,
+          );
         }
       }
       _setState(deviceId, BleConnectionState.connected);

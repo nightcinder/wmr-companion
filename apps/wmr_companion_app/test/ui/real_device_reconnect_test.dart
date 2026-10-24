@@ -5,16 +5,33 @@ import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
 
 import '../hid/fake_hid.dart';
+
+class _DroppableWifiTransport extends FakeTransport {
+  _DroppableWifiTransport({required super.devices});
+
+  int connectCalls = 0;
+  Object? connectError;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    connectCalls++;
+    final error = connectError;
+    if (error != null) throw error;
+    await super.connect(deviceId);
+  }
+}
 
 class TestModeNotifier extends StreamModeNotifier {
   TestModeNotifier(this.mode);
@@ -330,5 +347,42 @@ void main() {
     expect(adapter.calls.where((c) => c == 'connect').length, connectsBefore);
     expect(container.read(hidOutputProvider).running, isFalse);
     expect(hid.calls, contains('stop'));
+  });
+
+  test('a failed automatic Wi-Fi re-dial is retried with backoff', () async {
+    final wifi = _DroppableWifiTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+    );
+    addTearDown(wifi.dispose);
+    const policy = ReconnectPolicy(
+      baseDelay: Duration(milliseconds: 20),
+      maxDelay: Duration(milliseconds: 40),
+      maxAttempts: 3,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        realTransportProvider.overrideWithValue(transport),
+        wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+        streamModeProvider.overrideWith(() => TestModeNotifier(StreamMode.raw)),
+        reconnectPolicyProvider.overrideWithValue(policy),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connectWifi(host: 'pi.local', port: 8765);
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    final connectsBefore = wifi.connectCalls;
+    wifi.connectError = WmrWsException('daemon restarting');
+    await wifi.disconnect('pi.local:8765');
+    await wait(50);
+
+    // Clear the error before the second attempt so the re-armed timer succeeds.
+    wifi.connectError = null;
+    await wait(120);
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(wifi.connectCalls, greaterThanOrEqualTo(connectsBefore + 2));
   });
 }

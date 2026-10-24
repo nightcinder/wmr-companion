@@ -551,13 +551,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   void _reportWifiFailure(String deviceId, Object error) {
     if (state.activeTransport != BridgeTransportKind.wifi) return;
-    final status = BleLinkStatus(
-      BleLinkPhase.connectFailed,
-      deviceId: deviceId,
-      message: '$error',
+    _handleLinkStatus(
+      BleLinkStatus(
+        BleLinkPhase.connectFailed,
+        deviceId: deviceId,
+        message: '$error',
+      ),
     );
-    _lastStatus = status;
-    _deviceStatuses[deviceId] = status;
   }
 
   Future<void> _promoteWifiReady(String deviceId) async {
