@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- FF17 controller control: `ControllerCommand`, `ControllerResult`,
+  `ControllerStatusV2` and `encodeControllerCommand` in
+  `protocol/controller_control.dart`, plus `ControllerControlClient`
+  (`isSupported`, `readStatus`, `statusStream`, `send`).
+- `FakeWmrBridge` serves FF17 and simulates discovery, connect/disconnect and
+  the forget guards.
+
 ## 0.1.0
 
 - Initial extraction of the pure-Dart protocol, domain, and service pipeline for the WMR Bridge.

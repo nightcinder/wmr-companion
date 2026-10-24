@@ -490,3 +490,34 @@ Code: `packages/wmr_core/lib/protocol/echo.dart` (pure Dart, golden bytes from t
 - **Fake bridge.** `FakeWmrBridge` answers valid pings while FF15 is
   subscribed (`echoDelay`, `echoTurnaround`, `echoEnabled` to ignore them).
 
+
+## FF17 controller control in the app
+
+**Not verified on hardware; the firmware side has not been run on hardware
+either.** Spec: WMR_Bridge `docs/PROTOCOL.md`, "Controller scan and status v2,
+FF17" (merged in WMR_Bridge #70, firmware `v0.1.1`). Code:
+`packages/wmr_core/lib/protocol/controller_control.dart` (commands, result
+codes, 20-byte status parser), `packages/wmr_core/lib/services/controller_control_client.dart`,
+and the debug screen's "Controller control" panel.
+
+- **Writes** are 1 byte for `discover` and `forget addresses`, 2 bytes
+  (`opcode`, `hand`) for `connect`, `disconnect` and `forget bond`. Success is
+  ATT `0x00`; a refusal is ATT `0x80 + result code`. The client catches the
+  failure, reads the status once and shows the firmware's own result code
+  (`busy`, `noAddress`, `nothingToDo`, `notConnected`, `notEnabled`,
+  `invalidParam`) instead of the platform's wording.
+- **Status** is 20 bytes: version, per-hand flags (connected, connecting, HID
+  descriptor), address source, model, last 3 address bytes, discovery state
+  and round, last command and result. Subscribed on open, then read once, so
+  no transition between the two is lost.
+- **Detection.** The client checks service discovery for FF17; an older bridge
+  shows "does not expose FF17 (firmware before v0.1.1)" and disables the
+  buttons rather than writing to a missing characteristic.
+- **Radio contention.** While discovery is active the panel shows "Scanning
+  (round N)... the controller stream may stutter". There is no interlock; the
+  firmware bounds discovery and only runs it for hands without an address.
+- **Guards stay in the firmware.** The panel disables forget while a hand is
+  connected or connecting, but the bridge refuses it anyway.
+- **Fake bridge.** `FakeWmrBridge` serves FF17, simulates discovery
+  (`discoveryDuration`), connect/disconnect and the forget guards, and emits a
+  status notification on every change.

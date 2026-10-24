@@ -15,6 +15,7 @@ import '../gamepad/gamepad_screen.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
 import 'config_panel.dart';
+import 'controller_panel.dart';
 import 'debug_providers.dart';
 import 'stream_settings.dart';
 
@@ -179,6 +180,21 @@ class DebugScreen extends ConsumerWidget {
               )
           else
             _rawStats(ref, mono),
+          const SizedBox(height: 16),
+          // FF17 is ESP32-only: on a Wi-Fi (Pi) bridge the panel could only
+          // report a misleading "old firmware" error and dead buttons.
+          if (transportKinds[source == DebugSource.fake
+                  ? fakeBridgeDeviceId
+                  : ref.watch(realDeviceProvider).deviceId] !=
+              BridgeTransportKind.wifi)
+            ControllerPanel(
+              transport: source == DebugSource.fake
+                  ? ref.watch(transportProvider)
+                  : ref.watch(realLinkTransportProvider),
+              deviceId: source == DebugSource.fake
+                  ? fakeBridgeDeviceId
+                  : ref.watch(realDeviceProvider).deviceId,
+            ),
           const SizedBox(height: 16),
           ConfigPanel(
             key: ValueKey('${source.name}$hand'),

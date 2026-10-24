@@ -44,6 +44,14 @@ const String wmrBridgeConfigCharUuid = '0000ff13-0000-1000-8000-00805f9b34fb';
 /// `build-info.json`. Independent of the stream exclusion and of FF13/FF15.
 const String wmrBridgeVersionCharUuid = '0000ff16-0000-1000-8000-00805f9b34fb';
 
+/// Controller control and status v2: write a 1-2 byte command (discover,
+/// connect, disconnect, forget addresses, forget bond), read or subscribe to
+/// a 20-byte status. Independent of the FF11/FF12/FF14 exclusion. Firmware
+/// merged in WMR_Bridge #70 (v0.1.1), not run on hardware. docs/PROTOCOL.md
+/// "Controller scan and status v2, FF17".
+const String wmrBridgeControllerCharUuid =
+    '0000ff17-0000-1000-8000-00805f9b34fb';
+
 /// ATT application error the bridge returns when a CCC write would enable a
 /// second stream. Write 0x0000 to the active CCC first.
 const int attErrorOtherStreamActive = 0x80;
