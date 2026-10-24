@@ -12,17 +12,8 @@ import '../debug/debug_screen.dart';
 import '../latency/latency_screen.dart';
 import 'connect_providers.dart';
 
-enum _Source { fake, real }
-
-class ConnectScreen extends ConsumerStatefulWidget {
+class ConnectScreen extends StatelessWidget {
   const ConnectScreen({super.key});
-
-  @override
-  ConsumerState<ConnectScreen> createState() => _ConnectScreenState();
-}
-
-class _ConnectScreenState extends ConsumerState<ConnectScreen> {
-  _Source _source = _Source.fake;
 
   @override
   Widget build(BuildContext context) {
@@ -30,54 +21,8 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
       appBar: AppBar(title: const Text('WMR Companion')),
       body: ListView(
         padding: const EdgeInsets.all(16),
-        children: [
-          SegmentedButton<_Source>(
-            segments: const [
-              ButtonSegment(value: _Source.fake, label: Text('Fake bridge')),
-              ButtonSegment(value: _Source.real, label: Text('Real device')),
-            ],
-            selected: {_source},
-            onSelectionChanged: (s) => setState(() => _source = s.first),
-          ),
-          const SizedBox(height: 16),
-          if (_source == _Source.fake)
-            const _FakePanel()
-          else
-            const RealPanel(),
-        ],
+        children: const [RealPanel()],
       ),
-    );
-  }
-}
-
-class _FakePanel extends StatelessWidget {
-  const _FakePanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Synthetic frames and a synthetic orientation. No Bluetooth needed.',
-        ),
-        const SizedBox(height: 8),
-        FilledButton(
-          onPressed: () => Navigator.of(
-            context,
-          ).push(MaterialPageRoute<void>(builder: (_) => const DebugScreen())),
-          child: const Text('Open 3D debug view'),
-        ),
-        const SizedBox(height: 8),
-        FilledButton.tonal(
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const LatencyScreen(source: DebugSource.fake),
-            ),
-          ),
-          child: const Text('Latency test'),
-        ),
-      ],
     );
   }
 }

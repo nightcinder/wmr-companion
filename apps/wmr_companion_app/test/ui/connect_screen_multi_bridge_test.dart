@@ -30,7 +30,6 @@ void main() {
         child: const MaterialApp(home: ConnectScreen()),
       ),
     );
-    await tester.tap(find.text('Real device'));
     await tester.pump();
   }
 

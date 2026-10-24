@@ -35,7 +35,6 @@ void main() {
         child: const MaterialApp(home: ConnectScreen()),
       ),
     );
-    await tester.tap(find.text('Real device'));
     await tester.pump();
   }
 
@@ -43,6 +42,16 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   }
+
+  testWidgets('opens on the real device path with no fake bridge', (
+    tester,
+  ) async {
+    await open(tester);
+    expect(find.text('Fake bridge'), findsNothing);
+    expect(find.text('Real device'), findsNothing);
+    expect(find.text('Scan'), findsOneWidget);
+    await close(tester);
+  });
 
   testWidgets('scan, connect and show MTU and stream counters', (tester) async {
     await open(tester);
