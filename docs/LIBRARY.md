@@ -382,10 +382,30 @@ the directory move changed paths, not imports.
 
 - **Semantic versioning** per package. `wmr_core` and `wmr_fusion` can reach
   1.0 first; `wmr_companion` follows once the facade is stable.
-- **Protocol compatibility is explicit.** Export a `WmrProtocolVersion` and a
-  documented bridge-firmware matrix (FF11/FF12 always; FF14 needs bridge
-  firmware with batching; FF13/FF15 optional). Unknown fields/records must be
-  skipped, not fatal, so a newer bridge does not crash an older app.
+- **Protocol compatibility and firmware matrix:** The canonical compatibility
+  matrix between `WMR_Bridge` firmware and the `wmr-companion` packages is
+  published in `WMR_Bridge` at [`docs/COMPATIBILITY.md`](https://github.com/nightcinder/WMR_Bridge/blob/main/docs/COMPATIBILITY.md).
+  That document is the **canonical copy** to avoid drift between the two repos.
+  It is keyed on the bridge's read-only GATT characteristic `FF16` (`PROJECT_VER`,
+  max 31 bytes UTF-8) and covers all three firmware eras:
+  1. *Older than #38 (`41771f8`):* No FF16 characteristic. The facade leaves
+     `snapshot.protocol.firmwareVersion` as null and `features.firmwareVersion` as
+     false; FF11/FF12 are available, FF14 depends on batching support & ATT MTU >= 61,
+     and FF13/FF15 are optional per the canonical matrix.
+  2. *Builds between #38 and `v0.1.0-rc1` (`547ab09`):* FF16 reports a git commit
+     placeholder (`0.0.0+<sha>`).
+  3. *`v0.1.0-rc1` (`547ab09`) and later:* First build whose FF16 reports a real
+     version (`0.1.0-rc1`).
+  All six packages at `0.1.0` in source speak to every era. Two critical statuses
+  must be stated, not implied:
+  - **The library is not published:** All six packages are at `0.1.0` in source/git
+    only; publication to pub.dev is on hold by owner decision (2026-10-23, ONY-41;
+    see [PUBLISHING.md](PUBLISHING.md) §5). Nothing is available on pub.dev.
+  - **The firmware release is a prerelease:** `v0.1.0-rc1` is flagged prerelease
+    and is not "Latest"; it is hardware-unverified (CI-compiled only; no board has
+    been flashed or confirmed by CI).
+  Unknown fields or characteristics are ignored, so a newer bridge does not crash
+  an older client.
 - **Publish on pub.dev** after the API freeze. The six packages no longer carry
   `publish_to: none` and their dry-runs are clean (#49/#54); the actual `0.1.0`
   upload is on hold by owner decision (2026-10-23), see [PUBLISHING.md](PUBLISHING.md) §5.
