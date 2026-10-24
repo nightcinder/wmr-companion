@@ -21,7 +21,7 @@ UI (screens, widgets)
   -> State (Riverpod providers)
     -> ControllerService   (per-controller stream of ControllerState)
       -> Protocol layer    (pure Dart: reassembler -> WMR report decoder -> fusion)
-      -> BleTransport      (seam interface: GATT-shaped; rename-before-0.1.0 open with owner)
+      -> BleTransport      (seam interface: GATT-shaped; name settled for 0.1.0)
            -> UniversalBleTransport   (default BLE, uses universal_ble)
            -> WmrWsTransport          (Wi-Fi WebSocket to Linux/Pi daemon; host-tested/loopback-only)
            -> FakeTransport           (synthetic packets, for tests/UI dev)
@@ -29,7 +29,7 @@ UI (screens, widgets)
 ```
 
 Rules:
-- `BleTransport` is an abstract class: scan, connect, discover, subscribe(characteristic) -> Stream<Uint8List>, write, disconnect, plus connection info (MTU, RSSI, connection interval/PHY where available). Note: `BleTransport` is currently GATT-shaped (UUIDs, CCC subscription, read/write characteristics). `WmrWsTransport` maps WebSocket messages to this seam without changing `ControllerService`. The question of renaming `BleTransport` before 0.1.0 (to e.g. `WmrTransport` or `BridgeTransport`) is an open design question with the project owner; do not rename now.
+- `BleTransport` is an abstract class: scan, connect, discover, subscribe(characteristic) -> Stream<Uint8List>, write, disconnect, plus connection info (MTU, RSSI, connection interval/PHY where available). Note: `BleTransport` is currently GATT-shaped (UUIDs, CCC subscription, read/write characteristics). `WmrWsTransport` maps WebSocket messages to this seam without changing `ControllerService`. The name is settled: the project owner decided on ONY-146 to keep `BleTransport` as-is for 0.1.0 (it wraps third-party libraries), rather than rename it to e.g. `WmrTransport` or `BridgeTransport`; no rename.
 - Parser is pure Dart, no Flutter imports, fully unit tested with golden byte arrays.
 - Timestamp every received notification with a monotonic `Stopwatch` **at the transport boundary** (as early as possible) and carry it in the packet object.
 - Heavy work (fusion, stats) must not block the UI isolate. Start on the main isolate, but keep it behind interfaces so it can move to a worker isolate.
@@ -138,7 +138,7 @@ Milestone planning is governed by ONY-50 (see [STATUS.md](STATUS.md) and `HANDOF
 - **M11 — Two bridges as a product**: Multi-bridge connection support in `ControllerService` (#34), per-bridge attribution across records/stats/links/latency export (ONY-70, #51). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). Open: hardware bench verification (Sitting B′ / Sitting B).
 - **M12 — The verification campaign (Open)**: Turn run sheets into empirical hardware answers across campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32).
 - **M13 — Release and distribution (Open)**: `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done). Open: M13.3 security decision (after M12) and M13.4 README rewrite around M12 results.
-- **M14 — Raspberry Pi Wi-Fi host bridge**: WebSocket transport package (`wmr_ws`, M14.1 / #61) behind `BleTransport`, companion app host:port Wi-Fi connection entry (M14.3 / #62), docs and publishing order alignment (M14.5). Open: hardware verification campaign on physical Pi (P1–P10); Wi-Fi link is host-tested/loopback-only until the Pi sitting. `BleTransport` interface is GATT-shaped and rename-before-0.1.0 remains an open question with the owner (no rename).
+- **M14 — Raspberry Pi Wi-Fi host bridge**: WebSocket transport package (`wmr_ws`, M14.1 / #61) behind `BleTransport`, companion app host:port Wi-Fi connection entry (M14.3 / #62), docs and publishing order alignment (M14.5). Open: hardware verification campaign on physical Pi (P1–P10); Wi-Fi link is host-tested/loopback-only until the Pi sitting. `BleTransport` interface is GATT-shaped but keeps its name for 0.1.0 (owner decision on ONY-146, no rename).
 - **M15 — PSVR2 Sense controller framework**: Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers).
 
 ## GitHub and CI

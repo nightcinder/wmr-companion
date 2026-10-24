@@ -34,7 +34,7 @@ GATT service FF10 on the bridge:
 - FF15: echo characteristic for round-trip latency measurement (479/479 pings answered on hardware, user-reported)
 - FF16: bridge firmware version string (exists on firmware `main` via PR #38; app/library support landed in PR #46, `WmrProtocolVersion`)
 
-FF11/FF12/FF14 are mutually exclusive (a second enable fails with ATT error 0x80; write 0x0000 to the active one first). FF13, FF15, and FF16 are independent. Multi-bridge support (connecting multiple ESP32 bridges concurrently and merging notification streams into shared per-hand pipelines) is implemented in `ControllerService` (PR #34). App layers: UI -> Riverpod -> `WmrCompanion` facade -> `ControllerService` -> (parser + `BleTransport`). `BleTransport` is an abstract interface in `wmr_core`, implemented by `UniversalBleTransport` in `wmr_ble`, `WmrWsTransport` in `wmr_ws`, `FakeTransport` in `wmr_companion/testing.dart`, and native transport via `WMRCompanionKit`. Note: `BleTransport` is currently GATT-shaped; the question of whether to rename it before `0.1.0` remains an open design question with the owner (no rename made). Wi-Fi bridge streaming is host-tested / loopback-only until physical Pi sitting P1–P10.
+FF11/FF12/FF14 are mutually exclusive (a second enable fails with ATT error 0x80; write 0x0000 to the active one first). FF13, FF15, and FF16 are independent. Multi-bridge support (connecting multiple ESP32 bridges concurrently and merging notification streams into shared per-hand pipelines) is implemented in `ControllerService` (PR #34). App layers: UI -> Riverpod -> `WmrCompanion` facade -> `ControllerService` -> (parser + `BleTransport`). `BleTransport` is an abstract interface in `wmr_core`, implemented by `UniversalBleTransport` in `wmr_ble`, `WmrWsTransport` in `wmr_ws`, `FakeTransport` in `wmr_companion/testing.dart`, and native transport via `WMRCompanionKit`. The name is settled for `0.1.0`: the owner decided on ONY-146 to keep `BleTransport` as-is (GATT-shaped, but it wraps third-party libraries); no rename. Wi-Fi bridge streaming is host-tested / loopback-only until physical Pi sitting P1–P10.
 
 ## 2. Rules (from the project owner; keep them)
 
@@ -192,7 +192,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 *Question: does moving the host bridge to a Raspberry Pi over 5 GHz Wi-Fi eliminate upstream radio contention?*
 - **14.1 `packages/wmr_ws`**: WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged in #61).
 - **14.3 App Wi-Fi bridge entry**: host:port entry, token auth, TLS switch, and loopback checks (merged in #62).
-- **14.5 Companion docs and publish order**: align docs and publishing waves for seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and rename-before-0.1.0 is open with owner.
+- **14.5 Companion docs and publish order**: align docs and publishing waves for seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and keeps its name for `0.1.0` (owner decision on ONY-146).
 - **P1–P10 hardware verification**: physical Raspberry Pi testing sitting (P6 upstream loss comparison); Wi-Fi link is host-tested/loopback-only until then.
 
 ### M15 — PSVR2 Sense controller framework

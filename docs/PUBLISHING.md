@@ -17,7 +17,7 @@ The repository contains modular Dart and Flutter packages that are intended to b
 - `wmr_companion_ui` (optional Flutter UI widgets, landed in PR #45)
 - `wmr_companion_hid_android` (optional Android BLE HID output plugin, landed in PR #48)
 
-All seven package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. Note: `BleTransport` is currently GATT-shaped and the rename-before-0.1.0 question remains open with the owner; no rename is made here.
+All seven package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146); no rename is made here.
 
 The root application (`wmr_companion_app`) and `example/` (`wmr_companion_example`) remain application hosts and retain `publish_to: none`.
 
