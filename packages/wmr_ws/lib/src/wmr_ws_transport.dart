@@ -531,6 +531,11 @@ class _WmrWsSession {
   /// `subscribed` reply are not lost.
   String? dispatchingCharacteristic;
 
+  /// The sink that was actually subscribed for [dispatchingCharacteristic].
+  /// A newer sink may already sit in [_payloadSinks] for the same
+  /// characteristic; cleanup must close the subscribed one, not the newer.
+  WmrWsNotificationSink? _activeSink;
+
   final Map<String, WmrWsNotificationSink> _payloadSinks = {};
   WmrWsNotificationSink? _echoSink;
 
@@ -848,20 +853,29 @@ class _WmrWsSession {
           // means `unsubscribe` first, exactly like zeroing the old CCC.
           final active = dispatchingCharacteristic;
           if (active != null && active != characteristic) {
-            final previous = _payloadSinks[active];
+            final previous = _activeSink;
             try {
               // Keep the old stream dispatching until the daemon confirms, so
               // frames already in the socket are not lost.
               await _request({'type': 'unsubscribe'}, 'unsubscribed');
             } finally {
-              _payloadSinks.remove(active);
-              dispatchingCharacteristic = null;
+              // A newer subscribe may already have replaced this sink for the
+              // same characteristic. Close only the sink that was subscribed;
+              // the newer one is handled by its own queued operation.
+              if (identical(_payloadSinks[active], previous)) {
+                _payloadSinks.remove(active);
+              }
               previous?.close();
+              if (dispatchingCharacteristic == active) {
+                dispatchingCharacteristic = null;
+                _activeSink = null;
+              }
             }
           }
           if (_payloadSinks[characteristic] != sink || isClosed) return;
           // Set before writing so frames racing the reply are routed.
           dispatchingCharacteristic = characteristic;
+          _activeSink = sink;
           await _request({'type': 'subscribe', 'stream': stream}, 'subscribed');
         } catch (error) {
           if (identical(_payloadSinks[characteristic], sink)) {
@@ -869,6 +883,7 @@ class _WmrWsSession {
           }
           if (dispatchingCharacteristic == characteristic) {
             dispatchingCharacteristic = null;
+            _activeSink = null;
           }
           sink.addError(_streamFault(characteristic, error));
           sink.close();
@@ -879,6 +894,7 @@ class _WmrWsSession {
   }
 
   Future<void> unsubscribe(String characteristic) {
+    final expected = _payloadSinks[characteristic];
     return _enqueue(() async {
       if (characteristic == wmrBridgeEchoCharUuid) {
         final echo = _echoSink;
@@ -886,6 +902,9 @@ class _WmrWsSession {
         echo?.close();
         return;
       }
+      final subscribed = identical(dispatchingCharacteristic, characteristic)
+          ? _activeSink
+          : expected;
       if (dispatchingCharacteristic == characteristic) {
         try {
           // Keep dispatching until the daemon confirms: frames already in the
@@ -895,10 +914,17 @@ class _WmrWsSession {
           // The daemon may already have cleared it; local state is what we
           // control, and it is cleared below.
         }
-        dispatchingCharacteristic = null;
+        if (dispatchingCharacteristic == characteristic) {
+          dispatchingCharacteristic = null;
+          _activeSink = null;
+        }
       }
-      final sink = _payloadSinks.remove(characteristic);
-      sink?.close();
+      // A subscribe for the same characteristic may have replaced the sink
+      // while this operation waited its turn; leave that newer sink alone.
+      if (identical(_payloadSinks[characteristic], subscribed)) {
+        _payloadSinks.remove(characteristic);
+      }
+      subscribed?.close();
     });
   }
 
@@ -961,6 +987,7 @@ class _WmrWsSession {
     _echoSink?.close();
     _echoSink = null;
     dispatchingCharacteristic = null;
+    _activeSink = null;
     unawaited(subscription?.cancel());
     subscription = null;
     final ws = socket;

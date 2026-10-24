@@ -149,6 +149,34 @@ void main() {
     expect(service.fault?.kind, ModeFaultKind.otherStreamActive);
   });
 
+  test('a quick switch back keeps the newest subscription alive', () async {
+    await start(const FakePiOptions());
+    final first = transport
+        .subscribe(id, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    await waitFor(() => server.activeStream == 'batched');
+    await first.cancel();
+
+    // Switch away and back before the daemon answers the first switch, as a
+    // user tapping the selector twice does.
+    final decoded = <BleNotification>[];
+    final decodedSub = transport
+        .subscribe(id, wmrBridgeServiceUuid, wmrBridgeDecodedCharUuid)
+        .listen(decoded.add);
+    addTearDown(decodedSub.cancel);
+    final batched = <BleNotification>[];
+    final batchedSub = transport
+        .subscribe(id, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(batched.add);
+    addTearDown(batchedSub.cancel);
+
+    await waitFor(() => server.activeStream == 'batched');
+    final bytes = encodeDecodedRecord(record(0, 9));
+    server.sendBinary(bytes);
+    await waitFor(() => batched.isNotEmpty);
+    expect(batched.single.value, bytes);
+  });
+
   test('unsubscribe reaches the daemon and closes the stream', () async {
     await start(const FakePiOptions());
     final done = Completer<void>();

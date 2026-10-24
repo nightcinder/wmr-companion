@@ -37,7 +37,6 @@ void main() {
         child: const MaterialApp(home: ConnectScreen()),
       ),
     );
-    await tester.tap(find.text('Real device'));
     await tester.pump();
     await tester.tap(find.text('Wi-Fi'));
     await tester.pump();
@@ -193,7 +192,6 @@ void main() {
         child: const MaterialApp(home: ConnectScreen()),
       ),
     );
-    await tester.tap(find.text('Real device'));
     await tester.pump();
 
     await tester.tap(find.text('Scan'));

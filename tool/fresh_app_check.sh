@@ -35,6 +35,7 @@ if anchor not in text:
 host = (
     "wmr_companion",
     "wmr_ble",
+    "wmr_ws",
     "wmr_companion_ui",
     "wmr_companion_hid_android",
 )
@@ -61,6 +62,7 @@ import 'package:wmr_companion/testing.dart';
 import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 void main() {
   test('a fresh host reads gamepad state from the facade', () async {
@@ -88,10 +90,11 @@ void main() {
     // ones the host is not required to use.
     const publicTypes = [
       UniversalBleAdapter,
+      WmrWsTransport,
       OrientationView,
       HidGamepadTransport,
     ];
-    expect(publicTypes, hasLength(3));
+    expect(publicTypes, hasLength(4));
   });
 }
 DART

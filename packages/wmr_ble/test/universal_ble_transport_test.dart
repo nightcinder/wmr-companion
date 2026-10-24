@@ -183,6 +183,36 @@ void main() {
       );
     });
 
+    test(
+      'a link drop during MTU negotiation aborts setup before ready',
+      () async {
+        adapter.mtuGate = Completer<void>();
+        final connecting = expectLater(
+          t.connect(id),
+          throwsA(
+            isA<BleTransportException>().having(
+              (e) => e.phase,
+              'phase',
+              BleLinkPhase.connectionLost,
+            ),
+          ),
+        );
+        await pump();
+
+        adapter.dropLink();
+        await pump();
+        adapter.mtuGate!.complete();
+        await connecting;
+
+        expect(t.status.phase, BleLinkPhase.connectionLost);
+        expect(adapter.calls, isNot(contains('discoverServices')));
+        expect(
+          await t.connectionState(id).first,
+          BleConnectionState.disconnected,
+        );
+      },
+    );
+
     test('a user disconnect is not reported as a lost connection', () async {
       await connectAndSubscribe();
       await t.disconnect(id);
