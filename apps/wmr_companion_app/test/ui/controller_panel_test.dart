@@ -19,10 +19,7 @@ void main() {
 
     await tester.pumpWidget(
       _wrap(
-        ControllerPanel(
-          transport: transport,
-          deviceId: fakeBridgeDeviceId,
-        ),
+        ControllerPanel(transport: transport, deviceId: fakeBridgeDeviceId),
       ),
     );
     await tester.pumpAndSettle();
@@ -48,10 +45,7 @@ void main() {
 
     await tester.pumpWidget(
       _wrap(
-        ControllerPanel(
-          transport: transport,
-          deviceId: fakeBridgeDeviceId,
-        ),
+        ControllerPanel(transport: transport, deviceId: fakeBridgeDeviceId),
       ),
     );
     await tester.pumpAndSettle();
@@ -87,9 +81,35 @@ void main() {
     expect(find.textContaining('does not expose FF17'), findsOneWidget);
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Scan for controllers'))
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Scan for controllers'),
+          )
           .onPressed,
       isNull,
     );
+  });
+
+  testWidgets('offers Retry after a transient link failure', (tester) async {
+    final transport = FakeTransport(devices: const [fakeBridgeDevice]);
+    FakeWmrBridge(transport, discoveryDuration: Duration.zero);
+    addTearDown(transport.dispose);
+
+    // Mount before the link is up: the first read fails and the panel must
+    // not stay dead once the connection is ready.
+    await tester.pumpWidget(
+      _wrap(
+        ControllerPanel(transport: transport, deviceId: fakeBridgeDeviceId),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not read FF17 status'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+
+    await transport.connect(fakeBridgeDeviceId);
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('LEFT  not connected'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
   });
 }

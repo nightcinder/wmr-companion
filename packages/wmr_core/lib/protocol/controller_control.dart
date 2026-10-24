@@ -48,16 +48,18 @@ enum ControllerAddressSource {
   compileOverride,
   stored;
 
-  static ControllerAddressSource fromCode(int code) =>
-      switch (code) { 1 => compileOverride, 2 => stored, _ => none };
+  static ControllerAddressSource fromCode(int code) => switch (code) {
+    1 => compileOverride,
+    2 => stored,
+    _ => none,
+  };
 }
 
 enum ControllerModel {
   wmr,
   psvr2;
 
-  static ControllerModel fromCode(int code) =>
-      code == 1 ? psvr2 : wmr;
+  static ControllerModel fromCode(int code) => code == 1 ? psvr2 : wmr;
 }
 
 enum ControllerDiscoveryState {
@@ -152,8 +154,7 @@ class ControllerStatusV2 {
       discoveryState: ControllerDiscoveryState.fromCode(value[15]),
       discoveryRound: value[16],
       lastCommand: lastCommand,
-      lastResult:
-          ControllerResult.fromCode(value[18]) ?? ControllerResult.ok,
+      lastResult: ControllerResult.fromCode(value[18]) ?? ControllerResult.ok,
     );
   }
 }

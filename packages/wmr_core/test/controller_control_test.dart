@@ -48,14 +48,14 @@ void main() {
     });
 
     test('hand commands carry the hand', () {
-      expect(
-        encodeControllerCommand(ControllerCommand.connect, hand: 1),
-        [0x02, 0x01],
-      );
-      expect(
-        encodeControllerCommand(ControllerCommand.forgetBond, hand: 0),
-        [0x05, 0x00],
-      );
+      expect(encodeControllerCommand(ControllerCommand.connect, hand: 1), [
+        0x02,
+        0x01,
+      ]);
+      expect(encodeControllerCommand(ControllerCommand.forgetBond, hand: 0), [
+        0x05,
+        0x00,
+      ]);
     });
 
     test('refuses a missing or out-of-range hand', () {
@@ -179,5 +179,36 @@ void main() {
       expect(values.last.hands[0].connected, isTrue);
       await sub.cancel();
     });
+
+    test('a link drop is not reported as the previous ok result', () async {
+      final failing = _WriteFailingTransport(devices: const [fakeBridgeDevice]);
+      FakeWmrBridge(failing, discoveryDuration: Duration.zero);
+      await failing.connect(fakeBridgeDeviceId);
+      addTearDown(failing.dispose);
+      final outcome = await ControllerControlClient(
+        failing,
+        fakeBridgeDeviceId,
+      ).send(ControllerCommand.discover);
+      expect(outcome.isOk, isFalse);
+      expect(outcome.result, isNull);
+      expect(outcome.error, isNotNull);
+    });
   });
+}
+
+/// Accepts reads but refuses every write, like a link that dropped between
+/// the status read and the command write.
+class _WriteFailingTransport extends FakeTransport {
+  _WriteFailingTransport({required super.devices});
+
+  @override
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) async {
+    throw StateError('link dropped');
+  }
 }

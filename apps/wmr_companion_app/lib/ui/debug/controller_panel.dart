@@ -28,6 +28,7 @@ class _ControllerPanelState extends State<ControllerPanel> {
   ControllerStatusV2? _status;
   String? _error;
   bool _busy = false;
+  bool _canRetry = false;
   ControllerControlClient? _client;
   StreamSubscription<ControllerStatusV2>? _sub;
   int _generation = 0;
@@ -67,10 +68,11 @@ class _ControllerPanelState extends State<ControllerPanel> {
     try {
       if (!await client.isSupported()) {
         if (mounted && generation == _generation) {
-          setState(
-            () => _error =
-                'This bridge does not expose FF17 (firmware before v0.1.1).',
-          );
+          setState(() {
+            _canRetry = false;
+            _error =
+                'This bridge does not expose FF17 (firmware before v0.1.1).';
+          });
         }
         return;
       }
@@ -86,6 +88,9 @@ class _ControllerPanelState extends State<ControllerPanel> {
           }
         },
       );
+      // Hold the subscription before the read so a failed read cannot leave
+      // a listener behind: dispose() and the catch below both cancel it.
+      _sub = sub;
       final status = await client.readStatus();
       if (!mounted || generation != _generation) {
         await sub.cancel();
@@ -93,13 +98,18 @@ class _ControllerPanelState extends State<ControllerPanel> {
       }
       setState(() {
         _client = client;
-        _sub = sub;
         _status = status;
         _error = null;
+        _canRetry = false;
       });
     } catch (error) {
+      await _sub?.cancel();
+      _sub = null;
       if (mounted && generation == _generation) {
-        setState(() => _error = 'Could not read FF17 status: $error');
+        setState(() {
+          _canRetry = true;
+          _error = 'Could not read FF17 status: $error';
+        });
       }
     }
   }
@@ -165,7 +175,8 @@ class _ControllerPanelState extends State<ControllerPanel> {
     final status = _status;
     final ready = status != null && !_busy;
     final scanning =
-        status != null && status.discoveryState != ControllerDiscoveryState.idle;
+        status != null &&
+        status.discoveryState != ControllerDiscoveryState.idle;
     final anyBusy =
         status?.hands.any((h) => h.connected || h.connecting) ?? false;
     final anyAddress = status?.hands.any((h) => h.hasAddress) ?? false;
@@ -222,6 +233,17 @@ class _ControllerPanelState extends State<ControllerPanel> {
                   : null,
               child: const Text('Forget stored addresses'),
             ),
+            if (_canRetry)
+              OutlinedButton(
+                onPressed: () {
+                  setState(() {
+                    _canRetry = false;
+                    _error = null;
+                  });
+                  _open();
+                },
+                child: const Text('Retry'),
+              ),
           ],
         ),
         if (status != null)
@@ -265,7 +287,10 @@ class _ControllerPanelState extends State<ControllerPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('$name  ${status == null ? '...' : _summary(status)}', style: mono),
+                Text(
+                  '$name  ${status == null ? '...' : _summary(status)}',
+                  style: mono,
+                ),
               ],
             ),
           ),

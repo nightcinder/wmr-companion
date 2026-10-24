@@ -61,11 +61,7 @@ class ControllerControlClient {
   /// Status notifications. Malformed values are dropped; a subscription
   /// failure is delivered as an error on the stream.
   Stream<ControllerStatusV2> statusStream() => transport
-      .subscribe(
-        deviceId,
-        wmrBridgeServiceUuid,
-        wmrBridgeControllerCharUuid,
-      )
+      .subscribe(deviceId, wmrBridgeServiceUuid, wmrBridgeControllerCharUuid)
       .map((notification) => ControllerStatusV2.parse(notification.value))
       .where((s) => s != null)
       .cast<ControllerStatusV2>();
@@ -98,7 +94,17 @@ class ControllerControlClient {
       } catch (_) {
         status = null;
       }
-      return ControllerCommandOutcome.failed(status?.lastResult, error);
+      // Only report a result the firmware recorded for *this* command. A
+      // transport failure (link drop, GATT busy) leaves the previous value
+      // there, usually `ok`, which must not be shown as the reason.
+      final refusal = error is ControllerCommandException
+          ? error.result
+          : status != null &&
+                status.lastCommand == command &&
+                status.lastResult != ControllerResult.ok
+          ? status.lastResult
+          : null;
+      return ControllerCommandOutcome.failed(refusal, error);
     }
   }
 }
