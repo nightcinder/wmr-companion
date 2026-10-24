@@ -134,8 +134,8 @@ class RealPanel extends ConsumerWidget {
           ),
         ),
         if (status.message != null) Text(status.message!),
-        if (link == BridgeTransportKind.wifi && s.deviceId != null)
-          Text('Endpoint: ${s.deviceId}', style: mono),
+        if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null)
+          Text('Endpoint: ${s.wifiDeviceId}', style: mono),
         if (s.connectedDeviceIds.length <= 1) ...[
           Text('MTU (negotiated): ${status.mtu ?? '-'}', style: mono),
           Text(
@@ -311,6 +311,7 @@ class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
   final _host = TextEditingController();
   final _port = TextEditingController(text: '8765');
   final _token = TextEditingController();
+  bool _secure = false;
   String? _error;
 
   @override
@@ -338,6 +339,7 @@ class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
         host: host,
         port: port,
         token: _token.text,
+        secure: _secure,
       );
     } on ArgumentError catch (error) {
       if (mounted) setState(() => _error = '${error.message}');
@@ -389,6 +391,25 @@ class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
           enableSuggestions: false,
           decoration: const InputDecoration(labelText: 'Token (optional)'),
         ),
+        CheckboxListTile(
+          key: const Key('wifi-secure'),
+          contentPadding: EdgeInsets.zero,
+          value: _secure,
+          onChanged: widget.busy
+              ? null
+              : (value) => setState(() => _secure = value ?? false),
+          title: const Text('TLS (wss)'),
+          subtitle: const Text(
+            'Only when a TLS proxy fronts the daemon; wmr_bridge itself '
+            'serves plain ws://.',
+          ),
+        ),
+        if (!_secure)
+          Text(
+            'The token and the stream cross the network in cleartext over '
+            'ws://. Use a trusted LAN, or a TLS proxy with TLS on.',
+            style: theme.textTheme.bodySmall,
+          ),
         if (_error != null) ...[
           const SizedBox(height: 8),
           Text(_error!, style: TextStyle(color: theme.colorScheme.error)),

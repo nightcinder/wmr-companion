@@ -7,6 +7,7 @@ import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import 'raw_mode_notifier.dart';
 
@@ -15,6 +16,7 @@ void main() {
     WidgetTester tester,
     FakeTransport wifi, {
     bool rawDefault = true,
+    void Function(WmrWsEndpoint endpoint)? onEndpoint,
   }) async {
     final ble = UniversalBleTransport(
       adapter: FakeBleAdapter(),
@@ -24,7 +26,10 @@ void main() {
       ProviderScope(
         overrides: [
           realTransportProvider.overrideWithValue(ble),
-          wifiTransportFactoryProvider.overrideWithValue((endpoint) => wifi),
+          wifiTransportFactoryProvider.overrideWithValue((endpoint) {
+            onEndpoint?.call(endpoint);
+            return wifi;
+          }),
           if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -47,6 +52,8 @@ void main() {
     expect(find.byKey(const Key('wifi-host')), findsOneWidget);
     expect(find.byKey(const Key('wifi-port')), findsOneWidget);
     expect(find.byKey(const Key('wifi-token')), findsOneWidget);
+    expect(find.byKey(const Key('wifi-secure')), findsOneWidget);
+    expect(find.textContaining('cleartext'), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('wifi-host')), 'pi.local');
     await tester.enterText(find.byKey(const Key('wifi-port')), '8765');
@@ -54,6 +61,8 @@ void main() {
       find.byKey(const Key('wifi-token')),
       'shared-secret',
     );
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
     await tester.tap(find.text('Connect over Wi-Fi'));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
@@ -84,12 +93,16 @@ void main() {
     await open(tester, wifi);
 
     await tester.enterText(find.byKey(const Key('wifi-host')), '  ');
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
     await tester.tap(find.text('Connect over Wi-Fi'));
     await tester.pump();
     expect(find.text('Enter the bridge host or IP address.'), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('wifi-host')), 'pi.local');
     await tester.enterText(find.byKey(const Key('wifi-port')), '70000');
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
     await tester.tap(find.text('Connect over Wi-Fi'));
     await tester.pump();
     expect(
@@ -108,6 +121,8 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('wifi-host')), 'pi.local');
     await tester.enterText(find.byKey(const Key('wifi-port')), '8765');
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
     await tester.tap(find.text('Connect over Wi-Fi'));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
@@ -115,6 +130,8 @@ void main() {
     await tester.pump();
     expect(find.text('State: connected, streaming'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Bluetooth'));
+    await tester.pump();
     await tester.tap(find.text('Bluetooth'));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
@@ -125,5 +142,30 @@ void main() {
     expect(find.byKey(const Key('wifi-host')), findsNothing);
     expect(find.text('Scan'), findsOneWidget);
     expect(find.text('Disconnect'), findsNothing);
+  });
+
+  testWidgets('TLS switch builds a wss endpoint', (tester) async {
+    WmrWsEndpoint? seen;
+    final wifi = FakeTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+    );
+    await open(tester, wifi, onEndpoint: (endpoint) => seen = endpoint);
+
+    await tester.enterText(find.byKey(const Key('wifi-host')), 'pi.local');
+    await tester.enterText(find.byKey(const Key('wifi-port')), '8765');
+    await tester.tap(find.byKey(const Key('wifi-secure')));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
+    await tester.tap(find.text('Connect over Wi-Fi'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    expect(seen, isNotNull);
+    expect(seen!.secure, isTrue);
+    expect(seen!.uri.scheme, 'wss');
+    expect(find.textContaining('cleartext'), findsNothing);
   });
 }

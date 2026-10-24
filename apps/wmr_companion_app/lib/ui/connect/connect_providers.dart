@@ -603,11 +603,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     required String host,
     required int port,
     String? token,
+    bool secure = false,
   }) async {
     final trimmedToken = token?.trim();
     final endpoint = WmrWsEndpoint(
       host: host.trim(),
       port: port,
+      secure: secure,
       token: trimmedToken == null || trimmedToken.isEmpty ? null : trimmedToken,
     );
     final id = endpoint.resolvedDeviceId;
