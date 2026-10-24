@@ -248,7 +248,13 @@ class RealPanel extends ConsumerWidget {
         if (s.stats != null) ...[
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
-          StatsTable(s.stats!, style: mono),
+          if (s.mode?.mode.carriesRecords ?? false)
+            if (s.decodedStats != null)
+              DecodedStreamTable(s.decodedStats!, style: mono)
+            else
+              Text('Waiting for the decoded stream...', style: mono)
+          else
+            StatsTable(s.stats!, style: mono),
         ],
       ],
     );

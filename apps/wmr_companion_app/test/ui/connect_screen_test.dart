@@ -1,9 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
+import 'package:wmr_core/protocol/decoded_batch.dart';
+import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
@@ -99,6 +103,30 @@ void main() {
 
     expect(adapter.ccc, ['on ff14']);
     expect(find.text('State: connected, streaming'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('FF14 stream panel counts records, not raw frames', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await open(tester, rawDefault: false);
+    await connect(tester);
+
+    final record = Uint8List(wmrDecodedSize)..[0] = wmrDecodedVersion;
+    adapter.emitNotification(
+      wmrBridgeBatchedCharUuid,
+      encodeDecodedBatch([record, record]),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('LEFT'), findsOneWidget);
+    expect(find.textContaining('records 2'), findsOneWidget);
+    expect(find.textContaining('RIGHT  records 0'), findsOneWidget);
+    expect(find.textContaining('batches 1'), findsOneWidget);
+    expect(find.textContaining('frames'), findsNothing);
     await close(tester);
   });
 
