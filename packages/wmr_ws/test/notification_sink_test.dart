@@ -41,6 +41,24 @@ void main() {
     ], reason: 'queueing must not change the arrival stamp');
   });
 
+  test(
+    'without a listener the queue stays bounded and keeps the oldest',
+    () async {
+      final sink = WmrWsNotificationSink(capacity: 3);
+      addTearDown(sink.close);
+      for (var i = 0; i < 6; i++) {
+        sink.add(frame(i));
+      }
+      expect(sink.dropped, 3);
+
+      final received = <BleNotification>[];
+      final sub = sink.stream.listen(received.add);
+      addTearDown(sub.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(received.map((n) => n.value.single).toList(), [0, 1, 2]);
+    },
+  );
+
   test('a paused consumer queues up to capacity and then drops', () async {
     final sink = WmrWsNotificationSink(capacity: 2);
     final received = <BleNotification>[];

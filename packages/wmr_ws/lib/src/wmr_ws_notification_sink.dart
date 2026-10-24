@@ -25,6 +25,7 @@ class WmrWsNotificationSink {
   final ListQueue<BleNotification> _queue = ListQueue<BleNotification>();
   late final StreamController<BleNotification> _controller =
       StreamController<BleNotification>(
+        onListen: _schedule,
         onPause: () => _paused = true,
         onResume: () {
           _paused = false;
@@ -73,7 +74,13 @@ class WmrWsNotificationSink {
   }
 
   void _schedule() {
-    if (_scheduled || _paused || _closed || _queue.isEmpty) return;
+    if (_scheduled ||
+        _paused ||
+        _closed ||
+        _queue.isEmpty ||
+        !_controller.hasListener) {
+      return;
+    }
     _scheduled = true;
     // A timer, not a microtask: it yields to socket reads, so a burst cannot
     // be transferred into the stream controller's internal buffer in one go.
@@ -82,7 +89,9 @@ class WmrWsNotificationSink {
 
   void _deliverOne() {
     _scheduled = false;
-    if (_paused || _closed || _queue.isEmpty) return;
+    if (_paused || _closed || _queue.isEmpty || !_controller.hasListener) {
+      return;
+    }
     _controller.add(_queue.removeFirst());
     _schedule();
   }
