@@ -73,7 +73,7 @@ jobs:
           dart test
       - name: pub.dev publish dry-run (every package in the publish set)
         run: |
-          # A clean dry-run for all six published packages. The root pub
+          # A clean dry-run for all seven published packages. The root pub
           # workspace resolves each hosted inter-package constraint to the
           # local member directory, so nothing has to be on pub.dev yet.
           # A dry-run error or warning fails this step; nothing is uploaded.
@@ -89,6 +89,9 @@ jobs:
 
           echo "=== Publish dry-run: wmr_ble ==="
           (cd packages/wmr_ble && flutter pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_ws ==="
+          (cd packages/wmr_ws && dart pub publish --dry-run)
 
           echo "=== Publish dry-run: wmr_companion_ui ==="
           (cd packages/wmr_companion_ui && flutter pub publish --dry-run)

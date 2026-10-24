@@ -21,14 +21,15 @@ UI (screens, widgets)
   -> State (Riverpod providers)
     -> ControllerService   (per-controller stream of ControllerState)
       -> Protocol layer    (pure Dart: reassembler -> WMR report decoder -> fusion)
-      -> BleTransport      (interface)
-           -> UniversalBleTransport   (default, uses universal_ble)
+      -> BleTransport      (seam interface: GATT-shaped; rename-before-0.1.0 open with owner)
+           -> UniversalBleTransport   (default BLE, uses universal_ble)
+           -> WmrWsTransport          (Wi-Fi WebSocket to Linux/Pi daemon; host-tested/loopback-only)
            -> FakeTransport           (synthetic packets, for tests/UI dev)
            -> (later) NativeTransport via platform channel, if latency demands it
 ```
 
 Rules:
-- `BleTransport` is an abstract class: scan, connect, discover, subscribe(characteristic) -> Stream<Uint8List>, write, disconnect, plus connection info (MTU, RSSI, connection interval/PHY where available).
+- `BleTransport` is an abstract class: scan, connect, discover, subscribe(characteristic) -> Stream<Uint8List>, write, disconnect, plus connection info (MTU, RSSI, connection interval/PHY where available). Note: `BleTransport` is currently GATT-shaped (UUIDs, CCC subscription, read/write characteristics). `WmrWsTransport` maps WebSocket messages to this seam without changing `ControllerService`. The question of renaming `BleTransport` before 0.1.0 (to e.g. `WmrTransport` or `BridgeTransport`) is an open design question with the project owner; do not rename now.
 - Parser is pure Dart, no Flutter imports, fully unit tested with golden byte arrays.
 - Timestamp every received notification with a monotonic `Stopwatch` **at the transport boundary** (as early as possible) and carry it in the packet object.
 - Heavy work (fusion, stats) must not block the UI isolate. Start on the main isolate, but keep it behind interfaces so it can move to a worker isolate.
@@ -55,6 +56,7 @@ wmr-companion/
   packages/wmr_ble/          # universal_ble adapter/transport and lifecycle hook
   packages/wmr_companion_ui/ # optional orientation/link/stats/gamepad widgets
   packages/wmr_companion_hid_android/ # optional Android Bluetooth HID output
+  packages/wmr_ws/      # pure-Dart WebSocket transport for Linux/Pi Wi-Fi daemon
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
   packages/WMRCompanionKit/ # native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers
   example/              # minimal Flutter host app (~20 lines to gamepad state)
@@ -136,6 +138,7 @@ Milestone planning is governed by ONY-50 (see [STATUS.md](STATUS.md) and `HANDOF
 - **M11 — Two bridges as a product**: Multi-bridge connection support in `ControllerService`, per-bridge attribution across records/stats/links/latency export (ONY-70, #51). Open: firmware flasher variants (`build.py --variant`), browser installer variants, auto-reconnect.
 - **M12 — The verification campaign (Open)**: Turn run sheets into empirical hardware answers across three sittings: Sitting A (single bridge latency & tracking quality), Sitting B (two bridges A/B/A/B on two ESP32s to test radio contention), and Sitting C (PC HID output & soak).
 - **M13 — Release and distribution (Open)**: Tagged firmware release with packaged manifest and FF16 version, compatibility matrix keyed on FF16, bridge security disposition, and GitHub Pages installer.
+- **M14 — Raspberry Pi Wi-Fi host bridge**: WebSocket transport package (`wmr_ws`, M14.1 / #61) behind `BleTransport`, companion app host:port Wi-Fi connection entry (M14.3 / #62), docs and publishing order alignment (M14.5). Open: hardware verification campaign on physical Pi (P1–P10); Wi-Fi link is host-tested/loopback-only until the Pi sitting. `BleTransport` interface is GATT-shaped and rename-before-0.1.0 remains an open question with the owner (no rename).
 
 ## GitHub and CI
 - Repo: `wmr-companion` (public, MIT), default branch `main`. Squash merges.

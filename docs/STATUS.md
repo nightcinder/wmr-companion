@@ -14,7 +14,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 ```
 
 - **WMR_Bridge** (firmware, C, BTstack on ESP32): connects to both controllers over Classic Bluetooth HID, optionally decodes the IMU and inputs, and serves them over a BLE GATT service. Source of truth for the wire protocol.
-- **wmr-companion** (this repo): federated package tree with six Dart packages (`packages/wmr_core`, `packages/wmr_companion`, `packages/wmr_ble`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`) plus Swift `packages/WMRCompanionKit`, a minimal Flutter host (`example/`), and the reference app (`apps/wmr_companion_app`). Connects to the bridge, reassembles or parses the stream, fuses orientation on the host, shows a debug 3D view and link statistics, and records raw captures.
+- **wmr-companion** (this repo): federated package tree with seven Dart packages (`packages/wmr_core`, `packages/wmr_companion`, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`) plus Swift `packages/WMRCompanionKit`, a minimal Flutter host (`example/`), and the reference app (`apps/wmr_companion_app`). Connects to the bridge (BLE or Wi-Fi WebSocket), reassembles or parses the stream, fuses orientation on the host, shows a debug 3D view and link statistics, and records raw captures. Note: the Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (see `WMR_Bridge` `docs/PI_BRIDGE.md` and run sheet `docs/runs/sheets/pi-bridge.md`).
 - Android and iOS are both in scope for v1 (the owner settled iOS 18 as the floor, `docs/LIBRARY.md` §13). Debug-mode 3DoF tracking first, gamepad mapping later.
 - Third-party: `universal_ble` (BLE), `vector_math`, Riverpod, Flutter. The firmware is derived from BlueKitchen BTstack and keeps its non-commercial license; this app is MIT.
 
@@ -36,6 +36,7 @@ Work is planned across milestones M10–M13 (governed by ONY-50; see `HANDOFF.md
 | **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). **Open:** Firmware flasher variants (`build.py --variant`), browser installer variants, auto-reconnect. |
 | **M12 — The verification campaign** | Empirical hardware verification across three sittings | **Open.** Sitting A (single bridge latency & tracking quality); Sitting B (two bridges A/B/A/B on two ESP32s to test radio contention); Sitting C (PC HID output & soak). |
 | **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | **Open.** Tagged firmware release with packaged manifest and FF16 version; compatibility matrix keyed on FF16; bridge security disposition in `docs/SECURITY.md`; README updates based on verified hardware results. |
+| **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). Note: `BleTransport` interface is GATT-shaped and the rename-before-0.1.0 question remains open with the owner (no rename made). |
 
 ### What has been checked on hardware (user-reported)
 
@@ -131,6 +132,11 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
    - Compatibility matrix published in both repos keyed on FF16 version.
    - Bridge security disposition in `docs/SECURITY.md`.
    - README rewrite in both repos around verified hardware results.
+5. **M14 — Raspberry Pi Wi-Fi host bridge (In progress)**:
+   - **M14.1 `packages/wmr_ws`:** WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged #61).
+   - **M14.3 App Wi-Fi bridge entry:** host:port connection UI, optional token authentication, TLS switch, loopback checks (merged #62).
+   - **M14.5 Companion docs and publish order:** Update docs (`README.md`, `STATUS.md`, `PLAN.md`, `LIBRARY.md`, `PUBLISHING.md`) and publish waves for the seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped and rename-before-0.1.0 question is open with owner.
+   - **Open:** Empirical P-campaign verification on physical Raspberry Pi hardware (P1–P10). Wi-Fi link is host-tested/loopback-only until the Pi sitting.
 
 ## Not yet run on hardware (as of 2026-10-23)
 
@@ -143,6 +149,8 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - Stick dead zone, learned rest centre, and unified missing-report definition (PR #7).
 - FF16 firmware version read on a live bridge (PR #46).
 - Per-bridge attribution on multi-bridge hardware (PR #51).
+- Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
+- `BleTransport` rename-before-0.1.0: `BleTransport` is GATT-shaped and the rename question is still open with the owner; no rename made.
 
 ## Where things are
 
