@@ -106,8 +106,11 @@ The daemon has a 512-message queue per client and drops the **newest** message
 when full. The client does the same with `WmrWsTransport.queueSize` and counts
 the losses in `statsFor(deviceId).droppedByQueue`, so a slow consumer is
 visible rather than an unbounded heap. Every frame passes through that queue
-and is paced into the stream one at a time, so a slow-but-unpaused listener
-cannot grow the stream controller's internal buffer either. `WmrWsTransport.status()` exposes the
+and is paced into the stream one at a time, so a synchronous consumer that is
+slow, unpaused or not yet attached cannot grow the stream controller's internal
+buffer. An asynchronous `onData` that returns before it has consumed a frame
+can still hold already-delivered events in the controller; `ControllerService`
+is synchronous, which is the contract this transport is written for. `WmrWsTransport.status()` exposes the
 daemon's own `dropped`/`delivered` counters.
 
 ## Tests

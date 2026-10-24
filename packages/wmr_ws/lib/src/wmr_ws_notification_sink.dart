@@ -11,11 +11,14 @@ import 'package:wmr_core/ble/ble_transport.dart';
 /// pretending the stream kept up.
 ///
 /// Every notification goes through the bounded queue. Delivery is paced one
-/// event at a time, so the stream controller's own buffer cannot grow either
-/// when the consumer is slow but not paused. A paused subscription also keeps
-/// filling the queue and overflows at the same bound. Notifications keep their
-/// [BleNotification.receivedAtUs] stamp from the socket, so a message that
-/// waited in this queue does not look newer than it is.
+/// event at a time, so the stream controller's own buffer cannot grow when the
+/// consumer is synchronous but slow, unpaused or not attached yet. (An
+/// asynchronous `onData` that returns before consuming can still hold
+/// delivered events in the controller; [ControllerService] is synchronous.)
+/// A paused subscription also keeps filling the queue and overflows at the
+/// same bound. Notifications keep their [BleNotification.receivedAtUs] stamp
+/// from the socket, so a message that waited in this queue does not look
+/// newer than it is.
 class WmrWsNotificationSink {
   WmrWsNotificationSink({this.capacity = 512})
     : assert(capacity > 0, 'capacity must be positive');
