@@ -49,7 +49,7 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 | FF11/FF12 mutual exclusion | Second enable refused with ATT error 0x80; switching by writing 0 to the active CCC first works; below MTU 59 nothing is sent and `mtu_skip` counts; recovery after MTU raise works |
 | Axis mapping (sensor to 3D view) | Checked visually in the app's 3D view: world X right = -sensor Y, world Y up = +sensor X, world Z toward user = +sensor Z. Not measured numerically |
 | Phone transport | MTU 517 with High priority; no fragment errors, no sequence gaps on the phone in captures |
-| FF15 echo round trip | One 120 s run on FF14 at MTU 517, 15 ms interval, both controllers: 479 of 479 pings answered, no timeouts. Round trip min 22.4, p50 40.8, p95 72.8, p99 97.1, max 151.9 ms; ESP32 turnaround p50 0.43 ms, p99 2.3 ms, max 7.5 ms. One run, one position, one phone; details and what it does not show in [LATENCY.md](LATENCY.md) |
+| FF15 echo round trip | Two 120 s runs on FF14 at MTU 517, 15 ms interval, both controllers: 479 of 479 pings answered each, no timeouts. 2026-10-22: min 22.4, p50 40.8, p95 72.8, p99 97.1, max 151.9 ms; ESP32 turnaround p50 0.43 ms, max 7.5 ms. 2026-10-24 on WMR_Bridge `v0.1.1` with this app at `0.1.0`: min 18.6, p50 40.5, p95 73.6, p99 102.5, max 125.3 ms; turnaround p50 0.40 ms, max 63.5 ms (two pings over 10 ms). One run, one position and one phone each; details and what they do not show in [LATENCY.md](LATENCY.md) |
 
 ### The main open problem: upstream report loss
 
@@ -88,6 +88,7 @@ What this does and does not show:
 - LEFT: 19.5, 20.9, 27.1 % in order. It rose through the session and the FF14 run sits between the two FF12 runs, so FF14 shows no effect on LEFT. This agrees with the earlier finding that LEFT's extra loss does not follow notification volume. LEFT RSSI was about 4 dB weaker in runs 2 and 4 than in run 1 (about -30 and -27 against -26).
 - Run 4's cumulative figures include a stretch without a phone, so only `last5s` is comparable.
 - Single-controller runs with the phone on FF14 at MTU 517, on the firmware of WMR_Bridge PR #21 (FF13 streaming fix), user-reported, 5 to 8 min each: LEFT alone about 0.5 %, RIGHT alone about 10.8 %, both connected about 19 % each (same build and position). In a long run, RIGHT's loss fell from about 20 % to about 11 % when LEFT went to sleep. Working hypothesis, not proven: the two Classic links and the phone compete for the ESP32's radio. Tracked in WMR_Bridge issue #18 and addressed by multi-bridge support (M11).
+- The 2026-10-24 app run (`0.1.0` app, WMR_Bridge `v0.1.1`) measured tick loss LEFT 21.0 % and RIGHT 15.2 % over 120 s of FF14 with both controllers, inside this spread (one run, position not recorded; [LATENCY.md](LATENCY.md)). It does not change the #18 picture.
 
 Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes: upstream report loss") and `docs/TESTING.md`.
 

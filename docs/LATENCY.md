@@ -121,6 +121,60 @@ No incomplete frames, reassembly errors or parse errors. The tick loss figures a
 - Whether the FF14 traffic causes it. Every ping here competed with a running stream. Runs with no stream, FF11, FF12 and FF14 at one fixed position are now possible from this screen (selector and no-stream mode built, **not yet run on hardware**); the run sheet below is for them.
 - Anything about other phones, positions or distances; the RSSI moved by 21 dB during the run.
 
+## Second hardware run: 0.1.1 bridge, 0.1.0 app (user-reported)
+
+One 120 s run from the screen, 2026-10-24 18:43:35, files `latency-20261024-184335{,-echo}.csv` and `.json`, archived in `WMR_Bridge` [`docs/runs/roundtrip/`](https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/roundtrip/README.md). Setup as reported: `wmr-latency` version 3 export, FF14 batched, 250 ms ping interval, both controllers connected to one bridge, WMR_Bridge `v0.1.1` firmware and this app at `0.1.0`. MTU 517, connection interval 15 ms and high priority requested; RSSI was -86 dBm at the start and -81 dBm at the end, so the start was 17 dB weaker than the first run's, and the run was much steadier than the first run's -69 to -48 dBm. The export does not record the firmware or APK hash, the phone model, or whether the position matched the first run; it was not stated.
+
+**FF15 round trip (479 pings, 479 answered, no timeouts, no late, bad or skipped answers):**
+
+| ms | min | p50 | p90 | p95 | p99 | max |
+|---|---|---|---|---|---|---|
+| rtt = (t4 - t1) - turnaround | 18.6 | 40.5 | 61.8 | 73.6 | 102.5 | 125.3 |
+| write call to answer (t4 - t1) | 19.1 | 40.9 | 62.4 | 75.2 | 104.2 | 128.4 |
+| ESP32 turnaround | 0.26 | 0.40 | 0.72 | 1.01 | 2.25 | 63.5 |
+
+Other figures from the echo CSV (computed from the exported file):
+- The ESP32 queue depth the answers skipped was 0 for 105 of 479 pings, median 3, maximum 34. Median rtt by depth: 43.3 ms at depth 0, 40.5, 41.0 and 39.8 ms at 1, 2 and 3, then 39.4, 37.4, 36.0 and 34.4 ms at 4 to 7. The rtt stays flat to depth 8; six pings skipped 10 or more queued frames (maximum 34) and took 51.3 to 91.2 ms. Correlation of rtt with depth 0.03.
+- Median rtt was 40.5 ms in the first half of the run and 40.3 ms in the second.
+- The write call itself (t1 to its return) took 2.2 ms at the least, 9.4 ms median, 37.6 ms at p95 and 68.7 ms at most. The answer was always seen after the write call returned; on 15 pings it came within 1 ms after it.
+- Two pings had an ESP32 turnaround over 10 ms (63.5 ms and 15.4 ms). The first run's largest was 7.5 ms. Two of 479 is not a distribution.
+
+**Same run, streams (both hands, FF14):**
+
+| | LEFT | RIGHT |
+|---|---|---|
+| records | 19 027 | 20 384 |
+| rate (per s) | 158.6 | 169.9 |
+| arrivals (notifications carrying the hand) | 4 869 | 5 138 |
+| inter-arrival ms: p50 / p95 / p99 / max | 19.7 / 59.9 / 86.4 / 173.5 | 18.7 / 57.3 / 80.5 / 167.5 |
+| stalls over 50 ms | 414 | 355 |
+| sequence gaps / out of order | 0 / 0 | 0 / 0 |
+| missing by ticks | 5 056 (21.0 %) | 3 651 (15.2 %) |
+| delay above window minimum ms: p50 / p95 / max | 22.5 / 52.1 / 135.6 | 23.8 / 54.1 / 141.5 |
+
+No incomplete frames, reassembly errors or parse errors; no rows dropped and no mode change. Every record of both hands names the same bridge, `8c:94:df:12:b9:b6`, in the frame CSV.
+
+**Against the first run (same stream, both hands, 120 s):**
+
+| Figure | 2026-10-22 (pre-0.1.0 builds) | 2026-10-24 (`v0.1.1` / `0.1.0`) |
+|---|---|---|
+| rtt p50 / p95 / p99 / max ms | 40.8 / 72.8 / 97.1 / 151.9 | 40.5 / 73.6 / 102.5 / 125.3 |
+| ESP32 turnaround p50 / max ms | 0.43 / 7.5 | 0.40 / 63.5 |
+| write-call p50 / p95 ms | 11.1 / 46.7 | 9.4 / 37.6 |
+| stalls over 50 ms, LEFT / RIGHT | 308 / 252 | 414 / 355 |
+| missing by ticks, LEFT / RIGHT | 25.1 % / 17.8 % | 21.0 % / 15.2 % |
+| RSSI start → end, dBm | -69 → -48 | -86 → -81 |
+
+**What this shows:**
+- The ~40 ms round trip reproduces on the current release pair: p50 40.5 ms against 40.8 ms on builds from two days earlier, across the client refactor since then (latency modes, `wmr_core` extraction, multi-bridge, export v3). The refactor did not move the median. This is the FF14 re-run `WMR_Bridge` `docs/PREDICTION.md` §5 asked for.
+- The ESP32 is still not where the time goes at the median (0.40 ms), and the rtt is still flat with queue depth, so the answer priority behaves as it did.
+- The stream figures moved in opposite directions: tick loss is 4.0 points lower on LEFT and 2.6 lower on RIGHT, while stalls over 50 ms are higher by about 100 per hand, with a much weaker and much steadier signal. Both are inside the spread already recorded for one ESP32 and two controllers; this is not a release-pair improvement or regression.
+
+**What this does not show:**
+- Where the 40 ms is spent. The run says nothing new about the app/plugin/radio split, and the no-stream, FF11 and FF12 runs at a fixed position are still not run.
+- Whether the two 10 ms-plus ESP32 turnarounds are new. One run, two pings, no firmware hash; the `v0.1.1` image adds HCI logging and the ONY-183 reconnect changes, but this run did not exercise them and cannot attribute the tail to them.
+- Anything about the `v0.1.1` packaging or the FF17/status-v2 additions; the export does not record which image ran or its hash, and the run used one bridge and one phone at an unrecorded position.
+
 ## Run sheet: no stream, FF11, FF12, FF14 at a fixed position (**not yet run**)
 
 Status: **not yet run on hardware.** This is the procedure for the comparison; nothing below is a hardware result. The screen and exports are built and unit/widget tested only.
