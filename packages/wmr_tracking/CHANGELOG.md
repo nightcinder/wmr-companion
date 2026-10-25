@@ -21,3 +21,7 @@
 - VITURE Pro Neckband profile now records the Unity SDK requirement and the
   embedded-Unity integration path; hand tracking is not available from the C
   glasses SDK.
+- `UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`, and
+  `unityToOpenXrPose` / `openXrToUnityPose`: reusable Unity UaaL relay command
+  contract, 26-joint `XRHandJointID` to OpenXR mapping, and left-handed Unity to
+  right-handed OpenXR coordinate conversion (ONY-213).

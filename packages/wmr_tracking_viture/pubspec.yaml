@@ -1,0 +1,30 @@
+name: wmr_tracking_viture
+description: >-
+  VITURE Pro Neckband head and 26-joint hand tracking relay source for
+  wmr_tracking, backed by an embedded Unity-as-a-Library (UaaL) bridge.
+version: 0.1.0
+repository: https://github.com/nightcinder/wmr-companion
+issue_tracker: https://github.com/nightcinder/wmr-companion/issues
+
+environment:
+  sdk: ^3.13.5
+  flutter: '>=3.3.0'
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  wmr_tracking: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.onyxlens.wmr_tracking_viture
+        pluginClass: WmrTrackingViturePlugin

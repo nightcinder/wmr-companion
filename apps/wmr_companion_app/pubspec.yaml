@@ -24,6 +24,7 @@ dependencies:
   wmr_fusion: ^0.1.0
   wmr_tracking: ^0.1.0
   wmr_tracking_android_xr: ^0.1.0
+  wmr_tracking_viture: ^0.1.0
 
 dev_dependencies:
   flutter_test:

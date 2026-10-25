@@ -1,0 +1,39 @@
+{
+  "game_object": "WmrTrackingRelay",
+  "method": "OnCommand",
+  "commands": [
+    {
+      "v": 1,
+      "cmd": "start",
+      "vendor": "viture",
+      "options": {
+        "filter_mode": "responsive",
+        "aim_sensitivity": "high"
+      }
+    },
+    {
+      "v": 1,
+      "cmd": "configure",
+      "vendor": "viture",
+      "options": {
+        "filter_mode": "stable",
+        "aim_sensitivity": "low"
+      }
+    },
+    {
+      "v": 1,
+      "cmd": "recenter",
+      "vendor": "viture"
+    },
+    {
+      "v": 1,
+      "cmd": "stop",
+      "vendor": "viture"
+    },
+    {
+      "v": 1,
+      "cmd": "dispose",
+      "vendor": "viture"
+    }
+  ]
+}

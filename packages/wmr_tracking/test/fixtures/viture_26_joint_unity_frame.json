@@ -1,0 +1,123 @@
+{
+  "v": 1,
+  "space": "unity",
+  "time_ns": 1800000000000000,
+  "head": {
+    "pose": {
+      "t": [0.0, 1.62, 0.08],
+      "q": [0.05, -0.1, 0.02, 0.993529063490344]
+    },
+    "confidence": "high"
+  },
+  "hands": {
+    "right": {
+      "hand": "right",
+      "joints": {
+        "Wrist": {
+          "pose": {"t": [0.18, 1.18, 0.34], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "Palm": {
+          "pose": {"t": [0.2, 1.21, 0.36], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ThumbMetacarpal": {
+          "pose": {"t": [0.16, 1.19, 0.35], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ThumbProximal": {
+          "pose": {"t": [0.15, 1.2, 0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ThumbDistal": {
+          "pose": {"t": [0.14, 1.21, 0.39], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ThumbTip": {
+          "pose": {"t": [0.13, 1.22, 0.41], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "IndexMetacarpal": {
+          "pose": {"t": [0.18, 1.22, 0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "IndexProximal": {
+          "pose": {"t": [0.18, 1.23, 0.4], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "IndexIntermediate": {
+          "pose": {"t": [0.18, 1.24, 0.42], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "IndexDistal": {
+          "pose": {"t": [0.18, 1.24, 0.44], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "IndexTip": {
+          "pose": {"t": [0.18, 1.25, 0.46], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "MiddleMetacarpal": {
+          "pose": {"t": [0.2, 1.22, 0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "MiddleProximal": {
+          "pose": {"t": [0.2, 1.23, 0.4], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "MiddleIntermediate": {
+          "pose": {"t": [0.2, 1.24, 0.43], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "MiddleDistal": {
+          "pose": {"t": [0.2, 1.24, 0.45], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "MiddleTip": {
+          "pose": {"t": [0.2, 1.25, 0.47], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "RingMetacarpal": {
+          "pose": {"t": [0.22, 1.21, 0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "RingProximal": {
+          "pose": {"t": [0.22, 1.22, 0.4], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "RingIntermediate": {
+          "pose": {"t": [0.22, 1.23, 0.42], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "RingDistal": {
+          "pose": {"t": [0.22, 1.23, 0.44], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "RingTip": {
+          "pose": {"t": [0.22, 1.24, 0.46], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "LittleMetacarpal": {
+          "pose": {"t": [0.24, 1.2, 0.36], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "LittleProximal": {
+          "pose": {"t": [0.24, 1.21, 0.39], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "LittleIntermediate": {
+          "pose": {"t": [0.24, 1.22, 0.41], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "LittleDistal": {
+          "pose": {"t": [0.24, 1.22, 0.43], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "LittleTip": {
+          "pose": {"t": [0.24, 1.23, 0.45], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        }
+      }
+    }
+  }
+}

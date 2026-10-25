@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'codec.dart';
 import 'tracking_types.dart';
+import 'unity_relay.dart';
 
 /// Why a tracking source is not running.
 enum TrackingExceptionKind {
@@ -164,6 +165,7 @@ class RelayTrackingSource implements TrackingSource {
       features: {TrackingFeature.headPose6Dof, TrackingFeature.handJoints},
     ),
     this.codec = const TrackingFrameCodec(),
+    this.defaultSpace = UnityRelayCoordinateSpace.openXr,
   });
 
   @override
@@ -179,6 +181,9 @@ class RelayTrackingSource implements TrackingSource {
   final Stream<Object?> messages;
 
   final TrackingFrameCodec codec;
+
+  /// Coordinate space assumed when a relay frame omits `"space"`.
+  final UnityRelayCoordinateSpace defaultSpace;
 
   final StreamController<TrackingFrame> _frames =
       StreamController<TrackingFrame>.broadcast();
@@ -197,12 +202,16 @@ class RelayTrackingSource implements TrackingSource {
     }
     if (_started) return;
     _started = true;
+    final relayCodec = UnityRelayFrameCodec(
+      defaultSpace: defaultSpace,
+      codec: codec,
+    );
     _sub = messages.listen(
       (message) {
         try {
           final frame = switch (message) {
-            String text => codec.decodeString(text),
-            Map<String, Object?> map => codec.decode(map),
+            String text => relayCodec.decodeString(text),
+            Map<Object?, Object?> map => relayCodec.decode(map),
             _ => throw const FormatException(
               'relay frame must be a JSON map or string',
             ),

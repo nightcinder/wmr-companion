@@ -111,7 +111,11 @@ List<double> _numbers(List<Object?> value, String name) {
     if (element is! num) {
       throw FormatException('$name must contain numbers');
     }
-    result.add(element.toDouble());
+    final number = element.toDouble();
+    if (!number.isFinite) {
+      throw FormatException('$name must contain finite numbers');
+    }
+    result.add(number);
   }
   return result;
 }
