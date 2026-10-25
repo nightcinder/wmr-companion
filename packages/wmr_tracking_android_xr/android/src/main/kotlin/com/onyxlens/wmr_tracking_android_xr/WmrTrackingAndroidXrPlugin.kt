@@ -104,7 +104,7 @@ class WmrTrackingAndroidXrPlugin :
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var eventSink: EventChannel.EventSink? = null
-    private var pendingStart: MethodChannel.Result? = null
+    private val pendingStart = PendingStartGate()
 
     private var session: Session? = null
     private var scope: CoroutineScope? = null
@@ -164,12 +164,16 @@ class WmrTrackingAndroidXrPlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "capabilities" -> result.success(capabilities())
-            "start" -> start(result)
+            "start" -> start(MethodChannelStartReply(result))
             "stop" -> {
+                // A late permission result must not open a session after the
+                // caller stopped tracking.
+                failPendingStart("Android XR tracking stopped before the start completed")
                 stopTracking(reportError = false)
                 result.success(null)
             }
             "dispose" -> {
+                failPendingStart("Android XR tracking source was disposed before the start completed")
                 stopTracking(reportError = false)
                 disposed = true
                 result.success(null)
@@ -179,6 +183,10 @@ class WmrTrackingAndroidXrPlugin :
     }
 
     private fun capabilities(): Map<String, Any?> {
+        // Each Dart create() is a new handshake on the shared engine. `dispose`
+        // is engine-scoped, so re-arm it here; otherwise a source created after
+        // `WmrCompanion.detachTrackingSource()` could never start.
+        disposed = false
         val context = activity ?: appContext ?: return mapOf(
             "supported" to false,
             "handTracking" to false,
@@ -219,22 +227,22 @@ class WmrTrackingAndroidXrPlugin :
             else -> "missing"
         }
 
-    private fun start(result: MethodChannel.Result) {
+    private fun start(reply: StartReply) {
         if (disposed) {
-            result.error(ERROR_CLOSED, "Android XR tracking source has been disposed", null)
+            reply.error(ERROR_CLOSED, "Android XR tracking source has been disposed")
             return
         }
         if (started) {
-            result.success(null)
+            reply.success()
             return
         }
-        if (pendingStart != null) {
-            result.error(ERROR_UNAVAILABLE, "An Android XR start is already pending", null)
+        if (pendingStart.isPending) {
+            reply.error(ERROR_UNAVAILABLE, "An Android XR start is already pending")
             return
         }
         val current = activity
         if (current == null) {
-            result.error(ERROR_UNAVAILABLE, "No activity to host the XR session", null)
+            reply.error(ERROR_UNAVAILABLE, "No activity to host the XR session")
             return
         }
 
@@ -242,10 +250,10 @@ class WmrTrackingAndroidXrPlugin :
             .filter { ContextCompat.checkSelfPermission(current, it) != PackageManager.PERMISSION_GRANTED }
             .toTypedArray()
         if (missing.isEmpty()) {
-            startSession(current, result)
+            startSession(current, reply)
             return
         }
-        pendingStart = result
+        pendingStart.hold(reply)
         ActivityCompat.requestPermissions(current, missing, PERMISSION_REQUEST_CODE)
     }
 
@@ -255,58 +263,58 @@ class WmrTrackingAndroidXrPlugin :
         grantResults: IntArray,
     ): Boolean {
         if (requestCode != PERMISSION_REQUEST_CODE) return false
-        val result = pendingStart ?: return true
-        pendingStart = null
+        // Null means stop()/dispose()/detach cancelled the start while the
+        // dialog was open: do not open a session for it.
+        val reply = pendingStart.resolve() ?: return true
         val denied = permissions.filterIndexed { index, _ ->
             grantResults.getOrNull(index) != PackageManager.PERMISSION_GRANTED
         }
         if (denied.isNotEmpty()) {
-            result.error(
+            reply.error(
                 ERROR_PERMISSION_DENIED,
                 "Android XR permissions were denied: ${denied.joinToString()}",
-                null,
             )
             return true
         }
         val current = activity
         if (current == null) {
-            result.error(ERROR_UNAVAILABLE, "No activity to host the XR session", null)
+            reply.error(ERROR_UNAVAILABLE, "No activity to host the XR session")
             return true
         }
-        startSession(current, result)
+        startSession(current, reply)
         return true
     }
 
     @Suppress("DEPRECATION") // The Activity overload is synchronous; the
     // CoroutineContext overload needs a suspend caller, and this plugin only
     // needs the cached session for the activity it was handed.
-    private fun startSession(activity: Activity, result: MethodChannel.Result) {
+    private fun startSession(activity: Activity, reply: StartReply) {
         val created = try {
             Session.create(activity)
         } catch (error: Exception) {
-            result.error(ERROR_UNAVAILABLE, "Session.create failed: ${error.message}", null)
+            reply.error(ERROR_UNAVAILABLE, "Session.create failed: ${error.message}")
             return
         }
         val xrSession = when (created) {
             is SessionCreateSuccess -> created.session
             is SessionCreateUnsupportedDevice -> {
-                result.error(ERROR_UNSUPPORTED, "This device does not support Android XR", null)
+                reply.error(ERROR_UNSUPPORTED, "This device does not support Android XR")
                 return
             }
             is SessionCreateApkRequired -> {
-                result.error(ERROR_UNAVAILABLE, "Android XR runtime APK required: ${created.requiredApk}", null)
+                reply.error(ERROR_UNAVAILABLE, "Android XR runtime APK required: ${created.requiredApk}")
                 return
             }
             is SessionCreateTimedOut -> {
-                result.error(ERROR_UNAVAILABLE, "Android XR session creation timed out", null)
+                reply.error(ERROR_UNAVAILABLE, "Android XR session creation timed out")
                 return
             }
             is SessionCreateUnknownError -> {
-                result.error(ERROR_UNAVAILABLE, "Android XR session creation failed: ${created.errorMessage}", null)
+                reply.error(ERROR_UNAVAILABLE, "Android XR session creation failed: ${created.errorMessage}")
                 return
             }
             else -> {
-                result.error(ERROR_UNAVAILABLE, "Android XR session creation failed", null)
+                reply.error(ERROR_UNAVAILABLE, "Android XR session creation failed")
                 return
             }
         }
@@ -318,23 +326,21 @@ class WmrTrackingAndroidXrPlugin :
         val configured = try {
             xrSession.configure(config)
         } catch (error: Exception) {
-            result.error(ERROR_UNSUPPORTED, "Session.configure failed: ${error.message}", null)
+            reply.error(ERROR_UNSUPPORTED, "Session.configure failed: ${error.message}")
             return
         }
         when (configured) {
             is SessionConfigureSuccess -> Unit
             is SessionConfigureCalibrationRequired ->
-                return result.error(ERROR_UNSUPPORTED, "XR calibration is required", null)
+                return reply.error(ERROR_UNSUPPORTED, "XR calibration is required")
             is SessionConfigureLibraryNotLinked ->
-                return result.error(
+                return reply.error(
                     ERROR_UNAVAILABLE,
                     "XR library not linked: ${configured.libraryName}",
-                    null,
                 )
-            else -> return result.error(
+            else -> return reply.error(
                 ERROR_UNSUPPORTED,
                 "DeviceTrackingMode.SPATIAL or HandTrackingMode.BOTH was refused",
-                null,
             )
         }
 
@@ -349,32 +355,34 @@ class WmrTrackingAndroidXrPlugin :
             launch { collectHead(xrSession) }
             launch {
                 Hand.left(xrSession).state.collect { state ->
-                    leftHand = handJson(state, "left")
+                    leftHand = handJson(xrSession, state, "left")
                     if (started) emitFrame()
                 }
             }
             launch {
                 Hand.right(xrSession).state.collect { state ->
-                    rightHand = handJson(state, "right")
+                    rightHand = handJson(xrSession, state, "right")
                     if (started) emitFrame()
                 }
             }
         }
-        result.success(null)
+        reply.success()
     }
 
     private suspend fun collectHead(xrSession: Session) {
         ArDevice.getInstance(xrSession).state.collect { state ->
             head = when (state.trackingState) {
-                TrackingState.TRACKING -> poseJson(toActivity(xrSession, state.devicePose), "high")
-                TrackingState.PAUSED -> poseJson(toActivity(xrSession, state.devicePose), "low")
+                TrackingState.TRACKING ->
+                    toActivity(xrSession, state.devicePose)?.let { poseJson(it, "high") }
+                TrackingState.PAUSED ->
+                    toActivity(xrSession, state.devicePose)?.let { poseJson(it, "low") }
                 else -> null
             }
             if (started) emitFrame()
         }
     }
 
-    private fun handJson(state: Hand.State, side: String): JSONObject? {
+    private fun handJson(xrSession: Session, state: Hand.State, side: String): JSONObject? {
         val confidence = when (state.trackingState) {
             TrackingState.TRACKING -> "high"
             TrackingState.PAUSED -> "low"
@@ -382,7 +390,10 @@ class WmrTrackingAndroidXrPlugin :
         }
         val joints = JSONObject()
         for ((type, pose) in state.handJoints) {
-            joints.put(AndroidXrJoints.name(type), poseJson(pose, confidence))
+            // Skip a joint whose space conversion failed rather than mixing
+            // perception-space and activity-space poses in one frame.
+            val activityPose = toActivity(xrSession, pose) ?: continue
+            joints.put(AndroidXrJoints.name(type), poseJson(activityPose, confidence))
         }
         if (joints.length() == 0) return null
         return JSONObject()
@@ -390,11 +401,18 @@ class WmrTrackingAndroidXrPlugin :
             .put("joints", joints)
     }
 
-    private fun toActivity(xrSession: Session, pose: Pose): Pose =
+    /**
+     * Converts [pose] to activity space, or null when SceneCore cannot.
+     *
+     * Dropping the pose keeps a frame either wholly in activity space or
+     * without it; passing the perception-space pose through would report the
+     * wrong space at `high` confidence.
+     */
+    private fun toActivity(xrSession: Session, pose: Pose): Pose? =
         try {
             xrSession.scene.perceptionSpace.transformPoseTo(pose, xrSession.scene.activitySpace)
         } catch (_: Exception) {
-            pose
+            null
         }
 
     private fun emitFrame() {
@@ -412,6 +430,9 @@ class WmrTrackingAndroidXrPlugin :
     }
 
     private fun stopTracking(reportError: Boolean) {
+        // A permission result can still arrive after the stream is cancelled or
+        // the activity is gone; never let it open a session.
+        failPendingStart()
         started = false
         trackingJob?.cancel()
         trackingJob = null
@@ -426,10 +447,8 @@ class WmrTrackingAndroidXrPlugin :
         }
     }
 
-    private fun failPendingStart() {
-        val pending = pendingStart ?: return
-        pendingStart = null
-        pending.error(ERROR_UNAVAILABLE, "Android XR activity was detached", null)
+    private fun failPendingStart(message: String = "Android XR activity was detached") {
+        pendingStart.cancel(ERROR_UNAVAILABLE, message)
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -470,4 +489,13 @@ class WmrTrackingAndroidXrPlugin :
         }
 
     }
+}
+
+/** Adapts a Flutter [MethodChannel.Result] to the testable [StartReply] seam. */
+private class MethodChannelStartReply(
+    private val result: MethodChannel.Result,
+) : StartReply {
+    override fun success() = result.success(null)
+
+    override fun error(code: String, message: String) = result.error(code, message, null)
 }
