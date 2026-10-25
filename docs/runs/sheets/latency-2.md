@@ -150,7 +150,7 @@ Per-run record:
 
 Per run, from the client that produced it:
 
-- **App:** the `wmr-latency` v2 JSON (`latency-YYYYMMDD-HHMMSS.json`) and the echo CSV (`latency-YYYYMMDD-HHMMSS-echo.csv`). "Export" in the app shares all three files; the frame CSV is not needed (see below).
+- **App:** the `wmr-latency` v3 JSON (`latency-YYYYMMDD-HHMMSS.json`) and the echo CSV (`latency-YYYYMMDD-HHMMSS-echo.csv`). "Export" in the app shares all three files; the frame CSV is not needed (see below).
 - **Probe:** its `wmr-latency` v2 JSON and its echo CSV. Name the files as the probe writes them; the probe's prefix is fixed by its own task.
 - **Bridge:** the `STREAM` line(s) for the run, in the thread, plus the firmware commit hash and boot banner once per session.
 
@@ -327,7 +327,7 @@ The protocol, repeats, `conn` record, exports and decision rule are the same, ap
 
 ## Known limits
 
-- The probe is specified but not built. This sheet is written against the 7.1 definition; if the built probe's timestamps or JSON differ, the sheet is updated **before** the first run, not after.
+- The probe is merged (`tool/gatt_probe`, with the `wmr-gatt-probe-debug-apk` CI artifact); only the paired sitting has not run. This sheet was written against the 7.1 definition; if the probe's timestamps or JSON differ, the sheet is updated **before** the first run, not after.
 - The app timestamps `t4` at the transport's notification delivery; the probe timestamps in the GATT callback. Both measure what their client sees, and the difference between them is part of what this sheet measures. It is not a pure plugin measurement.
 - `t1` is taken just before the write is handed to each client's transport, so both figures include their own GATT queueing. The write call's duration is reported in the echo CSV as `t1_done_us − t1_us`; a large app-side write call with a small probe-side one is a separate hint, not the decision.
 - The FF15 pings share the radio with the stream. At 50 ms the ping load is about 20 writes/s against a ~160 records/s stream; it is small but not zero, which is why the main blocks stay at 250 ms.

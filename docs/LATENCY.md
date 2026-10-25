@@ -171,13 +171,13 @@ No incomplete frames, reassembly errors or parse errors; no rows dropped and no 
 - The stream figures moved in opposite directions: tick loss is 4.0 points lower on LEFT and 2.6 lower on RIGHT, while stalls over 50 ms are higher by about 100 per hand, with a much weaker and much steadier signal. Both are inside the spread already recorded for one ESP32 and two controllers; this is not a release-pair improvement or regression.
 
 **What this does not show:**
-- Where the 40 ms is spent. The run says nothing new about the app/plugin/radio split, and the no-stream, FF11 and FF12 runs at a fixed position are still not run.
+- Where the 40 ms is spent. The run says nothing new about the app/plugin/radio split; the no-stream, FF11 and FF12 runs are in the ladder section below, and only the two repeats remain unrun.
 - Whether the two 10 ms-plus ESP32 turnarounds are new. One run, two pings, no firmware hash; the `v0.1.1` image adds HCI logging and the ONY-183 reconnect changes, but this run did not exercise them and cannot attribute the tail to them.
 - Anything about the `v0.1.1` packaging or the FF17/status-v2 additions; the export does not record which image ran or its hash, and the run used one bridge and one phone at an unrecorded position.
 
 ## Run sheet: no stream, FF11, FF12, FF14 at a fixed position (**one pass run 2026-10-24**)
 
-Status: **one pass run on hardware, 2026-10-24, on WMR_Bridge `v0.1.1` with this app `0.1.0`.** One 120 s run per stream in the order none, FF11, FF12, FF14, at one stated position with both controllers connected. The two repeats are **not run**, and the runs were sequential rather than interleaved. Results first; the procedure follows for the repeats.
+Status: **one pass run on hardware, 2026-10-24, on WMR_Bridge `v0.1.1` with this app `0.1.0`.** One 120 s run per stream - none, FF11 and FF12 at 20:11:49-20:16:56, plus the 18:43:35 FF14 second run reused as the batched row (not contemporaneous with the other three) - at one stated position with both controllers connected. The two repeats are **not run**, and the runs were sequential rather than interleaved. Results first; the procedure follows for the repeats.
 
 **Results, 2026-10-24 (user-reported, 120 s, 250 ms pings, MTU 517, 15 ms interval, both controllers):**
 
