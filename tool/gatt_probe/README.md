@@ -55,16 +55,15 @@ Run the 3 interleaved blocks alternating between App and Probe to eliminate drif
 - **Block 3**: App (none) → **Probe (none)** → App (FF14) → **Probe (FF14)**
 
 ### 3. Running a Probe Measurement
-1. Open **WMR GATT Probe** on the phone.
-2. Ensure Bluetooth and Location permissions are granted.
-3. Configure the run parameters:
+1. Open **WMR GATT Probe** on the phone. On launch, the probe automatically requests Bluetooth permissions and starts scanning for `WMR Bridge`.
+2. Once connected (or tap **Scan & Connect** to re-scan), configure the run parameters:
    - **Stream Subscription**: Select **FF14 (Batched)** for streamed runs, or **None (Echo only)** for no-stream runs.
    - **Ping Interval**: Select **250 ms** for main blocks (or **50 ms** / **1000 ms** for the interval pass).
    - **Dual-bridge mode**: Leave unchecked for standard single-bridge tests.
-4. Tap **Scan & Connect**. The probe connects to `WMR Bridge`, negotiates MTU 517, requests `CONNECTION_PRIORITY_HIGH`, and subscribes to the requested characteristics.
-5. Wait ~30 s for link settle. Check the ESP32 serial console for the `STREAM` line (verify `conn=[15.00ms lat=… to=…]`, `mtu=517`, `sub=1`).
-6. Tap **Start 120s Run**. The probe runs for exactly 120 seconds, updating metrics live.
-7. At 120 s, the run stops automatically and records the end RSSI and summary.
+3. The probe negotiates MTU 517, requests `CONNECTION_PRIORITY_HIGH`, and subscribes to the requested characteristics.
+4. Wait ~30 s for link settle. Check the ESP32 serial console for the `STREAM` line (verify `conn=[15.00ms lat=… to=…]`, `mtu=517`, `sub=1`).
+5. Tap **Start 120s Run**. The probe runs for exactly 120 seconds, updating metrics live.
+6. At 120 s, the run stops automatically and records the end RSSI and summary.
 
 ---
 

@@ -24,12 +24,16 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.RadioButton
 import android.widget.RadioGroup
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
@@ -109,6 +113,21 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        val rootScrollView = findViewById<ScrollView>(R.id.rootScrollView)
+        val basePadding = (16 * resources.displayMetrics.density).toInt()
+        ViewCompat.setOnApplyWindowInsetsListener(rootScrollView) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.updatePadding(
+                left = basePadding + insets.left,
+                top = basePadding + insets.top,
+                right = basePadding + insets.right,
+                bottom = basePadding + insets.bottom
+            )
+            WindowInsetsCompat.CONSUMED
+        }
+
         tvConnectionStatus = findViewById(R.id.tvConnectionStatus)
         tvRunMetrics = findViewById(R.id.tvRunMetrics)
         tvSummary = findViewById(R.id.tvSummary)
@@ -130,6 +149,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         gattClient = GattClient(this, this)
 
         setupListeners()
+        checkPermissionsAndConnect()
     }
 
     private fun setupListeners() {
@@ -156,7 +176,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
         rgStream.setOnCheckedChangeListener { _, checkedId ->
             val mode = if (checkedId == R.id.rbStreamBatched) StreamMode.BATCHED else StreamMode.NONE
-            gattClient?.streamMode = mode
+            gattClient?.updateStreamMode(mode)
         }
 
         rgInterval.setOnCheckedChangeListener { _, checkedId ->
@@ -215,15 +235,13 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         val filters = listOf(
             ScanFilter.Builder()
                 .setServiceUuid(ParcelUuid(Protocol.WMR_SERVICE_UUID))
-                .build(),
-            ScanFilter.Builder()
-                .setDeviceName(Protocol.WMR_BRIDGE_NAME)
                 .build()
         )
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
+        targetDevice = null
         scanner.startScan(filters, settings, scanCallback)
 
         // Stop scan after 10 s timeout
@@ -247,8 +265,10 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val name = result.scanRecord?.deviceName ?: device.name ?: ""
-            if (name.contains("WMR Bridge", ignoreCase = true) ||
-                result.scanRecord?.serviceUuids?.any { it.uuid == Protocol.WMR_SERVICE_UUID } == true
+            if (Protocol.isWmrBridgeAdvertisement(
+                    deviceName = name,
+                    serviceUuids = result.scanRecord?.serviceUuids?.map { it.uuid }
+                )
             ) {
                 if (isScanning) {
                     isScanning = false
@@ -258,7 +278,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                         Log.w(TAG, "Error stopping scan", e)
                     }
                     targetDevice = device
-                    tvConnectionStatus.text = "Found ${device.name ?: "Bridge"}. Connecting..."
+                    tvConnectionStatus.text = "Found ${name.ifEmpty { "Bridge" }}. Connecting..."
                     val client = gattClient ?: return
                     client.streamMode = if (rbStreamBatched.isChecked) StreamMode.BATCHED else StreamMode.NONE
                     client.connect(device)
@@ -287,7 +307,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                 btnConnect.isEnabled = false
                 btnDisconnect.isEnabled = true
                 btnStartRun.isEnabled = !isRunInProgress
-                setRadioGroupEnabled(rgStream, false)
+                setRadioGroupEnabled(rgStream, !isRunInProgress)
                 cbTwoBridges.isEnabled = false
             }
             GattState.DISCONNECTED -> {
@@ -416,6 +436,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         btnStartRun.isEnabled = false
         btnStopRun.isEnabled = true
         btnShare.isEnabled = false
+        setRadioGroupEnabled(rgStream, false)
         setRadioGroupEnabled(rgInterval, false)
         tvSummary.text = "Measurement run in progress..."
 
@@ -502,6 +523,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
         btnStartRun.isEnabled = false
         btnStopRun.isEnabled = false
+        setRadioGroupEnabled(rgStream, gattClient?.isReady == true)
         setRadioGroupEnabled(rgInterval, true)
         tvRunMetrics.text = "Finishing run and reading final RSSI..."
 

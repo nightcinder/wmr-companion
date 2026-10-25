@@ -62,6 +62,41 @@ class GattClient(
 
     var streamMode = StreamMode.BATCHED
 
+    fun updateStreamMode(newMode: StreamMode) {
+        if (streamMode == newMode) return
+        streamMode = newMode
+        val currentGatt = gatt ?: return
+        val bChar = batchedChar ?: return
+        if (state != GattState.READY) return
+
+        val enable = (newMode == StreamMode.BATCHED)
+        updateState(
+            GattState.SUBSCRIBING,
+            if (enable) "Subscribing to FF14 batched..." else "Unsubscribing from FF14 batched..."
+        )
+        val notifOk = currentGatt.setCharacteristicNotification(bChar, enable)
+        if (!notifOk) {
+            updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+            mainHandler.post { listener.onError("Failed to set notification for FF14") }
+            return
+        }
+        val bCcc = bChar.getDescriptor(Protocol.CCC_DESCRIPTOR_UUID)
+        if (bCcc != null) {
+            val value = if (enable) {
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            } else {
+                BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+            }
+            val ok = writeDescriptor(currentGatt, bCcc, value)
+            if (!ok) {
+                updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+                mainHandler.post { listener.onError("Failed to initiate FF14 descriptor write") }
+            }
+        } else {
+            updateState(GattState.READY, "Probe Ready (MTU: ${negotiatedMtu ?: "?"}, Stream: ${streamMode.name})")
+        }
+    }
+
     var negotiatedMtu: Int? = null
         private set
     var priorityRequested: Boolean? = null
@@ -314,7 +349,7 @@ class GattClient(
                 return
             }
 
-            if (!subscribingToBatched && streamMode == StreamMode.BATCHED) {
+            if (descriptor.characteristic.uuid == Protocol.WMR_ECHO_CHAR_UUID && streamMode == StreamMode.BATCHED) {
                 // FF15 subscribed. Now subscribe to FF14
                 val bChar = batchedChar
                 if (bChar != null) {

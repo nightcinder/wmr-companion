@@ -8,6 +8,13 @@ object Protocol {
     val WMR_BRIDGE_NAME = "WMR Bridge"
 
     val WMR_SERVICE_UUID: UUID = UUID.fromString("0000ff10-0000-1000-8000-00805f9b34fb")
+
+    fun isWmrBridgeAdvertisement(deviceName: String?, serviceUuids: List<UUID>?): Boolean {
+        if (serviceUuids?.any { it == WMR_SERVICE_UUID } == true) {
+            return true
+        }
+        return deviceName?.startsWith(WMR_BRIDGE_NAME, ignoreCase = true) == true
+    }
     val WMR_STREAM_CHAR_UUID: UUID = UUID.fromString("0000ff11-0000-1000-8000-00805f9b34fb")
     val WMR_DECODED_CHAR_UUID: UUID = UUID.fromString("0000ff12-0000-1000-8000-00805f9b34fb")
     val WMR_BATCHED_CHAR_UUID: UUID = UUID.fromString("0000ff14-0000-1000-8000-00805f9b34fb")
