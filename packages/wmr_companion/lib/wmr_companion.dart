@@ -38,6 +38,7 @@ export 'package:wmr_core/protocol/firmware_version.dart'
 export 'package:wmr_core/protocol/wmr_fragment.dart' show WmrFrame;
 export 'package:wmr_core/services/controller_service.dart'
     show DecodedStats, StreamMode;
+export 'package:wmr_tracking/wmr_tracking.dart';
 
 export 'src/companion.dart';
 export 'src/config.dart';

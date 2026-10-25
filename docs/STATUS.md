@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-24 (updated for M10–M15 milestones and reusable library close-out ONY-41; see [../HANDOFF.md](../HANDOFF.md)). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-25 (adds the ONY-202 headset-tracking research and framework; earlier update was M10–M15 milestones and reusable library close-out ONY-41). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -14,7 +14,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 ```
 
 - **WMR_Bridge** (firmware, C, BTstack on ESP32): connects to both controllers over Classic Bluetooth HID, optionally decodes the IMU and inputs, and serves them over a BLE GATT service. Source of truth for the wire protocol.
-- **wmr-companion** (this repo): federated package tree with seven Dart packages (`packages/wmr_core`, `packages/wmr_companion`, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`) plus Swift `packages/WMRCompanionKit`, a minimal Flutter host (`example/`), and the reference app (`apps/wmr_companion_app`). Connects to the bridge (BLE or Wi-Fi WebSocket), reassembles or parses the stream, fuses orientation on the host, shows a debug 3D view and link statistics, and records raw captures. Note: the Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (see `WMR_Bridge` `docs/PI_BRIDGE.md` and run sheet `docs/runs/sheets/pi-bridge.md`).
+- **wmr-companion** (this repo): federated package tree with seven published Dart packages (`packages/wmr_core`, `packages/wmr_companion`, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`) plus the `packages/wmr_tracking` 6DoF framework and Swift `packages/WMRCompanionKit`, a minimal Flutter host (`example/`), and the reference app (`apps/wmr_companion_app`). Connects to the bridge (BLE or Wi-Fi WebSocket), reassembles or parses the stream, fuses orientation on the host, shows a debug 3D view and link statistics, and records raw captures. Note: the Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (see `WMR_Bridge` `docs/PI_BRIDGE.md` and run sheet `docs/runs/sheets/pi-bridge.md`).
 - Android and iOS are both in scope for v1 (the owner settled iOS 18 as the floor, `docs/LIBRARY.md` §13). Debug-mode 3DoF tracking first, gamepad mapping later.
 - Third-party: `universal_ble` (BLE), `vector_math`, Riverpod, Flutter. The firmware is derived from BlueKitchen BTstack and keeps its non-commercial license; this app is MIT.
 
@@ -115,7 +115,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-plan`; see [../HANDOFF.md](../HANDOFF.md) §7 and [PLAN.md](PLAN.md)). The sequence of work:
 
 1. **M10 — Library v1 & API freeze**:
-   - Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted and tested.
+   - Seven published Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted and tested. ONY-202 added the `wmr_tracking` package (publishable; no vendor adapter run).
    - FF16 bridge firmware version reading landed in #46 (`WmrProtocolVersion`).
    - Reference app moved to `apps/wmr_companion_app` in #53 (M10.5).
    - Dart pub workspace, export-boundary checks, and strict publish dry-run landed in #54 (`docs/PUBLISHING.md`).
@@ -150,7 +150,18 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
    - PSVR2 Sense firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom).
    - M15.2–15.4 parked (owner has no PSVR2 controllers).
 
-## Not yet run on hardware (as of 2026-10-23)
+## 6DoF tracking framework (ONY-202, 2026-10-25)
+
+`packages/wmr_tracking` and `WmrCompanion.attachTrackingSource` add a vendor-neutral seam for headset head/hand tracking and fuse it with the controller IMU. The deep dive, vendor capability matrix and adapter recipes are in [TRACKING.md](TRACKING.md). This is **desk research plus a unit-tested framework**: no headset, glasses or vendor SDK has been run, and no vendor adapter ships in this repo. The implemented paths are:
+
+- `runtimeController` (reserved; no runtime tracks WMR controllers),
+- `handAnchor` (palm/grip plus a grip offset; needs Android XR or XREAL hand tracking),
+- `headRelative` (head pose plus a learned head-local offset; **not** true positional tracking),
+- `orientationOnly` (the existing 3DoF behaviour).
+
+The honest current state is that the companion still ships 3DoF. Calling it 6DoF requires an adapter and the hardware gates listed in [TRACKING.md](TRACKING.md#gates-before-calling-this-6dof).
+
+## Not yet run on hardware (as of 2026-10-25)
 
 Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
 
@@ -163,6 +174,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - Per-bridge attribution on multi-bridge hardware (PR #51).
 - Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
 - `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); no rename made.
+- Headset head/hand tracking on any device, and every vendor adapter path in [TRACKING.md](TRACKING.md): Android XR permissions/session, XREAL Unity hand tracking, VITURE Carina pose and stereo frames. The framework itself is unit-tested only.
 
 ## Where things are
 
@@ -183,4 +195,5 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 | Handoff (rules, environment, lessons, cleanup list) | [../HANDOFF.md](../HANDOFF.md) |
 | iOS companion app framework & native probe | [IOS.md](IOS.md) |
 | Headset camera research | [CAMERAS.md](CAMERAS.md) |
+| Headset head/hand tracking research and 6DoF framework | [TRACKING.md](TRACKING.md) |
 | Windows build and flash | WMR_Bridge `docs/BUILD_WINDOWS.md` |

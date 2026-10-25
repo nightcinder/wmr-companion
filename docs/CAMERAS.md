@@ -1,5 +1,7 @@
 # Headset camera access for controller fusion (research, 2026-10-22)
 
+> For the tracking (head/hand pose) side and the framework that consumes it, see [TRACKING.md](TRACKING.md). This page stays scoped to raw camera access.
+
 Question: could the app fuse the controllers' IMU with a headset's cameras to get 6DoF (the long-term goal)? Devices looked at: Xreal Aura, URXR One, Xreal One Pro + Eye, Viture Luma Ultra. This is desk research from a handful of searches; most vendor docs are thin and the sources were read through tool summaries, so details may be incomplete. Nothing here was tested on a device. Saved from the artifact `CEnR6zMhVKcqq5eFChk111`.
 
 ## Short answer

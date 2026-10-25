@@ -9,13 +9,18 @@ This package is the umbrella API from `docs/LIBRARY.md`. It wraps
 can adapt the streams to whatever state layer it already uses. The reference
 app in this repository is the first consumer.
 
-Status: **0.1.0, landed**. All seven packages — `wmr_core`, `wmr_companion`,
-`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui` and
+Status: **0.1.0, landed**. All eight packages — `wmr_core`, `wmr_companion`,
+`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_companion_ui` and
 `wmr_companion_hid_android` — are in the pub workspace and pass their export
 boundary checks; publishing to pub.dev is on hold per the owner's decision. The
 facade works on the fake transport and is dogfooded by the app's real connection
 path, including `WmrWsTransport` alongside `UniversalBleTransport` and
 `FakeTransport`. Nothing here has been run on iOS hardware.
+
+The optional `wmr_tracking` package (internal, `publish_to: none`) defines the
+`TrackingSource` seam and `SixDofFuser` behind `poses`. The facade re-exports its
+types. No vendor adapter ships yet, and no headset has been tested; see
+[`docs/TRACKING.md`](../../docs/TRACKING.md).
 
 ## Why in-process input
 
@@ -105,6 +110,9 @@ One class, one config, a handful of models.
 | `disconnect()` | Close the link and return to idle. |
 | `controllers` | FF11 frames or FF12/FF14 samples, one event per frame/sample. |
 | `gamepad` | Mapped two-handed `GamepadState`, one event per decoded sample. |
+| `poses` | Fused `ControllerPose` per decoded sample while a `TrackingSource` is attached; position is null without a head or hand anchor. |
+| `attachTrackingSource(TrackingSource)` | Start and own a head/hand tracking source, align its clock to the BLE stream and enable `poses`. |
+| `detachTrackingSource()` | Stop and dispose the attached source and disable `poses`. |
 | `link` | `WmrLinkSnapshot`: state, MTU, RSSI, interval, mode, fault, protocol, counters. |
 | `protocol` | The bridge's `WmrProtocolVersion` (FF16 firmware version and feature matrix) after the one-time read. |
 | `failures` | Typed non-fatal errors (scan failures, stream faults). |

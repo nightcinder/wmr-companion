@@ -10,6 +10,7 @@ import 'package:wmr_core/domain/stick_centre.dart';
 import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 import 'config.dart';
 import 'errors.dart';
@@ -49,6 +50,7 @@ class WmrCompanion {
   final StreamController<WmrControllerUpdate> _controllers =
       StreamController.broadcast();
   final StreamController<GamepadState> _gamepad = StreamController.broadcast();
+  final StreamController<ControllerPose> _poses = StreamController.broadcast();
   final StreamController<WmrLinkSnapshot> _link = StreamController.broadcast();
   final StreamController<WmrException> _failures = StreamController.broadcast();
 
@@ -75,8 +77,12 @@ class WmrCompanion {
   StreamSubscription<ReceivedFrame>? _frameSub;
   StreamSubscription<DecodedSample>? _sampleSub;
   StreamSubscription<ModeState>? _modeSub;
+  StreamSubscription<TrackingFrame>? _trackingSub;
   Timer? _linkTimer;
   Timer? _reconnectTimer;
+  TrackingSource? _trackingSource;
+  SourceClockAligner? _trackingAligner;
+  SixDofFuser? _fuser;
 
   bool _disposed = false;
   bool _intentionalDisconnect = false;
@@ -108,6 +114,11 @@ class WmrCompanion {
 
   /// Mapped two-handed gamepad state, one event per decoded sample.
   Stream<GamepadState> get gamepad => _gamepad.stream;
+
+  /// Fused 6DoF controller poses, one event per decoded sample, while a
+  /// tracking source is attached through [attachTrackingSource]. Position is
+  /// null until the source supplies a head or hand anchor.
+  Stream<ControllerPose> get poses => _poses.stream;
 
   /// Link parameters and counters, on connect, on mode change and once a
   /// second while connected.
@@ -348,6 +359,79 @@ class WmrCompanion {
   /// Resets the view-frame yaw of [hand] without touching pitch and roll.
   void resetYaw(Hand hand) => _service?.resetYaw(hand.wireIndex);
 
+  /// Attaches a head/hand tracking source used to lift controller orientation
+  /// to 6DoF.
+  ///
+  /// The facade owns the source after this call: it starts it, re-stamps its
+  /// frames onto the BLE transport's monotonic clock and feeds them to a
+  /// [SixDofFuser]. Each decoded controller sample then emits a
+  /// [ControllerPose] on [poses]. Attaching a second source detaches and
+  /// disposes the first.
+  ///
+  /// Tracking is independent of the bridge connection: attach before
+  /// [connect] to have poses ready for the first sample. Only the controller
+  /// IMU is required; without a head or hand anchor [ControllerPose.position]
+  /// stays null and [ControllerPose.source] is
+  /// [ControllerPoseSource.orientationOnly].
+  Future<void> attachTrackingSource(TrackingSource source) async {
+    _ensureUsable();
+    await detachTrackingSource();
+    _trackingSource = source;
+    _trackingAligner = SourceClockAligner();
+    _fuser = SixDofFuser();
+    _trackingSub = source.frames.listen(
+      (frame) {
+        final aligner = _trackingAligner;
+        final fuser = _fuser;
+        if (aligner == null || fuser == null) return;
+        final arrivalNs = _transport.clock.nowUs * 1000;
+        final hostNs = aligner.align(
+          sourceTimeNs: frame.timeNs,
+          hostTimeNs: arrivalNs,
+        );
+        fuser.onTrackingFrame(frame.withHostTime(hostNs));
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!_failures.isClosed) {
+          _failures.add(
+            WmrTrackingException('Tracking source failed', cause: error),
+          );
+        }
+      },
+    );
+    try {
+      await source.start();
+    } catch (error) {
+      await detachTrackingSource();
+      throw WmrTrackingException(
+        'Tracking source could not start',
+        cause: error,
+      );
+    }
+  }
+
+  /// Stops and disposes the attached tracking source, if any, and clears the
+  /// fuser. Safe to call when no source is attached.
+  Future<void> detachTrackingSource() async {
+    await _trackingSub?.cancel();
+    _trackingSub = null;
+    final source = _trackingSource;
+    _trackingSource = null;
+    _trackingAligner = null;
+    _fuser = null;
+    if (source == null) return;
+    try {
+      await source.stop();
+    } catch (_) {
+      // Teardown is best-effort; the link/session teardown wins.
+    }
+    try {
+      await source.dispose();
+    } catch (_) {
+      // See above.
+    }
+  }
+
   /// Releases the session, subscriptions and timers and closes the BLE link.
   /// The transport itself is left alone: whoever created it disposes it.
   Future<void> dispose() async {
@@ -355,6 +439,7 @@ class WmrCompanion {
     _disposed = true;
     await _scanSub?.cancel();
     _scanSub = null;
+    await detachTrackingSource();
     final deviceId = _deviceId;
     await _disposeSession();
     _deviceId = null;
@@ -372,6 +457,7 @@ class WmrCompanion {
     await _connection.close();
     await _controllers.close();
     await _gamepad.close();
+    await _poses.close();
     await _link.close();
     await _failures.close();
   }
@@ -445,6 +531,17 @@ class WmrCompanion {
   void _onSample(ControllerService service, DecodedSample sample) {
     if (!identical(service, _service)) return;
     final hand = Hand.of(sample.record.hand);
+    final orientation = sample.orientation;
+    final fuser = _fuser;
+    if (fuser != null && !_poses.isClosed) {
+      _poses.add(
+        fuser.update(
+          hand: hand == Hand.left ? TrackedHand.left : TrackedHand.right,
+          orientation: orientation,
+          hostTimeNs: sample.receivedAtUs * 1000,
+        ),
+      );
+    }
     final input = HandInput.fromSample(sample);
     _latestInputs[hand.wireIndex] = input;
     final decoded = service.decodedStats.hands[sample.record.hand];
