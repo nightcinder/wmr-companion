@@ -11,6 +11,7 @@ Flutter:
 
 1. Kotlin sends `UnityRelayCommand` JSON (`start`, `stop`, `dispose`,
    `recenter`, `configure`) via `UnityPlayer.UnitySendMessage("WmrTrackingRelay", "OnCommand", json)`.
+   `recenter` delegates to `VitureXR.HeadTracking.SetWorldOrigin()`.
 2. The minimal C# component (`unity/Assets/WmrTrackingViture/Runtime/VitureTrackingRelayBridge.cs`)
    calls `VitureXR.Glasses.GetGlassesModel()`, `VitureXR.HandTracking.Start()` /
    `.Stop()`, reads the head pose and 26 `XRHandJointID` joints from
@@ -36,10 +37,14 @@ controller IMU and 3DoF output are unchanged.
 Failures are typed `TrackingException`s:
 - `unavailable`: the Unity UaaL runtime (`com.unity3d.player.UnityPlayer`) or
   VITURE XR SDK bridge is not linked, or the host activity is detached.
-- `unsupported`: the connected glasses are a 3DoF-only model (`One`, `OneLite`,
-  `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) rather than
-  `LumaUltra`, or the host is not a VITURE Pro Neckband.
-- `permissionDenied`: `android.permission.CAMERA` was denied.
+- `unsupported`: the glasses model is unreported / unknown, the connected glasses
+  are a 3DoF-only model (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`,
+  `LumaCyber`, `Beast`) rather than `LumaUltra`, or the host is not a VITURE
+  Pro Neckband.
+- `permissionDenied`: `android.permission.CAMERA` was denied. The permission is
+  declared in the plugin manifest (with `android.hardware.camera` optional)
+  and is inert while `WMR_VITURE_TRACKING` is false. Host apps not using the
+  VITURE slice can exclude it using `tools:node="remove"`.
 - `protocol`: a relay frame or capability handshake was malformed.
 
 Nothing in this package has run on a VITURE Pro Neckband or glasses. The Unity

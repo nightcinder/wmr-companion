@@ -218,6 +218,16 @@ namespace OnyxLens.WmrTrackingViture
             {
                 _headTransform = Camera.main.transform;
             }
+#if WMR_VITURE_XR_SDK
+            try
+            {
+                HeadTracking.SetWorldOrigin();
+            }
+            catch (Exception ex)
+            {
+                ReportError("unavailable", "VitureXR.HeadTracking.SetWorldOrigin() failed: " + ex.Message);
+            }
+#endif
         }
 
         private void Update()
@@ -297,16 +307,18 @@ namespace OnyxLens.WmrTrackingViture
         }
 
 #if WMR_UNITY_XR_HANDS
+        private readonly List<XRHandSubsystem> _subsystemsCache = new List<XRHandSubsystem>();
+
         private void EnsureHandSubsystem()
         {
             if (_handSubsystem != null && _handSubsystem.running) return;
-            var subsystems = new List<XRHandSubsystem>();
-            SubsystemManager.GetSubsystems(subsystems);
-            for (int i = 0; i < subsystems.Count; i++)
+            _subsystemsCache.Clear();
+            SubsystemManager.GetSubsystems(_subsystemsCache);
+            for (int i = 0; i < _subsystemsCache.Count; i++)
             {
-                if (subsystems[i].running)
+                if (_subsystemsCache[i].running)
                 {
-                    _handSubsystem = subsystems[i];
+                    _handSubsystem = _subsystemsCache[i];
                     return;
                 }
             }
