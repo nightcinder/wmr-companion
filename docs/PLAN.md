@@ -11,7 +11,7 @@ A Flutter library and reference app (Android and iOS both in v1 scope, iOS 18 fl
 This is a **test harness first**. Prefer simple and measurable over polished.
 
 ## Non-goals (for now)
-- 6DoF / positional tracking, Monado XR integration on the phone, desktop/web targets, app store polish.
+- Shipped 6DoF / positional tracking, Monado XR integration on the phone, desktop/web targets, app store polish. A tracking seam and head-relative fallback exist in `packages/wmr_tracking` ([TRACKING.md](TRACKING.md)); no headset has been tested on hardware.
 
 ## Architecture
 Keep layers separate so the BLE layer can be swapped without touching the rest.
@@ -58,6 +58,7 @@ wmr-companion/
   packages/wmr_companion_hid_android/ # optional Android Bluetooth HID output
   packages/wmr_ws/      # pure-Dart WebSocket transport for Linux/Pi Wi-Fi daemon
   packages/wmr_fusion/  # pure-Dart Madgwick and Mahony
+  packages/wmr_tracking/ # pure-Dart head/hand tracking seam and 6DoF controller fusion
   packages/WMRCompanionKit/ # native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers
   example/              # minimal Flutter host app (~20 lines to gamepad state)
   docs/STATUS.md    # current state and roadmap

@@ -45,7 +45,7 @@ deps = "\n".join(
 # The packages depend on each other by hosted constraints, which are not on
 # pub.dev yet. A host using them by path must override the whole internal
 # closure, because dependency overrides are not transitive.
-closure = host + ("wmr_core", "wmr_fusion")
+closure = host + ("wmr_core", "wmr_fusion", "wmr_tracking")
 overrides = "dependency_overrides:\n" + "\n".join(
     f"  {name}:\n    path: {root}/packages/{name}" for name in closure
 )

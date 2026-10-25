@@ -38,3 +38,8 @@ class WmrStreamModeException extends WmrException {
 class WmrConfigException extends WmrException {
   const WmrConfigException(super.message, {super.cause});
 }
+
+/// A headset tracking source could not be started or reported a failure.
+class WmrTrackingException extends WmrException {
+  const WmrTrackingException(super.message, {super.cause});
+}

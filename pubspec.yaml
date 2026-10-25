@@ -8,6 +8,7 @@ environment:
 workspace:
   - apps/wmr_companion_app
   - packages/wmr_fusion
+  - packages/wmr_tracking
   - packages/wmr_core
   - packages/wmr_companion
   - packages/wmr_ble
