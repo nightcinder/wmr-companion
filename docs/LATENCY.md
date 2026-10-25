@@ -118,7 +118,7 @@ No incomplete frames, reassembly errors or parse errors. The tick loss figures a
 
 **What this does not show:**
 - Where the 41 ms is spent. The rtt includes the app's write call (median 11 ms), the plugin and platform channel in both directions, the phone's and the ESP32's Bluetooth stacks, and the air. It is not a controller-to-screen latency, and not the latency of the stream records.
-- Whether the FF14 traffic causes it. Every ping here competed with a running stream. Runs with no stream, FF11, FF12 and FF14 at one fixed position are now possible from this screen (selector and no-stream mode built, **not yet run on hardware**); the run sheet below is for them.
+- Whether the FF14 traffic causes it. Every ping here competed with a running stream. Runs with no stream, FF11, FF12 and FF14 at one fixed position have now been made on the `0.1.1`/`0.1.0` pair (2026-10-24, one pass, sequential; results below). They show the no-stream case is *slower*, not faster, but they were not interleaved, so they do not settle the stream-load question.
 - Anything about other phones, positions or distances; the RSSI moved by 21 dB during the run.
 
 ## Second hardware run: 0.1.1 bridge, 0.1.0 app (user-reported)
@@ -175,9 +175,25 @@ No incomplete frames, reassembly errors or parse errors; no rows dropped and no 
 - Whether the two 10 ms-plus ESP32 turnarounds are new. One run, two pings, no firmware hash; the `v0.1.1` image adds HCI logging and the ONY-183 reconnect changes, but this run did not exercise them and cannot attribute the tail to them.
 - Anything about the `v0.1.1` packaging or the FF17/status-v2 additions; the export does not record which image ran or its hash, and the run used one bridge and one phone at an unrecorded position.
 
-## Run sheet: no stream, FF11, FF12, FF14 at a fixed position (**not yet run**)
+## Run sheet: no stream, FF11, FF12, FF14 at a fixed position (**one pass run 2026-10-24**)
 
-Status: **not yet run on hardware.** This is the procedure for the comparison; nothing below is a hardware result. The screen and exports are built and unit/widget tested only.
+Status: **one pass run on hardware, 2026-10-24, on WMR_Bridge `v0.1.1` with this app `0.1.0`.** One 120 s run per stream in the order none, FF11, FF12, FF14, at one stated position with both controllers connected. The two repeats are **not run**, and the runs were sequential rather than interleaved. Results first; the procedure follows for the repeats.
+
+**Results, 2026-10-24 (user-reported, 120 s, 250 ms pings, MTU 517, 15 ms interval, both controllers):**
+
+| Stream | rtt p50 / p99 / max (ms) | min rtt | Pings over 50 ms | Tick loss LEFT / RIGHT | RSSI start → end |
+|---|---|---|---|---|---|
+| none | 61.6 / 106.4 / 151.8 | 45.0 | 438 / 479 | — (no stream) | −80 → −80 dBm |
+| FF11 raw | 44.8 / 119.9 / 150.0 | 18.0 | 191 / 479 | — (no decoded ticks) | −84 → −86 dBm |
+| FF12 decoded | 44.3 / 124.7 / 195.3 | 15.3 | 194 / 479 | 30.7 % / 17.6 % | −88 → −87 dBm |
+| FF14 batched | 40.5 / 102.5 / 125.3 | 18.6 | 121 / 479 | 21.0 % / 15.2 % | −86 → −81 dBm |
+
+The FF14 run is 18:43:35; the other three are 20:11:49–20:16:56. All answered 479 of 479 pings. Exports: WMR_Bridge
+[`docs/runs/roundtrip/`](https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/roundtrip/README.md).
+
+- **No stream is the slowest case, not the fastest.** 61.6 ms p50 and a 45.0 ms floor against 40.5–44.8 ms and 15.3–18.6 ms with any stream; 438 of 479 pings over 50 ms against 121–194. With FF11/FF12/FF14 off the bridge has nothing to send, so the phone is likely granting slave latency and the ESP32 skips connection events. That is the same direction as the older ~59 ms no-stream run and a reason not to treat "no stream" as the low-latency baseline.
+- **FF11 and FF12 are not shown to be faster or slower than FF14.** They sit 3.8–4.3 ms above FF14, but the runs were sequential, not interleaved, and the eight RSSI samples span 8 dB. RSSI is two point reads per run (start, stop) at 1 dB resolution, so that spread does not show the rig moved either. The repeats are what would separate a stream effect from session drift.
+- **FF11's RIGHT side is short.** Its RIGHT records only start 35.1 s into the run, so its RIGHT stalls and gaps cover 85 s; LEFT is complete. Raw frames carry no device ticks, so FF11 has no tick-loss figure — its sequence gaps (18 LEFT, 26 RIGHT) are the available loss signal.
 
 **Setup, once per session**
 
@@ -205,15 +221,15 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 - Firmware hash, app commit, phone model/Android version, MTU, connection interval and high-priority result from the report, and RSSI at start/end.
 - Any mode fault shown on screen, and anything that moved during the session.
 
-**What the runs can show, if they work**
+**What the runs show** (2026-10-24 pass; the repeats would strengthen each)
 
-- `rtt` with no stream against each stream: whether the ~40 ms is caused by stream load or is there even with FF15 alone.
-- Whether `rtt` changes with the notification count (FF12 against FF14) at the same position.
+- `rtt` with no stream against each stream: no-stream is slower, so the ~40 ms is not stream load. Its 45.0 ms floor points at connection-event timing (slave latency), not queueing.
+- Whether `rtt` changes with the notification count (FF12 against FF14) at the same position: not separable from this pass — 3.9 ms apart, sequential, 8 dB RSSI spread.
 - The optional 50 ms and 1000 ms ping intervals, if run, whether `rtt` is quantised to the connection interval. They are not part of the six runs above.
 
-Six runs is one position, one phone, one session. The two repeats are there so a difference smaller than the run-to-run spread is not called a result. Nothing here is "verified" until Nick reports it.
+Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
 
-**Next: latency-2, the app against the native probe.** The comparison that decides milestone 5 is not stream against stream but this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). It is not yet run, and the probe it needs (milestone 7.1) is not built yet.
+**Next: latency-2, the app against the native probe.** The comparison that decides milestone 5 is not stream against stream but this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). The probe is merged (`tool/gatt_probe`, PR #36) and its APK is built by CI (`wmr-gatt-probe-debug-apk`); the sitting itself has not run.
 
 ## Flutter library / iOS v1 run (phase 5)
 
