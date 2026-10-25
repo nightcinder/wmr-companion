@@ -1,10 +1,10 @@
 # Run sheet: latency-2 — the Flutter app against the native GATT probe
 
-> **Proposed sheet, not yet run.** The native GATT probe it compares against (milestone 7.1) and its CI APK do not exist yet. Nothing here is a hardware result. Every figure quoted from an earlier run is user-reported and, unless stated otherwise, comes from a single run.
+> **Proposed sheet, not yet run.** The native GATT probe it compares against (milestone 7.1) is merged (`tool/gatt_probe`, PR #36) and its CI job builds `wmr-gatt-probe-debug-apk`; the paired sitting has not run. Nothing here is a hardware result. Every figure quoted from an earlier run is user-reported and, unless stated otherwise, comes from a single run.
 
 Question: of the ~41 ms FF15 round trip and the ~250–300 inter-arrival stalls over 50 ms per hand per 120 s (both from single runs), how much is `universal_ble` plus the platform channel and Dart, and how much is the radio and the connection parameters? This sheet is the REF/VAR protocol that measures this app against a bare-Kotlin GATT client at one fixed position, so milestone 5 (Flutter against native) can be decided on evidence rather than on the size of the number.
 
-Companion documents: [LATENCY.md](../../LATENCY.md) (screen, export format, and the v1 stream-against-stream run sheet), [STATUS.md](../../STATUS.md) (milestones and what has been reported on hardware), [PLAN.md](../../PLAN.md) (architecture). The 7.x references below are work items of the M7 milestone in the plan that produced this sheet; milestone 5 in STATUS is the decision they feed. The probe is 7.1: a standalone Android app under `tool/gatt_probe/`, plain `BluetoothGattCallback`, same connect sequence (MTU 517, high priority), subscribing FF14 or nothing, pinging FF15 at 50/250/1000 ms, stamping `SystemClock.elapsedRealtimeNanos()` in the callback, and exporting the **same** `wmr-latency` v2 JSON and echo CSV as this app.
+Companion documents: [LATENCY.md](../../LATENCY.md) (screen, export format, and the v1 stream-against-stream run sheet), [STATUS.md](../../STATUS.md) (milestones and what has been reported on hardware), [PLAN.md](../../PLAN.md) (architecture). The 7.x references below are work items of the M7 milestone in the plan that produced this sheet; milestone 5 in STATUS is the decision they feed. The probe is 7.1: a standalone Android app under `tool/gatt_probe/`, plain `BluetoothGattCallback`, same connect sequence (MTU 517, high priority), subscribing FF14 or nothing, pinging FF15 at 50/250/1000 ms, stamping `SystemClock.elapsedRealtimeNanos()` in the callback, and exporting the same `round_trip` and per-hand fields as this app (the probe writes `wmr-latency` v2, the app now writes v3).
 
 ## The decision rule — verbatim, fixed before any data
 
@@ -30,12 +30,14 @@ All figures are user-reported. Sources: [LATENCY.md](../../LATENCY.md) "First ha
 - The no-stream p50 (59 ms) is higher than the FF14 one (41 ms), which is the opposite of what stream load alone would predict. One live explanation is the phone granting slave latency 1 (`lat=1` in every STREAM line): an idle ESP32 may then skip every other 15 ms event. This sheet cannot set the grant; it records it (§4).
 - Every run so far is a single run, one phone, one position. The earlier FF14 run also drifted 21 dB in RSSI, so its position cannot be assumed fixed. That is why §2 tapes the setup and §3 repeats and interleaves the two clients.
 
+**2026-10-24 update.** The one-pass stream ladder on the `0.1.1`/`0.1.0` pair reproduced the direction of both rows above: FF14 40.5 ms p50, FF11 44.8, FF12 44.3, none 61.6 (floor 45.0 ms, 438 of 479 pings over 50 ms), 479 of 479 answered in each. The no-stream penalty is therefore current, not an artefact of the 2026-10-22 build. It still does not separate app from radio, which is what this sheet measures.
+
 ## 1. Definitions used below
 
 | Term | Meaning |
 |---|---|
 | App | The debug APK from this repo's CI, on the latency screen, with the export described in [LATENCY.md](../../LATENCY.md) |
-| Probe | The native GATT probe (7.1), built by its own CI job, exporting the same `wmr-latency` v2 JSON and echo CSV |
+| Probe | The native GATT probe (7.1), built by its own CI job, exporting the same `round_trip` and per-hand fields as this app (`wmr-latency` v2 against the app's v3) |
 | Pair | One app run and one probe run with the same stream and ping interval, at the same position, in the same block or interval set |
 | Block | Four runs in a fixed order: none and FF14 on each client, alternating client (§3) |
 | Cell | All valid runs of one client at one stream and ping interval in one session (four runs at FF14/250 ms, three at none/250 ms) |
@@ -43,7 +45,7 @@ All figures are user-reported. Sources: [LATENCY.md](../../LATENCY.md) "First ha
 
 Only one client may be connected to the bridge at a time: the firmware serves one phone link (`phone=1`). Force-stop or disconnect the other client before the next run connects.
 
-If the probe's export is not `wmr-latency` version 2 with a `round_trip` object and the per-hand `stalls_over_50000us` field, stop. A comparison against a different schema is not this sheet.
+Accept both schema versions: the probe's `wmr-latency` v2 and the app's v3. Each must have a `round_trip` object and the per-hand `stalls_over_50000us` field; read figures by field name and do not reject a run because the version integer differs. A comparison against a different schema is not this sheet.
 
 ## 2. Setup, once per session
 
@@ -148,7 +150,7 @@ Per-run record:
 
 Per run, from the client that produced it:
 
-- **App:** the `wmr-latency` v2 JSON (`latency-YYYYMMDD-HHMMSS.json`) and the echo CSV (`latency-YYYYMMDD-HHMMSS-echo.csv`). "Export" in the app shares all three files; the frame CSV is not needed (see below).
+- **App:** the `wmr-latency` v3 JSON (`latency-YYYYMMDD-HHMMSS.json`) and the echo CSV (`latency-YYYYMMDD-HHMMSS-echo.csv`). "Export" in the app shares all three files; the frame CSV is not needed (see below).
 - **Probe:** its `wmr-latency` v2 JSON and its echo CSV. Name the files as the probe writes them; the probe's prefix is fixed by its own task.
 - **Bridge:** the `STREAM` line(s) for the run, in the thread, plus the firmware commit hash and boot banner once per session.
 
@@ -325,7 +327,7 @@ The protocol, repeats, `conn` record, exports and decision rule are the same, ap
 
 ## Known limits
 
-- The probe is specified but not built. This sheet is written against the 7.1 definition; if the built probe's timestamps or JSON differ, the sheet is updated **before** the first run, not after.
+- The probe is merged (`tool/gatt_probe`, with the `wmr-gatt-probe-debug-apk` CI artifact); only the paired sitting has not run. This sheet was written against the 7.1 definition; if the probe's timestamps or JSON differ, the sheet is updated **before** the first run, not after.
 - The app timestamps `t4` at the transport's notification delivery; the probe timestamps in the GATT callback. Both measure what their client sees, and the difference between them is part of what this sheet measures. It is not a pure plugin measurement.
 - `t1` is taken just before the write is handed to each client's transport, so both figures include their own GATT queueing. The write call's duration is reported in the echo CSV as `t1_done_us − t1_us`; a large app-side write call with a small probe-side one is a separate hint, not the decision.
 - The FF15 pings share the radio with the stream. At 50 ms the ping load is about 20 writes/s against a ~160 records/s stream; it is small but not zero, which is why the main blocks stay at 250 ms.
