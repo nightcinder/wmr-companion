@@ -17,6 +17,7 @@ const _forbiddenPrefixes = <String>[
   'package:wmr_companion_ui/',
   'package:wmr_companion_hid_android/',
   'package:wmr_companion_app/',
+  'package:wmr_tracking_viture/',
   'package:universal_ble/',
   'package:path_provider/',
   'package:share_plus/',

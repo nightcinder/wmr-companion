@@ -18,8 +18,9 @@ The repository contains modular Dart and Flutter packages that are intended to b
 - `wmr_companion_ui` (optional Flutter UI widgets, landed in PR #45)
 - `wmr_companion_hid_android` (optional Android BLE HID output plugin, landed in PR #48)
 - `wmr_tracking_android_xr` (optional Android XR head/hand tracking plugin, ONY-212)
+- `wmr_tracking_viture` (optional VITURE Pro Neckband Unity UaaL head/hand tracking relay plugin, ONY-213)
 
-All nine package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146); no rename is made here.
+All ten package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146); no rename is made here.
 
 The root application (`wmr_companion_app`) and `example/` (`wmr_companion_example`) remain application hosts and retain `publish_to: none`.
 
@@ -142,7 +143,7 @@ dependencies:
 
 **Benefits, as realised here:**
 1. **Workspace-native resolution:** A hosted constraint such as `wmr_fusion: ^0.1.0` resolves to the local workspace member directory. No `dependency_overrides` or path juggling is needed.
-2. **Seamless transitive resolution:** Every package, both app hosts and all nine packages resolve the whole internal graph locally.
+2. **Seamless transitive resolution:** Every package, both app hosts and all ten packages resolve the whole internal graph locally.
 3. **Single source of truth:** One lockfile at the repository root (`pubspec.lock`) replaces the per-package and example locks.
 4. **Publish-ready:** `dart pub publish` understands workspaces and the published archive keeps the hosted constraint, not the local path. `resolution: workspace` is workspace metadata and does not make the package depend on the repository layout.
 
@@ -165,9 +166,10 @@ dependencies:
 | `wmr_companion_ui` | `wmr_companion: ^0.1.0` |
 | `wmr_companion_hid_android` | `wmr_companion: ^0.1.0` |
 | `wmr_tracking_android_xr` | `wmr_tracking: ^0.1.0` |
+| `wmr_tracking_viture` | `wmr_tracking: ^0.1.0` |
 
-All nine packages are fully prepared for publication:
-- `publish_to: none` has been removed from all nine packages.
+All ten packages are fully prepared for publication:
+- `publish_to: none` has been removed from all ten packages.
 - Each package contains its own `LICENSE` file matching the root MIT license.
 - Each package contains a `CHANGELOG.md` with an honest `0.1.0` entry.
 - Each package specifies `repository:` and `issue_tracker:` pointing to the GitHub repository.

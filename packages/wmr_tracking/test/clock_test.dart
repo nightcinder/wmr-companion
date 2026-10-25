@@ -1,4 +1,5 @@
 import 'package:test/test.dart';
+import 'package:vector_math/vector_math_64.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 void main() {
@@ -63,5 +64,73 @@ void main() {
 
     expect(aligner.offsetNs, isNull);
     expect(aligner.align(sourceTimeNs: 1000, hostTimeNs: 9000), 9000);
+  });
+
+  test('clock_jitter: irregular timestamps, duplicates and out-of-order frames '
+      'keep alignment stable without using future or stale samples', () {
+    final aligner = SourceClockAligner();
+    final fuser = SixDofFuser(
+      config: const SixDofFusionConfig(lateTolerance: Duration.zero),
+    );
+    const baseSourceNs = 10000000000;
+    const baseHostNs = 50000000000;
+    const stepNs = 33333333; // 30 Hz
+
+    // Deterministic sequence with arrival jitter, a duplicate source
+    // timestamp, an out-of-order frame, and a future frame.
+    final events = <(int sourceNs, int arrivalNs, double x)>[
+      (baseSourceNs, baseHostNs, 0.10),
+      (baseSourceNs + stepNs, baseHostNs + stepNs + 2000000, 0.20),
+      // Duplicate timestamp: offset stays finite and stable.
+      (baseSourceNs + stepNs, baseHostNs + stepNs + 2500000, 0.20),
+      // Frame 3 arrives before Frame 2 (out of order).
+      (baseSourceNs + 3 * stepNs, baseHostNs + 3 * stepNs - 1500000, 0.40),
+      (baseSourceNs + 2 * stepNs, baseHostNs + 3 * stepNs + 500000, 0.30),
+    ];
+
+    for (final (sourceNs, arrivalNs, x) in events) {
+      final hostNs = aligner.align(
+        sourceTimeNs: sourceNs,
+        hostTimeNs: arrivalNs,
+      );
+      final palm = Pose(
+        translation: Vector3(x, 1.22, -0.34),
+        rotation: Quaternion.identity(),
+      );
+      fuser.onTrackingFrame(
+        TrackingFrame(
+          timeNs: sourceNs,
+          hostTimeNs: hostNs,
+          rightHand: HandPose(
+            hand: TrackedHand.right,
+            palm: TrackedPose(pose: palm),
+            joints: {HandJoint.palm: TrackedPose(pose: palm)},
+          ),
+        ),
+      );
+    }
+
+    // Querying between Frame 2 and Frame 3 must pick Frame 2 (not future
+    // Frame 3).
+    final midSampleNs = baseHostNs + 2 * stepNs + 5000000;
+    final midPose = fuser.update(
+      hand: TrackedHand.right,
+      orientation: Quaternion.identity(),
+      hostTimeNs: midSampleNs,
+    );
+    expect(midPose.source, ControllerPoseSource.handAnchor);
+    expect(midPose.frameAgeNs, greaterThanOrEqualTo(0));
+    expect(midPose.frameAgeNs, lessThanOrEqualTo(100000000));
+    expect(midPose.position!.x, closeTo(0.30, 1e-6));
+
+    // Querying 200 ms after Frame 3 must reject stale frames (> 100 ms).
+    final staleSampleNs = baseHostNs + 3 * stepNs + 200000000;
+    final stalePose = fuser.update(
+      hand: TrackedHand.right,
+      orientation: Quaternion.identity(),
+      hostTimeNs: staleSampleNs,
+    );
+    expect(stalePose.source, ControllerPoseSource.orientationOnly);
+    expect(stalePose.position, isNull);
   });
 }

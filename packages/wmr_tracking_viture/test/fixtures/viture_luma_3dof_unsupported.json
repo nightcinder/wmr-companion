@@ -1,0 +1,9 @@
+{
+  "unityAvailable": true,
+  "supported": false,
+  "handTracking": false,
+  "headTracking": false,
+  "handJointCount": 0,
+  "glassesModel": "LumaPro",
+  "reason": "VITURE hand tracking requires LumaUltra on Pro Neckband (found LumaPro)"
+}

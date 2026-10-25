@@ -14,3 +14,4 @@ export 'src/pose.dart';
 export 'src/profiles.dart';
 export 'src/tracking_source.dart';
 export 'src/tracking_types.dart';
+export 'src/unity_relay.dart';
