@@ -7,6 +7,12 @@
 - `SourceClockAligner` maps vendor timestamps onto the host monotonic clock.
 - `SixDofFuser` combines controller IMU orientation with runtime controller,
   hand-anchor and head-relative position sources.
+- `OneEuroFilter`: a timestamp-aware speed-adaptive low-pass for hand-anchor
+  controller translation. `SixDofFuser` uses it on hand anchors and resets it
+  across gaps and source transitions; IMU orientation is never filtered.
+  Migration note: `SixDofFusionConfig.positionSmoothing` now applies only to
+  runtime-tracked controller poses; hand anchors use the One Euro filter. BLE
+  and IMU-only 3DoF consumers see no change.
 - `FakeTrackingSource` and `RelayTrackingSource` for hardware-free tests,
   UI development and Unity/native sidecars.
 - RayNeo X3 Pro and Rokid AR Studio capability profiles, plus `rayneo` and

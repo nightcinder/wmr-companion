@@ -9,6 +9,7 @@ workspace:
   - apps/wmr_companion_app
   - packages/wmr_fusion
   - packages/wmr_tracking
+  - packages/wmr_tracking_android_xr
   - packages/wmr_core
   - packages/wmr_companion
   - packages/wmr_ble

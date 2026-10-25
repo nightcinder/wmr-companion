@@ -16,7 +16,8 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access. This page
   1. Runtime head pose + hand palm/grip anchor → absolute controller position while the hand is visible. Whether a hand holding a WMR controller is trackable is unproven.
   2. Head pose + controller IMU + a learned head-local offset → stable orientation and a plausible position that moves with the head. This is **not** positional tracking; it is the framework's low-confidence fallback.
   3. Controller IMU only → the current 3DoF behaviour, unchanged.
-- **The framework** is `packages/wmr_tracking` plus `WmrCompanion.attachTrackingSource`: a `TrackingSource` seam, a normalised `TrackingFrame`, vendor capability profiles, a clock aligner, a JSON relay codec and `SixDofFuser`. It is pure Dart and hardware-free to test. Kotlin and Unity belong in Flutter *plugin* packages around it, not inside it.
+- **The framework** is `packages/wmr_tracking` plus `WmrCompanion.attachTrackingSource`: a `TrackingSource` seam, a normalised `TrackingFrame`, vendor capability profiles, a clock aligner, a JSON relay codec, a shared One Euro filter and `SixDofFuser`. It is pure Dart and hardware-free to test. Kotlin and Unity belong in Flutter *plugin* packages around it, not inside it.
+- **The Android XR adapter is implemented** in `packages/wmr_tracking_android_xr` (Kotlin + Dart, default off). It compiles and its host tests pass, but it has not run on an Android XR device or glasses, so nothing here is a hardware result.
 
 ## What "hand tracking" means for this project
 
@@ -47,7 +48,12 @@ Official guidance: [Work with hands using ARCore for Jetpack XR](https://develop
 - **What is not available:** the tracking cameras. Android XR permits the outward passthrough camera (subject to permission), not the non-standard tracking cameras ([CAMERAS.md](CAMERAS.md)). This rules out direct WMR LED constellation tracking on the headset.
 - **Host constraint:** this API runs in an Android XR app on the XR device, not on a phone driving display glasses. The companion's BLE link would have to move to that device, or the pose has to be relayed to the phone.
 
-**Companion path:** a Kotlin Flutter plugin owns the XR session, requests the permissions, configures both modes, and forwards head and hand poses as `TrackingFrame`s. The `TrackingFrameCodec` JSON contract is ready for that boundary. The plugin must keep the OpenXR axis convention (already what the companion uses) and forward a monotonic timestamp.
+**Companion path (implemented in `wmr_tracking_android_xr`):** a Kotlin Flutter plugin owns the XR session, requests `HAND_TRACKING` and `HEAD_TRACKING`, configures `HandTrackingMode.BOTH` with `DeviceTrackingMode.SPATIAL`, converts perception-space poses to the activity space and forwards head plus both hands as `TrackingFrameCodec` JSON over one event channel. The Dart side implements `TrackingSource`; `WmrCompanion.attachTrackingSource` aligns the `System.nanoTime()` timestamp to the BLE clock and feeds `SixDofFuser`.
+
+- **Default off.** `AndroidXrTracking.enabled` is `bool.fromEnvironment('WMR_ANDROID_XR_TRACKING')`, default false. `AndroidXrTrackingSource.create()` returns null without touching a channel when the flag is off, so BLE, controller IMU and 3DoF are unchanged. Enable with `--dart-define=WMR_ANDROID_XR_TRACKING=true` and attach the returned source explicitly.
+- **Typed outcomes.** A denied permission, a non-XR device, a refused `SPATIAL` mode, an unlinked runtime library and activity detach all surface as `TrackingException` kinds (`permissionDenied`, `unsupported`, `unavailable`), not as an empty stream.
+- **Lifecycle.** `start`/`stop`/`dispose` are idempotent in Dart; the Kotlin side cancels its collectors and drops the session on stop/activity detach. A Jetpack XR `Session` is tied to its activity, so activity recreation reports `unavailable` and the consumer must start again.
+- **Not claimed.** No hardware run, no measured rate, no proof that a hand holding a WMR controller stays tracked, and no `grip` pose: Android XR exposes `PALM`/`WRIST` and the other 24 OpenXR joints, so fusion uses the palm plus the configured grip offset. The head pose is converted with `perceptionSpace.transformPoseTo(..., activitySpace)` when SceneCore is available.
 
 ## XREAL
 
@@ -175,10 +181,10 @@ This is a packaging design, not an implemented adapter: no Unity project, Neckba
 
 ## The framework
 
-`packages/wmr_tracking` is pure Dart, depends only on `vector_math`, and is publishable but not on pub.dev (like the other packages, on owner hold). It sits below the facade:
+`packages/wmr_tracking` is pure Dart, depends only on `vector_math`, and is publishable but not on pub.dev (like the other packages, on owner hold). `packages/wmr_tracking_android_xr` is the optional Flutter plugin around it and adds `androidx.xr.runtime`, `androidx.xr.arcore` and `androidx.xr.scenecore` 1.0.0. It sits below the facade:
 
 ```
-Android XR plugin ──┐
+Android XR plugin ──┤ (implemented)
 XREAL Unity ────────┤
 RayNeo Unity ───────┤   TrackingFrame (OpenXR axes, metres, host-clock estimate)
 Rokid Unity ────────┤
@@ -232,7 +238,9 @@ fuser.onTrackingFrame(frame.withHostTime(hostNs));
 | `headRelative` | Head pose * last learned head-local offset | Low | Moves with the head; not positional tracking |
 | `orientationOnly` | null | None | Current 3DoF behaviour |
 
-The last absolute position is converted to a head-local offset and reused when the hand drops out. That keeps the controller stable through brief occlusion but avoids pretending the fallback is real tracking. `positionSmoothing` (default 0.5) hides anchor jitter at the cost of lag. `calibrateGrip` captures a real controller-to-palm offset when a runtime provides both poses; otherwise the default offset is 2 cm below and 6 cm forward of the palm.
+Hand-anchor positions pass through the shared `OneEuroFilter` (`packages/wmr_tracking/lib/src/one_euro.dart`) on the controller sample clock. Defaults are `minCutoff=1.0 Hz`, `beta=0.02`, `dCutoff=1.0 Hz` and a clamped `dt` of 1/240–0.1 s. The filter works in centimetres internally because the paper's `beta` is scale-dependent; feeding metre-scale speed into 0.02 would leave the cutoff near constant and add about 158 ms of lag. Orientation is never filtered: it stays the controller IMU quaternion. The filter resets on the first sample, a gap over 100 ms, a source transition, a source restart or `SixDofFuser.reset()`, so a head-relative fallback is never smoothed into a tracked pose.
+
+The last absolute position is converted to a head-local offset and reused when the hand drops out. That keeps the controller stable through brief occlusion but avoids pretending the fallback is real tracking. `positionSmoothing` (default 0.5) remains for runtime-tracked controller poses only; it does not apply to hand anchors. `calibrateGrip` captures a real controller-to-palm offset when a runtime provides both poses; otherwise the default offset is 2 cm below and 6 cm forward of the palm.
 
 ### Facade integration
 
@@ -250,12 +258,12 @@ The facade owns the source (start, alignment, stop and dispose), emits one `Cont
 
 ### Adapter recipes
 
-**Android XR (recommended first target).**
-1. Add a Kotlin plugin to `apps/wmr_companion_app/android`.
-2. Request `HAND_TRACKING` and `HEAD_TRACKING`; configure `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
-3. On each frame, read `ArDevice.getInstance(session).state.value.devicePose` and `Hand.left/right(session).state.value`, convert `HandJointType` to the `HandJoint` names, and send the fields in `TrackingFrameCodec` format over an event channel.
-4. Timestamp with `System.nanoTime()`; let the facade's aligner map it. Do not compare it with wall-clock time.
-5. Gate the UI on capability support: a device may refuse `SPATIAL`, and hand tracking can be unavailable.
+**Android XR (implemented first target).**
+1. `packages/wmr_tracking_android_xr` is the Kotlin plugin; `apps/wmr_companion_app` depends on it, but no app code starts it yet.
+2. The plugin requests `HAND_TRACKING` and `HEAD_TRACKING`, then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
+3. It reads `ArDevice.getInstance(session).state` and `Hand.left/right(session).state`, maps all 26 `HandJointType`s to the OpenXR `HandJoint` names, and sends `TrackingFrameCodec` JSON over an event channel.
+4. Frames use `System.nanoTime()`; the facade's aligner maps them to the BLE clock. No wall-clock comparison is made.
+5. `AndroidXrTrackingSource.create()` returns null when the flag is off and throws `unsupported`/`permissionDenied`/`unavailable` when the device cannot deliver the slice.
 
 **Unity bridge (VITURE Neckband, XREAL, RayNeo, Rokid).**
 1. Build a Unity Android project with the vendor XR plugin and one scene that reads head pose and, where available, `XRHandSubsystem` joints.
@@ -279,6 +287,35 @@ The facade owns the source (start, alignment, stop and dispose), emits one `Cont
 **XREAL (defer).** There is no supported Flutter route. If the project later wants it, a Unity sidecar can emit `TrackingFrameCodec` JSON; otherwise a native port is required. Air 2 Ultra is the only hand-tracking model.
 
 **Relay/native test.** `TrackingFrameCodec.encodeToString` / `decodeString` is the wire contract. It is versioned (`v: 1`), uses metres and `[x, y, z, w]` quaternions, and ignores unknown joints for forward compatibility.
+
+## Android XR vertical slice (ONY-212)
+
+What landed, and what is still unverified:
+
+| Piece | State |
+|---|---|
+| Kotlin session, permissions, `BOTH` + `SPATIAL` configure | Implemented; compiles against `androidx.xr.*` 1.0.0; not run on a device |
+| Head pose + 26 OpenXR-named joints | Implemented with `perceptionSpace→activitySpace` conversion; device rate and frames unverified |
+| Dart `TrackingSource`, default-off flag, typed errors | Implemented and host-tested |
+| `SixDofFuser` + shared One Euro filter | Implemented and host-tested with synthetic vectors |
+| Palm/grip anchoring | Palm from the fixture; no `grip` joint exists in the public Android XR API, so the default/calibrated grip offset applies |
+| Flag-off BLE/3DoF parity | `apps/wmr_companion_app/test/android_xr_flag_off_test.dart` replays the deterministic fake bridge and matches PR #78 (`c3be059`) golden orientations; no tracking channel or pose stream is touched |
+| Activity recreation | Stops tracking and reports `unavailable`; the consumer restarts the source |
+| Hardware smoke test | **Not run** |
+
+Synthetic vectors in `packages/wmr_tracking/test/filter_test.dart`: `filter_static` (10 s, 5 mm Gaussian, 30 Hz, filtered RMSE below raw, mean drift under 2 mm, orientation follows the controller IMU), `filter_ramp` (0.5 m/s, 5 s, 30/60/90 Hz, deterministic jitter, steady-state lag under 150 ms), `filter_gap` (10 cm step, 150 ms dropout, reset and correct fallback), plus a source-transition test, a non-finite sample test and a non-positive timestamp test. `packages/wmr_tracking/test/android_xr_fixture_test.dart` decodes a 26-joint fixture and checks palm and grip anchoring. `packages/wmr_tracking_android_xr/test/` covers the default-off flag, capability handshake, permission and `SPATIAL` denial fixtures, idempotent lifecycle, malformed frames and monotonic timestamps. `apps/wmr_companion_app/test/android_xr_flag_off_test.dart` is the `ble_flag_off` vector: it replays 400 deterministic bridge ticks, matches the PR #78 golden 3DoF quaternions for both hands, asserts no `poses` event and no tracking-channel call.
+
+Commands used for this slice:
+
+```bash
+cd packages/wmr_tracking && dart test
+cd packages/wmr_tracking_android_xr && flutter test && flutter analyze
+cd apps/wmr_companion_app && flutter analyze && flutter test
+cd apps/wmr_companion_app && flutter build apk --debug
+cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_android_xr:testDebugUnitTest
+```
+
+The APK build and the Kotlin unit test are compile/host gates, not hardware results. The 26-joint fixture and every error path are synthetic. The remaining hardware questions are unchanged: permission prompts and `SPATIAL` support on a real headset/glasses, joint and head rates, whether a gripping hand is tracked, and the BLE/pose relay latency.
 
 ## Gates before calling this 6DoF
 

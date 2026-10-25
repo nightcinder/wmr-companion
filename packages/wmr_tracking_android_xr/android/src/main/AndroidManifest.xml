@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Runtime permissions for ARCore for Jetpack XR. They are inert on
+         devices without Android XR, and the Dart side stays off by default. -->
+    <uses-permission android:name="android.permission.HAND_TRACKING" />
+    <uses-permission android:name="android.permission.HEAD_TRACKING" />
+</manifest>
