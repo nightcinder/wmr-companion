@@ -319,20 +319,19 @@ void main() {
     expect(pose.frameAgeNs, -2);
   });
 
-  test('position smoothing moves toward the new anchor', () {
+  test('position smoothing moves toward a runtime controller pose', () {
     final fuser = SixDofFuser(
       config: const SixDofFusionConfig(positionSmoothing: 0.5),
     );
     fuser.onTrackingFrame(
       _frame(
         1000,
-        right: _hand(
-          TrackedHand.right,
-          Pose(
+        controllers: {
+          TrackedHand.right: Pose(
             translation: Vector3(0.2, 1, 0),
             rotation: Quaternion.identity(),
           ),
-        ),
+        },
       ),
     );
     fuser.update(
@@ -344,13 +343,12 @@ void main() {
     fuser.onTrackingFrame(
       _frame(
         2000,
-        right: _hand(
-          TrackedHand.right,
-          Pose(
+        controllers: {
+          TrackedHand.right: Pose(
             translation: Vector3(0.6, 1, 0),
             rotation: Quaternion.identity(),
           ),
-        ),
+        },
       ),
     );
     final pose = fuser.update(

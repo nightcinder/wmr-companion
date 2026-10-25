@@ -29,7 +29,7 @@ jobs:
 
       # One resolution for the whole workspace; every member is resolved here.
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
+      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_tracking_android_xr packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
       - working-directory: apps/wmr_companion_app
         run: flutter analyze
       - working-directory: apps/wmr_companion_app
@@ -76,9 +76,14 @@ jobs:
         run: |
           dart analyze
           dart test
+      - name: wmr_tracking_android_xr package
+        working-directory: packages/wmr_tracking_android_xr
+        run: |
+          flutter analyze
+          flutter test
       - name: pub.dev publish dry-run (every package in the publish set)
         run: |
-          # A clean dry-run for all eight published packages. The root pub
+          # A clean dry-run for all nine published packages. The root pub
           # workspace resolves each hosted inter-package constraint to the
           # local member directory, so nothing has to be on pub.dev yet.
           # A dry-run error or warning fails this step; nothing is uploaded.
@@ -88,6 +93,9 @@ jobs:
 
           echo "=== Publish dry-run: wmr_tracking ==="
           (cd packages/wmr_tracking && dart pub publish --dry-run)
+
+          echo "=== Publish dry-run: wmr_tracking_android_xr ==="
+          (cd packages/wmr_tracking_android_xr && flutter pub publish --dry-run)
 
           echo "=== Publish dry-run: wmr_core ==="
           (cd packages/wmr_core && dart pub publish --dry-run)

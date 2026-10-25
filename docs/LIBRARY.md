@@ -10,7 +10,7 @@ the Linux/Raspberry Pi Wi-Fi bridge daemon; `packages/wmr_companion_ui` holds op
 stats and gamepad widgets; `packages/wmr_companion_hid_android` holds the
 optional Android HID output; and `example/` is a minimal Flutter host. The app
 depends on the packages by path and drives its real connection through the
-facade. The repository is a Dart pub workspace with one lockfile, and all eight
+facade. The repository is a Dart pub workspace with one lockfile, and all nine
 packages are publishable (clean `pub publish --dry-run`, export-boundary
 tests, fresh-app check in CI). `packages/wmr_tracking` provides the
 head/hand tracking seam and 6DoF controller fusion; it is publishable but no
@@ -135,6 +135,7 @@ apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), De
   |     +-- wmr_core                    pure Dart: protocol + domain + services
   |     |     +-- wmr_fusion            pure Dart: Madgwick/Mahony
   |     +-- wmr_tracking                pure Dart: head/hand tracking seam, 6DoF fusion
+  |     +-- wmr_tracking_android_xr     optional: Android XR Kotlin tracking plugin
   |     +-- wmr_ble                     Flutter plugin: universal_ble + native
   |     +-- wmr_ws                      pure Dart: WebSocket transport (Linux/Pi Wi-Fi daemon)
   +-- wmr_companion_hid_android         optional: phone-as-HID-gamepad output
@@ -150,6 +151,7 @@ apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), De
 | `wmr_companion` | Dart (Flutter once the BLE plugin lands) | yes | Facade (`WmrCompanion`), models/DTOs, defaults, lifecycle, capture/latency recorders with injected sinks | UI widgets, Riverpod |
 | `wmr_companion_ui` | Flutter | optional | Debug 3D view, stats panel, gamepad tester | Core internals; talks to the facade |
 | `wmr_companion_hid_android` | Flutter plugin | optional | Existing `BluetoothHidDevice` output | Core internals |
+| `wmr_tracking_android_xr` | Flutter plugin | optional | Android XR head + 26-joint hand `TrackingSource` (default off) | Core internals, the facade |
 | `apps/wmr_companion_app` | Flutter app | no | The current app; dogfoods every package | — |
 
 Use a Dart pub workspace (SDK is already `^3.13.5`) rather than adding Melos.
@@ -412,9 +414,9 @@ the directory move changed paths, not imports.
      FF16), `protocol: 1`, and `streams: ["raw", "decoded", "batched"]` (synthesized as FF10
      GATT services FF11, FF12, FF14, FF15, FF16; no FF13 config block). Wi-Fi link is
      host-tested/loopback-only until the Pi hardware sitting (P6).
-  All eight packages at `0.1.0` in source speak to every era. Two critical statuses
+  All nine packages at `0.1.0` in source speak to every era. Two critical statuses
   must be stated, not implied:
-  - **The library is not published:** All eight packages are at `0.1.0` in source/git
+  - **The library is not published:** All nine packages are at `0.1.0` in source/git
     only; publication to pub.dev is on hold by owner decision (2026-10-23, ONY-41;
     see [PUBLISHING.md](PUBLISHING.md) §5). Nothing is available on pub.dev.
   - **The firmware release is a prerelease:** `v0.1.0-rc1` is flagged prerelease
@@ -422,7 +424,7 @@ the directory move changed paths, not imports.
     been flashed or confirmed by CI).
   Unknown fields or characteristics are ignored, so a newer bridge does not crash
   an older client.
-- **Publish on pub.dev** after the API freeze. The eight packages no longer carry
+- **Publish on pub.dev** after the API freeze. The nine packages no longer carry
   `publish_to: none` and their dry-runs are clean (#49/#54/#61); the actual `0.1.0`
   upload is on hold by owner decision (2026-10-23), see [PUBLISHING.md](PUBLISHING.md) §5.
   Keep the app's and `example/`'s `publish_to: none`.

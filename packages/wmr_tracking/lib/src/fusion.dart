@@ -1,5 +1,6 @@
 import 'package:vector_math/vector_math_64.dart';
 
+import 'one_euro.dart';
 import 'pose.dart';
 import 'tracking_types.dart';
 
@@ -96,8 +97,10 @@ class SixDofFusionConfig {
   /// up to this much newer than the sample are still considered.
   final Duration lateTolerance;
 
-  /// Weight of a new position, 1 disables smoothing. Smoothing hides joint
-  /// and hand-anchor jitter at the cost of lag.
+  /// Weight of a new runtime-tracked position, 1 disables smoothing. Hand
+  /// anchors use [OneEuroFilter] instead, because a fixed EMA adds the same lag
+  /// while staying still and while moving. Has no effect on
+  /// [ControllerPoseSource.handAnchor].
   final double positionSmoothing;
 
   /// Maximum number of buffered tracking frames.
@@ -144,6 +147,12 @@ class SixDofFusionConfig {
 /// 3. a head-relative offset learned from the last real position,
 /// 4. orientation only.
 ///
+/// Hand-anchor positions pass through a [OneEuroFilter] on the controller
+/// sample clock. Runtime controller poses keep [SixDofFusionConfig.positionSmoothing]
+/// for compatibility, and the head-relative/orientation fallbacks are never
+/// smoothed. Crossing between sources resets the filter, so a fallback is not
+/// disguised as a tracked hand.
+///
 /// Orientation always comes from the controller IMU, so it stays at the
 /// sample rate. Position sources 1 and 2 are absolute. Source 3 is not true
 /// positional tracking: it keeps the controller at a fixed offset from the
@@ -163,6 +172,11 @@ class SixDofFuser {
   final Map<TrackedHand, Vector3> _lastWorld = {};
   final Map<TrackedHand, Vector3> _headLocal = {};
   final Map<TrackedHand, Vector3> _lastOutput = {};
+  final Map<TrackedHand, OneEuroFilter> _handFilters = {
+    TrackedHand.left: OneEuroFilter(),
+    TrackedHand.right: OneEuroFilter(),
+  };
+  final Map<TrackedHand, ControllerPoseSource> _lastSource = {};
 
   SixDofFusionConfig get config => _config;
 
@@ -192,8 +206,16 @@ class SixDofFuser {
     required Quaternion orientation,
     required int hostTimeNs,
   }) {
+    if (hostTimeNs <= 0) {
+      throw ArgumentError.value(
+        hostTimeNs,
+        'hostTimeNs',
+        'must be a positive monotonic timestamp',
+      );
+    }
     final frame = _frameFor(hostTimeNs);
     if (frame == null) {
+      _resetHand(hand);
       return ControllerPose(
         hand: hand,
         hostTimeNs: hostTimeNs,
@@ -236,15 +258,39 @@ class SixDofFuser {
       }
     }
 
+    if (target != null && !_isFinite(target)) {
+      // A malformed vendor pose must not leak NaN into the transform chain.
+      target = null;
+      source = ControllerPoseSource.orientationOnly;
+      confidence = TrackingConfidence.none;
+    }
+
+    final previousSource = _lastSource[hand];
+    if (source == ControllerPoseSource.handAnchor &&
+        previousSource != ControllerPoseSource.handAnchor) {
+      _handFilters[hand]!.reset();
+    } else if (source == ControllerPoseSource.runtimeController &&
+        previousSource != ControllerPoseSource.runtimeController) {
+      _lastOutput.remove(hand);
+    } else if (source == ControllerPoseSource.headRelative) {
+      // Never smooth a guess into a tracked anchor, or the other way round.
+      _handFilters[hand]!.reset();
+      _lastOutput.remove(hand);
+    }
+
     if (target != null && source != ControllerPoseSource.headRelative) {
+      // Learn the head-local offset from the raw anchor, not the lagging
+      // filtered position.
       _lastWorld[hand] = Vector3.copy(target);
       if (headPose != null) {
         _headLocal[hand] = headPose.inverse().transformPoint(target);
       }
     }
 
-    if (target != null &&
-        source != ControllerPoseSource.headRelative &&
+    if (target != null && source == ControllerPoseSource.handAnchor) {
+      target = _handFilters[hand]!.filter(target, hostTimeNs);
+    } else if (target != null &&
+        source == ControllerPoseSource.runtimeController &&
         _config.positionSmoothing < 1) {
       final previous = _lastOutput[hand];
       if (previous != null) {
@@ -256,6 +302,7 @@ class SixDofFuser {
     if (target != null && source != ControllerPoseSource.headRelative) {
       _lastOutput[hand] = Vector3.copy(target);
     }
+    _lastSource[hand] = source;
 
     return ControllerPose(
       hand: hand,
@@ -279,18 +326,32 @@ class SixDofFuser {
     _gripOffsets[hand] = palm.inverse() * controller;
   }
 
-  /// Clears buffered frames and learned offsets. Per-hand calibration is
-  /// kept unless [clearCalibration] is true.
+  /// Clears buffered frames, learned offsets and filter state. Per-hand
+  /// calibration is kept unless [clearCalibration] is true.
+  ///
+  /// Call this on a source restart or tracking-origin reset.
   void reset({bool clearCalibration = false}) {
     _frames.clear();
     _lastWorld.clear();
     _headLocal.clear();
     _lastOutput.clear();
+    _lastSource.clear();
+    for (final filter in _handFilters.values) {
+      filter.reset();
+    }
     if (clearCalibration) {
       _gripOffsets[TrackedHand.left] = _config.gripOffset;
       _gripOffsets[TrackedHand.right] = _config.gripOffset;
     }
   }
+
+  void _resetHand(TrackedHand hand) {
+    _handFilters[hand]!.reset();
+    _lastSource.remove(hand);
+  }
+
+  static bool _isFinite(Vector3 value) =>
+      value.x.isFinite && value.y.isFinite && value.z.isFinite;
 
   TrackingFrame? _frameFor(int hostTimeNs) {
     final tolerance = _config.lateTolerance.inMicroseconds * 1000;
