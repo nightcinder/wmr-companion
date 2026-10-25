@@ -376,6 +376,21 @@ class WmrCompanion {
   Future<void> attachTrackingSource(TrackingSource source) async {
     _ensureUsable();
     await detachTrackingSource();
+    if (_disposed) {
+      // dispose() ran while detachTrackingSource() was awaiting. The facade
+      // owns the source now, so release it rather than starting a leaked one.
+      try {
+        await source.stop();
+      } catch (_) {
+        // Teardown is best-effort; the source was never started.
+      }
+      try {
+        await source.dispose();
+      } catch (_) {
+        // See above.
+      }
+      _ensureUsable();
+    }
     _trackingSource = source;
     _trackingAligner = SourceClockAligner();
     _fuser = SixDofFuser();

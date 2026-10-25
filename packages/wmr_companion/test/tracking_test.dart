@@ -97,6 +97,18 @@ void main() {
     expect(source.disposed, isTrue);
   });
 
+  test('a dispose during attach disposes the new source', () async {
+    final source = FakeTrackingSource();
+
+    final attach = companion.attachTrackingSource(source);
+    final rejected = expectLater(attach, throwsStateError);
+    await companion.dispose();
+    await rejected;
+
+    expect(source.disposed, isTrue);
+    expect(source.started, isFalse);
+  });
+
   test('attaching after dispose is rejected', () async {
     final source = FakeTrackingSource();
     await companion.dispose();

@@ -251,7 +251,11 @@ class SixDofFuser {
         target = previous + (target - previous) * _config.positionSmoothing;
       }
     }
-    if (target != null) _lastOutput[hand] = Vector3.copy(target);
+    // A head-relative fallback is only a guess; keeping it would smooth the
+    // first real runtime/hand-anchor position toward that guess.
+    if (target != null && source != ControllerPoseSource.headRelative) {
+      _lastOutput[hand] = Vector3.copy(target);
+    }
 
     return ControllerPose(
       hand: hand,

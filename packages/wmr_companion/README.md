@@ -17,9 +17,9 @@ facade works on the fake transport and is dogfooded by the app's real connection
 path, including `WmrWsTransport` alongside `UniversalBleTransport` and
 `FakeTransport`. Nothing here has been run on iOS hardware.
 
-The optional `wmr_tracking` package (internal, `publish_to: none`) defines the
-`TrackingSource` seam and `SixDofFuser` behind `poses`. The facade re-exports its
-types. No vendor adapter ships yet, and no headset has been tested; see
+The optional, publishable `wmr_tracking` package (covered by the release
+dry-run) defines the `TrackingSource` seam and `SixDofFuser` behind `poses`.
+The facade re-exports its types. No vendor adapter ships yet, and no headset has been tested; see
 [`docs/TRACKING.md`](../../docs/TRACKING.md).
 
 ## Why in-process input

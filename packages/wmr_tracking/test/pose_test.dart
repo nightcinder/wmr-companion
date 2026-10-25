@@ -62,6 +62,30 @@ void main() {
     expect(Pose.fromJson(json), pose);
   });
 
+  test('a non-symmetric rotation round-trips in [x,y,z,w] order', () {
+    final rotation = Quaternion.axisAngle(Vector3(0.3, 0.7, -0.2), 0.9);
+    final pose = Pose(
+      translation: Vector3(-1.25, 0.4, 2.5),
+      rotation: rotation,
+    );
+
+    final json = pose.toJson();
+    expect(json['q'], [rotation.x, rotation.y, rotation.z, rotation.w]);
+
+    final decoded = Pose.fromJson(json);
+    expect(decoded.translation, vectorMoreOrLessEquals(pose.translation));
+    expect(decoded.rotation, quaternionMoreOrLessEquals(rotation));
+  });
+
+  test('the identity quaternion decodes without a 180 degree flip', () {
+    final decoded = Pose.fromJson({
+      't': [0.0, 0.0, 0.0],
+      'q': [0.0, 0.0, 0.0, 1.0],
+    });
+
+    expect(decoded.rotation, quaternionMoreOrLessEquals(Quaternion.identity()));
+  });
+
   test('a malformed pose is rejected', () {
     expect(
       () => Pose.fromJson({

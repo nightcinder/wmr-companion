@@ -11,12 +11,15 @@ typedef HostClock = int Function();
 ///
 /// The first sample defines the offset. Later samples are low-pass filtered to
 /// absorb transport jitter, and offsets that jump by more than
-/// [maxCorrection] are rejected unless the source clock itself went
-/// backwards (a device or session restart), in which case the aligner rebases.
+/// [maxCorrection] are rejected. A source timestamp that goes backwards by
+/// more than [resetThreshold] is a device or session restart and rebases;
+/// a smaller backwards step is a delayed frame and is mapped with the existing
+/// offset.
 class SourceClockAligner {
   SourceClockAligner({
     this.maxCorrection = const Duration(milliseconds: 50),
     this.smoothing = 0.125,
+    this.resetThreshold = const Duration(seconds: 1),
   }) : assert(smoothing > 0 && smoothing <= 1);
 
   /// Largest arrival-time error treated as jitter rather than a clock reset.
@@ -24,6 +27,9 @@ class SourceClockAligner {
 
   /// Low-pass weight for a new offset; 1 trusts every sample.
   final double smoothing;
+
+  /// Smallest backwards jump in source time treated as a clock reset.
+  final Duration resetThreshold;
 
   int? _offsetNs;
   int? _lastSourceNs;
@@ -33,19 +39,28 @@ class SourceClockAligner {
 
   /// Maps [sourceTimeNs] to the host clock, using [hostTimeNs] as the arrival
   /// estimate. A rejected outlier is still mapped with the previous offset;
-  /// it is never dropped or allowed to move time backwards.
+  /// it is never dropped. Delayed out-of-order frames are mapped with the
+  /// existing offset so they do not re-stamp the whole stream.
   int align({required int sourceTimeNs, required int hostTimeNs}) {
     final previousSource = _lastSourceNs;
-    _lastSourceNs = sourceTimeNs;
-
     final offset = _offsetNs;
-    if (offset == null ||
-        (previousSource != null && sourceTimeNs < previousSource)) {
-      final rebased = hostTimeNs - sourceTimeNs;
-      _offsetNs = rebased;
+    if (offset == null) {
+      _lastSourceNs = sourceTimeNs;
+      _offsetNs = hostTimeNs - sourceTimeNs;
       return hostTimeNs;
     }
 
+    if (previousSource != null && sourceTimeNs < previousSource) {
+      final backwardsNs = previousSource - sourceTimeNs;
+      if (backwardsNs <= resetThreshold.inMicroseconds * 1000) {
+        return sourceTimeNs + offset;
+      }
+      _lastSourceNs = sourceTimeNs;
+      _offsetNs = hostTimeNs - sourceTimeNs;
+      return hostTimeNs;
+    }
+
+    _lastSourceNs = sourceTimeNs;
     final rawOffset = hostTimeNs - sourceTimeNs;
     final delta = rawOffset - offset;
     if (delta.abs() > maxCorrection.inMicroseconds * 1000) {

@@ -219,7 +219,7 @@ final hostNs = aligner.align(sourceTimeNs: frame.timeNs, hostTimeNs: arrivalNs);
 fuser.onTrackingFrame(frame.withHostTime(hostNs));
 ```
 
-`SourceClockAligner` seeds the offset from the first frame, low-pass filters jitter, rejects jumps larger than 50 ms, and rebases if the source clock goes backwards (device/session restart). The contract is documented on `TrackingFrame`: source time in nanoseconds, host time optional, both monotonic.
+`SourceClockAligner` seeds the offset from the first frame, low-pass filters jitter, rejects jumps larger than 50 ms, and rebases only when the source clock jumps backwards by more than a second (device/session restart); smaller backwards steps are delayed frames mapped with the existing offset. The contract is documented on `TrackingFrame`: source time in nanoseconds, host time optional, both monotonic.
 
 ### Fusion and confidence
 

@@ -33,14 +33,27 @@ void main() {
     expect(aligner.offsetNs, 4999000);
   });
 
-  test('a source clock reset rebases', () {
+  test('a delayed frame is mapped with the existing offset', () {
     final aligner = SourceClockAligner();
-    aligner.align(sourceTimeNs: 1000000, hostTimeNs: 2000000);
+    aligner.align(sourceTimeNs: 2000000000, hostTimeNs: 5000000000);
 
-    final host = aligner.align(sourceTimeNs: 1000, hostTimeNs: 2500000);
+    final host = aligner.align(
+      sourceTimeNs: 1999900000,
+      hostTimeNs: 5000500000,
+    );
 
-    expect(host, 2500000);
-    expect(aligner.offsetNs, 2499000);
+    expect(host, 1999900000 + 3000000000);
+    expect(aligner.offsetNs, 3000000000);
+  });
+
+  test('a source clock reset beyond the threshold rebases', () {
+    final aligner = SourceClockAligner();
+    aligner.align(sourceTimeNs: 2000000000, hostTimeNs: 5000000000);
+
+    final host = aligner.align(sourceTimeNs: 1000, hostTimeNs: 5500000000);
+
+    expect(host, 5500000000);
+    expect(aligner.offsetNs, 5499999000);
   });
 
   test('reset forgets the offset', () {

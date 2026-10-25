@@ -57,9 +57,7 @@ class Pose {
       Pose(translation: translation + offset, rotation: rotation);
 
   /// JSON form: translation `[x, y, z]` in metres and rotation
-  /// `[x, y, z, w]`. The quaternion order is the one used by the vendor
-  /// bridge protocol in `docs/TRACKING.md`, not vector_math's constructor
-  /// order.
+  /// `[x, y, z, w]`, matching vector_math's quaternion component order.
   Map<String, Object?> toJson() => {
     't': [translation.x, translation.y, translation.z],
     'q': [rotation.x, rotation.y, rotation.z, rotation.w],
@@ -74,7 +72,7 @@ class Pose {
     final q = _four(json['q'], 'q');
     return Pose(
       translation: Vector3(t[0], t[1], t[2]),
-      rotation: Quaternion(q[3], q[0], q[1], q[2]),
+      rotation: Quaternion(q[0], q[1], q[2], q[3]),
     );
   }
 

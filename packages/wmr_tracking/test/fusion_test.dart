@@ -115,6 +115,50 @@ void main() {
     expect(pose.position, _vector(0.2, 1.35, -0.3));
   });
 
+  test(
+    'a head-relative fallback does not bias the first anchored position',
+    () {
+      final fuser = SixDofFuser();
+      fuser.onTrackingFrame(
+        _frame(
+          1000,
+          head: Pose(
+            translation: Vector3(0, 1.6, 0),
+            rotation: Quaternion.identity(),
+          ),
+        ),
+      );
+      final fallback = fuser.update(
+        hand: TrackedHand.right,
+        orientation: Quaternion.identity(),
+        hostTimeNs: 1000,
+      );
+      expect(fallback.source, ControllerPoseSource.headRelative);
+      expect(fallback.position, _vector(0.2, 1.35, -0.3));
+
+      fuser.onTrackingFrame(
+        _frame(
+          2000,
+          right: _hand(
+            TrackedHand.right,
+            Pose(
+              translation: Vector3(0.5, 1.2, -0.4),
+              rotation: Quaternion.identity(),
+            ),
+          ),
+        ),
+      );
+      final anchored = fuser.update(
+        hand: TrackedHand.right,
+        orientation: Quaternion.identity(),
+        hostTimeNs: 2000,
+      );
+
+      expect(anchored.source, ControllerPoseSource.handAnchor);
+      expect(anchored.position, _vector(0.5, 1.18, -0.46));
+    },
+  );
+
   test('the learned head-local offset follows a moved head', () {
     final fuser = SixDofFuser();
     fuser.onTrackingFrame(
