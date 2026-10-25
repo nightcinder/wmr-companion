@@ -103,4 +103,14 @@ class ProtocolTest {
         assertEquals(100L, Protocol.tickDelta(500L, 600L))
         assertEquals(1L, Protocol.tickDelta(0xFFFFFFFFL, 0L))
     }
+
+    @Test
+    fun testBridgeAdvertisementMatching() {
+        assertTrue(Protocol.isWmrBridgeAdvertisement("WMR Bridge", emptyList()))
+        assertTrue(Protocol.isWmrBridgeAdvertisement("WMR Bridge L", null))
+        assertTrue(Protocol.isWmrBridgeAdvertisement("WMR Bridge R", null))
+        assertTrue(Protocol.isWmrBridgeAdvertisement(null, listOf(Protocol.WMR_SERVICE_UUID)))
+        assertEquals(false, Protocol.isWmrBridgeAdvertisement("Other Device", emptyList()))
+        assertEquals(false, Protocol.isWmrBridgeAdvertisement(null, null))
+    }
 }
