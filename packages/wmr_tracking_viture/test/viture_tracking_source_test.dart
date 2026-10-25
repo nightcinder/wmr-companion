@@ -184,6 +184,35 @@ void main() {
     },
   );
 
+  test('an unreported or unknown glasses model maps to TrackingExceptionKind.unsupported', () async {
+    const unknownCapabilities = <String, Object?>{
+      'unityAvailable': true,
+      'supported': false,
+      'handTracking': false,
+      'headTracking': false,
+      'handGestures': false,
+      'passthroughCamera': false,
+      'handJointCount': 0,
+      'glassesModel': 'Unknown',
+      'reason': 'VITURE hand tracking requires LumaUltra on Pro Neckband (found Unknown)',
+      'permissions': <String, Object?>{'camera': 'granted'},
+    };
+
+    await expectLater(
+      VitureNeckbandTrackingSource.create(
+        enabled: true,
+        platform: _FakeViturePlatform(capabilities: unknownCapabilities),
+      ),
+      throwsA(
+        isA<TrackingException>().having(
+          (error) => error.kind,
+          'kind',
+          TrackingExceptionKind.unsupported,
+        ),
+      ),
+    );
+  });
+
   test(
     'an unlinked Unity UaaL runtime maps to TrackingExceptionKind.unavailable',
     () async {

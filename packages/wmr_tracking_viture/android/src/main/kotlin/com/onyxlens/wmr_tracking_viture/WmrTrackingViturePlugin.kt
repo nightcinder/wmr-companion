@@ -172,7 +172,7 @@ class WmrTrackingViturePlugin internal constructor(
                 "permissions" to permissions,
             )
         }
-        val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel() ?: "LumaUltra")
+        val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
         val supported = modelSpec.head6Dof && modelSpec.handTracking
         return mapOf(
             "unityAvailable" to true,
@@ -260,8 +260,8 @@ class WmrTrackingViturePlugin internal constructor(
         return true
     }
 
-    private fun startUnityRelay(reply: StartReply) {
-        val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel() ?: "LumaUltra")
+    internal fun startUnityRelay(reply: StartReply) {
+        val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
         if (!modelSpec.handTracking || !modelSpec.head6Dof) {
             reply.error(
                 ERROR_UNSUPPORTED,

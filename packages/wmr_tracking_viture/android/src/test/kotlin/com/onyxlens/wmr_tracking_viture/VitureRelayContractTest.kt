@@ -70,6 +70,22 @@ class VitureRelayContractTest {
     }
 
     @Test
+    fun nullOrUnreportedGlassesModelDefaultsToUnknownSpec() {
+        val nullSpec = VitureGlassesModelSpec.fromSdkName(null)
+        assertEquals(VitureGlassesModelSpec.UNKNOWN, nullSpec)
+        assertFalse(nullSpec.head6Dof)
+        assertFalse(nullSpec.handTracking)
+        assertEquals(0, nullSpec.handJointCount)
+        assertEquals("Unknown", nullSpec.sdkName)
+
+        val emptySpec = VitureGlassesModelSpec.fromSdkName("  ")
+        assertEquals(VitureGlassesModelSpec.UNKNOWN, emptySpec)
+
+        val unknownSpec = VitureGlassesModelSpec.fromSdkName("UnrecognizedModel")
+        assertEquals(VitureGlassesModelSpec.UNKNOWN, unknownSpec)
+    }
+
+    @Test
     fun relayCommandsFormatValidJsonEnvelopes() {
         assertEquals(
             """{"v":1,"cmd":"start","vendor":"viture","options":{"filter_mode":"responsive","aim_sensitivity":"high"}}""",
