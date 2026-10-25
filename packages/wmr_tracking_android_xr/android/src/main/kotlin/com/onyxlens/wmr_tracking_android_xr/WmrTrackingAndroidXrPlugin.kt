@@ -90,6 +90,10 @@ internal object AndroidXrJoints {
  * A Jetpack XR [Session] is tied to the activity that created it. Activity
  * recreation therefore stops tracking and reports `unavailable`; the Dart
  * source must start again, which is idempotent.
+ *
+ * `dispose` is terminal for that Dart source: `start` reports `closed`.
+ * [capabilities] is the create handshake, so it begins a new lifecycle and a
+ * later source on the same engine can start normally.
  */
 class WmrTrackingAndroidXrPlugin :
     FlutterPlugin,
@@ -166,10 +170,12 @@ class WmrTrackingAndroidXrPlugin :
             "capabilities" -> result.success(capabilities())
             "start" -> start(result)
             "stop" -> {
+                failPendingStart()
                 stopTracking(reportError = false)
                 result.success(null)
             }
             "dispose" -> {
+                failPendingStart()
                 stopTracking(reportError = false)
                 disposed = true
                 result.success(null)
@@ -179,6 +185,11 @@ class WmrTrackingAndroidXrPlugin :
     }
 
     private fun capabilities(): Map<String, Any?> {
+        // AndroidXrTrackingSource.create() calls capabilities() as its
+        // handshake. That begins a new source lifecycle: `disposed` only
+        // rejects further use of the instance that was disposed, not every
+        // later source on the same Flutter engine.
+        disposed = false
         val context = activity ?: appContext ?: return mapOf(
             "supported" to false,
             "handTracking" to false,
@@ -366,8 +377,10 @@ class WmrTrackingAndroidXrPlugin :
     private suspend fun collectHead(xrSession: Session) {
         ArDevice.getInstance(xrSession).state.collect { state ->
             head = when (state.trackingState) {
-                TrackingState.TRACKING -> poseJson(toActivity(xrSession, state.devicePose), "high")
-                TrackingState.PAUSED -> poseJson(toActivity(xrSession, state.devicePose), "low")
+                TrackingState.TRACKING ->
+                    activityPoseJson(xrSession, state.devicePose, "high")
+                TrackingState.PAUSED ->
+                    activityPoseJson(xrSession, state.devicePose, "low")
                 else -> null
             }
             if (started) emitFrame()
@@ -390,12 +403,21 @@ class WmrTrackingAndroidXrPlugin :
             .put("joints", joints)
     }
 
-    private fun toActivity(xrSession: Session, pose: Pose): Pose =
+    /** Returns the pose in activity space, or null when the transform fails. */
+    private fun toActivity(xrSession: Session, pose: Pose): Pose? =
         try {
             xrSession.scene.perceptionSpace.transformPoseTo(pose, xrSession.scene.activitySpace)
         } catch (_: Exception) {
-            pose
+            // Emitting the perception-space pose would label it activity space
+            // with `high` confidence. Drop the frame's pose instead.
+            null
         }
+
+    private fun activityPoseJson(
+        xrSession: Session,
+        pose: Pose,
+        confidence: String,
+    ): JSONObject? = toActivity(xrSession, pose)?.let { poseJson(it, confidence) }
 
     private fun emitFrame() {
         if (!started) return
@@ -429,7 +451,7 @@ class WmrTrackingAndroidXrPlugin :
     private fun failPendingStart() {
         val pending = pendingStart ?: return
         pendingStart = null
-        pending.error(ERROR_UNAVAILABLE, "Android XR activity was detached", null)
+        pending.error(ERROR_UNAVAILABLE, "Android XR start was cancelled", null)
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
