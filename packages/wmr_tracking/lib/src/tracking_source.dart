@@ -37,8 +37,9 @@ class TrackingException implements Exception {
 ///
 /// Implementations live outside this pure-Dart package: an Android XR app can
 /// wrap ARCore for Jetpack XR behind a Flutter method/event channel, Viture
-/// can wrap its C SDK with FFI, and XREAL's Unity-only SDK needs a sidecar
-/// relay. `FakeTrackingSource` covers tests and UI development.
+/// can wrap its C SDK with FFI, and the Unity-only SDKs (XREAL, RayNeo, Rokid,
+/// VITURE Pro Neckband) need an embedded Unity build or a sidecar relay.
+/// `FakeTrackingSource` covers tests and UI development.
 ///
 /// Lifecycle: [start] subscribes to the platform, [frames] is a broadcast
 /// stream, [stop] releases the platform subscription and [dispose] is final.

@@ -18,6 +18,12 @@ enum TrackingVendor {
   /// XREAL SDK for Unity (NRSDK 2.x and XREAL SDK 3.x).
   xreal,
 
+  /// RayNeo OpenXR ARDK for Unity (X-Series) or the RayNeo Android SDK.
+  rayneo,
+
+  /// Rokid UXR SDK for Unity on YodaOS-Master (AR Studio / AR Lite).
+  rokid,
+
   /// VITURE XR Glasses SDK (C) or VITURE XR SDK for Unity.
   viture,
 

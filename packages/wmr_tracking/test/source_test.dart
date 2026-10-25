@@ -52,6 +52,25 @@ void main() {
     expect(xrealOne.capabilities.hasHead6Dof, isTrue);
     expect(xrealOne.capabilities.hasHandTracking, isFalse);
 
+    final rayneo = knownTrackingProfiles.firstWhere(
+      (profile) => profile.id == 'rayneo-x3-pro',
+    );
+    expect(rayneo.vendor, TrackingVendor.rayneo);
+    expect(rayneo.capabilities.hasHead6Dof, isTrue);
+    expect(rayneo.capabilities.hasHandTracking, isFalse);
+    expect(
+      rayneo.capabilities.supports(TrackingFeature.passthroughCamera),
+      isTrue,
+    );
+
+    final rokid = knownTrackingProfiles.firstWhere(
+      (profile) => profile.id == 'rokid-ar-studio',
+    );
+    expect(rokid.vendor, TrackingVendor.rokid);
+    expect(rokid.capabilities.hasHead6Dof, isTrue);
+    expect(rokid.capabilities.supports(TrackingFeature.handGestures), isTrue);
+    expect(rokid.capabilities.hasHandTracking, isFalse);
+
     final vitureC = knownTrackingProfiles.firstWhere(
       (profile) => profile.id == 'viture-luma-ultra-c',
     );

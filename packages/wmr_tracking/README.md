@@ -7,8 +7,8 @@ yet; no vendor adapter has been run on hardware. The research and integration pl
 
 ## What it does
 
-- `TrackingSource`: one interface per runtime (Android XR, XREAL, VITURE or a
-  relay), with declared `TrackingCapabilities`.
+- `TrackingSource`: one interface per runtime (Android XR, XREAL, RayNeo,
+  Rokid, VITURE or a relay), with declared `TrackingCapabilities`.
 - `TrackingFrame` / `HandPose` / `TrackedPose`: normalised OpenXR-style poses
   (metres, +X right, +Y up, -Z forward) and 26 OpenXR-named hand joints.
 - `SourceClockAligner`: maps a vendor timestamp domain onto the host monotonic
@@ -18,10 +18,12 @@ yet; no vendor adapter has been run on hardware. The research and integration pl
 - `TrackingFrameCodec` / `RelayTrackingSource`: versioned JSON and a source that decodes it, for a native plugin or Unity sidecar.
 - `FakeTrackingSource`: hardware-free tests and UI development.
 
-No vendor SDK is bundled. That is deliberate: XREAL and VITURE hand tracking
-are Unity-only today, VITURE's C SDK exposes head pose but not hands, and
-Android XR needs a Kotlin plugin. The package makes the fusion side stable while
-those adapters are added.
+No vendor SDK is bundled. That is deliberate: XREAL, RayNeo, Rokid and VITURE
+hand tracking are Unity-only today, VITURE's C SDK exposes head pose but not
+hands, and Android XR needs a Kotlin plugin. The package makes the fusion side
+stable while those adapters are added. Kotlin and Unity belong in sibling
+Flutter plugin packages; see the packaging section of
+[`docs/TRACKING.md`](../../docs/TRACKING.md#packaging-kotlin-and-unity-inside-a-flutter-plugin).
 
 ## Usage
 

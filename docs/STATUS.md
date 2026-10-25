@@ -152,10 +152,10 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 
 ## 6DoF tracking framework (ONY-202, 2026-10-25)
 
-`packages/wmr_tracking` and `WmrCompanion.attachTrackingSource` add a vendor-neutral seam for headset head/hand tracking and fuse it with the controller IMU. The deep dive, vendor capability matrix and adapter recipes are in [TRACKING.md](TRACKING.md). This is **desk research plus a unit-tested framework**: no headset, glasses or vendor SDK has been run, and no vendor adapter ships in this repo. The implemented paths are:
+`packages/wmr_tracking` and `WmrCompanion.attachTrackingSource` add a vendor-neutral seam for headset head/hand tracking and fuse it with the controller IMU. The deep dive, vendor capability matrix and adapter recipes are in [TRACKING.md](TRACKING.md). The research now covers Android XR, XREAL, RayNeo, Rokid and VITURE, and concludes that Kotlin plugins and Unity-as-a-Library both fit in a Flutter plugin package; VITURE hand tracking requires the Pro Neckband. This is **desk research plus a unit-tested framework**: no headset, glasses or vendor SDK has been run, and no vendor adapter ships in this repo. The implemented paths are:
 
 - `runtimeController` (reserved; no runtime tracks WMR controllers),
-- `handAnchor` (palm/grip plus a grip offset; needs Android XR or XREAL hand tracking),
+- `handAnchor` (palm/grip plus a grip offset; needs Android XR, XREAL Air 2 Ultra or a VITURE Pro Neckband),
 - `headRelative` (head pose plus a learned head-local offset; **not** true positional tracking),
 - `orientationOnly` (the existing 3DoF behaviour).
 
@@ -174,7 +174,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - Per-bridge attribution on multi-bridge hardware (PR #51).
 - Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
 - `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); no rename made.
-- Headset head/hand tracking on any device, and every vendor adapter path in [TRACKING.md](TRACKING.md): Android XR permissions/session, XREAL Unity hand tracking, VITURE Carina pose and stereo frames. The framework itself is unit-tested only.
+- Headset head/hand tracking on any device, and every vendor adapter path in [TRACKING.md](TRACKING.md): Android XR permissions/session, XREAL Unity hand tracking, RayNeo ARDK head pose, Rokid UXR gestures, VITURE Carina pose/stereo frames and VITURE Neckband Unity hands. The framework itself is unit-tested only.
 
 ## Where things are
 
