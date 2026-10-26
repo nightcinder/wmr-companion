@@ -11,6 +11,7 @@ export 'src/codec.dart';
 export 'src/fusion.dart';
 export 'src/one_euro.dart';
 export 'src/pose.dart';
+export 'src/pose_recording.dart';
 export 'src/profiles.dart';
 export 'src/tracking_source.dart';
 export 'src/tracking_types.dart';

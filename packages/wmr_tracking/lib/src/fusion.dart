@@ -70,6 +70,47 @@ class ControllerPose {
     if (frameAgeNs != null) 'frame_age_ns': frameAgeNs,
   };
 
+  /// Parses [toJson]. Throws [FormatException] on a malformed value.
+  factory ControllerPose.fromJson(Object? json) {
+    if (json is! Map) {
+      throw const FormatException('controller pose must be an object');
+    }
+    final hand = _enumValue(TrackedHand.values, json['hand'], 'hand');
+    final hostTimeNs = json['host_time_ns'];
+    if (hostTimeNs is! int || hostTimeNs < 0) {
+      throw const FormatException(
+        'host_time_ns must be a non-negative integer',
+      );
+    }
+    final orientation = _quaternion(json['orientation'], 'orientation');
+    final rawPosition = json['position'];
+    final position = rawPosition == null
+        ? null
+        : () {
+            final values = _vector(rawPosition, 'position');
+            return Vector3(values[0], values[1], values[2]);
+          }();
+    final frameAgeNs = json['frame_age_ns'];
+    if (frameAgeNs != null && (frameAgeNs is! int || frameAgeNs < 0)) {
+      throw const FormatException(
+        'frame_age_ns must be a non-negative integer',
+      );
+    }
+    return ControllerPose(
+      hand: hand,
+      hostTimeNs: hostTimeNs,
+      orientation: orientation,
+      position: position,
+      source: _enumValue(ControllerPoseSource.values, json['source'], 'source'),
+      confidence: _enumValue(
+        TrackingConfidence.values,
+        json['confidence'],
+        'confidence',
+      ),
+      frameAgeNs: frameAgeNs as int?,
+    );
+  }
+
   @override
   String toString() =>
       'ControllerPose(${hand.name}, $source, $confidence, '
@@ -370,4 +411,42 @@ class SixDofFuser {
     }
     return best;
   }
+}
+
+T _enumValue<T extends Enum>(List<T> values, Object? value, String name) {
+  if (value is! String) {
+    throw FormatException('$name must be a string');
+  }
+  for (final candidate in values) {
+    if (candidate.name == value) return candidate;
+  }
+  throw FormatException('unknown $name: $value');
+}
+
+List<double> _vector(Object? value, String name) {
+  if (value is! List || value.length != 3) {
+    throw FormatException('$name must contain three numbers');
+  }
+  final out = <double>[];
+  for (final element in value) {
+    if (element is! num || !element.isFinite) {
+      throw FormatException('$name must contain finite numbers');
+    }
+    out.add(element.toDouble());
+  }
+  return out;
+}
+
+Quaternion _quaternion(Object? value, String name) {
+  if (value is! List || value.length != 4) {
+    throw FormatException('$name must contain four numbers');
+  }
+  final out = <double>[];
+  for (final element in value) {
+    if (element is! num || !element.isFinite) {
+      throw FormatException('$name must contain finite numbers');
+    }
+    out.add(element.toDouble());
+  }
+  return Quaternion(out[0], out[1], out[2], out[3]);
 }

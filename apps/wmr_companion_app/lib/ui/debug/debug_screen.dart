@@ -18,6 +18,7 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'config_panel.dart';
 import 'controller_panel.dart';
 import 'debug_providers.dart';
+import 'pose_recorder_panel.dart';
 import 'stream_settings.dart';
 
 const _handNames = ['LEFT', 'RIGHT'];
@@ -167,6 +168,8 @@ class DebugScreen extends ConsumerWidget {
             'roll ${_deg(euler.rollDeg)}',
             style: mono,
           ),
+          const SizedBox(height: 8),
+          PoseRecorderPanel(source: source),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
