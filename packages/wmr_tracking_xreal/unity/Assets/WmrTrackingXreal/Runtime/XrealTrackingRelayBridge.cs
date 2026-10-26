@@ -34,7 +34,24 @@ namespace OnyxLens.WmrTrackingXreal
             "com.onyxlens.wmr_tracking_xreal.WmrTrackingXrealPlugin";
 
         private bool _running;
+        private bool _applicationPaused;
         private Transform _headTransform;
+
+        /// <summary>True while a `start` command has been accepted and not stopped.</summary>
+        public bool IsRunning => _running;
+
+        /// <summary>
+        /// Raised on the Unity main thread with the exact JSON frame that is
+        /// sent to Kotlin. The editor smoke scene subscribes to log frames;
+        /// production hosts may ignore it.
+        /// </summary>
+        public event Action<string> FrameEmitted;
+
+        /// <summary>
+        /// Raised with (`code`, `message`) whenever the bridge reports an error
+        /// to Kotlin, so the smoke scene can surface the same failure locally.
+        /// </summary>
+        public event Action<string, string> ErrorReported;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
         private AndroidJavaClass _pluginClass;
@@ -207,8 +224,23 @@ namespace OnyxLens.WmrTrackingXreal
 
         private void Update()
         {
-            if (!_running) return;
+            if (!_running || _applicationPaused) return;
             EmitCurrentFrame();
+        }
+
+        /// <summary>
+        /// Keeps the relay running across Android pause/resume. The XR Hands
+        /// subsystem is left running; frame emission stops while the player is
+        /// paused and resumes on the next Update after unpause.
+        /// </summary>
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            _applicationPaused = pauseStatus;
+            Debug.Log(
+                "[WmrTrackingXreal] application " +
+                (pauseStatus ? "paused" : "resumed") +
+                "; relayRunning=" + _running
+            );
         }
 
         /// <summary>
@@ -278,7 +310,9 @@ namespace OnyxLens.WmrTrackingXreal
             }
 #endif
             sb.Append('}');
-            SendFrameToKotlin(sb.ToString());
+            string frameJson = sb.ToString();
+            FrameEmitted?.Invoke(frameJson);
+            SendFrameToKotlin(frameJson);
         }
 
 #if WMR_UNITY_XR_HANDS
@@ -375,6 +409,7 @@ namespace OnyxLens.WmrTrackingXreal
 
         private void ReportError(string code, string message)
         {
+            ErrorReported?.Invoke(code, message);
 #if UNITY_ANDROID && !UNITY_EDITOR
             GetPluginClass()?.CallStatic("onUnityError", code, message);
 #endif

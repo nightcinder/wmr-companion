@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add a minimal Unity 6000.0 smoke project, frame/error events and pause/resume
+  handling in the C# relay bridge, plus an editor script that exports the
+  `unityLibrary` Gradle module for the Flutter host.
+
 ## 0.1.0
 
 - Add the default-off VITURE Pro Neckband head and 26-joint hand

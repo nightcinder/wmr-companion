@@ -48,3 +48,10 @@ and Unity XR Hands + XRI installed. None of this has run on an Air 2 Ultra or a
 supported phone. The Unity 2021.3+/6000.0 UaaL export and the proprietary XREAL
 SDK (`com.xreal.xr`) are external SDK gates; Kotlin and Dart compile and pass
 host/JVM tests without requiring the proprietary AAR at build time.
+
+## Unity smoke project
+
+`unity/` is a minimal Unity 6000.0 project with the relay bridge, a smoke scene
+that sends `start`, logs frames and survives pause/resume, and an editor script
+that exports the `unityLibrary` Gradle module. Import and export steps are in
+[`unity/README.md`](unity/README.md). The XREAL SDK is not vendored.

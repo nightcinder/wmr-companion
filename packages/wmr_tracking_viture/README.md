@@ -47,6 +47,13 @@ Failures are typed `TrackingException`s:
   VITURE slice can exclude it using `tools:node="remove"`.
 - `protocol`: a relay frame or capability handshake was malformed.
 
+## Unity smoke project
+
+`unity/` is a minimal Unity 6000.0 project with the relay bridge, a smoke scene
+that sends `start`, logs frames and survives pause/resume, and an editor script
+that exports the `unityLibrary` Gradle module. Import and export steps are in
+[`unity/README.md`](unity/README.md). The VITURE XR SDK is not vendored.
+
 Nothing in this package has run on a VITURE Pro Neckband or glasses. The Unity
 6000.0+ UaaL export and proprietary VITURE Unity SDK (`com.viture.xr` v0.7.0)
 are external SDK gates; Kotlin and Dart compile and pass host/JVM tests without
