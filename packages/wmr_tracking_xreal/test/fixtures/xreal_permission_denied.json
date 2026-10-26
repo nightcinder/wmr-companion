@@ -1,0 +1,4 @@
+{
+  "platform_code": "permissionDenied",
+  "message": "XREAL camera permission was denied: android.permission.CAMERA"
+}

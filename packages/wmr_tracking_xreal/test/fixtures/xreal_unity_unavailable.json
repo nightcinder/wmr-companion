@@ -1,0 +1,9 @@
+{
+  "unityAvailable": false,
+  "supported": false,
+  "handTracking": false,
+  "headTracking": false,
+  "handJointCount": 0,
+  "glassesModel": "Unknown",
+  "reason": "XREAL Unity UaaL runtime (com.unity3d.player.UnityPlayer) is not linked"
+}

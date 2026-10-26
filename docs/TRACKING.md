@@ -182,11 +182,11 @@ The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_trac
 
 ## The framework
 
-`packages/wmr_tracking` is pure Dart, depends only on `vector_math`, and is publishable but not on pub.dev (like the other packages, on owner hold). `packages/wmr_tracking_android_xr` is the optional Flutter plugin around it and adds `androidx.xr.runtime`, `androidx.xr.arcore` and `androidx.xr.scenecore` 1.0.0. `packages/wmr_tracking_viture` is the optional Flutter plugin for the VITURE Pro Neckband Unity UaaL relay. Both sit below the facade:
+`packages/wmr_tracking` is pure Dart, depends only on `vector_math`, and is publishable but not on pub.dev (like the other packages, on owner hold). `packages/wmr_tracking_android_xr` is the optional Flutter plugin around it and adds `androidx.xr.runtime`, `androidx.xr.arcore` and `androidx.xr.scenecore` 1.0.0. `packages/wmr_tracking_viture` is the optional Flutter plugin for the VITURE Pro Neckband Unity UaaL relay, and `packages/wmr_tracking_xreal` is the optional Flutter plugin for the XREAL Air 2 Ultra Unity UaaL relay. All three sit below the facade:
 
 ```
 Android XR plugin ──┤ (implemented)
-XREAL Unity ────────┤
+XREAL Unity ────────┤ (implemented)
 RayNeo Unity ───────┤   TrackingFrame (OpenXR axes, metres, host-clock estimate)
 Rokid Unity ────────┤
 VITURE Unity ───────┼─> TrackingSource ──> SourceClockAligner ──> SixDofFuser
@@ -286,7 +286,7 @@ The facade owns the source (start, alignment, stop and dispose), emits one `Cont
 
 **Rokid AR Studio.** Embed a UXR 3.0 Unity scene. Use head pose for the origin; wire gesture events to UI actions, not to the controller anchor. If Rokid later exposes joints, the profile can move from `handGestures` to `handJoints` without a fusion change.
 
-**XREAL (defer).** There is no supported Flutter route. If the project later wants it, a Unity sidecar can emit `TrackingFrameCodec` JSON; otherwise a native port is required. Air 2 Ultra is the only hand-tracking model.
+**XREAL Air 2 Ultra.** `packages/wmr_tracking_xreal` embeds a one-scene Unity UaaL relay and reuses the shared `UnityRelayCommand` / `UnityRelayFrameCodec` contract. The C# bridge reads the head pose and the 26 `XRHandJointID` joints from the XREAL XR Hands subsystem, converts Unity to OpenXR space, and calls back through JNI. The Unity project must set **Initial Input Source = Hands**; the bridge does not switch input source at runtime. See the vertical-slice section below.
 
 **Relay/native test.** `TrackingFrameCodec.encodeToString` / `decodeString` is the wire contract. It is versioned (`v: 1`), uses metres and `[x, y, z, w]` quaternions, and ignores unknown joints for forward compatibility.
 
@@ -354,6 +354,41 @@ Explicit unknowns and SDK-bound gates:
 - **External SDK gate:** Unity 6000.0+ Android build support, `com.unity.xr.hands`, and the VITURE XR SDK for Unity v0.7.0 (`com.viture.xr`) are not redistributable in this repo. `WmrTrackingViturePlugin` isolates `com.unity3d.player.UnityPlayer` behind `VitureUnityBridge` so standard CI builds and tests pass, and reports `TrackingExceptionKind.unavailable` when `unityLibrary` is not linked.
 - **Undocumented vendor parameters:** Unity head and hand update rates on the Pro Neckband are not stated in VITURE's public docs (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); Android permissions required by the VITURE Unity runtime beyond `android.permission.CAMERA` are not documented; and whether a hand gripping a WMR controller stays tracked by `VitureXR.HandTracking` is unproven.
 
+## XREAL Air 2 Ultra vertical slice (ONY-214)
+
+What landed, and what remains an external SDK or hardware gate:
+
+| Piece | State |
+|---|---|
+| Reusable Unity relay contract (`UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`) | Reused from `packages/wmr_tracking` (ONY-213); no public API change |
+| Unity → OpenXR conversion (`p=(x,y,z) -> (x,y,-z)`, `q=(qx,qy,qz,qw) -> (-qx,-qy,qz,qw)`) | Implemented in Kotlin and C# (the C# bridge emits `"space": "openxr"`); Dart also converts `"space": "unity"` sidecar frames; verified within `1e-6` with round-trip (`frame_conversion`) |
+| Dart `XrealAir2UltraTrackingSource`, default-off `WMR_XREAL_TRACKING` flag, typed errors | Implemented in `packages/wmr_tracking_xreal` and host-tested |
+| Glasses capability matrix | `Air2Ultra` only advertises 6DoF head + 26 hands; `One`/`OnePro` report 6DoF head only (XREAL Eye); `Air`/`Air2`/`Air2Pro`/`Light` report 3DoF head only. All non-Ultra models fail `create()` with `unsupported` |
+| Kotlin `WmrTrackingXrealPlugin`, camera permission gate (`PendingStartGate`), reflective `UnitySendMessage` bridge | Implemented and JVM-tested; compiles without the proprietary `unityLibrary` AAR |
+| Minimal Unity C# bridge (`XrealTrackingRelayBridge.cs` + `.asmdef`) | Implemented in `packages/wmr_tracking_xreal/unity/`; reads `XREALPlugin.GetDeviceType()` and the running `XRHandSubsystem`. Unity 2021.3+/6000.0 and XREAL SDK 3.x (`com.xreal.xr`) are external SDK gates |
+| Flag-off BLE/3DoF parity | `apps/wmr_companion_app/test/xreal_flag_off_test.dart` replays 400 deterministic bridge ticks, matches PR #78 (`c3be059`) golden orientations, and touches no XREAL channel |
+| Hardware / Unity UaaL smoke test | **Not run** |
+
+Synthetic vectors and fixtures:
+- `packages/wmr_tracking/test/xreal_fixture_test.dart`: `frame_conversion` (Unity `p=(1,2,3)`, `q=(qx,qy,qz,qw)` → OpenXR `(1,2,-3)`, `(-qx,-qy,qz,qw)` within `1e-6` and round-trip), `xreal_26_joint_unity_frame.json` (26 `XRHandJointID` joints + palm anchoring), `xreal_26_joint_grip_frame.json` (grip anchor priority over palm), and `xreal_relay_commands.json` (`start`, `stop`, `dispose` command envelopes).
+- `packages/wmr_tracking_xreal/test/xreal_tracking_source_test.dart`: default-off flag, Air 2 Ultra capabilities, One + Eye rejection (`xreal_one_eye_unsupported.json`), 3DoF Air rejection (`xreal_air2_3dof_unsupported.json`), unlinked Unity UaaL runtime (`xreal_unity_unavailable.json`), camera permission denial (`xreal_permission_denied.json`), idempotent `start`/`stop`/`dispose`, malformed frames and stream error recovery.
+- `packages/wmr_tracking_xreal/android/src/test/kotlin/`: JVM unit tests for 26-joint `XRHandJointID` mapping, Unity→OpenXR conversion, `XrealGlassesModelSpec` (including `XREAL_AIR_2_ULTRA`-style aliases), unreported/null glasses model default, command JSON builders, `WmrTrackingXrealPlugin` capability/start flows and `PendingStartGate`.
+
+Commands used for this slice:
+
+```bash
+cd packages/wmr_tracking && dart analyze && dart test
+cd packages/wmr_tracking_xreal && flutter analyze && flutter test
+cd apps/wmr_companion_app && flutter analyze && flutter test
+cd apps/wmr_companion_app && flutter build apk --debug
+cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_xreal:testDebugUnitTest
+```
+
+Explicit unknowns and SDK-bound gates:
+- **External SDK gate:** Unity 2021.3+/6000.0 Android build support, `com.unity.xr.hands`, and the XREAL SDK for Unity 3.x (`com.xreal.xr`) are not redistributable in this repo. `WmrTrackingXrealPlugin` isolates `com.unity3d.player.UnityPlayer` behind `XrealUnityBridge`, and the C# bridge guards `XREALPlugin.GetDeviceType()` and the XR Hands API behind `WMR_XREAL_XR_SDK` / `WMR_UNITY_XR_HANDS`; CI without the AAR compiles and reports `unavailable`.
+- **Project-setting gate:** the XREAL XR Plug-in must be enabled with **Initial Input Source = Hands**, Unity XR Hands + XRI installed, and `XREAL_DEVICE_CATEGORY_REALITY` included in Support Devices. The bridge does not change the input source at runtime because no runtime API for it was verified; a project left on Controller input reports `unavailable` when `start` cannot find a running `XRHandSubsystem`.
+- **Undocumented vendor parameters:** XREAL does not publish Unity head or hand update rates (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); the Android permissions the XREAL Unity runtime needs are not documented, so `android.permission.CAMERA` is an unverified assumption (declared optional and inert while the flag is off); `XREALPlugin.GetDeviceType()` enum spellings are not fully documented, so both Dart and Kotlin normalise and alias the name and fail closed on anything unrecognised; and whether an Air 2 Ultra keeps tracking a hand gripping a WMR controller is unproven. Passthrough camera frames are not relayed.
+
 ## Gates before calling this 6DoF
 
 The code is a framework, not a hardware result. In order:
@@ -362,12 +397,13 @@ The code is a framework, not a hardware result. In order:
 2. **Android XR plugin smoke test.** Request permissions, configure both modes, and log joint/head rates on a real headset. Confirm whether a hand holding a WMR controller is tracked at all; if not, the hand-anchor path is unusable while gripping.
 3. **Unity-in-Flutter smoke test.** Build a one-scene UaaL plugin, send `start` with `UnitySendMessage`, receive JSON frames back, and log them in Dart. Check the plugin survives Flutter hot restart, activity recreation and Unity pause/resume. This is the gate for VITURE Neckband, XREAL, RayNeo and Rokid.
 4. **VITURE Neckband hand test.** On a Pro Neckband + Luma Ultra, run `VitureXR.HandTracking.Start()`, log `XRHandSubsystem` joints and confirm whether a hand gripping a WMR controller is tracked. This is the only VITURE path that can beat `headRelative`.
-5. **RayNeo and Rokid presence test.** On an X3 Pro, confirm `Algorithm.GetSlamStatus()` reaches `FFVINS_TRACKING_SUCCESS` and capture `HeadTrackedPoseDriver.OnPostUpdate` rate. On Rokid AR Studio, confirm which gestures the UXR `InputManager` emits and whether any joint data is reachable from C#; if it is gesture-only, record that the anchor path is unavailable.
-6. **Clock test.** Log controller `receivedAtUs` and tracking host timestamps together for a minute; check the aligner offset is stable and frames stay within the 100 ms window.
-7. **Fallback quality test.** Compare `headRelative` against a known physical position while nodding and walking. Expect it to fail as positional tracking; record the failure so it is not sold as 6DoF.
-8. **VITURE C path.** Run `get_gl_pose_carina` on an Android phone with Luma Ultra, measure pose rate/status and USB permission behaviour. If it works, it is the lowest-friction phone-only head-pose source.
+5. **XREAL Air 2 Ultra hand test.** On a Beam Pro or S24/S25 with the Air 2 Ultra, set the XREAL input source to Hands, log `XRHandSubsystem` joints and the reported `XREALPlugin.GetDeviceType()` name, and confirm whether a hand gripping a WMR controller is tracked. Also record the actual input-source API, if one exists, and the permissions the runtime requests.
+6. **RayNeo and Rokid presence test.** On an X3 Pro, confirm `Algorithm.GetSlamStatus()` reaches `FFVINS_TRACKING_SUCCESS` and capture `HeadTrackedPoseDriver.OnPostUpdate` rate. On Rokid AR Studio, confirm which gestures the UXR `InputManager` emits and whether any joint data is reachable from C#; if it is gesture-only, record that the anchor path is unavailable.
+7. **Clock test.** Log controller `receivedAtUs` and tracking host timestamps together for a minute; check the aligner offset is stable and frames stay within the 100 ms window.
+8. **Fallback quality test.** Compare `headRelative` against a known physical position while nodding and walking. Expect it to fail as positional tracking; record the failure so it is not sold as 6DoF.
+9. **VITURE C path.** Run `get_gl_pose_carina` on an Android phone with Luma Ultra, measure pose rate/status and USB permission behaviour. If it works, it is the lowest-friction phone-only head-pose source.
 
-Until 1–8 produce reported hardware results, describe the framework as "ready for an adapter", not "6DoF supported".
+Until 1–9 produce reported hardware results, describe the framework as "ready for an adapter", not "6DoF supported".
 
 ## Sources
 

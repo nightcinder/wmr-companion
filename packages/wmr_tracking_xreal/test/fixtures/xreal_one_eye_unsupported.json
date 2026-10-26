@@ -1,0 +1,9 @@
+{
+  "unityAvailable": true,
+  "supported": false,
+  "handTracking": false,
+  "headTracking": true,
+  "handJointCount": 0,
+  "glassesModel": "One",
+  "reason": "XREAL hand tracking requires Air 2 Ultra (found One)"
+}

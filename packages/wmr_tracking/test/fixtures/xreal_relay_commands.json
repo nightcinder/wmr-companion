@@ -1,0 +1,21 @@
+{
+  "game_object": "WmrTrackingRelay",
+  "method": "OnCommand",
+  "commands": [
+    {
+      "v": 1,
+      "cmd": "start",
+      "vendor": "xreal"
+    },
+    {
+      "v": 1,
+      "cmd": "stop",
+      "vendor": "xreal"
+    },
+    {
+      "v": 1,
+      "cmd": "dispose",
+      "vendor": "xreal"
+    }
+  ]
+}
