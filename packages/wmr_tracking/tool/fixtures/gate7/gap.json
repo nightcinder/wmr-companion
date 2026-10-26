@@ -1,0 +1,16 @@
+{
+  "format": "wmr-gate7-clock-fixture",
+  "version": 1,
+  "name": "gap",
+  "capture": "gap.txt",
+  "hand": "right",
+  "head": {
+    "start_source_ns": 1000000000,
+    "start_host_ns": 10000000000,
+    "rate_hz": 30,
+    "duration_s": 60,
+    "jitter_ns": 2000000,
+    "seed": 328,
+    "drift_ns_per_s": 0
+  }
+}

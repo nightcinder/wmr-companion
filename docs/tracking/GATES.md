@@ -10,7 +10,22 @@ The code is a framework, not a hardware result. In order:
 4. **VITURE Neckband hand test.** On a Pro Neckband + Luma Ultra, run `VitureXR.HandTracking.Start()`, log `XRHandSubsystem` joints and confirm whether a hand gripping a WMR controller is tracked. This is the only VITURE path that can beat `headRelative`.
 5. **XREAL Air 2 Ultra hand test.** On a Beam Pro or S24/S25 with the Air 2 Ultra, set the XREAL input source to Hands, log `XRHandSubsystem` joints and the reported `XREALPlugin.GetDeviceType()` name, and confirm whether a hand gripping a WMR controller is tracked. Also record the actual input-source API, if one exists, and the permissions the runtime requests.
 6. **RayNeo and Rokid presence test.** On an X3 Pro, confirm `Algorithm.GetSlamStatus()` reaches `FFVINS_TRACKING_SUCCESS` and capture `HeadTrackedPoseDriver.OnPostUpdate` rate. On Rokid AR Studio, confirm which gestures the UXR `InputManager` emits and whether any joint data is reachable from C#; if it is gesture-only, record that the anchor path is unavailable.
-7. **Clock test.** Log controller `receivedAtUs` and tracking host timestamps together for a minute; check the aligner offset is stable and frames stay within the 100 ms window.
+7. **Clock test.** Log controller `receivedAtUs` and tracking host timestamps
+   together for a minute; check the aligner offset is stable and frames stay
+   within the 100 ms window. The hardware-free replay feeds a recorded
+   controller capture plus a synthetic head trace through the aligner and
+   prints JSON stats; run it from `packages/wmr_tracking`:
+
+   ```sh
+   dart run tool/gate7_clock_replay.dart --fixture tool/fixtures/gate7/stable_offset.json
+   ```
+
+   It exits 0 when the aligner offset standard deviation is under 5 ms and
+   fewer than 1% of frames are older than 100 ms, and names failures in
+   `reasons`. The `drift.json`, `gap.json` and `out_of_window.json` fixtures
+   must exit 1 with `offset_drift`, `controller_gap` and
+   `frame_out_of_window`. A real headset run is still the validation; the
+   replay proves only the aligner and the thresholds.
 8. **Fallback quality test.** Compare `headRelative` against a known physical position while nodding and walking. Expect it to fail as positional tracking; record the failure so it is not sold as 6DoF.
 9. **VITURE C path.** Run `get_gl_pose_carina` on an Android phone with Luma Ultra, measure pose rate/status and USB permission behaviour. If it works, it is the lowest-friction phone-only head-pose source.
 
