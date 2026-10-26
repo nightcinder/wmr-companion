@@ -54,4 +54,4 @@ for arg in "$@"; do
 done
 
 cd "$app_dir"
-exec flutter build apk "$mode" --flavor "$flavor" "${defines[@]}" "${passthrough[@]}"
+exec flutter build apk "$mode" --flavor "$flavor" "${defines[@]}" "${passthrough[@]+"${passthrough[@]}"}"
