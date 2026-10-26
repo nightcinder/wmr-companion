@@ -13,6 +13,7 @@ import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 import '../connect/connect_providers.dart';
+import 'pose_replay.dart';
 import 'stream_settings.dart';
 
 /// Where the debug screen takes its data from.
@@ -280,26 +281,55 @@ class SimulatedSixDof extends Notifier<bool> {
 
 /// One viewer update: the fused pose per hand plus the head that produced it.
 class DebugPoses {
-  const DebugPoses({this.left, this.right, this.head});
+  const DebugPoses({
+    this.left,
+    this.right,
+    this.head,
+    this.tracking,
+    this.replayed = false,
+  });
 
   final ControllerPose? left;
   final ControllerPose? right;
   final Pose? head;
+
+  /// The tracking frame delivered with this tick, if any. Recorded alongside
+  /// the controller poses so a capture keeps its 6DoF anchors.
+  final TrackingFrame? tracking;
+
+  /// Whether these poses came from a recorded file rather than the live
+  /// controller and tracking sources.
+  final bool replayed;
 
   ControllerPose? forHand(int hand) => hand == 0 ? left : right;
 }
 
 /// Poses for the 6DoF viewer.
 ///
-/// Decoded FF12/FF14 samples feed [SixDofFuser] at the controller rate. With
-/// no tracking frames the fuser returns an `orientationOnly` pose; with
-/// [simulatedSixDofProvider] on, a [FakeTrackingSource] emits a deterministic
-/// hand trajectory that lifts it to `handAnchor`. Raw mode has no IMU data,
-/// so the fake bridge keeps its synthetic orientation there.
+/// A loaded recording wins over the live stream and is stepped by
+/// [poseReplayProvider]. Otherwise decoded FF12/FF14 samples feed
+/// [SixDofFuser] at the controller rate. With no tracking frames the fuser
+/// returns an `orientationOnly` pose; with [simulatedSixDofProvider] on, a
+/// [FakeTrackingSource] emits a deterministic hand trajectory that lifts it to
+/// `handAnchor`. Raw mode has no IMU data, so the fake bridge keeps its
+/// synthetic orientation there.
 final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   ref,
   source,
 ) {
+  final replay = ref.watch(poseReplayProvider);
+  final replaySample = replay.sample;
+  if (replay.active) {
+    return Stream.value(
+      DebugPoses(
+        left: replaySample?.left,
+        right: replaySample?.right,
+        head: replaySample?.tracking?.head?.pose,
+        tracking: replaySample?.tracking,
+        replayed: true,
+      ),
+    );
+  }
   final mode = ref.watch(streamModeProvider);
   final decoded = mode.carriesRecords;
   final service = decoded ? ref.watch(controllerServiceProvider(source)) : null;
@@ -311,6 +341,7 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   var trackingStarted = false;
   StreamSubscription<TrackingFrame>? trackingSub;
   Pose? head;
+  TrackingFrame? lastTracking;
 
   Future<void> startTracking() async {
     final source = tracking;
@@ -352,39 +383,39 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
       );
       final sway = math.sin(phase * 1.2);
       final lift = math.cos(phase * 2.0);
-      trackingSource.addFrame(
-        TrackingFrame(
-          timeNs: nowNs,
-          hostTimeNs: nowNs,
-          head: TrackedPose(pose: headPose),
-          leftHand: HandPose(
-            hand: TrackedHand.left,
-            palm: TrackedPose(
-              pose: Pose(
-                translation: Vector3(
-                  -0.18 + sway * 0.12,
-                  -0.25 + lift * 0.06,
-                  -0.35 + sway * 0.10,
-                ),
-                rotation: Quaternion.identity(),
+      final frame = TrackingFrame(
+        timeNs: nowNs,
+        hostTimeNs: nowNs,
+        head: TrackedPose(pose: headPose),
+        leftHand: HandPose(
+          hand: TrackedHand.left,
+          palm: TrackedPose(
+            pose: Pose(
+              translation: Vector3(
+                -0.18 + sway * 0.12,
+                -0.25 + lift * 0.06,
+                -0.35 + sway * 0.10,
               ),
+              rotation: Quaternion.identity(),
             ),
           ),
-          rightHand: HandPose(
-            hand: TrackedHand.right,
-            palm: TrackedPose(
-              pose: Pose(
-                translation: Vector3(
-                  0.18 - sway * 0.12,
-                  -0.25 - lift * 0.06,
-                  -0.35 - sway * 0.10,
-                ),
-                rotation: Quaternion.identity(),
+        ),
+        rightHand: HandPose(
+          hand: TrackedHand.right,
+          palm: TrackedPose(
+            pose: Pose(
+              translation: Vector3(
+                0.18 - sway * 0.12,
+                -0.25 - lift * 0.06,
+                -0.35 - sway * 0.10,
               ),
+              rotation: Quaternion.identity(),
             ),
           ),
         ),
       );
+      trackingSource.addFrame(frame);
+      lastTracking = frame;
       head = headPose;
     }
 
@@ -404,7 +435,14 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
       );
     }
 
-    controller.add(DebugPoses(left: poseFor(0), right: poseFor(1), head: head));
+    controller.add(
+      DebugPoses(
+        left: poseFor(0),
+        right: poseFor(1),
+        head: head,
+        tracking: lastTracking,
+      ),
+    );
   }
 
   controller = StreamController<DebugPoses>(

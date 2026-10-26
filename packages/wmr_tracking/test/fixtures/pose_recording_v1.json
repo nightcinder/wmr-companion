@@ -1,0 +1,170 @@
+{
+  "format": "wmr-pose-recording",
+  "version": 1,
+  "samples": [
+    {
+      "host_ns": 1000,
+      "left": {
+        "hand": "left",
+        "host_time_ns": 1000,
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "source": "orientationOnly",
+        "confidence": "none"
+      },
+      "right": {
+        "hand": "right",
+        "host_time_ns": 1000,
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "source": "orientationOnly",
+        "confidence": "none"
+      }
+    },
+    {
+      "host_ns": 34000000,
+      "left": {
+        "hand": "left",
+        "host_time_ns": 34000000,
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          -0.18,
+          -0.25,
+          -0.35
+        ],
+        "source": "handAnchor",
+        "confidence": "high"
+      },
+      "right": {
+        "hand": "right",
+        "host_time_ns": 34000000,
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.18,
+          -0.25,
+          -0.35
+        ],
+        "source": "handAnchor",
+        "confidence": "high"
+      },
+      "tracking": {
+        "v": 1,
+        "time_ns": 34000000,
+        "host_time_ns": 34000000,
+        "head": {
+          "pose": {
+            "t": [
+              0.0,
+              1.6,
+              0.0
+            ],
+            "q": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "confidence": "high"
+        },
+        "hands": {
+          "left": {
+            "hand": "left",
+            "joints": {},
+            "palm": {
+              "pose": {
+                "t": [
+                  -0.18,
+                  -0.23,
+                  -0.29
+                ],
+                "q": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "confidence": "high"
+            }
+          },
+          "right": {
+            "hand": "right",
+            "joints": {},
+            "palm": {
+              "pose": {
+                "t": [
+                  0.18,
+                  -0.23,
+                  -0.29
+                ],
+                "q": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "confidence": "high"
+            }
+          }
+        }
+      }
+    },
+    {
+      "host_ns": 67000000,
+      "left": {
+        "hand": "left",
+        "host_time_ns": 67000000,
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          -0.3,
+          -0.2,
+          -0.35
+        ],
+        "source": "handAnchor",
+        "confidence": "high"
+      },
+      "right": {
+        "hand": "right",
+        "host_time_ns": 67000000,
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.3,
+          -0.2,
+          -0.35
+        ],
+        "source": "handAnchor",
+        "confidence": "high"
+      }
+    }
+  ]
+}

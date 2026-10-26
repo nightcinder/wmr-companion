@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `PoseRecording`, `PoseRecordingSample` and `PoseRecordingBuilder`: versioned,
+  deterministic JSON recording of fused `ControllerPose`s plus the
+  `TrackingFrame` that positioned them, with typed `PoseRecordingException`
+  errors. `PoseRecording.sampleAt` replays samples as a step function for
+  regression fixtures.
+
 ## 0.1.0
 
 - Initial framework: `TrackingSource` seam, normalised `TrackingFrame` and

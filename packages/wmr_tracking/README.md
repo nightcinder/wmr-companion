@@ -16,6 +16,7 @@ yet; no vendor adapter has been run on hardware. The research and integration pl
 - `SixDofFuser`: combines controller IMU orientation with a runtime controller
   pose, a hand anchor or a head-local fallback, and reports which one it used.
 - `TrackingFrameCodec` / `RelayTrackingSource`: versioned JSON and a source that decodes it, for a native plugin or Unity sidecar.
+- `PoseRecording` / `PoseRecordingBuilder`: versioned JSON capture of fused `ControllerPose`s and their `TrackingFrame`s, deterministic re-encoding and typed decode errors, for the debug screen recorder and committed regression fixtures.
 - `FakeTrackingSource`: hardware-free tests and UI development.
 
 No vendor SDK is bundled. That is deliberate: XREAL, RayNeo, Rokid and VITURE
