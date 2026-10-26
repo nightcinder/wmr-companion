@@ -260,12 +260,12 @@ The facade owns the source (start, alignment, stop and dispose), emits one `Cont
 
 ### Debug viewer and simulator
 
-The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. **Simulated 6DoF** is off by default; when on, a deterministic `FakeTrackingSource` hand trajectory feeds `SixDofFuser` so the viewer moves without a headset. With it off, the viewer shows the controller IMU orientation and an `orientationOnly` badge. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
+The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. A **Tracking source** selector offers None, Simulated, Android XR, VITURE and XREAL and defaults to None, which shows the controller IMU orientation and an `orientationOnly` badge. Selecting a vendor calls that package's `create()` only when its `--dart-define` flag is on, starts the source, aligns its frames to the viewer clock and feeds `SixDofFuser`; a typed `TrackingException` (`unavailable` when the Unity relay is not linked, `unsupported`, `permissionDenied`, `protocol`) is shown in the selector status instead of crashing. Simulated keeps the deterministic `FakeTrackingSource` hand trajectory that moves the viewer without a headset. One APK built with all three flags is safe to run with no Unity runtime linked. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
 
 ### Adapter recipes
 
 **Android XR (implemented first target).**
-1. `packages/wmr_tracking_android_xr` is the Kotlin plugin; `apps/wmr_companion_app` depends on it, but no app code starts it yet.
+1. `packages/wmr_tracking_android_xr` is the Kotlin plugin; the debug screen's tracking-source selector starts it when `WMR_ANDROID_XR_TRACKING` is on.
 2. The plugin requests `HAND_TRACKING` and `HEAD_TRACKING`, then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
 3. It reads `ArDevice.getInstance(session).state` and `Hand.left/right(session).state`, maps all 26 `HandJointType`s to the OpenXR `HandJoint` names, and sends `TrackingFrameCodec` JSON over an event channel.
 4. Frames use `System.nanoTime()`; the facade's aligner maps them to the BLE clock. No wall-clock comparison is made.

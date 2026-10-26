@@ -11,6 +11,9 @@ import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/domain/synthetic_motion.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_android_xr/wmr_tracking_android_xr.dart';
+import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
+import 'package:wmr_tracking_xreal/wmr_tracking_xreal.dart';
 
 import '../connect/connect_providers.dart';
 import 'pose_replay.dart';
@@ -262,21 +265,222 @@ final decodedViewProvider = StreamProvider.family<DecodedView, DebugSource>((
   });
 });
 
-/// Whether the debug viewer simulates a 6DoF tracking source.
-///
-/// Off by default: the normal build shows the controller's 3DoF orientation
-/// with an `orientationOnly` badge. Turning it on feeds a deterministic
-/// [FakeTrackingSource] trajectory through [SixDofFuser] so the viewer can be
-/// exercised without a headset.
-final simulatedSixDofProvider = NotifierProvider<SimulatedSixDof, bool>(
-  SimulatedSixDof.new,
+/// A tracking source the debug screen can attach to the 6DoF viewer.
+enum DebugTrackingSource {
+  none('None', null),
+  simulated('Simulated', null),
+  androidXr('Android XR', 'WMR_ANDROID_XR_TRACKING'),
+  viture('VITURE', 'WMR_VITURE_TRACKING'),
+  xreal('XREAL', 'WMR_XREAL_TRACKING');
+
+  const DebugTrackingSource(this.label, this.buildFlag);
+
+  final String label;
+
+  /// The `--dart-define` that enables this source. Null for [none] and
+  /// [simulated], which need no platform support.
+  final String? buildFlag;
+}
+
+/// The source selected in the debug screen. [DebugTrackingSource.none] by
+/// default: the viewer shows the controller's 3DoF orientation with an
+/// `orientationOnly` badge.
+final debugTrackingSourceProvider =
+    NotifierProvider<DebugTrackingSourceNotifier, DebugTrackingSelection>(
+      DebugTrackingSourceNotifier.new,
+    );
+
+/// The selected source and its create/start outcome.
+class DebugTrackingSelection {
+  const DebugTrackingSelection({
+    required this.choice,
+    required this.attachment,
+  });
+
+  final DebugTrackingSource choice;
+  final AsyncValue<DebugTrackingAttachment> attachment;
+}
+
+/// Creates the source for [choice], or null when its build flag is off.
+typedef DebugTrackingSourceFactory = Future<TrackingSource?> Function(
+  DebugTrackingSource choice,
 );
 
-class SimulatedSixDof extends Notifier<bool> {
-  @override
-  bool build() => false;
+/// Swappable in tests, so a source that fails like an unlinked Unity relay can
+/// be exercised without a platform channel.
+final debugTrackingSourceFactoryProvider = Provider<DebugTrackingSourceFactory>(
+  (ref) => createDebugTrackingSource,
+);
 
-  void set(bool value) => state = value;
+/// The production factory. Each vendor `create()` returns null without
+/// touching its platform channel while its `--dart-define` flag is off.
+Future<TrackingSource?> createDebugTrackingSource(
+  DebugTrackingSource choice,
+) async {
+  switch (choice) {
+    case DebugTrackingSource.none:
+      return null;
+    case DebugTrackingSource.simulated:
+      return FakeTrackingSource();
+    case DebugTrackingSource.androidXr:
+      return AndroidXrTrackingSource.create();
+    case DebugTrackingSource.viture:
+      return VitureNeckbandTrackingSource.create();
+    case DebugTrackingSource.xreal:
+      return XrealAir2UltraTrackingSource.create();
+  }
+}
+
+/// The outcome of creating and starting one selected source.
+class DebugTrackingAttachment {
+  const DebugTrackingAttachment({
+    required this.choice,
+    this.source,
+    this.error,
+    this.disabled = false,
+  });
+
+  final DebugTrackingSource choice;
+
+  /// The started source, or null when the selection is off, disabled or
+  /// failed.
+  final TrackingSource? source;
+
+  /// The typed failure from `create()` or `start()`.
+  final TrackingException? error;
+
+  /// The source exists but its default-off build flag is not set.
+  final bool disabled;
+
+  bool get running => source != null;
+}
+
+/// Stops and disposes [source], swallowing teardown failures.
+Future<void> releaseDebugTrackingSource(TrackingSource source) async {
+  try {
+    await source.stop();
+  } catch (_) {
+    // Teardown is best-effort.
+  }
+  try {
+    await source.dispose();
+  } catch (_) {
+    // See above.
+  }
+}
+
+/// Creates and starts the selected source, and detaches the previous one on
+/// every change.
+///
+/// A disabled flag returns [DebugTrackingAttachment.disabled] without touching
+/// a platform channel. Every failure is mapped to a [TrackingException], so an
+/// unlinked Unity relay or a missing plugin shows a typed status instead of
+/// crashing the debug screen.
+class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
+  TrackingSource? _owned;
+  int _generation = 0;
+
+  @override
+  DebugTrackingSelection build() {
+    ref.onDispose(() {
+      final source = _owned;
+      _owned = null;
+      if (source != null) unawaited(releaseDebugTrackingSource(source));
+    });
+    return const DebugTrackingSelection(
+      choice: DebugTrackingSource.none,
+      attachment: AsyncValue.data(
+        DebugTrackingAttachment(choice: DebugTrackingSource.none),
+      ),
+    );
+  }
+
+  void set(DebugTrackingSource choice) => unawaited(select(choice));
+
+  /// Detaches the current source before creating and starting [choice].
+  ///
+  /// [choice] is ignored when it arrives after a newer selection; its source,
+  /// if it was already created, is released rather than left running.
+  Future<void> select(DebugTrackingSource choice) async {
+    if (choice == state.choice && !state.attachment.isLoading) return;
+    final generation = ++_generation;
+    final previous = _owned;
+    _owned = null;
+    state = DebugTrackingSelection(
+      choice: choice,
+      attachment: const AsyncValue.loading(),
+    );
+    if (previous != null) await releaseDebugTrackingSource(previous);
+    if (generation != _generation) return;
+    if (choice == DebugTrackingSource.none) {
+      state = DebugTrackingSelection(
+        choice: choice,
+        attachment: AsyncValue.data(DebugTrackingAttachment(choice: choice)),
+      );
+      return;
+    }
+
+    final factory = ref.read(debugTrackingSourceFactoryProvider);
+    DebugTrackingAttachment attachment;
+    try {
+      final created = await factory(choice);
+      if (generation != _generation) {
+        if (created != null) await releaseDebugTrackingSource(created);
+        return;
+      }
+      if (created == null) {
+        attachment = DebugTrackingAttachment(choice: choice, disabled: true);
+      } else {
+        _owned = created;
+        try {
+          await created.start();
+        } on TrackingException catch (error) {
+          if (_owned == created) _owned = null;
+          await releaseDebugTrackingSource(created);
+          attachment = DebugTrackingAttachment(choice: choice, error: error);
+          _publish(generation, attachment);
+          return;
+        } on Object catch (error) {
+          if (_owned == created) _owned = null;
+          await releaseDebugTrackingSource(created);
+          attachment = DebugTrackingAttachment(
+            choice: choice,
+            error: TrackingException(
+              TrackingExceptionKind.unavailable,
+              'Could not start ${choice.label}: $error',
+            ),
+          );
+          _publish(generation, attachment);
+          return;
+        }
+        if (generation != _generation) {
+          if (_owned == created) _owned = null;
+          await releaseDebugTrackingSource(created);
+          return;
+        }
+        attachment = DebugTrackingAttachment(choice: choice, source: created);
+      }
+    } on TrackingException catch (error) {
+      attachment = DebugTrackingAttachment(choice: choice, error: error);
+    } on Object catch (error) {
+      attachment = DebugTrackingAttachment(
+        choice: choice,
+        error: TrackingException(
+          TrackingExceptionKind.unavailable,
+          'Could not create ${choice.label}: $error',
+        ),
+      );
+    }
+    _publish(generation, attachment);
+  }
+
+  void _publish(int generation, DebugTrackingAttachment attachment) {
+    if (generation != _generation) return;
+    state = DebugTrackingSelection(
+      choice: attachment.choice,
+      attachment: AsyncValue.data(attachment),
+    );
+  }
 }
 
 /// One viewer update: the fused pose per hand plus the head that produced it.
@@ -309,10 +513,11 @@ class DebugPoses {
 /// A loaded recording wins over the live stream and is stepped by
 /// [poseReplayProvider]. Otherwise decoded FF12/FF14 samples feed
 /// [SixDofFuser] at the controller rate. With no tracking frames the fuser
-/// returns an `orientationOnly` pose; with [simulatedSixDofProvider] on, a
-/// [FakeTrackingSource] emits a deterministic hand trajectory that lifts it to
-/// `handAnchor`. Raw mode has no IMU data, so the fake bridge keeps its
-/// synthetic orientation there.
+/// returns an `orientationOnly` pose. [debugTrackingSourceProvider] picks the
+/// source: [DebugTrackingSource.simulated] emits a deterministic
+/// [FakeTrackingSource] trajectory, while Android XR, VITURE and XREAL are
+/// created and started by [DebugTrackingSourceNotifier]. Raw mode has no IMU
+/// data, so the fake bridge keeps its synthetic orientation there.
 final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   ref,
   source,
@@ -333,31 +538,40 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   final mode = ref.watch(streamModeProvider);
   final decoded = mode.carriesRecords;
   final service = decoded ? ref.watch(controllerServiceProvider(source)) : null;
-  final simulated = ref.watch(simulatedSixDofProvider);
-  final fuser = simulated ? SixDofFuser() : null;
-  final tracking = simulated ? FakeTrackingSource() : null;
+  final selection = ref.watch(debugTrackingSourceProvider);
+  final choice = selection.choice;
+  final tracking = selection.attachment.value?.source;
+  final simulated = choice == DebugTrackingSource.simulated;
+  final fuser = tracking == null ? null : SixDofFuser();
   const motion = SyntheticMotion();
   final clock = Stopwatch()..start();
-  var trackingStarted = false;
+  final aligner = SourceClockAligner();
   StreamSubscription<TrackingFrame>? trackingSub;
   Pose? head;
   TrackingFrame? lastTracking;
 
-  Future<void> startTracking() async {
-    final source = tracking;
-    final fuserState = fuser;
-    if (source == null || trackingStarted) return;
-    // Subscribe before start so no frame is lost between the two.
-    trackingSub = source.frames.listen(fuserState?.onTrackingFrame);
-    try {
-      await source.start();
-      trackingStarted = true;
-    } catch (_) {
-      // Leave the viewer on the orientation-only fallback.
-    }
+  if (tracking != null) {
+    trackingSub = tracking.frames.listen(
+      (frame) {
+        // The simulated trajectory already carries this provider's clock.
+        final aligned = simulated
+            ? frame
+            : frame.withHostTime(
+                aligner.align(
+                  sourceTimeNs: frame.timeNs,
+                  hostTimeNs: clock.elapsed.inMicroseconds * 1000,
+                ),
+              );
+        fuser?.onTrackingFrame(aligned);
+        lastTracking = aligned;
+        head = aligned.head?.pose;
+      },
+      onError: (Object _, StackTrace _) {
+        // The attachment status shows source failures; the viewer keeps the
+        // orientation-only fallback.
+      },
+    );
   }
-
-  if (tracking != null) unawaited(startTracking());
 
   late final StreamController<DebugPoses> controller;
   Timer? timer;
@@ -375,7 +589,7 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
     final nowNs = now.inMicroseconds * 1000 + 1;
     final trackingSource = tracking;
     final fuserState = fuser;
-    if (trackingSource != null && fuserState != null && trackingStarted) {
+    if (simulated && trackingSource != null && fuserState != null) {
       final phase = now.inMilliseconds / 1000.0;
       final headPose = Pose(
         translation: Vector3(0, 1.6, 0),
@@ -414,7 +628,9 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
           ),
         ),
       );
-      trackingSource.addFrame(frame);
+      if (trackingSource is FakeTrackingSource) {
+        trackingSource.addFrame(frame);
+      }
       lastTracking = frame;
       head = headPose;
     }
@@ -456,21 +672,6 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
     timer?.cancel();
     unawaited(trackingSub?.cancel() ?? Future<void>.value());
     unawaited(controller.close());
-    final source = tracking;
-    if (source != null) {
-      unawaited(() async {
-        try {
-          await source.stop();
-        } catch (_) {
-          // Teardown is best-effort.
-        }
-        try {
-          await source.dispose();
-        } catch (_) {
-          // Teardown is best-effort.
-        }
-      }());
-    }
   });
   return controller.stream;
 });

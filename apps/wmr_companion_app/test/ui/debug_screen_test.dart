@@ -20,11 +20,6 @@ import 'package:wmr_ble/testing.dart';
 
 import 'raw_mode_notifier.dart';
 
-class _SimulatedOn extends SimulatedSixDof {
-  @override
-  bool build() => true;
-}
-
 DebugPoses _poses(ControllerPoseSource source) {
   final position = source == ControllerPoseSource.orientationOnly
       ? null
@@ -579,13 +574,17 @@ void main() {
             if (poses != null)
               debugPosesProvider(DebugSource.fake)
                   .overrideWith((ref) => Stream.value(poses)),
-            if (simulated)
-              simulatedSixDofProvider.overrideWith(_SimulatedOn.new),
           ],
           child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
         ),
       );
       await tester.pump();
+      if (simulated) {
+        ProviderScope.containerOf(tester.element(find.byType(DebugScreen)))
+            .read(debugTrackingSourceProvider.notifier)
+            .set(DebugTrackingSource.simulated);
+        await tester.pump();
+      }
     }
 
     for (final source in ControllerPoseSource.values) {
@@ -608,7 +607,7 @@ void main() {
             findsWidgets,
           );
         }
-        expect(find.text('Simulated 6DoF'), findsOneWidget);
+        expect(find.text('Tracking source'), findsOneWidget);
       });
     }
 
