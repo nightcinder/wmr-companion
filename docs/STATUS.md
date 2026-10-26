@@ -168,7 +168,7 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 - `headRelative` (head pose plus a learned head-local offset; **not** true positional tracking),
 - `orientationOnly` (the existing 3DoF behaviour).
 
-The honest current state is that the companion still ships 3DoF. Calling it 6DoF requires an adapter and the hardware gates listed in [TRACKING.md](TRACKING.md#gates-before-calling-this-6dof).
+The honest current state is that the companion still ships 3DoF. Calling it 6DoF requires an adapter and the hardware gates listed in [GATES.md](tracking/GATES.md#gates-before-calling-this-6dof).
 
 ## Not yet run on hardware (as of 2026-10-25)
 
