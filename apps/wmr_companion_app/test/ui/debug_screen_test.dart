@@ -560,6 +560,7 @@ void main() {
       WidgetTester tester, {
       DebugPoses? poses,
       bool simulated = false,
+      Quaternion? orientation,
     }) async {
       tall(tester);
       await tester.pumpWidget(
@@ -567,7 +568,8 @@ void main() {
           overrides: [
             streamModeProvider.overrideWith(RawModeNotifier.new),
             orientationProvider.overrideWith(
-              (ref) => Stream.value(quaternionFromEuler(0, 0, 0)),
+              (ref) =>
+                  Stream.value(orientation ?? quaternionFromEuler(0, 0, 0)),
             ),
             streamStatsProvider.overrideWith(
               (ref) => Stream.value(
@@ -609,6 +611,27 @@ void main() {
         expect(find.text('Simulated 6DoF'), findsOneWidget);
       });
     }
+
+    testWidgets('reset orientation zeroes the viewer pose yaw', (tester) async {
+      final raw = quaternionFromEuler(0.5, 0.2, -0.1);
+      await open(tester, orientation: raw);
+
+      final before = tester
+          .widget<ControllerPoseView>(find.byType(ControllerPoseView))
+          .pose
+          .orientation;
+      expect(eulerFromQuaternion(before).yawDeg, closeTo(28.6, 0.1));
+
+      await tester.tap(find.text('Reset orientation'));
+      await tester.pump();
+
+      final after = tester
+          .widget<ControllerPoseView>(find.byType(ControllerPoseView))
+          .pose
+          .orientation;
+      expect(eulerFromQuaternion(after).yawDeg, closeTo(0, 0.1));
+      expect(eulerFromQuaternion(after).pitchDeg, closeTo(11.5, 0.1));
+    });
 
     testWidgets('the simulated source lifts 3DoF to a hand anchor', (
       tester,

@@ -77,9 +77,21 @@ class DebugScreen extends ConsumerWidget {
     final poses = ref.watch(debugPosesProvider(source)).value;
     final simulated = ref.watch(simulatedSixDofProvider);
     final trackedHand = hand == 0 ? TrackedHand.left : TrackedHand.right;
-    final selectedPose =
-        poses?.forHand(hand) ??
-        ControllerPose(hand: trackedHand, hostTimeNs: 1, orientation: q);
+    final viewerPose = poses?.forHand(hand);
+    // The synthetic viewer pose carries the same yaw offset as the numbers
+    // above; the poses stream has no yaw offset of its own.
+    final selectedPose = synthetic
+        ? ControllerPose(
+            hand: trackedHand,
+            hostTimeNs: viewerPose?.hostTimeNs ?? 1,
+            orientation: q,
+            position: viewerPose?.position,
+            source: viewerPose?.source ?? ControllerPoseSource.orientationOnly,
+            confidence: viewerPose?.confidence ?? TrackingConfidence.none,
+            frameAgeNs: viewerPose?.frameAgeNs,
+          )
+        : viewerPose ??
+              ControllerPose(hand: trackedHand, hostTimeNs: 1, orientation: q);
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodyMedium?.copyWith(
       fontFamily: 'monospace',
