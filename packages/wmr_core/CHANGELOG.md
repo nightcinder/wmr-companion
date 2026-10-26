@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - FF17 controller control: `ControllerCommand`, `ControllerResult`,
   `ControllerStatusV2` and `encodeControllerCommand` in

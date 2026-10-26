@@ -2,7 +2,7 @@ name: wmr_tracking_xreal
 description: >-
   XREAL Air 2 Ultra head and 26-joint hand tracking relay source for
   wmr_tracking, backed by an embedded Unity-as-a-Library (UaaL) bridge.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/nightcinder/wmr-companion
 issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 
@@ -15,8 +15,8 @@ resolution: workspace
 dependencies:
   flutter:
     sdk: flutter
-  wmr_tracking: ^0.1.0
-  wmr_tracking_dispatch: ^0.1.0
+  wmr_tracking: ^0.2.0
+  wmr_tracking_dispatch: ^0.2.0
 
 dev_dependencies:
   flutter_test:

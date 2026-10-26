@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+- Version aligned with the v0.2.0 release; no breaking public API change.
+
 ## 0.1.0
 
 - Initial release of the public, framework-agnostic facade for the WMR Bridge controller pipeline.
