@@ -12,7 +12,7 @@ missing.
 ## Prerequisites
 
 - Unity 6000.0.x with Android Build Support (SDK, NDK, OpenJDK).
-- VITURE XR SDK for Unity v0.7.0 (`com.viture.xr`) from the VITURE developer
+- VITURE XR SDK for Unity v0.9.0 (`com.viture.xr`) from the VITURE developer
   package.
 - Unity XR Hands (`com.unity.xr.hands`, pinned in `Packages/manifest.json`).
 - A VITURE Pro Neckband with Luma Ultra for real head/hand frames.
@@ -21,7 +21,7 @@ missing.
 
 1. Open `packages/wmr_tracking_viture/unity` with Unity Hub / Unity 6000.0.x.
 2. Add the VITURE XR SDK: **Window > Package Manager > + > Add package from
-   tarball** (or from git URL), selecting `com.viture.xr` v0.7.0. Do not copy the
+   tarball** (or from git URL), selecting `com.viture.xr` v0.9.0. Do not copy the
    SDK into this repository.
 3. Confirm the runtime assembly picked up the defines: select
    `Assets/WmrTrackingViture/Runtime/WmrTrackingViture.Runtime.asmdef` and check

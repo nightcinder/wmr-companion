@@ -1,6 +1,6 @@
 # Run sheet: pose validation — VITURE (Pro Neckband + Luma Ultra)
 
-> **Proposed sheet, not yet run.** Nothing here is a hardware result. Every figure is recorded by the owner; all result tables are empty and must not be pre-filled. The Unity-in-Flutter relay is implemented and host-tested, but no Neckband run has happened.
+> **Proposed sheet, not yet run.** Nothing here is a hardware result. Every figure is recorded by the owner; all result tables are empty and must not be pre-filled. The Unity-in-Flutter relay is implemented and host-tested, but no Neckband run has happened. Current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1; the v0.7.0 prerequisite below is historical.
 
 Companion documents:
 

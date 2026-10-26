@@ -37,7 +37,7 @@ Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR mot
 | `packages/wmr_tracking/` | Pure-Dart head/hand tracking seam and 6DoF controller fusion, with vendor capability profiles, a One Euro filter, Unity-to-OpenXR conversion and a JSON relay codec (publish-ready; see [docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/wmr_tracking_android_xr/` | Default-off Kotlin Android XR head and 26-joint hand source; compiles against the Jetpack XR SDK 1.0.0, no hardware run yet ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/wmr_tracking_dispatch/` | Native pre-Unity glasses vendor detection, the Dart `TrackingSourceSelector` and one shared `SharedUnityRuntime` for VITURE/XREAL ([docs/GLASSES_DETECTION.md](docs/GLASSES_DETECTION.md)) |
-| `packages/wmr_tracking_viture/` | Default-off VITURE Pro Neckband Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 6000.0+ / VITURE SDK v0.7.0 is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
+| `packages/wmr_tracking_viture/` | Default-off VITURE Pro Neckband Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 6000.0.27f1 / VITURE XR SDK v0.9.0 (`Viture.XR.VitureXR`) is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/wmr_tracking_xreal/` | Default-off XREAL Air 2 Ultra Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 2021.3+/6000.0 / XREAL SDK 3.x is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/WMRCompanionKit/` | Native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers |
 | `tool/` | Monado config-key fetch, `fresh_app_check.sh`, and the native Android GATT / iOS probe apps |

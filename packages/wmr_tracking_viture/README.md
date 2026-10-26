@@ -4,16 +4,16 @@ Default-off VITURE Pro Neckband head and 26-joint hand tracking relay source for
 [`wmr_tracking`](../wmr_tracking).
 
 VITURE hand tracking is available only through the VITURE XR SDK for Unity
-(v0.7.0, Unity 6000.0+) running on the VITURE Pro Neckband with Luma Ultra
+(v0.9.0, Unity 6000.0+) running on the VITURE Pro Neckband with Luma Ultra
 glasses; the cross-platform C glasses SDK exposes head pose and cameras only.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 
 1. Kotlin sends `UnityRelayCommand` JSON (`start`, `stop`, `dispose`,
    `recenter`, `configure`) via `UnityPlayer.UnitySendMessage("WmrTrackingRelay", "OnCommand", json)`.
-   `recenter` delegates to `VitureXR.HeadTracking.SetWorldOrigin()`.
+   `recenter` delegates to `Viture.XR.VitureXR.HeadTracking.SetWorldOrigin()`.
 2. The minimal C# component (`unity/Assets/WmrTrackingViture/Runtime/VitureTrackingRelayBridge.cs`)
-   calls `VitureXR.Glasses.GetGlassesModel()`, `VitureXR.HandTracking.Start()` /
+   calls `Viture.XR.VitureXR.Glasses.GetGlassesModel()`, `Viture.XR.VitureXR.HandTracking.Start()` /
    `.Stop()`, reads the head pose and 26 `XRHandJointID` joints from
    `XRHandSubsystem`, converts left-handed Unity coordinates to right-handed
    OpenXR coordinates, and forwards frames to
@@ -55,6 +55,6 @@ that exports the `unityLibrary` Gradle module. Import and export steps are in
 [`unity/README.md`](unity/README.md). The VITURE XR SDK is not vendored.
 
 Nothing in this package has run on a VITURE Pro Neckband or glasses. The Unity
-6000.0+ UaaL export and proprietary VITURE Unity SDK (`com.viture.xr` v0.7.0)
+6000.0+ UaaL export and proprietary VITURE Unity SDK (`com.viture.xr` v0.9.0)
 are external SDK gates; Kotlin and Dart compile and pass host/JVM tests without
 requiring the proprietary AAR at build time.

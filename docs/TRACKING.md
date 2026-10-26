@@ -8,7 +8,7 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access.
 
 - `packages/wmr_tracking`: pure-Dart seam, `TrackingFrame`, capability profiles, `SourceClockAligner`, `SixDofFuser`, One Euro filter, Unity relay contract. Unit-tested, no hardware.
 - `packages/wmr_tracking_android_xr`: default-off Kotlin Android XR source (ONY-212). Compiles and host-tested; no device run.
-- `packages/wmr_tracking_viture`: default-off VITURE Pro Neckband Unity UaaL relay (ONY-213). Host/JVM-tested; Unity 6000.0+ / VITURE SDK v0.7.0 external gate.
+- `packages/wmr_tracking_viture`: default-off VITURE Pro Neckband Unity UaaL relay (ONY-213). Host/JVM-tested; Unity 6000.0.27f1 / VITURE XR SDK v0.9.0 (`Viture.XR.VitureXR`) external gate.
 - `packages/wmr_tracking_xreal`: default-off XREAL Air 2 Ultra Unity UaaL relay (ONY-214). Host/JVM-tested; Unity/XREAL SDK external gate.
 - `packages/wmr_tracking_dispatch`: native glasses detection and one shared `SharedUnityRuntime` for VITURE/XREAL (ONY-274).
 - Unified Unity prototype: `packages/wmr_tracking_unity` (ONY-273); coexistence unproven.

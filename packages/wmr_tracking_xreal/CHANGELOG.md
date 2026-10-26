@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Target XREAL SDK 3.1.0 in the Unity project and declare its AR Foundation,
+  URP, Input System, XRI and Image Conversion dependencies in the manifest.
+  No Dart or Kotlin API change.
+
 ## 0.2.1
 
 - Version aligned with the v0.2.1 gate and harness release; `wmr_tracking` and `wmr_tracking_dispatch` constraints raised to `^0.2.1`. No breaking public API change.

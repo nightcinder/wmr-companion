@@ -10,6 +10,11 @@
     "com.unity.modules.physics": "1.0.0",
     "com.unity.modules.ui": "1.0.0",
     "com.unity.modules.uielements": "1.0.0",
-    "com.unity.modules.xr": "1.0.0"
+    "com.unity.modules.xr": "1.0.0",
+    "com.unity.inputsystem": "1.11.2",
+    "com.unity.xr.arfoundation": "6.0.4",
+    "com.unity.render-pipelines.universal": "17.0.3",
+    "com.unity.xr.interaction.toolkit": "3.0.5",
+    "com.unity.modules.imageconversion": "1.0.0"
   }
 }
