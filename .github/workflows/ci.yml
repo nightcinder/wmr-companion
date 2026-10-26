@@ -179,6 +179,33 @@ jobs:
             fi
           done
 
+  gate8-fallback-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Gate 8 without hardware: a synthetic nod/walk trace through the
+      # headRelative fallback must drift (EXPECTED-FAIL), while a rigid
+      # head-local control must stay near zero (PASS).
+      - name: Gate 8 fallback quality
+        working-directory: packages/wmr_tracking
+        run: dart run tool/gate8_fallback_quality.dart
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gate8-fallback-quality
+          path: packages/wmr_tracking/build/gate8/fallback_quality.json
+          retention-days: 14
+
   android-flavors:
     runs-on: ubuntu-latest
     timeout-minutes: 35

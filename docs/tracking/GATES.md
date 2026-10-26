@@ -26,7 +26,24 @@ The code is a framework, not a hardware result. In order:
    must exit 1 with `offset_drift`, `controller_gap` and
    `frame_out_of_window`. A real headset run is still the validation; the
    replay proves only the aligner and the thresholds.
-8. **Fallback quality test.** Compare `headRelative` against a known physical position while nodding and walking. Expect it to fail as positional tracking; record the failure so it is not sold as 6DoF.
+8. **Fallback quality test.** Compare `headRelative` against a known physical
+   position while nodding and walking. Expect it to fail as positional
+   tracking; record the failure so it is not sold as 6DoF. The hardware-free
+   replay feeds a synthetic nod/walk trace with known ground-truth controller
+   positions through `SixDofFuser`'s `headRelative` path, plus a rigid
+   head-local control, and prints JSON error stats. Run it from
+   `packages/wmr_tracking`:
+
+   ```sh
+   dart run tool/gate8_fallback_quality.dart
+   ```
+
+   It writes `build/gate8/fallback_quality.json` and exits 0 when the nod/walk
+   trace drifts by at least 5 cm RMSE and 10 cm max error (verdict
+   `EXPECTED-FAIL`) and the rigid control stays under 1 µm RMSE and max error
+   (verdict `PASS`). A non-zero exit means the fallback did not behave as
+   documented. A real headset run is still the validation; the replay proves
+   only that `headRelative` moves with the head and is not positional tracking.
 9. **VITURE C path.** Run `get_gl_pose_carina` on an Android phone with Luma Ultra, measure pose rate/status and USB permission behaviour. If it works, it is the lowest-friction phone-only head-pose source.
 
 **Host-side coverage for gates 2 and 3.** From `packages/wmr_tracking`, `dart run tool/xr_contract_harness.dart` replays deterministic head poses and 26-joint hands through both adapter contracts — native plugin JSON in OpenXR axes and Unity relay JSON in left-handed Unity axes — decodes the paired golden fixtures, logs the achieved head and hand rates, and exits non-zero if either contract drifts or a malformed frame is accepted. Passing a valid frame as `--malformed` must fail, which is how the rejection check is verified. A green run proves the wire contract and rate accounting in CI; it does not replace the permission, session-lifecycle, Unity hot-restart or "hand gripping a controller" checks in gates 2 and 3.
