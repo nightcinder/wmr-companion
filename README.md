@@ -48,8 +48,8 @@ flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze
 flutter test
-flutter build apk --debug
-flutter run -d <device>           # BLE needs a physical phone
+tool/build_flavor.sh base          # flavors: base, viture, xreal
+flutter run --flavor base -d <device>   # BLE needs a physical phone
 ```
 
 From the repo root, the package suites are: `cd packages/wmr_core && dart test`; `cd packages/wmr_companion && dart test`; `cd packages/wmr_ble && flutter test`; `cd packages/wmr_ws && dart test`; `cd packages/wmr_companion_ui && flutter test`; `cd packages/wmr_companion_hid_android && flutter test`; `cd packages/wmr_fusion && dart test`; `cd packages/wmr_tracking && dart test`; `cd packages/wmr_tracking_android_xr && flutter test`; `cd packages/wmr_tracking_viture && flutter test`; `cd packages/wmr_tracking_xreal && flutter test`; `cd example && flutter test`. On macOS, `cd packages/WMRCompanionKit && swift test` covers the Swift framework.

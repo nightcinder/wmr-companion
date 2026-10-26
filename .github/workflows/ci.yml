@@ -134,19 +134,6 @@ jobs:
       - name: A fresh app consumes the packages
         run: ./tool/fresh_app_check.sh
 
-      # Monado's config key (BSL-1.0) is not committed. It is fetched here so the
-      # test APK can decode a controller config block; it ends up only inside the
-      # APK artifact, together with apps/wmr_companion_app/assets/monado/NOTICE.txt.
-      # A failed download must not fail CI: the app reports a missing key.
-      - name: Fetch Monado config key
-        continue-on-error: true
-        working-directory: apps/wmr_companion_app
-        run: dart run ../../tool/fetch_wmr_config_key.dart
-      - name: Show whether the key is in the build
-        run: ls -l apps/wmr_companion_app/assets/monado/
-      - working-directory: apps/wmr_companion_app
-        run: flutter build apk --debug
-
       - name: Example app
         working-directory: example
         run: |
@@ -154,10 +141,55 @@ jobs:
           flutter test
           flutter build apk --debug
 
+  android-flavors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Monado's config key (BSL-1.0) is not committed. It is fetched here so the
+      # APKs can decode a controller config block; it ends up only inside the
+      # artifacts, together with assets/monado/NOTICE.txt. A failed download must
+      # not fail CI: the app reports a missing key.
+      - name: Fetch Monado config key
+        continue-on-error: true
+        working-directory: apps/wmr_companion_app
+        run: dart run ../../tool/fetch_wmr_config_key.dart
+
+      # Stub unityLibrary modules prove the include path, flavor isolation and
+      # the both-libraries guard without Unity or the vendor SDKs. The stubs are
+      # removed before the real artifacts are built.
+      - name: Unity flavor wiring
+        working-directory: apps/wmr_companion_app
+        run: tool/test_flavor_wiring.sh
+
+      - name: Build base with every Dart flag on
+        working-directory: apps/wmr_companion_app
+        run: tool/build_flavor.sh base
+
+      - name: Build viture and xreal without Unity
+        working-directory: apps/wmr_companion_app
+        run: |
+          tool/build_flavor.sh viture
+          tool/build_flavor.sh xreal
+
       - uses: actions/upload-artifact@v7
         with:
-          name: wmr-companion-debug-apk
-          path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-debug.apk
+          name: wmr-companion-debug-apks
+          path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-*-debug.apk
           retention-days: 14
 
   gatt-probe:

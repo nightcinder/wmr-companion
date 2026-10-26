@@ -77,7 +77,7 @@ App (`apps/wmr_companion_app`; run these from that directory):
   - `cd packages/wmr_companion_ui && flutter test`
   - `cd packages/WMRCompanionKit && swift test`
 - Example app: `cd example && flutter pub get && flutter test && flutter build apk --debug`
-- Build debug APK: `flutter build apk --debug` (CI does this; BLE needs a physical phone)
+- Build debug APK: `cd apps/wmr_companion_app && tool/build_flavor.sh base` (flavors: `base`, `viture`, `xreal`; CI does all three; BLE needs a physical phone)
 - iOS config validation: `flutter build ios --config-only --no-codesign` (and in `example/`)
 
 Firmware (Anya, ESP-IDF PowerShell; ESP-IDF v6.1 at `C:\esp\v6.1\esp-idf`; BTstack tree `C:\Users\Nick\btstack-wmr`; `btstack-wmr\wmr_bridge` is a plain folder, not a git checkout):

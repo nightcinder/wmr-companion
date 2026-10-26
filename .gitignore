@@ -33,6 +33,11 @@ Thumbs.db
 # Monado's config key (BSL-1.0), fetched by tool/fetch_wmr_config_key.dart
 apps/wmr_companion_app/assets/monado/wmr_config_key.bin
 
+# Unity-as-a-Library exports for the Android flavors (ONY-271). Vendor SDKs are
+# not redistributable; copy unity/Build/Android/unityLibrary here to opt in.
+# android/unity/README.md documents the path.
+apps/wmr_companion_app/android/unity/*/
+
 # The pub workspace has one lockfile at the root; members do not keep their own
 packages/*/pubspec.lock
 example/pubspec.lock
