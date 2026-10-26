@@ -1,0 +1,31 @@
+name: Unity dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/wmr_tracking_unity/**'
+      - '.github/workflows/unity-dispatch.yml'
+  pull_request:
+    paths:
+      - 'packages/wmr_tracking_unity/**'
+      - '.github/workflows/unity-dispatch.yml'
+
+concurrency:
+  group: unity-dispatch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Compiles the Unity-independent dispatch file and runs its assertions.
+      # The Unity-dependent bridge and the proprietary SDKs are external gates.
+      - run: packages/wmr_tracking_unity/tool/test_dispatch.sh

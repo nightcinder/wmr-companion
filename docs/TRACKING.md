@@ -159,6 +159,10 @@ Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glas
 
 The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_tracking_viture`) are implemented and host-tested; exporting the Unity 6000.0+ `unityLibrary` AAR with the proprietary VITURE XR SDK (`com.viture.xr` v0.7.0) and running on a physical Pro Neckband remain external SDK/hardware gates.
 
+### One `unityLibrary` for both vendors
+
+`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, ONY-271 flavors stay the answer.
+
 ## Comparison
 
 | | Android XR | XREAL Air 2 Ultra | XREAL One + Eye | RayNeo X3 Pro | Rokid AR Studio | VITURE Luma Ultra (C) | VITURE Neckband (Unity) |
