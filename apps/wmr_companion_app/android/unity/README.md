@@ -1,4 +1,4 @@
-# Android build flavors (ONY-271)
+# Android build flavors (ONY-271, ONY-355)
 
 The WMR Companion app ships three product flavors under the `vendor`
 dimension. The Dart vendor flags are compile-time only, so one APK could carry
@@ -10,11 +10,17 @@ exported `unityLibrary`, and Unity allows one runtime per process.
 | `base` | none | Android XR headsets, emulator, BLE/3DoF | all three on in CI |
 | `viture` | optional VITURE `unityLibrary` | VITURE Pro Neckband + Luma Ultra | `WMR_VITURE_TRACKING=true` |
 | `xreal` | optional XREAL `unityLibrary` | XREAL Air 2 Ultra | `WMR_XREAL_TRACKING=true` |
+| `unified` | optional shared `unityLibrary` (VITURE + XREAL) | both vendors from one APK, selected at runtime | all three on |
 
 `base` is the default CI artifact. It links no Unity code. With every flag on,
 `VitureNeckbandTrackingSource` and `XrealAir2UltraTrackingSource` still build;
 asking either to start returns the typed `unavailable` failure instead of a
 missing-class crash.
+
+`unified` compiles the same Dart adapters and links one `unityLibrary` exported
+from `packages/wmr_tracking_unity`, which selects VITURE or XREAL at runtime.
+With no export linked it builds exactly like `base`: both sources exist and
+`start()` reports `unavailable`.
 
 ## Build
 
@@ -25,6 +31,7 @@ cd apps/wmr_companion_app
 tool/build_flavor.sh base
 tool/build_flavor.sh viture
 tool/build_flavor.sh xreal
+tool/build_flavor.sh unified
 ```
 
 The script passes the flavor's `--dart-define` flags and defaults to
@@ -53,6 +60,9 @@ redistributable. Export one with the package's Unity project:
   unityLibrary** (see that project's README).
 - XREAL: `packages/wmr_tracking_xreal/unity`, menu **WMR > Export XREAL
   unityLibrary**.
+- Unified: `packages/wmr_tracking_unity/unity` with both proprietary SDKs
+  imported, menu **WMR > Export unified unityLibrary** (see that project's
+  README).
 
 Then copy the exported module to the matching gitignored path:
 
@@ -66,19 +76,29 @@ cp -R packages/wmr_tracking_viture/unity/Build/Android/unityLibrary \
 mkdir -p apps/wmr_companion_app/android/unity/xreal
 cp -R packages/wmr_tracking_xreal/unity/Build/Android/unityLibrary \
   apps/wmr_companion_app/android/unity/xreal/
+
+# Unified
+mkdir -p apps/wmr_companion_app/android/unity/unified
+cp -R packages/wmr_tracking_unity/unity/Build/Android/unityLibrary \
+  apps/wmr_companion_app/android/unity/unified/
 ```
 
 Only the matching flavor depends on its module: `vitureImplementation` for
-`:unityLibraryViture`, `xrealImplementation` for `:unityLibraryXreal`. `base`
-never links one. If both directories exist, Gradle fails during configuration
-with "Cannot link both Unity libraries into one APK"; remove one export.
+`:unityLibraryViture`, `xrealImplementation` for `:unityLibraryXreal`, and
+`unifiedImplementation` for `:unityLibraryUnified`. `base` never links one.
+Unity allows one runtime per process, so the build accepts at most one export.
+If both per-vendor directories exist, Gradle fails during configuration with
+"Cannot link both Unity libraries into one APK". If `unified` exists alongside
+`viture` or `xreal`, it fails with "The unified unityLibrary cannot be combined
+with per-vendor Unity exports". Remove the other exports and rebuild.
 
-Without an export, `viture` and `xreal` still build and the Unity-backed
-sources report `unavailable`. That is the supported fallback for CI and for
-developers who do not have the proprietary SDKs.
+Without an export, `viture`, `xreal` and `unified` still build and the
+Unity-backed sources report `unavailable`. That is the supported fallback for CI
+and for developers who do not have the proprietary SDKs.
 
 `tool/test_flavor_wiring.sh` exercises this path without Unity: it writes
-throwaway `unityLibrary` stubs into both gitignored locations, checks that
+throwaway `unityLibrary` stubs into the gitignored locations, checks that
 `base` ignores them, that `viture` links the VITURE stub (by finding its
-manifest permission in the APK), and that both stubs together fail the build
-with the message above.
+manifest permission in the APK), that `unified` links only its own stub, that
+mixing exports fails with the messages above, and that `unified` still builds
+with no export at all.

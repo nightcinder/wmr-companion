@@ -39,7 +39,9 @@ android {
 
     // One APK can carry the Dart flags for every vendor, but only one Unity
     // runtime. `base` links no Unity at all (Android XR, emulator, BLE/3DoF);
-    // `viture` and `xreal` link a locally exported unityLibrary when present.
+    // `viture` and `xreal` link a locally exported per-vendor unityLibrary;
+    // `unified` links the shared unityLibrary exported from
+    // packages/wmr_tracking_unity and selects a vendor at runtime.
     flavorDimensions += "vendor"
     productFlavors {
         create("base") {
@@ -51,21 +53,31 @@ android {
         create("xreal") {
             dimension = "vendor"
         }
+        create("unified") {
+            dimension = "vendor"
+        }
     }
 }
 
 dependencies {
     // Only the matching flavor gets the module, so base can never carry Unity
-    // and the two runtimes can never be linked together. settings.gradle.kts
-    // already fails when both exports exist.
+    // and two runtimes can never be linked together. settings.gradle.kts
+    // already fails when incompatible exports exist.
     findProject(":unityLibraryViture")?.let {
         "vitureImplementation"(project(":unityLibraryViture"))
     }
     findProject(":unityLibraryXreal")?.let {
         "xrealImplementation"(project(":unityLibraryXreal"))
     }
-    check(findProject(":unityLibraryViture") == null || findProject(":unityLibraryXreal") == null) {
-        "Cannot link both unityLibrary modules into one APK."
+    findProject(":unityLibraryUnified")?.let {
+        "unifiedImplementation"(project(":unityLibraryUnified"))
+    }
+    val linkedUnityModules =
+        listOf("unityLibraryViture", "unityLibraryXreal", "unityLibraryUnified")
+            .filter { findProject(":$it") != null }
+    check(linkedUnityModules.size <= 1) {
+        "Cannot link multiple unityLibrary modules into one APK: " +
+            linkedUnityModules.joinToString() + "."
     }
 }
 
