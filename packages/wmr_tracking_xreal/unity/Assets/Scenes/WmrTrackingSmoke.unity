@@ -271,5 +271,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a76a8b29902b4fd4a36b5e8e2ace013e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  autoStart: 1
+  autoStart: 0
   logEveryNFrames: 30

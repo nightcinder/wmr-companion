@@ -64,20 +64,26 @@ keep generated Gradle changes.
   `{"v":1,"cmd":"start"|"stop"|"dispose",...}`. Frames return as OpenXR-space
   JSON through `WmrTrackingXrealPlugin.onUnityFrame(json)`; errors go to
   `onUnityError`, and the device type to `onUnityGlassesModel`.
-- `start` is idempotent. When the scene is hosted by the Flutter plugin both the
-  smoke harness and the plugin send it; the second one is accepted without
-  restarting the XR Hands subsystem.
+- The host owns `start`/`stop`. The smoke scene never starts vendor tracking on
+  its own in a player build: the scene ships with `autoStart` off and the
+  harness ignores that field outside the editor, so the session stays inside
+  the plugin's CAMERA-permission and default-off flow. On resume the harness
+  only logs state; a session the host stopped stays stopped.
+- `start` is idempotent, so a repeated `start` from the host is accepted
+  without restarting the XR Hands subsystem.
 
 ## What the smoke scene does
 
-- Sends the same `start` envelope as `XrealRelayCommandBuilder.start()`.
+- Can send the same `start` envelope as `XrealRelayCommandBuilder.start()` via
+  `SendStart()`, or on editor Play when `autoStart` is enabled. Player builds
+  never send it.
 - Subscribes to `XrealTrackingRelayBridge.FrameEmitted`, logs the first full
   frame and every 30th frame (size, head/hands presence).
 - Logs `ErrorReported` codes so an unsupported device, missing input source, or
   missing SDK is visible without an attached debugger.
 - On pause, logs the frame count and keeps the XR Hands subsystem running;
-  frames stop while paused and resume on the next `Update`. If the relay is no
-  longer running on resume, the harness sends `start` again.
+  frames stop while paused and resume on the next `Update`. On resume it only
+  logs; restarting is the host's decision, never the scene's.
 
 ## Gate
 

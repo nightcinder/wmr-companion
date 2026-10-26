@@ -181,7 +181,10 @@ namespace OnyxLens.WmrTrackingViture
                 );
                 return;
             }
-            HandTracking.Start();
+            if (!HandTracking.IsActive)
+            {
+                HandTracking.Start();
+            }
             if (!HandTracking.IsActive)
             {
                 ReportError("unavailable", "VitureXR.HandTracking.Start() did not activate");

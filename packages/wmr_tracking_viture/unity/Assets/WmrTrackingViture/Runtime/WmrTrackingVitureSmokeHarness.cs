@@ -1,9 +1,13 @@
 // Minimal smoke-scene driver for the VITURE Unity-as-a-Library relay.
 //
 // Attach next to VitureTrackingRelayBridge on the "WmrTrackingRelay"
-// GameObject. On Start it sends the same versioned `start` envelope that
-// Kotlin sends through UnityPlayer.UnitySendMessage, logs relay frames, and
-// logs pause/resume. It performs no rendering and no general Unity UI.
+// GameObject. It logs relay frames and pause/resume, and in the editor it can
+// send the same versioned `start` envelope that Kotlin sends through
+// UnityPlayer.UnitySendMessage. It performs no rendering and no general Unity UI.
+//
+// Player builds never start tracking from the scene: the Android host owns
+// start/stop so the vendor session stays inside its CAMERA-permission and
+// default-off flow.
 
 using UnityEngine;
 
@@ -20,7 +24,9 @@ namespace OnyxLens.WmrTrackingViture
             "{\"v\":1,\"cmd\":\"start\",\"vendor\":\"viture\"," +
             "\"options\":{\"filter_mode\":\"responsive\",\"aim_sensitivity\":\"high\"}}";
 
-        [SerializeField] private bool autoStart = true;
+        // Editor-only convenience so the scene can be played without a host.
+        // Ignored in player builds; the Android host drives `start`.
+        [SerializeField] private bool autoStart = false;
         [SerializeField, Min(1)] private int logEveryNFrames = 30;
 
         private VitureTrackingRelayBridge _bridge;
@@ -47,7 +53,14 @@ namespace OnyxLens.WmrTrackingViture
 
         private void Start()
         {
-            if (autoStart) SendStart();
+            if (!autoStart) return;
+#if UNITY_EDITOR
+            SendStart();
+#else
+            Debug.Log(
+                "[WmrTrackingVitureSmoke] autoStart ignored in player builds; the host drives start"
+            );
+#endif
         }
 
         private void OnDestroy()
@@ -109,7 +122,8 @@ namespace OnyxLens.WmrTrackingViture
                 "[WmrTrackingVitureSmoke] resumed after " + _pauseCount +
                 " pause(s); frames=" + _frames + " relayRunning=" + _bridge.IsRunning
             );
-            if (autoStart && !_bridge.IsRunning) SendStart();
+            // The host owns start/stop, so a session the host stopped stays
+            // stopped. Never restart vendor tracking from the scene.
         }
     }
 }
