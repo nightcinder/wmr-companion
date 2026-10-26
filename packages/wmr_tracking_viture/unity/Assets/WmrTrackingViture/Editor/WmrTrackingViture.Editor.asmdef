@@ -1,0 +1,29 @@
+{
+  "name": "WmrTrackingViture.Editor",
+  "rootNamespace": "OnyxLens.WmrTrackingViture.Editor",
+  "references": [
+    "WmrTrackingViture.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.xr.hands",
+      "expression": "1.0.0",
+      "define": "WMR_UNITY_XR_HANDS"
+    },
+    {
+      "name": "com.viture.xr",
+      "expression": "0.7.0",
+      "define": "WMR_VITURE_XR_SDK"
+    }
+  ],
+  "noEngineReferences": false
+}
