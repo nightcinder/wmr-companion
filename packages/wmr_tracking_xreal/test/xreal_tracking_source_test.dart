@@ -230,6 +230,28 @@ void main() {
     );
   });
 
+  test(
+    'an unknown model is rejected even when the SDK claims support',
+    () async {
+      final capabilities = Map<String, Object?>.from(_supportedAir2Ultra)
+        ..['glassesModel'] = 'Unknown';
+
+      await expectLater(
+        XrealAir2UltraTrackingSource.create(
+          enabled: true,
+          platform: _FakeXrealPlatform(capabilities: capabilities),
+        ),
+        throwsA(
+          isA<TrackingException>().having(
+            (error) => error.kind,
+            'kind',
+            TrackingExceptionKind.unsupported,
+          ),
+        ),
+      );
+    },
+  );
+
   test('an unlinked Unity UaaL runtime maps to unavailable', () async {
     final fixture = _fixture('xreal_unity_unavailable.json');
 

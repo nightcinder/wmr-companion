@@ -241,8 +241,8 @@ class XrealAir2UltraTrackingSource implements TrackingSource {
     if (!supported ||
         !handTracking ||
         !headTracking ||
-        (glassesModel != XrealGlassesModel.unknown &&
-            !glassesModel.supportsHandTracking)) {
+        glassesModel == XrealGlassesModel.unknown ||
+        !glassesModel.supportsHandTracking) {
       throw TrackingException(
         TrackingExceptionKind.unsupported,
         reason is String && reason.isNotEmpty
@@ -277,9 +277,7 @@ class XrealAir2UltraTrackingSource implements TrackingSource {
 
     return XrealAir2UltraTrackingSource._(
       platform: platform,
-      glassesModel: glassesModel == XrealGlassesModel.unknown
-          ? XrealGlassesModel.air2Ultra
-          : glassesModel,
+      glassesModel: glassesModel,
       capabilities: TrackingCapabilities(
         features: features,
         handJointCount: jointCount,

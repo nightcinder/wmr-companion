@@ -162,8 +162,8 @@ namespace OnyxLens.WmrTrackingXreal
                 return "Unknown";
             }
 #else
-            // Editor/compile-only default: the SDK gate supplies the real model.
-            return "Air2Ultra";
+            // Without the SDK gate the model is unknown; never fail open.
+            return "Unknown";
 #endif
         }
 

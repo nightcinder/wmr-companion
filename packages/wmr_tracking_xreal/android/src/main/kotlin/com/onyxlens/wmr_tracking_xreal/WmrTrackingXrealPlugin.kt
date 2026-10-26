@@ -268,6 +268,7 @@ class WmrTrackingXrealPlugin internal constructor(
     internal fun deliverUnityError(code: String, message: String) {
         if (!started) return
         started = false
+        bridge.sendCommand(XrealRelayCommandBuilder.stop())
         eventSink?.error(code, message, null)
     }
 

@@ -150,6 +150,19 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
+    fun deliverUnityErrorSendsStopToUnityRelay() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
+        val plugin = WmrTrackingXrealPlugin(bridge)
+        plugin.startUnityRelay(RecordingReply())
+        bridge.sentCommands.clear()
+
+        plugin.deliverUnityError("protocol", "malformed relay frame")
+
+        assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"stop\""))
+    }
+
+    @Test
     fun startUnityRelaySucceedsForAir2Ultra() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
         val plugin = WmrTrackingXrealPlugin(bridge)
