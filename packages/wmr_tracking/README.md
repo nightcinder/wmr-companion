@@ -24,7 +24,7 @@ hand tracking are Unity-only today, VITURE's C SDK exposes head pose but not
 hands, and Android XR needs a Kotlin plugin. The package makes the fusion side
 stable while those adapters are added. Kotlin and Unity belong in sibling
 Flutter plugin packages; see the packaging section of
-[`docs/TRACKING.md`](../../docs/TRACKING.md#packaging-kotlin-and-unity-inside-a-flutter-plugin).
+[`docs/tracking/FRAMEWORK.md`](../../docs/tracking/FRAMEWORK.md#packaging-kotlin-and-unity-inside-a-flutter-plugin).
 
 ## Usage
 

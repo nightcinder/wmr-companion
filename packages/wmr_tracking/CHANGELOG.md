@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
+
+Migration note: no existing public API changed; `PoseRecording` is additive.
 
 - `PoseRecording`, `PoseRecordingSample` and `PoseRecordingBuilder`: versioned,
   deterministic JSON recording of fused `ControllerPose`s plus the
