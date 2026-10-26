@@ -21,8 +21,8 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
   - `dart format --set-exit-if-changed .`
   - `flutter analyze`
   - `flutter test`
-  - `flutter run -d <device>` (BLE needs a physical phone; emulators do not work)
-  - `flutter build apk --debug`
+  - `flutter run --flavor base -d <device>` (BLE needs a physical phone; emulators do not work)
+  - `tool/build_flavor.sh base` (flavors: `base`, `viture`, `xreal`)
 - Per-package:
   - `packages/wmr_core`: `dart test` (also `dart pub get`, `dart analyze`)
   - `packages/wmr_companion`: `dart test` (also `dart pub get`, `dart analyze`)

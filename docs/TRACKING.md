@@ -317,7 +317,7 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart test
 cd packages/wmr_tracking_android_xr && flutter test && flutter analyze
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && flutter build apk --debug
+cd apps/wmr_companion_app && tool/build_flavor.sh base
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_android_xr:testDebugUnitTest
 ```
 
@@ -350,7 +350,7 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_viture && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && flutter build apk --debug
+cd apps/wmr_companion_app && tool/build_flavor.sh viture
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_viture:testDebugUnitTest
 ```
 
@@ -384,7 +384,7 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_xreal && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && flutter build apk --debug
+cd apps/wmr_companion_app && tool/build_flavor.sh xreal
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_xreal:testDebugUnitTest
 ```
 

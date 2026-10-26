@@ -36,6 +36,37 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // One APK can carry the Dart flags for every vendor, but only one Unity
+    // runtime. `base` links no Unity at all (Android XR, emulator, BLE/3DoF);
+    // `viture` and `xreal` link a locally exported unityLibrary when present.
+    flavorDimensions += "vendor"
+    productFlavors {
+        create("base") {
+            dimension = "vendor"
+        }
+        create("viture") {
+            dimension = "vendor"
+        }
+        create("xreal") {
+            dimension = "vendor"
+        }
+    }
+}
+
+dependencies {
+    // Only the matching flavor gets the module, so base can never carry Unity
+    // and the two runtimes can never be linked together. settings.gradle.kts
+    // already fails when both exports exist.
+    findProject(":unityLibraryViture")?.let {
+        "vitureImplementation"(project(":unityLibraryViture"))
+    }
+    findProject(":unityLibraryXreal")?.let {
+        "xrealImplementation"(project(":unityLibraryXreal"))
+    }
+    check(findProject(":unityLibraryViture") == null || findProject(":unityLibraryXreal") == null) {
+        "Cannot link both unityLibrary modules into one APK."
+    }
 }
 
 kotlin {
