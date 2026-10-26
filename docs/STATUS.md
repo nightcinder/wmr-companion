@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-25 (adds the ONY-202 headset-tracking research and framework; earlier update was M10–M15 milestones and reusable library close-out ONY-41). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-26 (records the M13.3 0.2 security posture; earlier update was the ONY-202 headset-tracking research and framework). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -35,9 +35,18 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 | **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.1.0` is on owner hold, and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
 | **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
 | **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
-| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done). **Open:** M13.3 security decision (after M12) and M13.4 README rewrite around M12 results. |
+| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.2 (owner choice below). **Open:** M13.4 README rewrite around M12 results. |
 | **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
 | **M15 — PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
+
+### Security posture for 0.2 (M13.3, owner decision)
+
+The owner chose to keep the **unauthenticated test posture for 0.2** and record its limits rather than harden the bridges before the release (`WMR_Bridge` #64, option 2). This is an explicit temporary decision, not a claim that the bridge is secure.
+
+- **BLE side:** the ESP32 GATT service requires no pairing, encryption or authentication. Any central in range can read FF11 and subscribe; only one phone is served at a time, and an unwanted central that connects first blocks the intended phone. Controllers are trusted by HID name, which is not authentication. Use the bridge only in a trusted environment and treat the stream as observable.
+- **Raspberry Pi side:** the daemon keeps the plaintext WebSocket and the shared bearer token. Loopback is the default, and a non-loopback bind requires a token. The token authorises clients but does not encrypt the stream, so terminate TLS externally (reverse proxy or SSH tunnel) or use a trusted WPA2/WPA3 LAN; the app shows this warning in the Wi-Fi connect panel.
+- **Platform security:** ESP32 flash encryption and secure boot remain off. **Raspberry Pi secure boot is out of scope for 0.2 and deferred to 0.3**; no companion feature or pairing flow depends on it.
+- **After 0.2:** require LE Secure Connections with a bonded phone, replace the experimental UUIDs, and enable flash encryption and secure boot, as listed in `WMR_Bridge` `docs/SECURITY.md` "Before wider use". These are post-0.2 work.
 
 ### What has been checked on hardware (user-reported)
 
@@ -105,7 +114,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | FF17 controller scan and control | Firmware merged (WMR_Bridge #70, tag `v0.1.1`): 1-2 byte commands (discover, connect, disconnect, forget addresses, forget bond) and a 20-byte status v2. App: parser, result-code handling, `ControllerControlClient`, fake-bridge support and a "Controller control" panel on the debug screen (per-hand state, scan, connect/disconnect, forget addresses/bond, scanning warning); unit and widget tested, **not yet run on hardware** ([PROTOCOL.md](PROTOCOL.md) "FF17 controller control in the app") |
 | Round trip: where the 40 ms goes (phone write and notification delivery, air, notification traffic). Needs an FF11/FF12 run and a run with no stream at the same position; the screen now has a no-stream latency mode and a stream selector (PR #28, built, **not yet run on hardware**) | [LATENCY.md](LATENCY.md) "First hardware run", "Run sheet" |
 | Controller discovery by name instead of compiled-in addresses (done; addresses are stored in the ESP32's NVS) | Firmware merged (WMR_Bridge #14); checks D1-D11 reported as passed by the project owner (user-reported, 2026-10-22, no output pasted) |
-| No BLE pairing or encryption on the bridge | WMR_Bridge `docs/SECURITY.md` |
+| BLE pairing/encryption not required in 0.2 (owner decision: keep the unauthenticated test bridge) | [Security posture for 0.2](#security-posture-for-02-m133-owner-decision), `WMR_Bridge` #64 and `docs/SECURITY.md` |
 | `universal_ble` gaps (PHY, connection interval readout) to raise upstream | [PROTOCOL.md](PROTOCOL.md) "universal_ble coverage" |
 | Remaining firmware bench checklists (FF12 5-7, 11, 12, 15-18; L1-L5; B4, B6-B11; C7; X-series done) | WMR_Bridge `docs/TESTING.md` |
 | Checks still not run, with commands and pass criteria | WMR_Bridge `docs/runs/sheets/closeout.md` |
@@ -139,7 +148,7 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 4. **M13 — Release and distribution (Open)**:
    - `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12).
    - Compatibility matrix published in both repos keyed on FF16 (#59, `WMR_Bridge` #45 & #49, M13.2 done).
-   - **Open:** M13.3 bridge security decision in `docs/SECURITY.md` (after M12).
+   - **M13.3 bridge security decision:** recorded for 0.2 — keep the unauthenticated test bridge, keep the Pi bridge plaintext with a bearer token, and defer Raspberry Pi secure boot to 0.3 (`WMR_Bridge` #64; summary above and in `WMR_Bridge` `docs/SECURITY.md`).
    - **Open:** M13.4 README rewrite in both repos around verified M12 hardware results.
 5. **M14 — Raspberry Pi Wi-Fi host bridge (In progress)**:
    - **M14.1 `packages/wmr_ws`:** WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged #61).
