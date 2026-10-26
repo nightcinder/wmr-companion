@@ -4,7 +4,7 @@
 
 Companion documents:
 
-- App [`docs/TRACKING.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/TRACKING.md) — gates 1, 2, 6, 7, 8 (this sheet). Gates 3–5 are covered by the VITURE and XREAL sheets.
+- App [`docs/tracking/GATES.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/tracking/GATES.md) — gates 1, 2, 6, 7, 8 (this sheet). Gates 3–5 are covered by the VITURE and XREAL sheets.
 - App [`docs/STATUS.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/STATUS.md) — what is implemented vs. unverified.
 - App [`docs/CAMERAS.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/CAMERAS.md) — why the tracking cameras are unreachable.
 - WMR_Bridge [`docs/DECODING.md`](https://github.com/nightcinder/WMR_Bridge/blob/main/docs/DECODING.md) — controller IMU/protocol reference.

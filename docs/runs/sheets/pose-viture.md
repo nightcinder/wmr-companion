@@ -4,9 +4,9 @@
 
 Companion documents:
 
-- App [`docs/TRACKING.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/TRACKING.md) — gates 1, 3, 4, 7, 8, 9 (this sheet).
+- App [`docs/tracking/GATES.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/tracking/GATES.md) — gates 1, 3, 4, 7, 8, 9 (this sheet).
 - App [`docs/STATUS.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/STATUS.md)
-- VITURE XR Glasses SDK (C) and VITURE XR SDK for Unity (links in TRACKING.md Sources).
+- VITURE XR Glasses SDK (C) and VITURE XR SDK for Unity (links in RESEARCH.md Sources).
 
 Gates covered: **1** (capture one frame), **3** (Unity-in-Flutter smoke test), **4** (VITURE Neckband hand test), **7** (clock), **8** (fallback quality), **9** (VITURE C path, optional).
 
@@ -29,7 +29,7 @@ Gates covered: **1** (capture one frame), **3** (Unity-in-Flutter smoke test), *
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb` (wireless for the Neckband), terminal, logcat capture. |
 
-Build the APK (after exporting the Unity `unityLibrary` AAR per TRACKING.md "Packaging"):
+Build the APK (after exporting the Unity `unityLibrary` AAR per FRAMEWORK.md "Packaging"):
 
 ```bash
 cd apps/wmr_companion_app

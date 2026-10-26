@@ -4,9 +4,9 @@
 
 Companion documents:
 
-- App [`docs/TRACKING.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/TRACKING.md) — gates 3, 5, 7, 8 (this sheet). Gate 1 is not defined for XREAL (no app-visible tracking camera); passthrough RGB only.
+- App [`docs/tracking/GATES.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/tracking/GATES.md) — gates 3, 5, 7, 8 (this sheet). Gate 1 is not defined for XREAL (no app-visible tracking camera); passthrough RGB only.
 - App [`docs/STATUS.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/STATUS.md)
-- XREAL SDK 3.1.0 docs (links in TRACKING.md Sources).
+- XREAL SDK 3.1.0 docs (links in RESEARCH.md Sources).
 
 Gates covered: **3** (Unity-in-Flutter smoke test), **5** (XREAL Air 2 Ultra hand test), **7** (clock), **8** (fallback quality). Gate 1 is N/A (no tracking camera exposed); gate 9 is VITURE-only.
 
