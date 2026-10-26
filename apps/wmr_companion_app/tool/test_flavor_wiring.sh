@@ -101,8 +101,17 @@ has_permission() {
   "$aapt" dump permissions "$apk" | grep -q "$permission"
 }
 
+# settings.gradle.kts probes the export directories at configuration time, which
+# the configuration cache cannot track. The project disables the cache, but drop
+# any entry anyway so a forced `--configuration-cache` run still re-probes after
+# each stub change (ONY-355).
+reset_configuration_cache() {
+  rm -rf "$app_dir/android/.gradle/configuration-cache"
+}
+
 build() {
   local flavor="$1"
+  reset_configuration_cache
   (cd "$app_dir" && tool/build_flavor.sh "$flavor")
 }
 
@@ -113,6 +122,7 @@ remove_stub() {
 expect_build_failure() {
   local flavor="$1" expected="$2"
   local output status
+  reset_configuration_cache
   set +e
   output="$(cd "$app_dir" && tool/build_flavor.sh "$flavor" 2>&1)"
   status=$?
