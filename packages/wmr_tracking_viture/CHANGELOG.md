@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Target VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`, Unity 6000.0.27f1) in the
+  Unity relay bridge. No Dart or Kotlin API change.
+
 ## 0.2.0
 
 - Add a minimal Unity 6000.0 smoke project, frame/error events and pause/resume

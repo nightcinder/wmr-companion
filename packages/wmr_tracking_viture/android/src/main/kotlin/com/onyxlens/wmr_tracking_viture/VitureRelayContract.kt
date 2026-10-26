@@ -74,7 +74,7 @@ internal object UnityPoseConverter {
 
 /**
  * Capability matrix for `VitureXR.Glasses.GetGlassesModel()` in the VITURE
- * Unity SDK (v0.7.0).
+ * Unity SDK (v0.9.0, `Viture.XR.VitureXR`).
  *
  * Only `LumaUltra` supports 6DoF head pose and 26-joint XR Hands skeletal
  * tracking on the Pro Neckband; other glasses models are 3DoF head-only.
@@ -168,7 +168,7 @@ internal object VitureRelayCommandBuilder {
  *
  * Production uses [ReflectiveUnityBridge] so the plugin compiles cleanly even
  * when the proprietary Unity 6000.0+ UaaL export (`unityLibrary`) and VITURE
- * XR SDK (`com.viture.xr` v0.7.0) are not present in the CI build environment.
+ * XR SDK (`com.viture.xr` v0.9.0, `Viture.XR.VitureXR`) are not present in the CI build environment.
  */
 internal interface VitureUnityBridge {
     val isUnityAvailable: Boolean

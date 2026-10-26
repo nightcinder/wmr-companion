@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Update the VITURE capability profile to name VITURE XR SDK for Unity 0.9.0
+  and Unity 6000.0.27f1. No API change.
+
 ## 0.2.0
 
 Migration note: no existing public API changed; `PoseRecording` is additive.

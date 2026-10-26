@@ -11,9 +11,9 @@ Flutter:
 
 1. Kotlin sends `UnityRelayCommand` JSON (`start`, `stop`, `dispose`,
    `recenter`, `configure`) via `UnityPlayer.UnitySendMessage("WmrTrackingRelay", "OnCommand", json)`.
-   `recenter` delegates to `VitureXR.HeadTracking.SetWorldOrigin()`.
+   `recenter` delegates to `Viture.XR.VitureXR.HeadTracking.SetWorldOrigin()`.
 2. The minimal C# component (`unity/Assets/WmrTrackingViture/Runtime/VitureTrackingRelayBridge.cs`)
-   calls `VitureXR.Glasses.GetGlassesModel()`, `VitureXR.HandTracking.Start()` /
+   calls `Viture.XR.VitureXR.Glasses.GetGlassesModel()`, `Viture.XR.VitureXR.HandTracking.Start()` /
    `.Stop()`, reads the head pose and 26 `XRHandJointID` joints from
    `XRHandSubsystem`, converts left-handed Unity coordinates to right-handed
    OpenXR coordinates, and forwards frames to

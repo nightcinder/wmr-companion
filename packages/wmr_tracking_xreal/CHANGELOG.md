@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Target XREAL SDK 3.1.0 in the Unity project and declare its AR Foundation,
+  URP, Input System, XRI and Image Conversion dependencies in the manifest.
+  No Dart or Kotlin API change.
+
 ## 0.2.0
 
 - Add a minimal Unity 6000.0 smoke project, frame/error events and pause/resume

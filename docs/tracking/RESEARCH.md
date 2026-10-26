@@ -114,6 +114,8 @@ Official docs: [Rokid Open Platform](https://open.rokid.com/), [SDK selection](h
 
 Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glasses-sdk/glasses) and [VITURE XR SDK for Unity](https://www.viture.com/developer/unity-sdk/unity).
 
+> **Current SDK note (ONY-378):** current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The 0.7.0 API names and findings below are kept as the research record.
+
 ### C glasses SDK
 
 - **Cross-platform C API** (`libglasses` on Linux, macOS, Windows; `libglasses.so` on Android), USB vendor ID `0x35CA`. Android needs the USB host feature, runtime USB permission and the `UsbDeviceConnection` file descriptor passed to `xr_device_provider_create`.

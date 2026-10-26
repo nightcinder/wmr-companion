@@ -16,7 +16,7 @@ abstract final class VitureTracking {
 }
 
 /// Glasses models reported by `VitureXR.Glasses.GetGlassesModel()` in the
-/// VITURE XR SDK for Unity (v0.7.0).
+/// VITURE XR SDK for Unity (v0.9.0, `Viture.XR.VitureXR`).
 ///
 /// Only [lumaUltra] provides 6DoF head pose and XR Hands skeletal hand
 /// tracking on the Pro Neckband; the remaining models are 3DoF head-only.
