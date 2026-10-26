@@ -302,13 +302,15 @@ class DebugTrackingSelection {
 }
 
 /// Creates the source for [choice], or null when its build flag is off.
-typedef DebugTrackingSourceFactory =
-    Future<TrackingSource?> Function(DebugTrackingSource choice);
+typedef DebugTrackingSourceFactory = Future<TrackingSource?> Function(
+  DebugTrackingSource choice,
+);
 
 /// Swappable in tests, so a source that fails like an unlinked Unity relay can
 /// be exercised without a platform channel.
-final debugTrackingSourceFactoryProvider =
-    Provider<DebugTrackingSourceFactory>((ref) => createDebugTrackingSource);
+final debugTrackingSourceFactoryProvider = Provider<DebugTrackingSourceFactory>(
+  (ref) => createDebugTrackingSource,
+);
 
 /// The production factory. Each vendor `create()` returns null without
 /// touching its platform channel while its `--dart-define` flag is off.

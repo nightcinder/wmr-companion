@@ -580,11 +580,9 @@ void main() {
       );
       await tester.pump();
       if (simulated) {
-        ProviderScope.containerOf(
-          tester.element(find.byType(DebugScreen)),
-        ).read(debugTrackingSourceProvider.notifier).set(
-          DebugTrackingSource.simulated,
-        );
+        ProviderScope.containerOf(tester.element(find.byType(DebugScreen)))
+            .read(debugTrackingSourceProvider.notifier)
+            .set(DebugTrackingSource.simulated);
         await tester.pump();
       }
     }
