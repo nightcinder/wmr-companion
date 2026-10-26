@@ -1,5 +1,8 @@
 package com.onyxlens.wmr_tracking_viture
 
+import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+
 /**
  * Unity `XRHandJointID` to OpenXR 26-joint name table shared by the VITURE
  * Unity-as-a-Library relay.
@@ -193,9 +196,9 @@ internal class ReflectiveUnityBridge : VitureUnityBridge {
 
     override fun queryGlassesModel(): String? {
         // When the C# bridge registers the detected model via
-        // WmrTrackingViturePlugin.onUnityGlassesModel(...), the plugin uses it;
-        // otherwise return null until the Unity scene reports it.
-        return WmrTrackingViturePlugin.reportedGlassesModel
+        // WmrTrackingViturePlugin.onUnityGlassesModel(...), the shared runtime
+        // keeps it; otherwise return null until the Unity scene reports it.
+        return SharedUnityRuntime.shared.glassesModel(GlassesVendor.VITURE)
     }
 
     override fun sendCommand(

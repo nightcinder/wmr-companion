@@ -6,6 +6,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+
 class WmrTrackingViturePluginTest {
     private class FakeBridge(
         override val isUnityAvailable: Boolean = true,
@@ -135,5 +138,39 @@ class WmrTrackingViturePluginTest {
         assertEquals(1, reply.successes.size)
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
+    }
+
+    @Test
+    fun startUnityRelayReusesThePlayerOwnedByXreal() {
+        var creations = 0
+        val runtime = SharedUnityRuntime {
+            creations += 1
+            true
+        }
+        runtime.claim(GlassesVendor.XREAL)
+        val bridge = FakeBridge(isUnityAvailable = true, model = "LumaUltra")
+        val plugin = WmrTrackingViturePlugin(bridge, runtime)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertTrue(reply.errors.isEmpty())
+        assertEquals(1, reply.successes.size)
+        assertEquals(GlassesVendor.XREAL, runtime.ownerVendor)
+        assertEquals(1, creations)
+    }
+
+    @Test
+    fun startUnityRelayFailsWhenTheSharedPlayerIsUnavailable() {
+        val runtime = SharedUnityRuntime { false }
+        val bridge = FakeBridge(isUnityAvailable = true, model = "LumaUltra")
+        val plugin = WmrTrackingViturePlugin(bridge, runtime)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals("unavailable", reply.errors[0].first)
+        assertTrue(bridge.sentCommands.isEmpty())
     }
 }

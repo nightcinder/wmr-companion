@@ -7,6 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -31,6 +33,7 @@ import io.flutter.plugin.common.PluginRegistry
  */
 class WmrTrackingViturePlugin internal constructor(
     private val bridge: VitureUnityBridge,
+    private val runtime: SharedUnityRuntime = SharedUnityRuntime.shared,
 ) :
     FlutterPlugin,
     MethodChannel.MethodCallHandler,
@@ -49,6 +52,27 @@ class WmrTrackingViturePlugin internal constructor(
     private var eventSink: EventChannel.EventSink? = null
     private val pendingStart = PendingStartGate()
 
+    /** Routes the shared UnityPlayer callbacks for this vendor onto Flutter. */
+    private val unityCallbacks = object : SharedUnityRuntime.Handler {
+        override fun onFrame(frameJson: String) {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                deliverUnityFrame(frameJson)
+            } else {
+                mainHandler.post { deliverUnityFrame(frameJson) }
+            }
+        }
+
+        override fun onError(code: String, message: String) {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                deliverUnityError(code, message)
+            } else {
+                mainHandler.post { deliverUnityError(code, message) }
+            }
+        }
+
+        override fun onGlassesModel(modelName: String?) = Unit
+    }
+
     private var started = false
     private var disposed = false
     private var pendingFilterMode: String = "responsive"
@@ -60,7 +84,7 @@ class WmrTrackingViturePlugin internal constructor(
         events = EventChannel(binding.binaryMessenger, "wmr_tracking_viture/frames")
         methods.setMethodCallHandler(this)
         events.setStreamHandler(this)
-        activeInstance = this
+        runtime.register(GlassesVendor.VITURE, unityCallbacks)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -70,9 +94,8 @@ class WmrTrackingViturePlugin internal constructor(
         events.setStreamHandler(null)
         eventSink = null
         appContext = null
-        if (activeInstance === this) {
-            activeInstance = null
-        }
+        runtime.unregister(GlassesVendor.VITURE, unityCallbacks)
+        runtime.release(GlassesVendor.VITURE)
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -261,6 +284,11 @@ class WmrTrackingViturePlugin internal constructor(
     }
 
     internal fun startUnityRelay(reply: StartReply) {
+        val claim = runtime.claim(GlassesVendor.VITURE)
+        if (!claim.granted) {
+            reply.error(ERROR_UNAVAILABLE, "No shared UnityPlayer is linked into this build")
+            return
+        }
         val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
         if (!modelSpec.handTracking || !modelSpec.head6Dof) {
             reply.error(
@@ -326,25 +354,14 @@ class WmrTrackingViturePlugin internal constructor(
         internal const val ERROR_PROTOCOL = "protocol"
         internal const val ERROR_CLOSED = "closed"
 
-        @Volatile
-        internal var activeInstance: WmrTrackingViturePlugin? = null
-
-        @Volatile
-        internal var reportedGlassesModel: String? = null
-
         /**
          * Called by C# `VitureTrackingRelayBridge` when a new tracking frame is
-         * ready. Marshals delivery onto the Android main thread for Flutter's
-         * `EventSink`.
+         * ready. The shared runtime routes it to the VITURE plugin, and that
+         * plugin marshals delivery onto the Android main thread.
          */
         @JvmStatic
         fun onUnityFrame(frameJson: String) {
-            val plugin = activeInstance ?: return
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                plugin.deliverUnityFrame(frameJson)
-            } else {
-                plugin.mainHandler.post { plugin.deliverUnityFrame(frameJson) }
-            }
+            SharedUnityRuntime.shared.dispatchFrame(GlassesVendor.VITURE, frameJson)
         }
 
         /**
@@ -354,21 +371,17 @@ class WmrTrackingViturePlugin internal constructor(
          */
         @JvmStatic
         fun onUnityError(code: String, message: String) {
-            val plugin = activeInstance ?: return
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                plugin.deliverUnityError(code, message)
-            } else {
-                plugin.mainHandler.post { plugin.deliverUnityError(code, message) }
-            }
+            SharedUnityRuntime.shared.dispatchError(GlassesVendor.VITURE, code, message)
         }
 
         /**
          * Called by C# `VitureTrackingRelayBridge` after querying
-         * `VitureXR.Glasses.GetGlassesModel()`.
+         * `VitureXR.Glasses.GetGlassesModel()`. The model is the second
+         * confirmation after native detection.
          */
         @JvmStatic
         fun onUnityGlassesModel(modelName: String?) {
-            reportedGlassesModel = modelName
+            SharedUnityRuntime.shared.dispatchGlassesModel(GlassesVendor.VITURE, modelName)
         }
     }
 }

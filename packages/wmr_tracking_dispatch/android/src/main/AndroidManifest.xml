@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Detection only lists attached USB devices and checks per-device access.
+         It performs no detection on plugin attach, so nothing runs while every
+         vendor flag is off. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+</manifest>

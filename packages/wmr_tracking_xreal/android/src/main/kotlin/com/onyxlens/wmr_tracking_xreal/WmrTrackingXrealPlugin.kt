@@ -7,6 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -31,6 +33,7 @@ import io.flutter.plugin.common.PluginRegistry
  */
 class WmrTrackingXrealPlugin internal constructor(
     private val bridge: XrealUnityBridge,
+    private val runtime: SharedUnityRuntime = SharedUnityRuntime.shared,
 ) :
     FlutterPlugin,
     MethodChannel.MethodCallHandler,
@@ -49,6 +52,27 @@ class WmrTrackingXrealPlugin internal constructor(
     private var eventSink: EventChannel.EventSink? = null
     private val pendingStart = PendingStartGate()
 
+    /** Routes the shared UnityPlayer callbacks for this vendor onto Flutter. */
+    private val unityCallbacks = object : SharedUnityRuntime.Handler {
+        override fun onFrame(frameJson: String) {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                deliverUnityFrame(frameJson)
+            } else {
+                mainHandler.post { deliverUnityFrame(frameJson) }
+            }
+        }
+
+        override fun onError(code: String, message: String) {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                deliverUnityError(code, message)
+            } else {
+                mainHandler.post { deliverUnityError(code, message) }
+            }
+        }
+
+        override fun onGlassesModel(modelName: String?) = Unit
+    }
+
     private var started = false
     private var disposed = false
 
@@ -58,7 +82,7 @@ class WmrTrackingXrealPlugin internal constructor(
         events = EventChannel(binding.binaryMessenger, "wmr_tracking_xreal/frames")
         methods.setMethodCallHandler(this)
         events.setStreamHandler(this)
-        activeInstance = this
+        runtime.register(GlassesVendor.XREAL, unityCallbacks)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -68,9 +92,8 @@ class WmrTrackingXrealPlugin internal constructor(
         events.setStreamHandler(null)
         eventSink = null
         appContext = null
-        if (activeInstance === this) {
-            activeInstance = null
-        }
+        runtime.unregister(GlassesVendor.XREAL, unityCallbacks)
+        runtime.release(GlassesVendor.XREAL)
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -228,6 +251,11 @@ class WmrTrackingXrealPlugin internal constructor(
     }
 
     internal fun startUnityRelay(reply: StartReply) {
+        val claim = runtime.claim(GlassesVendor.XREAL)
+        if (!claim.granted) {
+            reply.error(ERROR_UNAVAILABLE, "No shared UnityPlayer is linked into this build")
+            return
+        }
         val modelSpec = XrealGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
         if (!modelSpec.handTracking || !modelSpec.head6Dof) {
             reply.error(
@@ -290,25 +318,14 @@ class WmrTrackingXrealPlugin internal constructor(
         internal const val ERROR_PROTOCOL = "protocol"
         internal const val ERROR_CLOSED = "closed"
 
-        @Volatile
-        internal var activeInstance: WmrTrackingXrealPlugin? = null
-
-        @Volatile
-        internal var reportedGlassesModel: String? = null
-
         /**
          * Called by C# `XrealTrackingRelayBridge` when a new tracking frame is
-         * ready. Marshals delivery onto the Android main thread for Flutter's
-         * `EventSink`.
+         * ready. The shared runtime routes it to the XREAL plugin, and that
+         * plugin marshals delivery onto the Android main thread.
          */
         @JvmStatic
         fun onUnityFrame(frameJson: String) {
-            val plugin = activeInstance ?: return
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                plugin.deliverUnityFrame(frameJson)
-            } else {
-                plugin.mainHandler.post { plugin.deliverUnityFrame(frameJson) }
-            }
+            SharedUnityRuntime.shared.dispatchFrame(GlassesVendor.XREAL, frameJson)
         }
 
         /**
@@ -318,21 +335,17 @@ class WmrTrackingXrealPlugin internal constructor(
          */
         @JvmStatic
         fun onUnityError(code: String, message: String) {
-            val plugin = activeInstance ?: return
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                plugin.deliverUnityError(code, message)
-            } else {
-                plugin.mainHandler.post { plugin.deliverUnityError(code, message) }
-            }
+            SharedUnityRuntime.shared.dispatchError(GlassesVendor.XREAL, code, message)
         }
 
         /**
          * Called by C# `XrealTrackingRelayBridge` after querying
-         * `XREALPlugin.GetDeviceType()`.
+         * `XREALPlugin.GetDeviceType()`. The model is the second confirmation
+         * after native detection.
          */
         @JvmStatic
         fun onUnityGlassesModel(modelName: String?) {
-            reportedGlassesModel = modelName
+            SharedUnityRuntime.shared.dispatchGlassesModel(GlassesVendor.XREAL, modelName)
         }
     }
 }

@@ -1,0 +1,30 @@
+name: wmr_tracking_dispatch
+description: >-
+  Native glasses vendor detection and single-owner UnityPlayer dispatch for
+  the default-off VITURE and XREAL tracking plugins.
+version: 0.1.0
+repository: https://github.com/nightcinder/wmr-companion
+issue_tracker: https://github.com/nightcinder/wmr-companion/issues
+
+environment:
+  sdk: ^3.13.5
+  flutter: '>=3.3.0'
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  wmr_tracking: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.onyxlens.wmr_tracking_dispatch
+        pluginClass: WmrTrackingDispatchPlugin
