@@ -76,6 +76,11 @@ jobs:
         run: |
           dart analyze
           dart test
+
+      - name: XR adapter contract harness
+        working-directory: packages/wmr_tracking
+        run: dart run tool/xr_contract_harness.dart
+
       - name: wmr_tracking_android_xr package
         working-directory: packages/wmr_tracking_android_xr
         run: |
