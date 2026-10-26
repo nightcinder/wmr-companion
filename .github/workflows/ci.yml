@@ -76,6 +76,11 @@ jobs:
         run: |
           dart analyze
           dart test
+
+      - name: XR adapter contract harness
+        working-directory: packages/wmr_tracking
+        run: dart run tool/xr_contract_harness.dart
+
       - name: wmr_tracking_android_xr package
         working-directory: packages/wmr_tracking_android_xr
         run: |
@@ -143,6 +148,63 @@ jobs:
           flutter analyze
           flutter test
           flutter build apk --debug
+
+  gate7-clock-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Gate 7 without hardware: a recorded controller capture plus a
+      # synthetic head trace through SourceClockAligner. The good fixture must
+      # pass; drift, gap and out-of-window must fail with their named reasons.
+      - name: Gate 7 clock replay
+        working-directory: packages/wmr_tracking
+        run: |
+          dart run tool/gate7_clock_replay.dart --fixture tool/fixtures/gate7/stable_offset.json
+          for f in drift gap out_of_window; do
+            code=0
+            dart run tool/gate7_clock_replay.dart --fixture "tool/fixtures/gate7/$f.json" || code=$?
+            if [ "$code" -ne 1 ]; then
+              echo "gate7: $f expected exit 1, got $code" >&2
+              exit 1
+            fi
+          done
+
+  gate8-fallback-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Gate 8 without hardware: a synthetic nod/walk trace through the
+      # headRelative fallback must drift (EXPECTED-FAIL), while a rigid
+      # head-local control must stay near zero (PASS).
+      - name: Gate 8 fallback quality
+        working-directory: packages/wmr_tracking
+        run: dart run tool/gate8_fallback_quality.dart
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gate8-fallback-quality
+          path: packages/wmr_tracking/build/gate8/fallback_quality.json
+          retention-days: 14
 
   android-flavors:
     runs-on: ubuntu-latest
