@@ -258,6 +258,10 @@ companion.poses.listen((pose) {
 
 The facade owns the source (start, alignment, stop and dispose), emits one `ControllerPose` per decoded controller sample, and keeps tracking independent of the BLE connection. Attaching another source disposes the first. A failed `start()` throws `WmrTrackingException` and detaches cleanly.
 
+### Debug viewer and simulator
+
+The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. **Simulated 6DoF** is off by default; when on, a deterministic `FakeTrackingSource` hand trajectory feeds `SixDofFuser` so the viewer moves without a headset. With it off, the viewer shows the controller IMU orientation and an `orientationOnly` badge. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
+
 ### Adapter recipes
 
 **Android XR (implemented first target).**

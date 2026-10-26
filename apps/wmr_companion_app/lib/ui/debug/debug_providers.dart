@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:vector_math/vector_math_64.dart';
@@ -9,6 +10,7 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/domain/synthetic_motion.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 import '../connect/connect_providers.dart';
 import 'stream_settings.dart';
@@ -257,6 +259,182 @@ final decodedViewProvider = StreamProvider.family<DecodedView, DebugSource>((
       hand: hand,
     );
   });
+});
+
+/// Whether the debug viewer simulates a 6DoF tracking source.
+///
+/// Off by default: the normal build shows the controller's 3DoF orientation
+/// with an `orientationOnly` badge. Turning it on feeds a deterministic
+/// [FakeTrackingSource] trajectory through [SixDofFuser] so the viewer can be
+/// exercised without a headset.
+final simulatedSixDofProvider = NotifierProvider<SimulatedSixDof, bool>(
+  SimulatedSixDof.new,
+);
+
+class SimulatedSixDof extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool value) => state = value;
+}
+
+/// One viewer update: the fused pose per hand plus the head that produced it.
+class DebugPoses {
+  const DebugPoses({this.left, this.right, this.head});
+
+  final ControllerPose? left;
+  final ControllerPose? right;
+  final Pose? head;
+
+  ControllerPose? forHand(int hand) => hand == 0 ? left : right;
+}
+
+/// Poses for the 6DoF viewer.
+///
+/// Decoded FF12/FF14 samples feed [SixDofFuser] at the controller rate. With
+/// no tracking frames the fuser returns an `orientationOnly` pose; with
+/// [simulatedSixDofProvider] on, a [FakeTrackingSource] emits a deterministic
+/// hand trajectory that lifts it to `handAnchor`. Raw mode has no IMU data,
+/// so the fake bridge keeps its synthetic orientation there.
+final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
+  ref,
+  source,
+) {
+  final mode = ref.watch(streamModeProvider);
+  final decoded = mode.carriesRecords;
+  final service = decoded ? ref.watch(controllerServiceProvider(source)) : null;
+  final simulated = ref.watch(simulatedSixDofProvider);
+  final fuser = simulated ? SixDofFuser() : null;
+  final tracking = simulated ? FakeTrackingSource() : null;
+  const motion = SyntheticMotion();
+  final clock = Stopwatch()..start();
+  var trackingStarted = false;
+  StreamSubscription<TrackingFrame>? trackingSub;
+  Pose? head;
+
+  Future<void> startTracking() async {
+    final source = tracking;
+    final fuserState = fuser;
+    if (source == null || trackingStarted) return;
+    // Subscribe before start so no frame is lost between the two.
+    trackingSub = source.frames.listen(fuserState?.onTrackingFrame);
+    try {
+      await source.start();
+      trackingStarted = true;
+    } catch (_) {
+      // Leave the viewer on the orientation-only fallback.
+    }
+  }
+
+  if (tracking != null) unawaited(startTracking());
+
+  late final StreamController<DebugPoses> controller;
+  Timer? timer;
+
+  Quaternion orientationFor(int hand, Duration now) {
+    if (service != null && decoded) {
+      return service.pipeline(hand).orientation;
+    }
+    return source == DebugSource.fake ? motion.at(now) : Quaternion.identity();
+  }
+
+  void tick() {
+    if (controller.isClosed) return;
+    final now = clock.elapsed;
+    final nowNs = now.inMicroseconds * 1000 + 1;
+    final trackingSource = tracking;
+    final fuserState = fuser;
+    if (trackingSource != null && fuserState != null && trackingStarted) {
+      final phase = now.inMilliseconds / 1000.0;
+      final headPose = Pose(
+        translation: Vector3(0, 1.6, 0),
+        rotation: Quaternion.identity(),
+      );
+      final sway = math.sin(phase * 1.2);
+      final lift = math.cos(phase * 2.0);
+      trackingSource.addFrame(
+        TrackingFrame(
+          timeNs: nowNs,
+          hostTimeNs: nowNs,
+          head: TrackedPose(pose: headPose),
+          leftHand: HandPose(
+            hand: TrackedHand.left,
+            palm: TrackedPose(
+              pose: Pose(
+                translation: Vector3(
+                  -0.18 + sway * 0.12,
+                  -0.25 + lift * 0.06,
+                  -0.35 + sway * 0.10,
+                ),
+                rotation: Quaternion.identity(),
+              ),
+            ),
+          ),
+          rightHand: HandPose(
+            hand: TrackedHand.right,
+            palm: TrackedPose(
+              pose: Pose(
+                translation: Vector3(
+                  0.18 - sway * 0.12,
+                  -0.25 - lift * 0.06,
+                  -0.35 - sway * 0.10,
+                ),
+                rotation: Quaternion.identity(),
+              ),
+            ),
+          ),
+        ),
+      );
+      head = headPose;
+    }
+
+    ControllerPose poseFor(int hand) {
+      final orientation = orientationFor(hand, now);
+      if (fuserState != null) {
+        return fuserState.update(
+          hand: hand == 0 ? TrackedHand.left : TrackedHand.right,
+          orientation: orientation,
+          hostTimeNs: nowNs,
+        );
+      }
+      return ControllerPose(
+        hand: hand == 0 ? TrackedHand.left : TrackedHand.right,
+        hostTimeNs: nowNs,
+        orientation: orientation,
+      );
+    }
+
+    controller.add(DebugPoses(left: poseFor(0), right: poseFor(1), head: head));
+  }
+
+  controller = StreamController<DebugPoses>(
+    onListen: () {
+      tick();
+      timer = Timer.periodic(const Duration(milliseconds: 33), (_) => tick());
+    },
+    onCancel: () => timer?.cancel(),
+  );
+  ref.onDispose(() {
+    timer?.cancel();
+    unawaited(trackingSub?.cancel() ?? Future<void>.value());
+    unawaited(controller.close());
+    final source = tracking;
+    if (source != null) {
+      unawaited(() async {
+        try {
+          await source.stop();
+        } catch (_) {
+          // Teardown is best-effort.
+        }
+        try {
+          await source.dispose();
+        } catch (_) {
+          // Teardown is best-effort.
+        }
+      }());
+    }
+  });
+  return controller.stream;
 });
 
 /// Yaw removed from the displayed orientation ("reset orientation") in the

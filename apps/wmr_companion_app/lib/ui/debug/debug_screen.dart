@@ -8,6 +8,7 @@ import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 import '../connect/connect_providers.dart';
 import '../gamepad/gamepad_screen.dart';
@@ -73,6 +74,12 @@ class DebugScreen extends ConsumerWidget {
     final yawOffset = ref.watch(yawOffsetProvider);
     final q = synthetic ? removeYaw(raw, yawOffset) : raw;
     final euler = eulerFromQuaternion(q);
+    final poses = ref.watch(debugPosesProvider(source)).value;
+    final simulated = ref.watch(simulatedSixDofProvider);
+    final trackedHand = hand == 0 ? TrackedHand.left : TrackedHand.right;
+    final selectedPose =
+        poses?.forHand(hand) ??
+        ControllerPose(hand: trackedHand, hostTimeNs: 1, orientation: q);
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodyMedium?.copyWith(
       fontFamily: 'monospace',
@@ -117,13 +124,28 @@ class DebugScreen extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: 8),
+          SwitchListTile(
+            key: const ValueKey('simulated-6dof-switch'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Simulated 6DoF'),
+            subtitle: Text(
+              simulated
+                  ? 'FakeTrackingSource trajectory (no hardware)'
+                  : 'Off: 3DoF orientation only',
+            ),
+            value: simulated,
+            onChanged: (value) =>
+                ref.read(simulatedSixDofProvider.notifier).set(value),
+          ),
           SizedBox(
             height: 320,
-            child: OrientationView(
-              orientation: q,
-              edgeColor: theme.colorScheme.onSurface,
+            child: ControllerPoseView(
+              pose: selectedPose,
+              head: poses?.head,
+              style: mono,
             ),
           ),
+          PoseReadout(poses: poses, style: mono),
           Text(
             'q  w ${_f(q.w)}  x ${_f(q.x)}  y ${_f(q.y)}  z ${_f(q.z)}',
             style: mono,
@@ -259,6 +281,39 @@ class DebugScreen extends ConsumerWidget {
 
   static String _f(double v) => v.toStringAsFixed(3).padLeft(6);
   static String _deg(double v) => '${v.toStringAsFixed(1).padLeft(6)}°';
+}
+
+/// Position in metres and the position source for each hand.
+class PoseReadout extends StatelessWidget {
+  const PoseReadout({super.key, required this.poses, this.style});
+
+  final DebugPoses? poses;
+  final TextStyle? style;
+
+  static String _metres(double value) {
+    final text = value.toStringAsFixed(3);
+    return text == '-0.000' ? '0.000' : text;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var index = 0; index < _handNames.length; index++)
+          Text(_line(_handNames[index], poses?.forHand(index)), style: style),
+      ],
+    );
+  }
+
+  static String _line(String name, ControllerPose? pose) {
+    final position = pose?.position;
+    final positionText = position == null
+        ? 'position none'
+        : 'position ${_metres(position.x)}, ${_metres(position.y)}, '
+              '${_metres(position.z)} m';
+    return '$name  $positionText  source ${pose?.source.name ?? 'waiting'}';
+  }
 }
 
 /// Raw FF11, decoded FF12 or batched FF14. The app listens to one at a
