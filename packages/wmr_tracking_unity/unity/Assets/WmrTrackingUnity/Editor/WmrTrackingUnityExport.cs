@@ -7,7 +7,7 @@
 //        OnyxLens.WmrTrackingUnity.Editor.WmrTrackingUnityExport.Export
 //
 // Neither proprietary SDK is vendored. The export fails closed until
-// com.viture.xr (>= 0.7.0), com.xreal.xr (>= 3.0.0) and com.unity.xr.hands are
+// com.viture.xr (>= 0.9.0), com.xreal.xr (>= 3.0.0) and com.unity.xr.hands are
 // present. The post-export check proves that exactly one unityLibrary exists
 // and reports same-ABI native library name collisions, which are the most
 // likely way two SDKs break a shared export.
@@ -48,8 +48,9 @@ namespace OnyxLens.WmrTrackingUnity.Editor
         /// </summary>
         public static void Export()
         {
-            RequireVendorRuntime();
             RequireSdks();
+            ConfigureUnifiedXr.Configure();
+            RequireVendorRuntime();
             if (!File.Exists(ScenePath))
             {
                 throw new BuildFailedException(
@@ -157,7 +158,7 @@ namespace OnyxLens.WmrTrackingUnity.Editor
                 .Select(RelativeToLibrary)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
             {
-                report.Add(path);
+                report.Add(file);
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(NativeLibraryReportPath));
@@ -270,7 +271,7 @@ namespace OnyxLens.WmrTrackingUnity.Editor
 #endif
 #if !WMR_VITURE_XR_SDK
             throw new BuildFailedException(
-                "The VITURE XR SDK is not installed. Import com.viture.xr v0.7.0 " +
+                "The VITURE XR SDK is not installed. Import com.viture.xr v0.9.0 " +
                 "from the VITURE developer package into this project, then reopen " +
                 "it and retry the export. The SDK is not vendored."
             );

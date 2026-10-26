@@ -8,7 +8,7 @@
 //   com.onyxlens.wmr_tracking_viture.WmrTrackingViturePlugin.onUnityFrame(json)
 //
 // SDK gate: requires Unity 6000.0+, com.unity.xr.hands, and VITURE XR SDK for
-// Unity v0.7.0 (com.viture.xr) on the VITURE Pro Neckband.
+// Unity v0.9.0 (com.viture.xr) on the VITURE Pro Neckband.
 
 using System;
 using System.Collections.Generic;
@@ -21,7 +21,10 @@ using UnityEngine.SubsystemsImplementation;
 using UnityEngine.XR.Hands;
 #endif
 #if WMR_VITURE_XR_SDK
-using VitureXR;
+using Viture.XR;
+using VitureGlasses = Viture.XR.VitureXR.Glasses;
+using VitureHandTracking = Viture.XR.VitureXR.HandTracking;
+using VitureHeadTracking = Viture.XR.VitureXR.HeadTracking;
 #endif
 
 namespace OnyxLens.WmrTrackingViture
@@ -172,7 +175,7 @@ namespace OnyxLens.WmrTrackingViture
         {
             ReportGlassesModel();
 #if WMR_VITURE_XR_SDK
-            var model = Glasses.GetGlassesModel().ToString();
+            var model = VitureGlasses.GetGlassesModel().ToString();
             if (!string.Equals(model, "LumaUltra", StringComparison.OrdinalIgnoreCase))
             {
                 ReportError(
@@ -181,11 +184,11 @@ namespace OnyxLens.WmrTrackingViture
                 );
                 return;
             }
-            if (!HandTracking.IsActive)
+            if (!VitureHandTracking.IsActive)
             {
-                HandTracking.Start();
+                VitureHandTracking.Start();
             }
-            if (!HandTracking.IsActive)
+            if (!VitureHandTracking.IsActive)
             {
                 ReportError("unavailable", "VitureXR.HandTracking.Start() did not activate");
                 return;
@@ -198,9 +201,9 @@ namespace OnyxLens.WmrTrackingViture
         {
             _running = false;
 #if WMR_VITURE_XR_SDK
-            if (HandTracking.IsActive)
+            if (VitureHandTracking.IsActive)
             {
-                HandTracking.Stop();
+                VitureHandTracking.Stop();
             }
 #endif
         }
@@ -211,23 +214,23 @@ namespace OnyxLens.WmrTrackingViture
 #if WMR_VITURE_XR_SDK
             if (!string.IsNullOrEmpty(options.filter_mode))
             {
-                HandTracking.filterMode = string.Equals(
+                VitureHandTracking.filterMode = string.Equals(
                     options.filter_mode,
                     "stable",
                     StringComparison.OrdinalIgnoreCase
                 )
-                    ? HandTracking.FilterMode.Stable
-                    : HandTracking.FilterMode.Responsive;
+                    ? VitureHandFilterMode.Stable
+                    : VitureHandFilterMode.Responsive;
             }
             if (!string.IsNullOrEmpty(options.aim_sensitivity))
             {
-                HandTracking.aimSensitivity = string.Equals(
+                VitureHandTracking.aimSensitivity = string.Equals(
                     options.aim_sensitivity,
                     "low",
                     StringComparison.OrdinalIgnoreCase
                 )
-                    ? HandTracking.AimSensitivity.Low
-                    : HandTracking.AimSensitivity.High;
+                    ? VitureHandAimSensitivity.Low
+                    : VitureHandAimSensitivity.High;
             }
 #endif
         }
@@ -241,7 +244,7 @@ namespace OnyxLens.WmrTrackingViture
 #if WMR_VITURE_XR_SDK
             try
             {
-                HeadTracking.SetWorldOrigin();
+                VitureHeadTracking.SetWorldOrigin();
             }
             catch (Exception ex)
             {
@@ -416,7 +419,7 @@ namespace OnyxLens.WmrTrackingViture
         private void ReportGlassesModel()
         {
 #if WMR_VITURE_XR_SDK
-            string model = Glasses.GetGlassesModel().ToString();
+            string model = VitureGlasses.GetGlassesModel().ToString();
 #else
             string model = "LumaUltra";
 #endif
