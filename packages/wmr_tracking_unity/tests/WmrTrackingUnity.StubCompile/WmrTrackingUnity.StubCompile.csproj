@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Unity serializes these fields via reflection; the stub compiler cannot see that. -->
+    <NoWarn>$(NoWarn);CS0649;CS0414;CS0162;CS0219</NoWarn>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UnityEditorStub)' == 'true'">
+    <DefineConstants>$(DefineConstants);UNITY_EDITOR</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UnityEditorStub)' != 'true'">
+    <DefineConstants>$(DefineConstants);UNITY_ANDROID</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/Dispatch/*.cs" />
+    <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/*.cs" />
+    <!-- The real vendor bridges copied into the unified project, not stubs:
+         this is what proves the unified asmdef namespaces and call sites. -->
+    <Compile Include="../../unity/Assets/WmrTrackingViture/Runtime/*.cs" />
+    <Compile Include="../../unity/Assets/WmrTrackingXreal/Runtime/*.cs" />
+    <Compile Include="UnityStubs.cs" />
+  </ItemGroup>
+</Project>
