@@ -16,6 +16,7 @@ yet; no vendor adapter has been run on hardware. The research and integration pl
 - `SixDofFuser`: combines controller IMU orientation with a runtime controller
   pose, a hand anchor or a head-local fallback, and reports which one it used.
 - `TrackingFrameCodec` / `RelayTrackingSource`: versioned JSON and a source that decodes it, for a native plugin or Unity sidecar.
+- `FakeXrAdapter` / `XrContractHarness`: deterministic head and 26-joint hand frames for both adapter contracts (native OpenXR JSON and Unity relay JSON), with head/hand rate checks and malformed-frame rejection. Run it with `dart run tool/xr_contract_harness.dart` from this package; it needs no headset, Unity or Android XR.
 - `PoseRecording` / `PoseRecordingBuilder`: versioned JSON capture of fused `ControllerPose`s and their `TrackingFrame`s, deterministic re-encoding and typed decode errors, for the debug screen recorder and committed regression fixtures.
 - `FakeTrackingSource`: hardware-free tests and UI development.
 
@@ -50,4 +51,9 @@ controller with the head and is marked low confidence.
 ```sh
 dart test
 dart analyze
+dart run tool/xr_contract_harness.dart
 ```
+
+The harness prints the achieved head and hand rates for both adapter modes,
+checks the paired golden fixtures in `test/fixtures/xr_contract_*` and exits
+non-zero if a malformed frame is accepted. Pass `--json` for the report.
