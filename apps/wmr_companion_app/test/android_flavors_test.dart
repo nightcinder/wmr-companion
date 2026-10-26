@@ -11,16 +11,19 @@ void main() {
   final buildFlavor = File('tool/build_flavor.sh').readAsStringSync();
 
   group('Android build flavors', () {
-    test('declares base, viture, xreal and unified in one vendor dimension', () {
-      expect(appBuild, contains('flavorDimensions += "vendor"'));
-      for (final flavor in ['base', 'viture', 'xreal', 'unified']) {
-        expect(
-          appBuild,
-          contains('create("$flavor")'),
-          reason: 'missing $flavor product flavor',
-        );
-      }
-    });
+    test(
+      'declares base, viture, xreal and unified in one vendor dimension',
+      () {
+        expect(appBuild, contains('flavorDimensions += "vendor"'));
+        for (final flavor in ['base', 'viture', 'xreal', 'unified']) {
+          expect(
+            appBuild,
+            contains('create("$flavor")'),
+            reason: 'missing $flavor product flavor',
+          );
+        }
+      },
+    );
 
     test('links each Unity module only from its own flavor', () {
       expect(
