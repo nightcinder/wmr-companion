@@ -12,6 +12,7 @@ screen; they take plain facade models and have no Riverpod, app or
 | Widget | Input | Shows |
 | --- | --- | --- |
 | `OrientationView` | `Quaternion` | 3DoF cube with body axes |
+| `ControllerPoseView` | `ControllerPose`, optional head `Pose` | Low-poly ring-and-handle controller, orientation, position, trail, floor grid, head marker and position-source badge |
 | `LinkStatusView` | `WmrLinkSnapshot` | state, device, MTU, RSSI, interval, PHY, mode, fault |
 | `HandStatsView` | `Hand`, `WmrHandStats` | frames/records, rate, sequence gaps, tick loss, dt |
 | `GamepadStateView` | `GamepadState` | sticks, triggers, buttons |

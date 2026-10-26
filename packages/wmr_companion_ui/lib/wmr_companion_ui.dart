@@ -6,6 +6,7 @@
 /// layer it already has.
 library;
 
+export 'src/controller_pose_view.dart';
 export 'src/gamepad_state_view.dart';
 export 'src/hand_stats_view.dart';
 export 'src/link_status_view.dart';
