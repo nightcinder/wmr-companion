@@ -208,7 +208,14 @@ namespace OnyxLens.WmrTrackingUnity
                 ReportError(decision.Target, "unavailable", failure);
                 return;
             }
-            Forward(decision.Target, json);
+
+            // The XREAL relay has no `configure` command; forwarding it would
+            // raise a spurious `onUnityError("protocol", ...)` even though
+            // selection succeeded. XREAL only needs the backend enabled here.
+            if (decision.Target != VendorBackend.Xreal)
+            {
+                Forward(decision.Target, json);
+            }
             _dispatch.Accepted(decision);
             Debug.Log(
                 "[WmrTrackingUnity] configured vendor=" +

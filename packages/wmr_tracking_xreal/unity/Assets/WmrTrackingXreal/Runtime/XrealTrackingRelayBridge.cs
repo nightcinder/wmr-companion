@@ -14,7 +14,7 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Globalization;
 using System.Text;
 using UnityEngine;

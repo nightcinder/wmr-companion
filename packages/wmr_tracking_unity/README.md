@@ -4,8 +4,9 @@ One Unity 6000.0 project, one `WmrTrackingRelay` object and one dispatching
 bridge for both vendors. This is the ONY-273 prototype for shipping both SDKs
 in a **single** `unityLibrary`. The per-vendor projects in
 `packages/wmr_tracking_viture/unity` and `packages/wmr_tracking_xreal/unity`
-stay in place and unchanged; ONY-271 flavors remain the fallback until a real
-export and device run happen.
+stay in place and remain the source of truth for their scripts; their Runtime
+folders are copied into this project and kept byte-identical by a sync check.
+ONY-271 flavors remain the fallback until a real export and device run happen.
 
 No proprietary SDK, no Unity install and no hardware are used by this
 repository. Neither vendor's native code is vendored. Nothing here is a
@@ -23,10 +24,44 @@ packages/wmr_tracking_unity/
       WmrTrackingUnifiedSmokeHarness.cs   editor-only smoke logging
     Assets/WmrTrackingUnity/Editor/
       WmrTrackingUnityExport.cs           one-unityLibrary export + checks
+    Assets/WmrTrackingViture/Runtime/     copy of the VITURE relay scripts + asmdef
+    Assets/WmrTrackingXreal/Runtime/      copy of the XREAL relay scripts + asmdef
     Assets/Scenes/WmrTrackingUnifiedSmoke.unity
   tests/WmrTrackingUnity.Dispatch.Tests/  .NET console tests for the dispatch
+  tests/WmrTrackingUnity.LoaderGate.Tests/ switch-after-start loader gate checks
+  tool/sync_vendor_unity_runtime.sh       copy + --check for the vendor Runtime folders
   tool/test_dispatch.sh                   compile + test gate
 ```
+
+## Vendor sources in this project
+
+Unity does not reference the sibling per-vendor Unity projects, so the unified
+project carries their Runtime folders: the bridge scripts, their asmdefs and
+their `.meta` files.
+
+- `Assets/WmrTrackingViture/Runtime/` → assembly `WmrTrackingViture.Runtime`
+- `Assets/WmrTrackingXreal/Runtime/` → assembly `WmrTrackingXreal.Runtime`
+
+The copies keep the original `.meta` GUIDs, which is what the smoke scene's
+`VitureBackend` and `XrealBackend` components reference. Do not edit the
+copies: the per-vendor projects remain the source of truth. After changing a
+vendor bridge, re-run the sync and the check:
+
+```sh
+packages/wmr_tracking_unity/tool/sync_vendor_unity_runtime.sh
+packages/wmr_tracking_unity/tool/sync_vendor_unity_runtime.sh --check
+```
+
+`tool/test_dispatch.sh` (and CI) runs `--check` before compiling. The export
+script also fails before building when either bridge asset is missing, when
+the scene no longer references its GUID, or when the assembly did not compile.
+The copied bridges compile as part of the C# gate, so the unified namespace
+imports and `OnCommand` call sites are checked against the real scripts rather
+than stubs.
+
+While importing the bridges, their `using System.Diagnostics;` was narrowed to
+a `Stopwatch` alias because it made `Debug` ambiguous with `UnityEngine.Debug`
+under Unity's compiler. That fix is in the per-vendor sources and the copies.
 
 ## Relay contract (unchanged)
 
@@ -41,7 +76,7 @@ input is the existing `vendor` field now being authoritative:
 
 | Command | Behaviour |
 | --- | --- |
-| `configure` + `"vendor":"viture"\|"xreal"` | Selects and enables that backend. Applies `options` to it. Does not start tracking and does not initialise an XR loader. |
+| `configure` + `"vendor":"viture"\|"xreal"` | Selects and enables that backend. Does not start tracking and does not initialise an XR loader. VITURE receives the `configure` relay command and applies `options`; XREAL has no `configure` command, so the unified bridge only enables its backend and does not forward it (no spurious `protocol` error). |
 | `start` + `"vendor":"viture"\|"xreal"` | Selects the vendor (overriding an idle `configure`), enables its bridge, initialises only its XR loader, then forwards `start`. |
 | `start` without `vendor` | Reuses the vendor from the last successful `configure`, or the running vendor. Rejected with `protocol` when neither is known. |
 | `stop` | Forwards to the running vendor. Keeps the selection so a later `start` can omit `vendor`. |
@@ -105,6 +140,8 @@ Unity -batchmode -quit \
 
 The script writes `unity/Build/Android/` and fails unless:
 
+- both vendor bridge assets are present and referenced by the scene, and their
+  assemblies compiled;
 - both SDKs and XR Hands are installed;
 - exactly one directory named `unityLibrary` exists, at
   `Build/Android/unityLibrary`;
@@ -117,21 +154,30 @@ It writes `Build/Android/unityLibrary-native-libs.txt` listing every exported
 
 ## C# gate
 
-The dispatch is plain C# with no UnityEngine dependency:
+`VendorRelayDispatch.cs` is plain C# with no UnityEngine dependency. The gate
+also compiles `VendorLoaderGate.cs` and the real vendor bridges against
+minimal Unity/XR Management stubs:
 
 ```sh
 packages/wmr_tracking_unity/tool/test_dispatch.sh
 ```
 
-Requires the .NET 8 SDK. It compiles the same source file Unity compiles
-(`VendorRelayDispatch.cs`) and runs 59 assertions covering vendor parsing,
-configure/start/stop/dispose, idempotent start, busy vendor switches,
-recenter-before-start and start-failure retry. CI runs it from
-`.github/workflows/unity-dispatch.yml`.
+Requires the .NET 8 SDK. It:
 
-The Unity-dependent bridge, scene and export script compile only inside Unity
-with both proprietary SDKs; that external compile/export gate is documented,
-not faked. The existing per-vendor relay contract tests (Kotlin) are unchanged.
+- runs `tool/sync_vendor_unity_runtime.sh --check`;
+- compiles the unified bridge plus both copied vendor bridges in the Android
+  player and Editor configurations;
+- runs 59 dispatch assertions covering vendor parsing,
+  configure/start/stop/dispose, idempotent start, busy vendor switches,
+  recenter-before-start and start-failure retry;
+- runs 14 loader-gate assertions covering start, stop, switch to the other
+  vendor, switch back, already-active, missing loader and unavailable settings.
+
+CI runs it from `.github/workflows/unity-dispatch.yml`.
+
+The scene and export script compile only inside Unity with both proprietary
+SDKs; that external compile/export gate is documented, not faked. The existing
+per-vendor relay contract tests (Kotlin) are unchanged.
 
 ## Coexistence unknowns
 
@@ -140,10 +186,11 @@ both SDKs coexist in one build.
 
 1. **Two XR Management loaders.** Unity's `XRManagerSettings` has one
    `activeLoader`; `InitializeLoaderSync()` initialises the first assigned
-   loader that succeeds. The gate reorders/reduces the assigned list with
-   `TrySetLoaders`, but whether both vendor loaders may be assigned together,
-   whether their loader type names are recognisable by `viture`/`xreal`, and
-   whether XREAL tolerates deinitialise-then-reinitialise are untested.
+   loader that succeeds. The gate caches the full assigned list, reorders the
+   selected vendor first and keeps the other assigned, but whether both vendor
+   loaders may be assigned together, whether their loader type names are
+   recognisable by `viture`/`xreal`, and whether XREAL tolerates
+   deinitialise-then-reinitialise are untested.
 2. **Deferred loader init.** The design requires **Initialize XR on Startup**
    off and calls `InitializeLoaderSync()` when `start` arrives. Whether VITURE
    or XREAL can initialise that late (camera/JNI/session assumptions, Android

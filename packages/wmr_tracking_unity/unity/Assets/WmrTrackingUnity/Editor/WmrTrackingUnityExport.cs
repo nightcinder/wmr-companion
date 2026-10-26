@@ -27,6 +27,10 @@ namespace OnyxLens.WmrTrackingUnity.Editor
     public static class WmrTrackingUnityExport
     {
         public const string ScenePath = "Assets/Scenes/WmrTrackingUnifiedSmoke.unity";
+        public const string VitureBridgeAsset =
+            "Assets/WmrTrackingViture/Runtime/VitureTrackingRelayBridge.cs";
+        public const string XrealBridgeAsset =
+            "Assets/WmrTrackingXreal/Runtime/XrealTrackingRelayBridge.cs";
         public const string ExportDirectory = "Build/Android";
         public const string UnityLibraryPath = "Build/Android/unityLibrary";
         public const string NativeLibraryReportPath =
@@ -44,6 +48,7 @@ namespace OnyxLens.WmrTrackingUnity.Editor
         /// </summary>
         public static void Export()
         {
+            RequireVendorRuntime();
             RequireSdks();
             if (!File.Exists(ScenePath))
             {
@@ -195,6 +200,63 @@ namespace OnyxLens.WmrTrackingUnity.Editor
                 ? file.Substring(UnityLibraryPath.Length)
                 : file;
             return relative.TrimStart('/', '\\').Replace('\\', '/');
+        }
+
+        private static void RequireVendorRuntime()
+        {
+            string scene = File.ReadAllText(ScenePath);
+            RequireVendorScript(
+                VitureBridgeAsset,
+                "OnyxLens.WmrTrackingViture.VitureTrackingRelayBridge, WmrTrackingViture.Runtime",
+                scene
+            );
+            RequireVendorScript(
+                XrealBridgeAsset,
+                "OnyxLens.WmrTrackingXreal.XrealTrackingRelayBridge, WmrTrackingXreal.Runtime",
+                scene
+            );
+        }
+
+        // The smoke scene stores the two vendor bridges by script GUID. The
+        // unified project owns copies of the vendor Runtime folders (keep them
+        // in sync with
+        // packages/wmr_tracking_unity/tool/sync_vendor_unity_runtime.sh); this
+        // check fails before the build when a copy or its scene reference is
+        // missing.
+        private static void RequireVendorScript(
+            string assetPath,
+            string assemblyQualifiedName,
+            string scene)
+        {
+            if (!File.Exists(assetPath))
+            {
+                throw new BuildFailedException(
+                    "Vendor relay bridge is missing from the unified project: " +
+                    assetPath + ". Run " +
+                    "packages/wmr_tracking_unity/tool/sync_vendor_unity_runtime.sh " +
+                    "and reopen the project."
+                );
+            }
+
+            string guid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(guid) || !scene.Contains("guid: " + guid))
+            {
+                throw new BuildFailedException(
+                    "The unified smoke scene does not reference " + assetPath +
+                    " (GUID " + guid + "). Re-import the vendor scripts and " +
+                    "resave the scene."
+                );
+            }
+
+            Type type = Type.GetType(assemblyQualifiedName);
+            if (type == null || !typeof(MonoBehaviour).IsAssignableFrom(type))
+            {
+                throw new BuildFailedException(
+                    "Vendor relay assembly is not compiled: " +
+                    assemblyQualifiedName + ". Check the vendor Runtime asmdef " +
+                    "under the unified project and the SDK package references."
+                );
+            }
         }
 
         private static void RequireSdks()

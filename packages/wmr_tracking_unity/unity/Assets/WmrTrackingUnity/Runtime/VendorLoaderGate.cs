@@ -2,8 +2,11 @@
 //
 // XR Management can initialise only one loader per process (`activeLoader` is
 // singular), so a unified app must choose before initialisation. This gate
-// reorders the assigned loaders to the selected vendor and initialises it,
-// which requires "Initialize XR on Startup" to be off in Player settings.
+// caches the full assigned loader list, reorders it so the selected vendor is
+// first, and initialises it. The other vendor stays assigned so a later
+// stop-then-start can switch again; replacing the list with the single
+// selected loader would lose it until the project or app restarts. This
+// requires "Initialize XR on Startup" to be off in Player settings.
 // Whether VITURE and XREAL loaders can be deinitialised and re-initialised
 // reliably is unproven; see packages/wmr_tracking_unity/README.md.
 
@@ -17,6 +20,12 @@ namespace OnyxLens.WmrTrackingUnity
 {
     internal sealed class VendorLoaderGate
     {
+        // Full loader assignment captured before the first TrySetLoaders call.
+        // XRManagerSettings.activeLoaders is what the host assigned in XR
+        // Plug-in Management; retaining the other vendor there is what lets a
+        // later switch find it.
+        private List<XRLoader> _assignedLoaders;
+
         public enum Result
         {
             Unavailable,
@@ -37,6 +46,16 @@ namespace OnyxLens.WmrTrackingUnity
             XRManagerSettings manager = settings.Manager;
             manager.automaticLoading = false;
             manager.automaticRunning = false;
+
+            if (_assignedLoaders == null)
+            {
+                _assignedLoaders = new List<XRLoader>();
+                if (manager.activeLoaders != null)
+                {
+                    _assignedLoaders.AddRange(manager.activeLoaders);
+                }
+            }
+
             if (manager.activeLoader != null)
             {
                 if (Matches(manager.activeLoader, vendor))
@@ -48,16 +67,12 @@ namespace OnyxLens.WmrTrackingUnity
             }
 
             XRLoader selected = null;
-            var loaders = manager.activeLoaders;
-            if (loaders != null)
+            for (int i = 0; i < _assignedLoaders.Count; i++)
             {
-                for (int i = 0; i < loaders.Count; i++)
+                if (Matches(_assignedLoaders[i], vendor))
                 {
-                    if (Matches(loaders[i], vendor))
-                    {
-                        selected = loaders[i];
-                        break;
-                    }
+                    selected = _assignedLoaders[i];
+                    break;
                 }
             }
             if (selected == null)
@@ -65,7 +80,19 @@ namespace OnyxLens.WmrTrackingUnity
                 return Result.MissingLoader;
             }
 
-            if (!manager.TrySetLoaders(new List<XRLoader> { selected }))
+            // Selected loader first so XR Management initialises it, but keep
+            // the other vendor assigned for the next stop-then-start switch.
+            var ordered = new List<XRLoader>(_assignedLoaders.Count);
+            ordered.Add(selected);
+            for (int i = 0; i < _assignedLoaders.Count; i++)
+            {
+                if (_assignedLoaders[i] != null && _assignedLoaders[i] != selected)
+                {
+                    ordered.Add(_assignedLoaders[i]);
+                }
+            }
+
+            if (!manager.TrySetLoaders(ordered))
             {
                 return Result.InitFailed;
             }

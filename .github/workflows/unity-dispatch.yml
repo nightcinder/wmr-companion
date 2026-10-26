@@ -5,10 +5,14 @@ on:
     branches: [main]
     paths:
       - 'packages/wmr_tracking_unity/**'
+      - 'packages/wmr_tracking_viture/unity/Assets/WmrTrackingViture/Runtime/**'
+      - 'packages/wmr_tracking_xreal/unity/Assets/WmrTrackingXreal/Runtime/**'
       - '.github/workflows/unity-dispatch.yml'
   pull_request:
     paths:
       - 'packages/wmr_tracking_unity/**'
+      - 'packages/wmr_tracking_viture/unity/Assets/WmrTrackingViture/Runtime/**'
+      - 'packages/wmr_tracking_xreal/unity/Assets/WmrTrackingXreal/Runtime/**'
       - '.github/workflows/unity-dispatch.yml'
 
 concurrency:

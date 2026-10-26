@@ -43,6 +43,50 @@ namespace UnityEngine
             Array.Empty<T>();
     }
 
+    public class Camera : Object
+    {
+        public static Camera main { get; set; }
+
+        public Transform transform { get; } = new Transform();
+    }
+
+    public class Transform : Object
+    {
+        public Vector3 position { get; set; }
+
+        public Quaternion rotation { get; set; }
+    }
+
+    public struct Vector3
+    {
+        public float x;
+        public float y;
+        public float z;
+
+        public Vector3(float x, float y, float z)
+        {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+    }
+
+    public struct Quaternion
+    {
+        public float x;
+        public float y;
+        public float z;
+        public float w;
+
+        public Quaternion(float x, float y, float z, float w)
+        {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.w = w;
+        }
+    }
+
     public static class Debug
     {
         public static void Log(object message)
@@ -122,10 +166,21 @@ namespace UnityEngine.XR.Management
         public System.Collections.Generic.List<XRLoader> activeLoaders { get; } =
             new System.Collections.Generic.List<XRLoader>();
 
-        public bool TrySetLoaders(System.Collections.Generic.List<XRLoader> loaders) => true;
+        public bool TrySetLoaders(System.Collections.Generic.List<XRLoader> loaders)
+        {
+            activeLoaders.Clear();
+            activeLoaders.AddRange(loaders);
+            return true;
+        }
 
         public void InitializeLoaderSync()
         {
+            // XR Management initialises the first assigned loader; it keeps
+            // only one active loader per process.
+            if (activeLoader == null && activeLoaders.Count > 0)
+            {
+                activeLoader = activeLoaders[0];
+            }
         }
 
         public void StartSubsystems()
@@ -138,6 +193,7 @@ namespace UnityEngine.XR.Management
 
         public void DeinitializeLoader()
         {
+            activeLoader = null;
         }
     }
 
@@ -146,41 +202,5 @@ namespace UnityEngine.XR.Management
         public static XRGeneralSettings Instance { get; set; } = new XRGeneralSettings();
 
         public XRManagerSettings Manager { get; } = new XRManagerSettings();
-    }
-}
-
-namespace OnyxLens.WmrTrackingViture
-{
-    public class VitureTrackingRelayBridge : UnityEngine.MonoBehaviour
-    {
-        public bool IsRunning { get; set; }
-
-        public event Action<string> FrameEmitted;
-
-        public event Action<string, string> ErrorReported;
-
-        public void OnCommand(string json)
-        {
-            FrameEmitted?.Invoke(json);
-            ErrorReported?.Invoke("stub", "stub");
-        }
-    }
-}
-
-namespace OnyxLens.WmrTrackingXreal
-{
-    public class XrealTrackingRelayBridge : UnityEngine.MonoBehaviour
-    {
-        public bool IsRunning { get; set; }
-
-        public event Action<string> FrameEmitted;
-
-        public event Action<string, string> ErrorReported;
-
-        public void OnCommand(string json)
-        {
-            FrameEmitted?.Invoke(json);
-            ErrorReported?.Invoke("stub", "stub");
-        }
     }
 }
