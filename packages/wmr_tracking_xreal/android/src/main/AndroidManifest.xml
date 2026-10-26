@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Camera permission used by the XREAL SDK Unity XR runtime for hand
+         tracking. The public docs do not list the required permissions; this
+         mirrors the camera requirement and is labelled unverified in
+         docs/TRACKING.md. Inert while the default-off flag is disabled.
+         Declaring the camera feature as optional prevents filtering out
+         devices or runtimes without hardware camera support. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-permission android:name="android.permission.CAMERA" />
+</manifest>
