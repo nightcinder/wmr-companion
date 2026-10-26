@@ -149,6 +149,36 @@ jobs:
           flutter test
           flutter build apk --debug
 
+  gate7-clock-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Gate 7 without hardware: a recorded controller capture plus a
+      # synthetic head trace through SourceClockAligner. The good fixture must
+      # pass; drift, gap and out-of-window must fail with their named reasons.
+      - name: Gate 7 clock replay
+        working-directory: packages/wmr_tracking
+        run: |
+          dart run tool/gate7_clock_replay.dart --fixture tool/fixtures/gate7/stable_offset.json
+          for f in drift gap out_of_window; do
+            code=0
+            dart run tool/gate7_clock_replay.dart --fixture "tool/fixtures/gate7/$f.json" || code=$?
+            if [ "$code" -ne 1 ]; then
+              echo "gate7: $f expected exit 1, got $code" >&2
+              exit 1
+            fi
+          done
+
   android-flavors:
     runs-on: ubuntu-latest
     timeout-minutes: 35
