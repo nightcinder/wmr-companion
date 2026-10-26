@@ -16,6 +16,7 @@ dependencies:
   flutter:
     sdk: flutter
   wmr_tracking: ^0.1.0
+  wmr_tracking_dispatch: ^0.1.0
 
 dev_dependencies:
   flutter_test:

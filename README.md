@@ -33,6 +33,7 @@ Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR mot
 | `packages/wmr_fusion/` | Pure-Dart Madgwick and Mahony filters |
 | `packages/wmr_tracking/` | Pure-Dart head/hand tracking seam and 6DoF controller fusion, with vendor capability profiles, a One Euro filter, Unity-to-OpenXR conversion and a JSON relay codec (publish-ready; see [docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/wmr_tracking_android_xr/` | Default-off Kotlin Android XR head and 26-joint hand source; compiles against the Jetpack XR SDK 1.0.0, no hardware run yet ([docs/TRACKING.md](docs/TRACKING.md)) |
+| `packages/wmr_tracking_dispatch/` | Native pre-Unity glasses vendor detection, the Dart `TrackingSourceSelector` and one shared `SharedUnityRuntime` for VITURE/XREAL ([docs/GLASSES_DETECTION.md](docs/GLASSES_DETECTION.md)) |
 | `packages/wmr_tracking_viture/` | Default-off VITURE Pro Neckband Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 6000.0+ / VITURE SDK v0.7.0 is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/wmr_tracking_xreal/` | Default-off XREAL Air 2 Ultra Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 2021.3+/6000.0 / XREAL SDK 3.x is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/WMRCompanionKit/` | Native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers |
@@ -52,7 +53,7 @@ tool/build_flavor.sh base          # flavors: base, viture, xreal
 flutter run --flavor base -d <device>   # BLE needs a physical phone
 ```
 
-From the repo root, the package suites are: `cd packages/wmr_core && dart test`; `cd packages/wmr_companion && dart test`; `cd packages/wmr_ble && flutter test`; `cd packages/wmr_ws && dart test`; `cd packages/wmr_companion_ui && flutter test`; `cd packages/wmr_companion_hid_android && flutter test`; `cd packages/wmr_fusion && dart test`; `cd packages/wmr_tracking && dart test`; `cd packages/wmr_tracking_android_xr && flutter test`; `cd packages/wmr_tracking_viture && flutter test`; `cd packages/wmr_tracking_xreal && flutter test`; `cd example && flutter test`. On macOS, `cd packages/WMRCompanionKit && swift test` covers the Swift framework.
+From the repo root, the package suites are: `cd packages/wmr_core && dart test`; `cd packages/wmr_companion && dart test`; `cd packages/wmr_ble && flutter test`; `cd packages/wmr_ws && dart test`; `cd packages/wmr_companion_ui && flutter test`; `cd packages/wmr_companion_hid_android && flutter test`; `cd packages/wmr_fusion && dart test`; `cd packages/wmr_tracking && dart test`; `cd packages/wmr_tracking_dispatch && flutter test`; `cd packages/wmr_tracking_android_xr && flutter test`; `cd packages/wmr_tracking_viture && flutter test`; `cd packages/wmr_tracking_xreal && flutter test`; `cd example && flutter test`. On macOS, `cd packages/WMRCompanionKit && swift test` covers the Swift framework.
 
 CI also runs `dart analyze`/`flutter analyze` in each package, a `dart pub publish --dry-run` for all eleven packages, and `tool/fresh_app_check.sh`, then uploads a debug APK. The `v0.1.0` GitHub release carries `wmr-companion-0.1.0-debug.apk` and the GATT probe APK. Each CI APK is signed differently, so installing a new one over an old one needs `adb uninstall com.onyxlens.wmr_companion` first.
 

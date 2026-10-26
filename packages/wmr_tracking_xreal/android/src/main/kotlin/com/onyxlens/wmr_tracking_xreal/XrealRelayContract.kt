@@ -1,5 +1,8 @@
 package com.onyxlens.wmr_tracking_xreal
 
+import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+
 /**
  * Unity `XRHandJointID` to OpenXR 26-joint name table shared by the XREAL
  * Unity-as-a-Library relay.
@@ -218,9 +221,9 @@ internal class ReflectiveUnityBridge : XrealUnityBridge {
 
     override fun queryGlassesModel(): String? {
         // When the C# bridge registers the detected model via
-        // WmrTrackingXrealPlugin.onUnityGlassesModel(...), the plugin uses it;
-        // otherwise return null until the Unity scene reports it.
-        return WmrTrackingXrealPlugin.reportedGlassesModel
+        // WmrTrackingXrealPlugin.onUnityGlassesModel(...), the shared runtime
+        // keeps it; otherwise return null until the Unity scene reports it.
+        return SharedUnityRuntime.shared.glassesModel(GlassesVendor.XREAL)
     }
 
     override fun sendCommand(

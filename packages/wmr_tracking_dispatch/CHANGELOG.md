@@ -1,0 +1,11 @@
+# Changelog
+
+## 0.1.0
+
+- Add the pre-Unity glasses vendor detector (host and USB IDs), the typed
+  `GlassesDetection` result and the Dart `TrackingSourceSelector`.
+- Add the process-wide `SharedUnityRuntime`: one plugin owns the single
+  UnityPlayer and the other reuses it; frame, error and glasses-model callbacks
+  route by vendor.
+- VITURE and XREAL plugins now claim the shared runtime when they start and read
+  the reported glasses model from it. The per-vendor model check is unchanged.

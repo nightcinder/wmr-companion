@@ -69,6 +69,7 @@ kotlin {
 
 dependencies {
     implementation("androidx.core:core:1.16.0")
+    implementation(project(":wmr_tracking_dispatch"))
 
     testImplementation(kotlin("test"))
 }

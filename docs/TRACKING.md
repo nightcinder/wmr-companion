@@ -266,6 +266,11 @@ The facade owns the source (start, alignment, stop and dispose), emits one `Cont
 
 The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. A **Tracking source** selector offers None, Simulated, Android XR, VITURE and XREAL and defaults to None, which shows the controller IMU orientation and an `orientationOnly` badge. Selecting a vendor calls that package's `create()` only when its `--dart-define` flag is on, starts the source, aligns its frames to the viewer clock and feeds `SixDofFuser`; a typed `TrackingException` (`unavailable` when the Unity relay is not linked, `unsupported`, `permissionDenied`, `protocol`) is shown in the selector status instead of crashing. Simulated keeps the deterministic `FakeTrackingSource` hand trajectory that moves the viewer without a headset. One APK built with all three flags is safe to run with no Unity runtime linked. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
 
+### Native detection and one UnityPlayer
+
+`packages/wmr_tracking_dispatch` detects the vendor before any Unity command: the host (Neckband, Beam Pro or phone) and USB IDs, returning a typed `GlassesDetection`. Its Dart `TrackingSourceSelector` attaches the matching source or reports `unsupported` / `unavailable` / `permissionDenied`, and it never probes the native channel while every vendor flag is off. VITURE and XREAL now share one process-wide `SharedUnityRuntime`: the first claimant owns the single `UnityPlayer`, the other reuses it, and frame/error/glasses-model callbacks route by vendor. The per-vendor model check still runs as a second confirmation. USB IDs that public docs do not state are configurable rather than guessed; see [GLASSES_DETECTION.md](GLASSES_DETECTION.md).
+
+
 ### Adapter recipes
 
 **Android XR (implemented first target).**
