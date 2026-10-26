@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `FakeXrAdapter`, `XrContractHarness` and `tool/xr_contract_harness.dart`:
+  hardware-free replay of deterministic head and 26-joint hand frames through
+  both adapter JSON contracts (native OpenXR and Unity relay), with paired
+  golden fixtures, head/hand rate assertions and malformed-frame rejection.
+
 ## 0.2.0
 
 Migration note: no existing public API changed; `PoseRecording` is additive.

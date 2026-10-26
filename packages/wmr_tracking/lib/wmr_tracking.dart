@@ -8,6 +8,7 @@ library;
 
 export 'src/clock.dart';
 export 'src/codec.dart';
+export 'src/fake_xr_adapter.dart';
 export 'src/fusion.dart';
 export 'src/one_euro.dart';
 export 'src/pose.dart';
@@ -16,3 +17,4 @@ export 'src/profiles.dart';
 export 'src/tracking_source.dart';
 export 'src/tracking_types.dart';
 export 'src/unity_relay.dart';
+export 'src/xr_contract.dart';
