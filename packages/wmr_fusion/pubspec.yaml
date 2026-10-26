@@ -1,6 +1,6 @@
 name: wmr_fusion
 description: Pure-Dart 3DoF orientation filters (Madgwick, Mahony) for gyro + accelerometer samples.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/nightcinder/wmr-companion
 issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 

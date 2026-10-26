@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Add a minimal Unity 6000.0 smoke project, frame/error events and pause/resume
   handling in the C# relay bridge, plus an editor script that exports the
