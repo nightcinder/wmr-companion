@@ -190,7 +190,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 *Question: can a stranger get a working bridge and a working host app from the two repos?*
 - **13.1 Tagged firmware release** with packaged manifest and FF16 version; installer on GitHub Pages — **`v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12)**.
 - **13.2 Compatibility matrix** published in both repos, keyed on FF16 version — **merged (#59, `WMR_Bridge` #45 & #49)**.
-- **13.3 Bridge security decision** in `docs/SECURITY.md` — **open, after M12**.
+- **13.3 Bridge security decision** in `docs/SECURITY.md` — **recorded for 0.2** (unauthenticated test bridge; Pi secure boot deferred to 0.3), `WMR_Bridge` #64.
 - **13.4 README rewrite** in both repos around verified hardware results — **open, around M12 results**.
 
 ### M14 — Linux / Raspberry Pi Wi-Fi host bridge
