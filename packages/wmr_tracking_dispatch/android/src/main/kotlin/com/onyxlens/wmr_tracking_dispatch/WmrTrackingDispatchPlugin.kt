@@ -67,13 +67,18 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
         val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
         val devices: Collection<UsbDevice> =
             usbManager?.deviceList?.values ?: emptyList()
-        return GlassesEnvironment(
+        return glassesEnvironment(
             manufacturer = Build.MANUFACTURER,
             model = "${Build.MODEL} ${Build.DEVICE}",
             isAndroidXrHost = isAndroidXr,
-            usbPermissionGranted = usbManager != null &&
-                devices.all { usbManager.hasPermission(it) },
-            usbDevices = devices.map { UsbDeviceId(it.vendorId, it.productId) },
+            usbHostAvailable = usbManager != null,
+            usbDevices = devices.map {
+                UsbDeviceSnapshot(
+                    vendorId = it.vendorId,
+                    productId = it.productId,
+                    permissionGranted = usbManager?.hasPermission(it) == true,
+                )
+            },
         )
     }
 

@@ -258,6 +258,7 @@ class WmrTrackingXrealPlugin internal constructor(
         }
         val modelSpec = XrealGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
         if (!modelSpec.handTracking || !modelSpec.head6Dof) {
+            runtime.release(GlassesVendor.XREAL)
             reply.error(
                 ERROR_UNSUPPORTED,
                 "XREAL hand tracking requires Air 2 Ultra (found ${modelSpec.sdkName})",
@@ -265,6 +266,7 @@ class WmrTrackingXrealPlugin internal constructor(
             return
         }
         if (!bridge.sendCommand(XrealRelayCommandBuilder.start())) {
+            runtime.release(GlassesVendor.XREAL)
             reply.error(ERROR_UNAVAILABLE, "Failed to dispatch start command to Unity relay")
             return
         }
@@ -279,6 +281,7 @@ class WmrTrackingXrealPlugin internal constructor(
         if (wasStarted) {
             bridge.sendCommand(XrealRelayCommandBuilder.stop())
         }
+        runtime.release(GlassesVendor.XREAL)
         if (reportError) {
             eventSink?.error(ERROR_UNAVAILABLE, "XREAL host activity was detached", null)
         }
@@ -296,6 +299,7 @@ class WmrTrackingXrealPlugin internal constructor(
     internal fun deliverUnityError(code: String, message: String) {
         if (!started) return
         started = false
+        runtime.release(GlassesVendor.XREAL)
         bridge.sendCommand(XrealRelayCommandBuilder.stop())
         eventSink?.error(code, message, null)
     }

@@ -291,6 +291,7 @@ class WmrTrackingViturePlugin internal constructor(
         }
         val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
         if (!modelSpec.handTracking || !modelSpec.head6Dof) {
+            runtime.release(GlassesVendor.VITURE)
             reply.error(
                 ERROR_UNSUPPORTED,
                 "VITURE hand tracking requires LumaUltra on Pro Neckband (found ${modelSpec.sdkName})",
@@ -302,6 +303,7 @@ class WmrTrackingViturePlugin internal constructor(
             aimSensitivity = pendingAimSensitivity,
         )
         if (!bridge.sendCommand(commandJson)) {
+            runtime.release(GlassesVendor.VITURE)
             reply.error(ERROR_UNAVAILABLE, "Failed to dispatch start command to Unity relay")
             return
         }
@@ -316,6 +318,7 @@ class WmrTrackingViturePlugin internal constructor(
         if (wasStarted) {
             bridge.sendCommand(VitureRelayCommandBuilder.stop())
         }
+        runtime.release(GlassesVendor.VITURE)
         if (reportError) {
             eventSink?.error(ERROR_UNAVAILABLE, "VITURE host activity was detached", null)
         }
@@ -333,6 +336,7 @@ class WmrTrackingViturePlugin internal constructor(
     internal fun deliverUnityError(code: String, message: String) {
         if (!started) return
         started = false
+        runtime.release(GlassesVendor.VITURE)
         eventSink?.error(code, message, null)
     }
 

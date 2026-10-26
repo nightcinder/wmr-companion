@@ -24,7 +24,41 @@ object GlassesDetectionReason {
 }
 
 /** A USB device as seen by [VendorDetector]; Android-free for JVM tests. */
-data class UsbDeviceId(val vendorId: Int, val productId: Int)
+data class UsbDeviceId(
+    val vendorId: Int,
+    val productId: Int,
+    /** Whether the app may open it; IDs are readable without this grant. */
+    val permissionGranted: Boolean = false,
+)
+
+/** Raw Android USB facts before they become a [GlassesEnvironment]. */
+data class UsbDeviceSnapshot(
+    val vendorId: Int,
+    val productId: Int,
+    val permissionGranted: Boolean,
+)
+
+/**
+ * Production mapping from Android USB facts to [GlassesEnvironment].
+ *
+ * Kept separate from `Build`/`UsbManager` so the JVM tests exercise the same
+ * per-device permission mapping the plugin uses.
+ */
+fun glassesEnvironment(
+    manufacturer: String?,
+    model: String?,
+    isAndroidXrHost: Boolean,
+    usbHostAvailable: Boolean,
+    usbDevices: List<UsbDeviceSnapshot>,
+): GlassesEnvironment = GlassesEnvironment(
+    manufacturer = manufacturer,
+    model = model,
+    isAndroidXrHost = isAndroidXrHost,
+    usbPermissionGranted = usbHostAvailable && usbDevices.all { it.permissionGranted },
+    usbDevices = usbDevices.map {
+        UsbDeviceId(it.vendorId, it.productId, it.permissionGranted)
+    },
+)
 
 /**
  * The inputs the detector inspects. Production fills this from `Build`,

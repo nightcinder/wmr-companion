@@ -2,6 +2,7 @@ package com.onyxlens.wmr_tracking_dispatch
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -68,17 +69,58 @@ class VendorDetectorTest {
     }
 
     @Test
-    fun permissionDeniedOnAPhoneFailsClosed() {
+    fun phoneUsbMatchWorksBeforePermissionIsGranted() {
         val result = detector.detect(
             GlassesEnvironment(
                 manufacturer = "Google",
                 model = "Pixel",
                 usbPermissionGranted = false,
-                usbDevices = listOf(vitureDevice),
+                usbDevices = listOf(UsbDeviceId(GlassesUsbConfig.VITURE_VENDOR_ID, 0x1011)),
             ),
         )
-        assertEquals(GlassesVendor.NONE, result.vendor)
-        assertEquals(GlassesDetectionReason.USB_PERMISSION_DENIED, result.reason)
+        assertEquals(GlassesVendor.VITURE, result.vendor)
+        assertNull(result.reason)
+        assertFalse(result.usbPermissionGranted)
+    }
+
+    @Test
+    fun unrelatedDeniedDeviceDoesNotSuppressAMatch() {
+        val result = detector.detect(
+            GlassesEnvironment(
+                manufacturer = "Google",
+                model = "Pixel",
+                usbPermissionGranted = false,
+                usbDevices = listOf(
+                    UsbDeviceId(0x1234, 0x0001, permissionGranted = false),
+                    UsbDeviceId(GlassesUsbConfig.VITURE_VENDOR_ID, 0x1011, permissionGranted = true),
+                ),
+            ),
+        )
+        assertEquals(GlassesVendor.VITURE, result.vendor)
+        assertTrue(result.usbPermissionGranted)
+    }
+
+    @Test
+    fun productionEnvironmentMappingKeepsPerDevicePermissions() {
+        val environment = glassesEnvironment(
+            manufacturer = "Google",
+            model = "Pixel 9",
+            isAndroidXrHost = false,
+            usbHostAvailable = true,
+            usbDevices = listOf(
+                UsbDeviceSnapshot(0x1234, 0x0001, permissionGranted = false),
+                UsbDeviceSnapshot(GlassesUsbConfig.VITURE_VENDOR_ID, 0x1011, permissionGranted = false),
+            ),
+        )
+
+        assertFalse(environment.usbPermissionGranted)
+        assertFalse(environment.usbDevices[0].permissionGranted)
+        assertFalse(environment.usbDevices[1].permissionGranted)
+
+        val result = detector.detect(environment)
+        assertEquals(GlassesVendor.VITURE, result.vendor)
+        assertNull(result.reason)
+        assertFalse(result.usbPermissionGranted)
     }
 
     @Test

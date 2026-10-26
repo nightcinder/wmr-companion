@@ -8,11 +8,14 @@ import kotlin.test.assertTrue
 
 import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
 import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
 
 class WmrTrackingViturePluginTest {
     private class FakeBridge(
         override val isUnityAvailable: Boolean = true,
         var model: String? = null,
+        private val sendSucceeds: Boolean = true,
     ) : VitureUnityBridge {
         val sentCommands = mutableListOf<String>()
 
@@ -20,8 +23,20 @@ class WmrTrackingViturePluginTest {
 
         override fun sendCommand(payloadJson: String, gameObject: String, method: String): Boolean {
             sentCommands.add(payloadJson)
-            return true
+            return sendSucceeds
         }
+    }
+
+    private class RecordingResult : MethodChannel.Result {
+        var completed = false
+
+        override fun success(result: Any?) {
+            completed = true
+        }
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) = Unit
+
+        override fun notImplemented() = Unit
     }
 
     private class RecordingReply : StartReply {
@@ -172,5 +187,52 @@ class WmrTrackingViturePluginTest {
         assertEquals(1, reply.errors.size)
         assertEquals("unavailable", reply.errors[0].first)
         assertTrue(bridge.sentCommands.isEmpty())
+    }
+
+    @Test
+    fun unsupportedModelReleasesTheClaim() {
+        val runtime = SharedUnityRuntime { true }
+        val plugin = WmrTrackingViturePlugin(FakeBridge(model = null), runtime)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertNull(runtime.ownerVendor)
+    }
+
+    @Test
+    fun failedStartCommandReleasesTheClaim() {
+        val runtime = SharedUnityRuntime { true }
+        val plugin = WmrTrackingViturePlugin(
+            FakeBridge(model = "LumaUltra", sendSucceeds = false),
+            runtime,
+        )
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertNull(runtime.ownerVendor)
+    }
+
+    @Test
+    fun stopAndUnityErrorReleaseTheClaim() {
+        val runtime = SharedUnityRuntime { true }
+        val plugin = WmrTrackingViturePlugin(FakeBridge(model = "LumaUltra"), runtime)
+        val reply = RecordingReply()
+        plugin.startUnityRelay(reply)
+        assertEquals(GlassesVendor.VITURE, runtime.ownerVendor)
+
+        plugin.onMethodCall(MethodCall("stop", null), RecordingResult())
+
+        assertNull(runtime.ownerVendor)
+
+        plugin.startUnityRelay(reply)
+        assertEquals(GlassesVendor.VITURE, runtime.ownerVendor)
+
+        plugin.deliverUnityError("protocol", "bad frame")
+
+        assertNull(runtime.ownerVendor)
     }
 }

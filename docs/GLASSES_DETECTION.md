@@ -25,12 +25,13 @@ hand tracking) with `unsupported`. Detection never overrides the model check.
    VITURE -> `neckband` host and `viture`; XREAL/Nreal -> `beamPro` host and
    `xreal`. The host is the vendor compute unit, so its glasses are known even
    when USB access is denied.
-2. **USB IDs.** Exactly one configured vendor/product match -> that vendor.
-   Both VITURE and XREAL -> `none` with `usbAmbiguous`: refuse to guess.
+2. **USB IDs.** Vendor/product IDs are readable without a USB permission
+   grant, so configured matches are evaluated first. Exactly one configured
+   vendor/product match -> that vendor. Both VITURE and XREAL ->
+   `none` with `usbAmbiguous`: refuse to guess.
 3. **Android XR host.** `android.software.xr.api.openxr` or
    `android.software.xr.api.spatial` -> `androidXr`.
-4. **Nothing.** `none` with `noMatch`, or `usbPermissionDenied` when USB access
-   was denied on a host with no vendor marker.
+4. **Nothing.** `none` with `noMatch`.
 
 The detector does not run on plugin attach. `TrackingSourceSelector` calls it
 only when at least one vendor flag is enabled, so BLE, controller and 3DoF
@@ -62,17 +63,22 @@ await const PlatformGlassesDetector().configureIds(
 Empty product-ID sets match any product from that vendor ID. An empty vendor-ID
 set never matches, which is how XREAL stays fail-closed by default.
 
-## Permission denied
+## USB permission
 
-`UsbManager.hasPermission` is checked for every attached device. On a host with
-no vendor marker, any denied device makes the result `none /
-usbPermissionDenied`; nothing is started. On a Neckband or Beam Pro the host
-already identifies the vendor, so detection still returns it and reports
-`usbPermissionGranted: false` for diagnostics.
+`UsbManager.hasPermission` is recorded per attached device, but the detector
+matches configured vendor/product IDs first: Android exposes those IDs without
+a grant, so a phone with no USB permission still detects attached VITURE or
+XREAL glasses. An unrelated device without permission no longer suppresses a
+match. The result reports `usbPermissionGranted` for the matched device only;
+it is `false` until the platform USB permission flow has run.
 
-Detection reads IDs only. Opening a `UsbDeviceConnection` (for example for the
-VITURE C SDK) still needs the platform USB permission flow, which is outside
-this issue.
+Detection reads IDs only and does not request USB permission. Opening a
+`UsbDeviceConnection` (for example for the VITURE C SDK) still needs the
+platform USB permission flow, which is outside this issue. The host marker path
+never reads USB at all.
+
+The `usbPermissionDenied` reason is retained in the Dart API for older native
+detectors, but the current Kotlin detector no longer produces it.
 
 ## One UnityPlayer per process
 
@@ -90,6 +96,10 @@ this issue.
   reads only its own report.
 - Releasing ownership does not tear down the linked runtime; the next claimant
   reuses it.
+- A claim is released when tracking stops, when the vendor reports a runtime
+  error, and on every post-claim start failure (unsupported glasses model or a
+  failed `start` command). A failed start therefore leaves the runtime free for
+  the other vendor.
 
 The Kotlin unit tests use fake runtimes and handlers to prove the creator is
 called once across both vendors and that callbacks route by vendor. No Unity
@@ -98,8 +108,8 @@ runtime or vendor SDK is required.
 ## Verification
 
 - `packages/wmr_tracking_dispatch/android/src/test` - detector and shared-runtime
-  JVM tests (VITURE, XREAL, both, neither, permission denied, host markers,
-  single creation, reuse, routing).
+  JVM tests (VITURE, XREAL, both, neither, per-device permission mapping without
+  a grant, host markers, single creation, reuse, routing).
 - `packages/wmr_tracking_dispatch/test` - Dart detection parsing, selector
   outcomes (`attached`, `unsupported`, `unavailable`, `permissionDenied`,
   `none`), and a flag-off test asserting zero channel calls.
