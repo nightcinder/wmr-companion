@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - `FakeXrAdapter`, `XrContractHarness` and `tool/xr_contract_harness.dart`:
   hardware-free replay of deterministic head and 26-joint hand frames through
   both adapter JSON contracts (native OpenXR and Unity relay), with paired
   golden fixtures, head/hand rate assertions and malformed-frame rejection.
+- `tool/gate7_clock_replay.dart`: hardware-free clock-alignment replay over
+  recorded controller captures and synthetic head traces, failing on offset
+  drift, controller gaps and out-of-window frames.
+- `tool/gate8_fallback_quality.dart`: hardware-free nod/walk replay proving the
+  `headRelative` fallback is not positional tracking while a rigid head-local
+  control stays accurate.
 
 ## 0.2.0
 

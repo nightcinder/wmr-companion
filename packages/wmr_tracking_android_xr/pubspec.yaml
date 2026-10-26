@@ -2,7 +2,7 @@ name: wmr_tracking_android_xr
 description: >-
   Android XR head and 26-joint hand tracking source for wmr_tracking, backed by
   ARCore for Jetpack XR.
-version: 0.2.0
+version: 0.2.1
 repository: https://github.com/nightcinder/wmr-companion
 issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 
@@ -15,7 +15,7 @@ resolution: workspace
 dependencies:
   flutter:
     sdk: flutter
-  wmr_tracking: ^0.2.0
+  wmr_tracking: ^0.2.1
 
 dev_dependencies:
   flutter_test:
