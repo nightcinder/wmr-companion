@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Update the VITURE capability profile to name VITURE XR SDK for Unity 0.9.0
+  and Unity 6000.0.27f1. No API change.
+
 ## 0.2.1
 
 - `FakeXrAdapter`, `XrContractHarness` and `tool/xr_contract_harness.dart`:

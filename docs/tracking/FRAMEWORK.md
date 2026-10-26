@@ -18,7 +18,7 @@
 - Practical costs: a Unity build adds the whole player and its assets, needs its own Gradle/NDK setup, and must be licensed and versioned per Unity 6. The player is a second render loop competing with Flutter for the same GPU, so a tracking-only scene should stay minimal or render nothing when hidden.
 - **Recommended shape:** a sibling package such as `wmr_tracking_viture` that depends on `wmr_tracking` and owns the Unity relay channels, permissions and C# bridge script, while sharing `UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints` and `unityToOpenXrPose` in `wmr_tracking`. The pure-Dart fusion package remains hardware-free, and apps that do not need Unity pay nothing.
 
-The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_tracking_viture`) are implemented and host-tested; exporting the Unity 6000.0+ `unityLibrary` AAR with the proprietary VITURE XR SDK (`com.viture.xr` v0.7.0) and running on a physical Pro Neckband remain external SDK/hardware gates.
+The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_tracking_viture`) are implemented and host-tested; exporting the Unity 6000.0.27f1 `unityLibrary` AAR with the proprietary VITURE XR SDK (`com.viture.xr` v0.9.0, `Viture.XR.VitureXR`) and running on a physical Pro Neckband remain external SDK/hardware gates.
 
 ### One `unityLibrary` for both vendors
 
@@ -187,7 +187,7 @@ What landed, and what remains an external SDK or hardware gate:
 | Dart `VitureNeckbandTrackingSource`, default-off `WMR_VITURE_TRACKING` flag, typed errors | Implemented in `packages/wmr_tracking_viture` and host-tested |
 | Glasses model capability matrix (`LumaUltra` vs 3DoF `One`/`OneLite`/`Pro`/`Pro2`/`Luma`/`LumaPro`/`LumaCyber`/`Beast`) | Implemented; 3DoF models never advertise hand tracking or 6DoF head and fail with `unsupported` |
 | Kotlin `WmrTrackingViturePlugin`, camera permission gate (`PendingStartGate`), reflective `UnitySendMessage` bridge | Implemented and JVM-tested; compiles without proprietary `unityLibrary` AAR |
-| Minimal Unity C# bridge (`VitureTrackingRelayBridge.cs` + `.asmdef`) | Implemented in `packages/wmr_tracking_viture/unity/`; Unity 6000.0+ and `com.viture.xr` v0.7.0 are external SDK gates |
+| Minimal Unity C# bridge (`VitureTrackingRelayBridge.cs` + `.asmdef`) | Implemented in `packages/wmr_tracking_viture/unity/`; Unity 6000.0.27f1 and `com.viture.xr` v0.9.0 (`Viture.XR.VitureXR`) are external SDK gates |
 | Flag-off BLE/3DoF parity | `apps/wmr_companion_app/test/viture_flag_off_test.dart` replays 400 deterministic bridge ticks, matches PR #78 (`c3be059`) golden orientations, and touches no VITURE channel |
 | Hardware / Unity UaaL smoke test | **Not run** |
 
@@ -208,8 +208,8 @@ cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_viture:testDebugUni
 ```
 
 Explicit unknowns and SDK-bound gates:
-- **External SDK gate:** Unity 6000.0+ Android build support, `com.unity.xr.hands`, and the VITURE XR SDK for Unity v0.7.0 (`com.viture.xr`) are not redistributable in this repo. `WmrTrackingViturePlugin` isolates `com.unity3d.player.UnityPlayer` behind `VitureUnityBridge` so standard CI builds and tests pass, and reports `TrackingExceptionKind.unavailable` when `unityLibrary` is not linked.
-- **Undocumented vendor parameters:** Unity head and hand update rates on the Pro Neckband are not stated in VITURE's public docs (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); Android permissions required by the VITURE Unity runtime beyond `android.permission.CAMERA` are not documented; and whether a hand gripping a WMR controller stays tracked by `VitureXR.HandTracking` is unproven.
+- **External SDK gate:** Unity 6000.0.27f1 Android build support, `com.unity.xr.hands`, and the VITURE XR SDK for Unity v0.9.0 (`com.viture.xr`, API `Viture.XR.VitureXR`) are not redistributable in this repo. `WmrTrackingViturePlugin` isolates `com.unity3d.player.UnityPlayer` behind `VitureUnityBridge` so standard CI builds and tests pass, and reports `TrackingExceptionKind.unavailable` when `unityLibrary` is not linked.
+- **Undocumented vendor parameters:** Unity head and hand update rates on the Pro Neckband are not stated in VITURE's public docs (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); Android permissions required by the VITURE Unity runtime beyond `android.permission.CAMERA` are not documented; and whether a hand gripping a WMR controller stays tracked by `Viture.XR.VitureXR.HandTracking` is unproven.
 
 
 ## XREAL Air 2 Ultra vertical slice (ONY-214)

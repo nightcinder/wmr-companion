@@ -28,3 +28,7 @@
 # OS files
 .DS_Store
 Thumbs.db
+
+# Unity resolves the local vendor packages per build machine; the lockfile
+# contains their absolute paths and must not be committed.
+Packages/packages-lock.json

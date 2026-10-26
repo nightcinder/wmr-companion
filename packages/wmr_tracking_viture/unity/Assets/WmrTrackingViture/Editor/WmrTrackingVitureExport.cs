@@ -7,7 +7,7 @@
 //        OnyxLens.WmrTrackingViture.Editor.WmrTrackingVitureExport.Export
 //
 // The proprietary VITURE XR SDK is not vendored. The export fails closed with
-// install instructions until com.viture.xr (>= 0.7.0) and com.unity.xr.hands
+// install instructions until com.viture.xr (>= 0.9.0) and com.unity.xr.hands
 // are present; those packages supply WMR_VITURE_XR_SDK and WMR_UNITY_XR_HANDS.
 
 #if UNITY_EDITOR
@@ -106,7 +106,7 @@ namespace OnyxLens.WmrTrackingViture.Editor
 #endif
 #if !WMR_VITURE_XR_SDK
             throw new BuildFailedException(
-                "The VITURE XR SDK is not installed. Import com.viture.xr v0.7.0 " +
+                "The VITURE XR SDK is not installed. Import com.viture.xr v0.9.0 " +
                 "from the VITURE developer package (tarball or git URL) into this " +
                 "project, then reopen it and retry the export. The SDK is not " +
                 "vendored in this repository."

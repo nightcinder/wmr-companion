@@ -117,14 +117,18 @@ vendor CAMERA-permission and default-off flow stays in the plugin.
 
 Import both proprietary SDKs into the same project first:
 
-1. Open `packages/wmr_tracking_unity/unity` with Unity 6000.0.x.
-2. Add `com.viture.xr` v0.7.0 and `com.xreal.xr` 3.x from their vendor packages.
-   Do not commit either SDK.
+1. Open `packages/wmr_tracking_unity/unity` with Unity 6000.0.27f1.
+2. Add `com.viture.xr` v0.9.0 and `com.xreal.xr` 3.x from their vendor packages.
+   Do not commit either SDK. XREAL 3.x needs AR Foundation, URP, Input System,
+   XRI and Image Conversion; the manifest already declares them because XREAL's
+   runtime asmdef and camera-feature scripts reference those assemblies.
 3. Confirm the runtime assembly sees `WMR_VITURE_XR_SDK`, `WMR_XREAL_XR_SDK`
    and `WMR_UNITY_XR_HANDS`.
 4. XR Plug-in Management > Android: assign **both** vendor loaders. Disable
    **Initialize XR on Startup** so the unified bridge can choose; the gate also
    turns off `automaticLoading`/`automaticRunning` before it initialises manually.
+   `WMR > Export unified unityLibrary` runs `WMR > Configure unified XR`
+   automatically, so this is only needed when inspecting the project by hand.
 5. Player > Android: minimum API 24, ARM64, IL2CPP, script backends per each
    SDK's requirements (the export script sets the first three).
 
@@ -137,6 +141,11 @@ Unity -batchmode -quit \
   -executeMethod OnyxLens.WmrTrackingUnity.Editor.WmrTrackingUnityExport.Export \
   -logFile -
 ```
+
+`Export()` calls `ConfigureUnifiedXr.Configure()` first, which creates the
+XR Management settings if missing, assigns `VitureLoader` and `XREALXRLoader`,
+and disables startup initialisation. It also creates the XREAL and VITURE
+settings assets, which are build artefacts and stay untracked.
 
 The script writes `unity/Build/Android/` and fails unless:
 
@@ -151,6 +160,9 @@ The script writes `unity/Build/Android/` and fails unless:
 It writes `Build/Android/unityLibrary-native-libs.txt` listing every exported
 `.so`, and warns when no exported library name contains `viture` or
 `xreal`/`nrsdk` so the reviewer can inspect the report. `Build/` stays ignored.
+VITURE's `.so` files live inside `unityLibrary/libs/*.aar`; the report only sees
+loose files, so scan the AARs as well when checking for duplicate same-ABI
+libraries.
 
 ## C# gate
 

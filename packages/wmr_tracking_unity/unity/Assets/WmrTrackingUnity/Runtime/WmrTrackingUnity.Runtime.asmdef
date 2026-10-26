@@ -25,7 +25,7 @@
     },
     {
       "name": "com.viture.xr",
-      "expression": "0.7.0",
+      "expression": "0.9.0",
       "define": "WMR_VITURE_XR_SDK"
     },
     {

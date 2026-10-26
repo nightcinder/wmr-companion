@@ -1,5 +1,7 @@
 # Headset hand and head tracking — gates and open questions
 
+> **Current SDK note (ONY-378):** the VITURE gate now targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The gate definitions and results are unchanged.
+
 ## Gates before calling this 6DoF
 
 The code is a framework, not a hardware result. In order:

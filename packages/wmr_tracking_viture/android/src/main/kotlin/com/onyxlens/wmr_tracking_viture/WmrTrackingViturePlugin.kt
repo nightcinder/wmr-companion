@@ -21,7 +21,7 @@ import io.flutter.plugin.common.PluginRegistry
  * VITURE Pro Neckband head and 26-joint hand tracking Flutter plugin.
  *
  * Bridges Dart to an embedded Unity-as-a-Library (UaaL) scene running the
- * VITURE XR SDK for Unity (v0.7.0) on the VITURE Pro Neckband:
+ * VITURE XR SDK for Unity (v0.9.0, `Viture.XR.VitureXR`) on the VITURE Pro Neckband:
  * - Requests `android.permission.CAMERA` when needed, guarded by
  *   [PendingStartGate] so `stop()` / `dispose()` / activity detach cancels an
  *   in-flight start before it can open a session.
