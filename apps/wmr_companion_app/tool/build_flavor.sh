@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Build one WMR Companion Android flavor with the vendor flags it needs (ONY-271).
+# Build one WMR Companion Android flavor with the vendor flags it needs
+# (ONY-271, ONY-355).
 #
 #   tool/build_flavor.sh base
 #   tool/build_flavor.sh viture --release
+#   tool/build_flavor.sh unified
 #
 # Extra arguments are passed to `flutter build apk`. The default mode is
 # `--debug`; pass `--debug`, `--profile` or `--release` to override it.
@@ -38,8 +40,18 @@ case "$flavor" in
       --dart-define=WMR_XREAL_TRACKING=true
     )
     ;;
+  unified)
+    # One shared unityLibrary, both vendor adapters compiled in. With no export
+    # linked, VITURE/XREAL start() reports typed `unavailable`; with the export
+    # present, the runtime dispatch picks the vendor.
+    defines=(
+      --dart-define=WMR_ANDROID_XR_TRACKING=true
+      --dart-define=WMR_VITURE_TRACKING=true
+      --dart-define=WMR_XREAL_TRACKING=true
+    )
+    ;;
   *)
-    echo "usage: $0 {base|viture|xreal} [--debug|--profile|--release] [flutter build args...]" >&2
+    echo "usage: $0 {base|viture|xreal|unified} [--debug|--profile|--release] [flutter build args...]" >&2
     exit 64
     ;;
 esac

@@ -235,8 +235,8 @@ jobs:
         run: dart run ../../tool/fetch_wmr_config_key.dart
 
       # Stub unityLibrary modules prove the include path, flavor isolation and
-      # the both-libraries guard without Unity or the vendor SDKs. The stubs are
-      # removed before the real artifacts are built.
+      # the mutual-exclusion guards without Unity or the vendor SDKs. The stubs
+      # are removed before the real artifacts are built.
       - name: Unity flavor wiring
         working-directory: apps/wmr_companion_app
         run: tool/test_flavor_wiring.sh
@@ -254,11 +254,12 @@ jobs:
             :wmr_tracking_xreal:testDebugUnitTest \
             :wmr_tracking_android_xr:testDebugUnitTest
 
-      - name: Build viture and xreal without Unity
+      - name: Build viture, xreal and unified without Unity
         working-directory: apps/wmr_companion_app
         run: |
           tool/build_flavor.sh viture
           tool/build_flavor.sh xreal
+          tool/build_flavor.sh unified
 
       - uses: actions/upload-artifact@v7
         with:

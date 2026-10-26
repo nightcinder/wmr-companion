@@ -25,20 +25,30 @@ plugins {
 
 include(":app")
 
-// Optional Unity-as-a-Library modules (ONY-271). Export `unityLibrary` from
-// `packages/wmr_tracking_<vendor>/unity` and copy it to the gitignored
-// `android/unity/<vendor>/unityLibrary` path. A missing export is not an error:
+// Optional Unity-as-a-Library modules (ONY-271, ONY-355). Export `unityLibrary`
+// from `packages/wmr_tracking_<vendor>/unity` (or the shared
+// `packages/wmr_tracking_unity/unity`) and copy it to the gitignored
+// `android/unity/<flavor>/unityLibrary` path. A missing export is not an error:
 // the flavor still builds and the Dart source reports `unavailable` when asked
-// to start. Only one Unity runtime can run in a process, so both exports at once
-// fail the build instead of silently linking one.
+// to start. Only one Unity runtime can run in a process, so more than one export
+// fails the build instead of silently linking one.
 val unityLibraries: Map<String, File> =
     mapOf(
         "viture" to file("unity/viture/unityLibrary"),
         "xreal" to file("unity/xreal/unityLibrary"),
+        "unified" to file("unity/unified/unityLibrary"),
     )
 val presentUnityLibraries = unityLibraries.filterValues { it.isDirectory }
 
 if (presentUnityLibraries.size > 1) {
+    if ("unified" in presentUnityLibraries) {
+        throw GradleException(
+            "The unified unityLibrary cannot be combined with per-vendor Unity exports. Remove " +
+                (presentUnityLibraries.keys - "unified")
+                    .joinToString(" and ") { "android/unity/$it/unityLibrary" } +
+                ", then rebuild the unified flavor.",
+        )
+    }
     throw GradleException(
         "Cannot link both Unity libraries into one APK. Remove " +
             presentUnityLibraries.keys.joinToString(" and ") { "android/unity/$it/unityLibrary" } +
