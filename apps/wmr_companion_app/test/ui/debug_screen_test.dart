@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vector_math/vector_math_64.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
@@ -9,13 +10,40 @@ import 'package:wmr_core/domain/loss_window.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 import 'package:wmr_ble/testing.dart';
 
 import 'raw_mode_notifier.dart';
+
+class _SimulatedOn extends SimulatedSixDof {
+  @override
+  bool build() => true;
+}
+
+DebugPoses _poses(ControllerPoseSource source) {
+  final position = source == ControllerPoseSource.orientationOnly
+      ? null
+      : Vector3(0.123, -0.250, -0.300);
+  ControllerPose pose(TrackedHand hand) => ControllerPose(
+    hand: hand,
+    hostTimeNs: 1,
+    orientation: quaternionFromEuler(0.5, 0.2, -0.1),
+    position: position,
+    source: source,
+    confidence: source == ControllerPoseSource.orientationOnly
+        ? TrackingConfidence.none
+        : TrackingConfidence.high,
+  );
+  return DebugPoses(
+    left: pose(TrackedHand.left),
+    right: pose(TrackedHand.right),
+  );
+}
 
 void tall(WidgetTester tester) {
   tester.view.physicalSize = const Size(900, 3200);
@@ -524,6 +552,100 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('dBm'), findsNothing);
+    });
+  });
+
+  group('6DoF viewer sources', () {
+    Future<void> open(
+      WidgetTester tester, {
+      DebugPoses? poses,
+      bool simulated = false,
+      Quaternion? orientation,
+    }) async {
+      tall(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            orientationProvider.overrideWith(
+              (ref) =>
+                  Stream.value(orientation ?? quaternionFromEuler(0, 0, 0)),
+            ),
+            streamStatsProvider.overrideWith(
+              (ref) => Stream.value(
+                const StreamStats(hands: [HandStats(), HandStats()]),
+              ),
+            ),
+            if (poses != null)
+              debugPosesProvider(DebugSource.fake)
+                  .overrideWith((ref) => Stream.value(poses)),
+            if (simulated)
+              simulatedSixDofProvider.overrideWith(_SimulatedOn.new),
+          ],
+          child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
+        ),
+      );
+      await tester.pump();
+    }
+
+    for (final source in ControllerPoseSource.values) {
+      testWidgets('labels ${source.name} and reads position per hand', (
+        tester,
+      ) async {
+        await open(tester, poses: _poses(source));
+
+        expect(find.byType(ControllerPoseView), findsOneWidget);
+        expect(find.textContaining('source ${source.name}'), findsNWidgets(2));
+        if (source == ControllerPoseSource.orientationOnly) {
+          expect(find.textContaining('position none'), findsWidgets);
+          expect(
+            find.textContaining('fallback: orientation only, no position'),
+            findsOneWidget,
+          );
+        } else {
+          expect(
+            find.textContaining('position 0.123, -0.250, -0.300 m'),
+            findsWidgets,
+          );
+        }
+        expect(find.text('Simulated 6DoF'), findsOneWidget);
+      });
+    }
+
+    testWidgets('reset orientation zeroes the viewer pose yaw', (tester) async {
+      final raw = quaternionFromEuler(0.5, 0.2, -0.1);
+      await open(tester, orientation: raw);
+
+      final before = tester
+          .widget<ControllerPoseView>(find.byType(ControllerPoseView))
+          .pose
+          .orientation;
+      expect(eulerFromQuaternion(before).yawDeg, closeTo(28.6, 0.1));
+
+      await tester.tap(find.text('Reset orientation'));
+      await tester.pump();
+
+      final after = tester
+          .widget<ControllerPoseView>(find.byType(ControllerPoseView))
+          .pose
+          .orientation;
+      expect(eulerFromQuaternion(after).yawDeg, closeTo(0, 0.1));
+      expect(eulerFromQuaternion(after).pitchDeg, closeTo(11.5, 0.1));
+    });
+
+    testWidgets('the simulated source lifts 3DoF to a hand anchor', (
+      tester,
+    ) async {
+      await open(tester, simulated: true);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.textContaining('source handAnchor'), findsNWidgets(2));
+      expect(find.textContaining('source orientationOnly'), findsNothing);
+      expect(find.textContaining('m  source handAnchor'), findsNWidgets(2));
+      expect(
+        find.textContaining('fallback: orientation only, no position'),
+        findsNothing,
+      );
     });
   });
 }
