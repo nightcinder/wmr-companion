@@ -1,9 +1,28 @@
-# Build matrix — tracking flavors (v0.2)
+# Build matrix — tracking flavors (v0.2.1)
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
+`apps/wmr_companion_app/tool/install_unity_export.sh`,
 `apps/wmr_companion_app/android/app/build.gradle.kts` and
 `apps/wmr_companion_app/android/settings.gradle.kts`. No build here has been run on
 hardware; these are compile/packaging facts only.
+
+## Current release: v0.2.1 unified APK
+
+| Item | Value |
+|---|---|
+| Tag / commit | `v0.2.1` → `58b5c40` |
+| App version | `0.2.1+3` (`versionName 0.2.1`, `versionCode 3`) |
+| Artifact | `wmr-companion-0.2.1-unified-debug.apk`, 584,438,127 B, SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b` |
+| Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
+| Unified or fallback | Truly unified. The approved all-flags `base` fallback was **not** used |
+| Signing | Android debug key; not suitable for store distribution |
+| Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
+| Licence gate | The owner approved bundling both proprietary SDKs and exported the shared `unityLibrary` (ONY-354; export SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`) |
+
+Release notes: [`v0.2.1`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1).
+The APK was built from PR #103 head `0c3bb40`, whose tree is identical to the tagged
+commit `58b5c40`. The GATT probe asset, `wmr-gatt-probe-0.2.1-debug.apk`, is unchanged
+in shape from v0.2.0.
 
 ## Flavors
 
@@ -12,7 +31,10 @@ hardware; these are compile/packaging facts only.
 | `base` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | none | Android XR, emulator, BLE/3DoF; every Dart adapter exists, but VITURE/XREAL `start()` reports typed `unavailable` with no Unity runtime linked |
 | `viture` | `WMR_ANDROID_XR_TRACKING=false`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=false` | `android/unity/viture/unityLibrary` (optional) | VITURE Pro Neckband Unity UaaL head + 26-joint hand relay |
 | `xreal` | `WMR_ANDROID_XR_TRACKING=false`, `WMR_VITURE_TRACKING=false`, `WMR_XREAL_TRACKING=true` | `android/unity/xreal/unityLibrary` (optional) | XREAL Air 2 Ultra Unity UaaL head + 26-joint hand relay |
-| `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (optional) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, both report typed `unavailable` |
+| `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (required for a real unified APK) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, both report typed `unavailable` |
+
+`unified` requires Android 13 (API 33) when the VITURE runtime is linked, because
+`VitureUnityXR.aar` in the export declares `minSdk 33`.
 
 ## Why the Unity exports cannot be mixed
 
@@ -27,47 +49,67 @@ hardware; these are compile/packaging facts only.
 - `app/build.gradle.kts` also asserts that multiple modules are never linked together
   (`Cannot link multiple unityLibrary modules into one APK`).
 - Each vendor SDK contributes its own native libraries, XR loader and manifest
-  entries; coexistence of the two separate exports in one process is unproven (see
-  below). The unified export is the supported way to get both vendors into one APK.
+  entries; the supported way to get both vendors into one APK is the unified export.
 
-A missing Unity export is not an error: the flavor still builds and the Dart source
-reports `unavailable` when asked to start.
+A missing Unity export is not an error: `viture`, `xreal` and `unified` still build and
+the Dart sources report `unavailable` when asked to start.
 
-## Unified Unity library (ONY-273, ONY-355)
+## Unified Unity library (ONY-273, ONY-355, ONY-388)
 
-`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one
+`packages/wmr_tracking_unity` puts one Unity 6000.0 project and one
 `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry
 `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are
-selected, and the per-vendor relay JSON is unchanged. Its README lists the coexistence
-unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest
-entries, SDK redistribution terms, static initialisers from the inactive vendor,
-Kotlin-side selection, and the absence of any export or hardware run. The dispatch is
-compiled and tested outside Unity; the Unity assembly and export remain an external gate.
-If coexistence is ruled out, ONY-271 flavors stay the answer.
+selected, and the per-vendor relay JSON is unchanged. The 0.2.1 export migrated the
+vendors to VITURE 0.9.0 / XREAL 3.1.0 (ONY-378).
 
-The `unified` app flavor (ONY-355) links that shared export from
-`android/unity/unified/unityLibrary` only. Export it with **WMR > Export unified
-unityLibrary** in `packages/wmr_tracking_unity/unity`, then copy
-`unity/Build/Android/unityLibrary` to `apps/wmr_companion_app/android/unity/unified/`.
+The `unified` app flavor links that shared export from
+`android/unity/unified/unityLibrary` only. To build it:
+
+1. In `packages/wmr_tracking_unity/unity`, with both proprietary SDKs imported, choose
+   **WMR > Export unified unityLibrary**. Exporting needs Unity 6000.0.27f1 and the
+   vendors' SDK terms; the export is gitignored and is never committed.
+2. Install and normalise the export from `apps/wmr_companion_app`:
+
+   ```sh
+   tool/install_unity_export.sh unified path/to/unityLibrary.zip
+   ```
+
+   The installer treats the input as immutable and rewrites only its copy: it removes
+   the missing `../shared/keepUnitySymbols.gradle` include, remaps `:unityLibrary` and
+   `:unityLibrary:xrmanifest.androidlib` to `:unityLibraryUnified`, replaces the
+   absolute `ndkPath`, fixes `unityStreamingAssets`, rewrites AAR dependencies for AGP 9
+   and patches Unity's `buildIl2Cpp` helper for Gradle 9. See
+   `apps/wmr_companion_app/android/unity/README.md` for the full list and the manual
+   copy steps. `tool/test_unity_export_install.sh` tests this without Unity.
+3. Build:
+
+   ```sh
+   tool/build_flavor.sh unified --debug
+   ```
+
 No export is needed for CI: `tool/build_flavor.sh unified` still builds and the
-VITURE/XREAL sources report `unavailable`. See
-`apps/wmr_companion_app/android/unity/README.md`.
+VITURE/XREAL sources report `unavailable`. The 0.2.1 release installed the owner export
+(SHA-256 `945bd42…`, ONY-354), which carried both vendor runtimes in one `unityLibrary`.
 
 ## Commands
 
 ```bash
 cd apps/wmr_companion_app
+tool/install_unity_export.sh unified path/to/unityLibrary.zip
 tool/build_flavor.sh base
 tool/build_flavor.sh viture
 tool/build_flavor.sh xreal
 tool/build_flavor.sh unified
 ```
 
-Extra arguments pass through to `flutter build apk` (e.g. `--release`).
+Extra arguments pass through to `flutter build apk` (e.g. `--release`). APKs land in
+`apps/wmr_companion_app/build/app/outputs/flutter-apk/`.
 
 ## Unknowns
 
-- No Unity export or APK build with either vendor SDK has happened in this repo.
+- The 0.2.1 unified APK has **not** run on a VITURE or XREAL device. Runtime vendor
+  selection, permissions and the two SDKs coexisting in one process are unverified.
 - Vendor head/hand update rates are unpublished (`maxHeadRateHz: 0`, `maxHandRateHz: 0`).
 - Android permissions the VITURE/XREAL Unity runtimes need beyond `android.permission.CAMERA`
   are not documented.
+- No per-vendor flavor has been run on its target hardware either.
