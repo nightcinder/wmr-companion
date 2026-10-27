@@ -60,4 +60,13 @@ presentUnityLibraries.forEach { (vendor, directory) ->
     val module = ":unityLibrary${vendor.replaceFirstChar { it.uppercase() }}"
     include(module)
     project(module).projectDir = directory
+    // Unity's Android export can carry a nested XR manifest library. The export
+    // references it as `:unityLibrary:xrmanifest.androidlib`, which
+    // tool/install_unity_export.sh remaps to this module. Include it when
+    // present so the manifest still merges into the app (ONY-388).
+    val xrManifestLibrary = File(directory, "xrmanifest.androidlib")
+    if (xrManifestLibrary.isDirectory) {
+        include("$module:xrmanifest.androidlib")
+        project("$module:xrmanifest.androidlib").projectDir = xrManifestLibrary
+    }
 }

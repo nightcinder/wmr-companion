@@ -66,6 +66,29 @@ void main() {
       expect(appBuild, contains('Cannot link multiple unityLibrary modules'));
     });
 
+    test('includes the nested XR manifest library Unity exports', () {
+      // Unity references it as `:unityLibrary:xrmanifest.androidlib`; the
+      // installer remaps that to the included module, so settings must register
+      // the child project at the export's directory (ONY-388).
+      expect(settings, contains('xrmanifest.androidlib'));
+      expect(settings, contains(r'include("$module:xrmanifest.androidlib")'));
+      expect(
+        settings,
+        contains(r'project("$module:xrmanifest.androidlib").projectDir'),
+      );
+    });
+
+    test('unified requires API 33 for the VITURE 0.9.0 AAR', () {
+      // VitureUnityXR.aar declares minSdk 33; an export with it cannot merge
+      // into a lower minSdk (ONY-388).
+      final match = RegExp(
+        r'create\("unified"\)\s*\{(.*?)\}',
+        dotAll: true,
+      ).firstMatch(appBuild);
+      expect(match, isNotNull, reason: 'missing unified product flavor');
+      expect(match!.group(1), contains('minSdk = 33'));
+    });
+
     test('build script passes the right --dart-define for each flavor', () {
       const flags = [
         'WMR_ANDROID_XR_TRACKING',
