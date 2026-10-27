@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-26 (records the M13.3 0.2 security posture; earlier update was the ONY-202 headset-tracking research and framework). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-27 (records the v0.2.1 unified APK release; earlier updates were the M13.3 0.2 security posture and the ONY-202 headset-tracking research and framework). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -26,16 +26,31 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ## Current state
 
+### Current release (v0.2.1, 2026-10-27)
+
+| Item | Value |
+|---|---|
+| Tag / commit | `v0.2.1` → `58b5c40` |
+| App version | `0.2.1+3` (`versionName 0.2.1`, `versionCode 3`); all twelve Dart packages are `0.2.1` |
+| Android artifact | `wmr-companion-0.2.1-unified-debug.apk`, 584,438,127 B, SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b` |
+| GATT probe | `wmr-gatt-probe-0.2.1-debug.apk`, 5,961,348 B, SHA-256 `c8457f78b2d45297307c78d5fbacae27d495a25edb537ffd18409956d4171649` |
+| Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. This is the truly unified artifact, **not** the approved base fallback |
+| Signing | Android debug key. Not suitable for store distribution |
+| Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified |
+| Licence gate | The owner approved bundling both proprietary SDKs and exported the shared `unityLibrary` (ONY-354; export SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`) |
+
+Release notes: [`v0.2.1`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1). Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
+
 ### Milestones (see [PLAN.md](PLAN.md))
 
 Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md` §7 and `docs/PLAN.md`). The earlier milestones (M1–M6: scaffold, GATT stream, 3DoF orientation, latency screen, iOS probe) established the baseline pipeline; active work is organized under M10–M15:
 
 | Milestone | Scope | State |
 |---|---|---|
-| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.1.0` is on owner hold, and the phase-5 iOS 18 device gate was waived for this release (owner, 2026-10-23) — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
+| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.1` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
 | **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
 | **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
-| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.2 (owner choice below). **Open:** M13.4 README rewrite around M12 results. |
+| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion `v0.2.1` unified debug APK published 2026-10-27 (tag `58b5c40`; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.2 (owner choice below). **Open:** M13.4 README rewrite around M12 results. |
 | **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
 | **M15 — PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
 
@@ -146,6 +161,7 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
      - *Sitting B (two bridges):* multi-bridge A/B/A/B on two ESP32s — **parked**, no second Classic ESP32.
      - *Write-ups:* #18 disposition, M7 decision, M8 defaults, STATUS in both repos.
 4. **M13 — Release and distribution (Open)**:
+   - **Companion `v0.2.1` unified APK:** tagged and published 2026-10-27 at `58b5c40`, with the owner-approved VITURE+XREAL export, debug signing and no hardware validation (above).
    - `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12).
    - Compatibility matrix published in both repos keyed on FF16 (#59, `WMR_Bridge` #45 & #49, M13.2 done).
    - **M13.3 bridge security decision:** recorded for 0.2 — keep the unauthenticated test bridge, keep the Pi bridge plaintext with a bearer token, and defer Raspberry Pi secure boot to 0.3 (`WMR_Bridge` #64; summary above and in `WMR_Bridge` `docs/SECURITY.md`).
@@ -170,10 +186,11 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 
 The honest current state is that the companion still ships 3DoF. Calling it 6DoF requires an adapter and the hardware gates listed in [GATES.md](tracking/GATES.md#gates-before-calling-this-6dof).
 
-## Not yet run on hardware (as of 2026-10-25)
+## Not yet run on hardware (as of 2026-10-27)
 
 Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
 
+- The **0.2.1 unified APK** on a VITURE or XREAL device: runtime vendor selection, the vendor tracking rate/permissions, and both SDKs coexisting in one process. The artifact passed export-level and host checks only; it is debug-signed.
 - Bluetooth HID output on a phone and a host (skipped).
 - FF14 checks B4 (phone-side sequence gaps) and B9, and B6-B8, B10, B11.
 - A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream (the screen now supports all four via PR #28 no-stream latency mode and stream selector; not yet run).
@@ -182,7 +199,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - FF16 firmware version read on a live bridge (PR #46).
 - Per-bridge attribution on multi-bridge hardware (PR #51).
 - Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
-- `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); no rename made.
+- `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); the name is unchanged in `0.2.1`.
 - Headset head/hand tracking on any device, and every vendor adapter path in [TRACKING.md](TRACKING.md): Android XR permissions/session, XREAL Unity hand tracking, RayNeo ARDK head pose, Rokid UXR gestures, VITURE Carina pose/stereo frames and VITURE Neckband Unity hands. The framework itself is unit-tested only.
 
 ## Where things are
@@ -196,6 +213,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 | Raw capture format and screen | [CAPTURE.md](CAPTURE.md) |
 | Latency screen, CSV/JSON export format | [LATENCY.md](LATENCY.md) |
 | Gamepad mapping, settings, output options | [GAMEPAD.md](GAMEPAD.md) |
+| Android flavors, unified export and current release | [tracking/BUILDS.md](tracking/BUILDS.md), [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md) |
 | Firmware wire protocol (source of truth) | WMR_Bridge `docs/PROTOCOL.md` |
 | Decoding, timing, loss investigation, unknowns | WMR_Bridge `docs/DECODING.md` |
 | Firmware counters and log lines | WMR_Bridge `docs/COUNTERS.md` |
