@@ -6,11 +6,22 @@ in a **single** `unityLibrary`. The per-vendor projects in
 `packages/wmr_tracking_viture/unity` and `packages/wmr_tracking_xreal/unity`
 stay in place and remain the source of truth for their scripts; their Runtime
 folders are copied into this project and kept byte-identical by a sync check.
-ONY-271 flavors remain the fallback until a real export and device run happen.
+
+The `v0.2.1` release shipped a real export from this project and the `unified`
+Android APK built from it (ONY-354 owner export, ONY-388 build); there has still
+been no device run. The per-vendor ONY-271 flavors remain available as the
+fallback path.
 
 No proprietary SDK, no Unity install and no hardware are used by this
 repository. Neither vendor's native code is vendored. Nothing here is a
 hardware result.
+
+**Status (0.2.1, 2026-10-27):** the owner approved redistributing both SDKs and
+supplied the export (ONY-354; SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`).
+`apps/wmr_companion_app/tool/install_unity_export.sh unified <zip>` normalises it
+and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
+debug-signed and **has not been run on a VITURE or XREAL device**; runtime
+vendor selection and the coexistence points below are still unverified.
 
 ## Layout
 
@@ -222,7 +233,9 @@ both SDKs coexist in one build.
 5. **SDK licence terms.** Redistributing both proprietary SDKs inside one
    `unityLibrary`/APK may be restricted by each vendor's terms. This repository
    only points at the vendor packages; it does not grant redistribution
-   rights. Legal review is required before shipping the combined build.
+   rights. The project owner approved bundling both runtimes for the 0.2.1 APK
+   (ONY-354); the SDKs remain under their vendors' licences, so that approval
+   does not extend to other redistributors.
 6. **Both vendors' static initialisers.** Even if only one XR loader is
    active, content providers, `JNI_OnLoad` hooks and static initialisers from
    the other SDK may still run when its Kotlin classes or native libraries are
@@ -237,9 +250,10 @@ both SDKs coexist in one build.
 9. **Per-vendor `recenter`.** Only the VITURE bridge implements recenter today.
    The unified bridge preserves XREAL's existing `protocol` rejection rather
    than inventing an API.
-10. **No run.** No Unity import, no export, no `unityLibrary`, no APK, no
-    Neckband, no Air 2 Ultra, no measured frames. The C# assertions and static
-    docs are the entire evidence base.
+10. **No hardware run.** A real export and the 0.2.1 unified APK exist
+    (ONY-354/ONY-388), but there is no Neckband, Air 2 Ultra or measured-frame
+    run. The C# assertions, export checks and APK inspection are the evidence
+    base.
 
-If any of items 1–5 is shown impossible on paper or by a real export, record it
-here and stop: ONY-271 flavors remain the supported answer.
+If any of items 1–4 is shown impossible on paper or by a real export, record it
+here and stop: the ONY-271 per-vendor flavors remain the supported answer.
