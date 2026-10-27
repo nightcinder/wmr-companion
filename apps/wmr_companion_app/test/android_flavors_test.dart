@@ -71,10 +71,7 @@ void main() {
       // installer remaps that to the included module, so settings must register
       // the child project at the export's directory (ONY-388).
       expect(settings, contains('xrmanifest.androidlib'));
-      expect(
-        settings,
-        contains(r'include("$module:xrmanifest.androidlib")'),
-      );
+      expect(settings, contains(r'include("$module:xrmanifest.androidlib")'));
       expect(
         settings,
         contains(r'project("$module:xrmanifest.androidlib").projectDir'),
