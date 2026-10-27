@@ -55,6 +55,19 @@ android {
         }
         create("unified") {
             dimension = "vendor"
+            // VITURE 0.9.0's VitureUnityXR.aar declares minSdk 33, and the
+            // unified export links it alongside XREAL. Keep the other flavors
+            // on Flutter's default (ONY-388).
+            minSdk = 33
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Flutter's debug engine and the VITURE 0.9.0 AAR both ship this
+            // Vulkan validation layer. Keeping either copy is enough; the
+            // layer is not loaded unless validation is requested (ONY-388).
+            pickFirsts += "**/libVkLayer_khronos_validation.so"
         }
     }
 }

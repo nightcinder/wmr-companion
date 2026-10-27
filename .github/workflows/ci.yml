@@ -237,6 +237,10 @@ jobs:
       # Stub unityLibrary modules prove the include path, flavor isolation and
       # the mutual-exclusion guards without Unity or the vendor SDKs. The stubs
       # are removed before the real artifacts are built.
+      - name: Unity export installer
+        working-directory: apps/wmr_companion_app
+        run: tool/test_unity_export_install.sh
+
       - name: Unity flavor wiring
         working-directory: apps/wmr_companion_app
         run: tool/test_flavor_wiring.sh
