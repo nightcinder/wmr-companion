@@ -20,6 +20,7 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access.
 - [FRAMEWORK.md](tracking/FRAMEWORK.md) — seam, filter, vectors, adapter recipes, vertical slices.
 - [BUILDS.md](tracking/BUILDS.md) — build matrix, flavors, `--dart-define`, Unity exports.
 - [GATES.md](tracking/GATES.md) — hardware gates and open questions.
+- [PREFLIGHT.md](tracking/PREFLIGHT.md) — named 1.0 path (XREAL), current unified APK, and the desk-only export/permission check.
 - Run sheets: [Android XR](runs/sheets/pose-androidxr.md), [VITURE](runs/sheets/pose-viture.md), [XREAL](runs/sheets/pose-xreal.md).
 
 No 6DoF claim: no vendor adapter has run on hardware.
