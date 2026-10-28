@@ -15,7 +15,8 @@ File vector(String name) {
 }
 
 HandInput hand(List<String> f, int at) {
-  if (f[at] == '0') return HandInput(); // connected flag is checked by the caller
+  if (f[at] == '0')
+    return HandInput(); // connected flag is checked by the caller
   return HandInput(
     buttons: int.parse(f[at + 1]),
     stick: [double.parse(f[at + 2]), double.parse(f[at + 3])],
@@ -54,10 +55,12 @@ void main() {
         leftTrackpad: TrackpadRole.values[int.parse(f[19])],
         rightTrackpad: TrackpadRole.values[int.parse(f[20])],
       );
-      final previous = GamepadState(buttons: {
-        if (f[15] == '1') GamepadButton.l2,
-        if (f[16] == '1') GamepadButton.r2,
-      });
+      final previous = GamepadState(
+        buttons: {
+          if (f[15] == '1') GamepadButton.l2,
+          if (f[16] == '1') GamepadButton.r2,
+        },
+      );
       final report = encodeHidReport(
         mapGamepad(
           f[1] == '0' ? null : left,
@@ -66,9 +69,7 @@ void main() {
           previous: previous,
         ),
       );
-      final expected = [
-        for (var i = 21; i < 30; i++) int.parse(f[i]),
-      ];
+      final expected = [for (var i = 21; i < 30; i++) int.parse(f[i])];
       expect(report, expected, reason: f.first);
     }
   });
