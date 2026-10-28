@@ -75,18 +75,24 @@ class Axml:
                 self._start_element(pos)
             pos += size
 
+    def _length(self, at: int) -> tuple[int, int]:
+        """ResStringPool length: one byte, or two when the high bit is set."""
+        first = self.data[at]
+        if first & 0x80:
+            return ((first & 0x7F) << 8) | self.data[at + 1], 2
+        return first, 1
+
     def _string_pool(self, pos: int) -> None:
         count, _, flags, strings_start, _ = struct.unpack_from("<IIIII", self.data, pos + 8)
         offsets = struct.unpack_from(f"<{count}I", self.data, pos + 28)
         base = pos + strings_start
         for offset in offsets:
             at = base + offset
-            if flags & 0x100:  # UTF-8 pool
-                length = self.data[at]
-                at += 1
-                if flags & 0x80:
-                    length = (length << 8) | self.data[at]
-                    at += 1
+            if flags & 0x100:  # UTF-8 pool: [u16 len][u8 len][bytes][NUL]
+                _, width = self._length(at)
+                at += width
+                length, width = self._length(at)
+                at += width
                 self.strings.append(self.data[at : at + length].decode("utf-8", "replace"))
             else:
                 length = struct.unpack_from("<H", self.data, at)[0]
@@ -122,6 +128,11 @@ class Axml:
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
+
+
+def is_required(value: str | None) -> bool:
+    """Android defaults android:required to true when the attribute is absent."""
+    return value != "false"
 
 
 def main(argv: list[str]) -> int:
@@ -167,11 +178,11 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             camera_required = features.get("android.hardware.camera")
-            if camera_required == "true":
-                fail("android.hardware.camera is required; it would filter devices")
+            if is_required(camera_required):
+                fail("android.hardware.camera is required (explicitly or by default); it would filter devices")
                 failures += 1
             else:
-                print(f"PASS features: bluetooth_le, camera(required={camera_required}), usb.host")
+                print("PASS features: bluetooth_le, camera(required=false), usb.host")
 
         missing_libs = REQUIRED_LIBS - names
         if missing_libs:

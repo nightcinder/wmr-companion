@@ -61,7 +61,10 @@ python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.2.1-uni
 ## 3. Permission and session path (host-validated)
 
 `check_unified_apk.py` passed on the v0.2.1 artifact with its recorded SHA-256.
-It reads the binary manifest, dex and Unity subsystem files:
+It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
+without `android:required` counts as required, as Android does — `camera` must
+say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
+parser (UTF-16 and UTF-8 pools) and that camera gate.
 
 | Check | Result |
 |---|---|
