@@ -24,6 +24,11 @@ The APK was built from PR #103 head `0c3bb40`, whose tree is identical to the ta
 commit `58b5c40`. The GATT probe asset, `wmr-gatt-probe-0.2.1-debug.apk`, is unchanged
 in shape from v0.2.0.
 
+Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
+checks the merged permissions, both Unity runtimes and their versions, the vendor
+metadata and the tracking/session classes in the dex. It passed on the v0.2.1
+artifact; the open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
+
 ## Flavors
 
 | Flavor | `--dart-define` | Unity export linked | What it ships |

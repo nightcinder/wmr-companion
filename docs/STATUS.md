@@ -186,6 +186,8 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 
 The honest current state is that the companion still ships 3DoF. Calling it 6DoF requires an adapter and the hardware gates listed in [GATES.md](tracking/GATES.md#gates-before-calling-this-6dof).
 
+**Named 1.0 path (ONY-440, 2026-10-28): XREAL Air 2 Ultra**, hosted by an existing Beam Pro or Samsung S24-or-later phone; VITURE (Luma Ultra + Pro Neckband) is the fallback and needs two purchases. The `v0.2.1` unified APK was checked host-side: merged `CAMERA`/`HAND_TRACKING`/`HEAD_TRACKING` declarations, both vendor runtimes, and the shared-runtime session classes are present. Nothing was installed or started. Decision and open gaps: [tracking/PREFLIGHT.md](tracking/PREFLIGHT.md).
+
 ## Not yet run on hardware (as of 2026-10-27)
 
 Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
