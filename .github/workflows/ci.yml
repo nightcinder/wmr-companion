@@ -284,7 +284,7 @@ jobs:
     needs: changes
     # A push to main always builds, whatever the path filter says; PRs build
     # only when Android-relevant paths changed.
-    if: ${{ !startsWith(github.ref, 'refs/tags/') && (github.ref == 'refs/heads/main' || needs.changes.outputs.android_flavors == 'true') }}
+    if: ${{ (needs.changes.outputs.android_flavors == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -390,7 +390,7 @@ jobs:
     needs: changes
     # A push to main always builds, whatever the path filter says; PRs build
     # only when the probe changed.
-    if: ${{ !startsWith(github.ref, 'refs/tags/') && (github.ref == 'refs/heads/main' || needs.changes.outputs.gatt_probe == 'true') }}
+    if: ${{ (needs.changes.outputs.gatt_probe == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
