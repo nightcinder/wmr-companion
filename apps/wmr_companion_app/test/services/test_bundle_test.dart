@@ -153,4 +153,63 @@ void main() {
     expect(readme, contains('Firmware version (FF16)'));
     expect(readme, contains('MTU'));
   });
+
+  test('records every guided bench step in the manifest', () async {
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 10, 29, 14),
+        appVersion: '0.2.2+4',
+        phone: 'Google Pixel 8',
+        androidVersion: 'Android 14 (API 34)',
+        streamMode: 'raw',
+        benchRun: const BenchBundleRun([
+          BenchBundleStep(
+            id: 'connect',
+            status: 'done',
+            summary: '1 bridge(s): AA (MTU 185, raw)',
+          ),
+          BenchBundleStep(
+            id: 'both_hands',
+            status: 'done',
+            summary: 'Frames from LEFT and RIGHT',
+          ),
+          BenchBundleStep(id: 'still_left', status: 'skipped'),
+          BenchBundleStep(
+            id: 'latency',
+            status: 'failed',
+            detail: 'The latency run recorded no rows.',
+          ),
+          BenchBundleStep(id: 'export', status: 'not_run'),
+        ]),
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    expect(
+      bundle.present,
+      contains('Guided bench run: 2 done, 1 skipped, 1 failed (5 steps)'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final manifest = text(archive, 'manifest.md');
+    expect(manifest, contains('## Guided bench run'));
+    expect(manifest, contains('- connect: done — 1 bridge(s)'));
+    expect(manifest, contains('- both_hands: done — Frames from LEFT'));
+    expect(manifest, contains('- still_left: skipped'));
+    expect(
+      manifest,
+      contains('- latency: failed — The latency run recorded no rows.'),
+    );
+    expect(manifest, contains('- export: not_run'));
+
+    final diagnostics =
+        jsonDecode(text(archive, 'diagnostics.json')) as Map<String, Object?>;
+    final bench = diagnostics['bench']! as Map<String, Object?>;
+    final steps = (bench['steps']! as List).cast<Map<String, Object?>>();
+    expect(steps, hasLength(5));
+    expect(steps[3]['id'], 'latency');
+    expect(steps[3]['status'], 'failed');
+  });
 }

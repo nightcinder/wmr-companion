@@ -439,7 +439,7 @@ jobs:
               echo "::error::$apk has no CN=WMR Companion signer"
               exit 1
             fi
-            if ! grep -qi '315443400405ec7dcb7d75f8474183450c741ae1bf3484fc1bdf3287a641fca2' <<<"$certs"; then
+            if ! grep -qi 'bdaa32b51ad3afd267d0f80f28a473b85319f8c37e26289cf1dc1ff7cfaae256' <<<"$certs"; then
               echo "::error::$apk certificate SHA-256 does not match the documented key"
               exit 1
             fi

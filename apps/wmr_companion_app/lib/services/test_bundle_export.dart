@@ -76,12 +76,16 @@ final bundleOutputDirectoryProvider = FutureProvider<Directory>((ref) async {
   return Directory('${documents.path}${Platform.pathSeparator}exports');
 });
 
+/// Builds the bundle input, with an explicit bench run when a wizard ends in
+/// the export.
+typedef TestBundleInputBuilder = Future<TestBundleInput> Function({
+  BenchBundleRun? benchRun,
+});
+
 /// Gathers what the app already holds. Runs when the user taps export, so the
 /// figures are the ones on screen at that moment.
-final testBundleInputProvider = Provider<Future<TestBundleInput> Function()>((
-  ref,
-) {
-  return () async {
+final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
+  return ({BenchBundleRun? benchRun}) async {
     final device = ref.read(realDeviceProvider);
     final service = ref.read(realDeviceProvider.notifier).service;
     final info = await ref.read(bundleDeviceInfoProvider)();
@@ -154,6 +158,7 @@ final testBundleInputProvider = Provider<Future<TestBundleInput> Function()>((
       bridges: bridges,
       latencyFiles: latest?.paths ?? const [],
       captureFiles: [for (final capture in captureStore.list()) capture.path],
+      benchRun: benchRun ?? ref.read(benchBundleProvider),
     );
   };
 });
@@ -169,16 +174,38 @@ final shareTestBundleProvider = Provider<Future<void> Function(String path)>((
   };
 });
 
-/// One tap: gather, write the zip, then share it.
-final exportTestBundleProvider = Provider<Future<TestBundle> Function()>((ref) {
-  return () async {
-    final input = await ref.read(testBundleInputProvider)();
+/// One tap: gather, write the zip, then share it. A bench run is passed in so
+/// the manifest records the step results, including the export, before the
+/// archive is written.
+typedef TestBundleExporter = Future<TestBundle> Function({
+  BenchBundleRun? benchRun,
+});
+
+final exportTestBundleProvider = Provider<TestBundleExporter>((ref) {
+  return ({BenchBundleRun? benchRun}) async {
+    final input = await ref.read(testBundleInputProvider)(benchRun: benchRun);
     final directory = await ref.read(bundleOutputDirectoryProvider.future);
     final bundle = await writeTestBundle(input, directory);
     await ref.read(shareTestBundleProvider)(bundle.path);
     return bundle;
   };
 });
+
+/// Step results from the guided bench wizard, when the export ends one. The
+/// plain Export test bundle action leaves it null and the manifest says so.
+final benchBundleProvider =
+    NotifierProvider<BenchBundleNotifier, BenchBundleRun?>(
+      BenchBundleNotifier.new,
+    );
+
+class BenchBundleNotifier extends Notifier<BenchBundleRun?> {
+  @override
+  BenchBundleRun? build() => null;
+
+  void publish(BenchBundleRun run) => state = run;
+
+  void clear() => state = null;
+}
 
 Map<String, Object?>? _rawStatsJson(StreamStats? stats) {
   if (stats == null) return null;
