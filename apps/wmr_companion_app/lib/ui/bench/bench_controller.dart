@@ -1,0 +1,257 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../services/test_bundle.dart';
+import '../../services/test_bundle_export.dart';
+import 'bench_run.dart';
+
+enum BenchStatus { pending, running, done, skipped, failed }
+
+class BenchStepResult {
+  const BenchStepResult({
+    this.status = BenchStatus.pending,
+    this.summary,
+    this.error,
+    this.data = const {},
+  });
+
+  final BenchStatus status;
+  final String? summary;
+  final String? error;
+  final Map<String, Object?> data;
+
+  bool get finished =>
+      status == BenchStatus.done ||
+      status == BenchStatus.skipped ||
+      status == BenchStatus.failed;
+}
+
+class BenchRunState {
+  const BenchRunState({
+    this.step = BenchStep.connect,
+    this.results = const {},
+    this.exporting = false,
+    this.bundlePath,
+    this.fileName,
+    this.present = const [],
+    this.missing = const [],
+    this.bundleError,
+  });
+
+  final BenchStep step;
+  final Map<BenchStep, BenchStepResult> results;
+  final bool exporting;
+  final String? bundlePath;
+  final String? fileName;
+  final List<String> present;
+  final List<String> missing;
+  final String? bundleError;
+
+  BenchStepResult resultFor(BenchStep step) =>
+      results[step] ?? const BenchStepResult();
+
+  BenchStepResult get current => resultFor(step);
+
+  int get index => BenchStep.values.indexOf(step);
+
+  bool get busy => current.status == BenchStatus.running || exporting;
+
+  int get completed =>
+      results.values.where((r) => r.status == BenchStatus.done).length;
+
+  int get skipped =>
+      results.values.where((r) => r.status == BenchStatus.skipped).length;
+
+  int get failed =>
+      results.values.where((r) => r.status == BenchStatus.failed).length;
+
+  BenchRunState copyWith({
+    BenchStep? step,
+    Map<BenchStep, BenchStepResult>? results,
+    bool? exporting,
+    String? bundlePath,
+    String? fileName,
+    List<String>? present,
+    List<String>? missing,
+    String? bundleError,
+    bool clearBundleError = false,
+  }) {
+    return BenchRunState(
+      step: step ?? this.step,
+      results: results ?? this.results,
+      exporting: exporting ?? this.exporting,
+      bundlePath: bundlePath ?? this.bundlePath,
+      fileName: fileName ?? this.fileName,
+      present: present ?? this.present,
+      missing: missing ?? this.missing,
+      bundleError: clearBundleError ? null : (bundleError ?? this.bundleError),
+    );
+  }
+}
+
+final benchControllerProvider =
+    NotifierProvider.autoDispose<BenchController, BenchRunState>(
+      BenchController.new,
+    );
+
+/// Drives one step at a time. Measurements run through [BenchSession] so the
+/// machine is testable against the fake bridge without any UI.
+class BenchController extends Notifier<BenchRunState> {
+  @override
+  BenchRunState build() => const BenchRunState();
+
+  Future<void> runCurrent() async {
+    final step = state.step;
+    if (state.busy || step == BenchStep.export) return;
+    if (step.isPrompt) {
+      await confirmCurrent();
+      return;
+    }
+    _setResult(step, const BenchStepResult(status: BenchStatus.running));
+    try {
+      final session = await ref.read(benchSessionProvider)();
+      if (session == null) {
+        _setResult(
+          step,
+          const BenchStepResult(
+            status: BenchStatus.failed,
+            error: 'Not connected to the bridge.',
+          ),
+        );
+        return;
+      }
+      final outcome = await _runStep(session, step);
+      if (!ref.mounted) return;
+      _setResult(
+        step,
+        outcome.ok
+            ? BenchStepResult(
+                status: BenchStatus.done,
+                summary: outcome.summary,
+                data: outcome.data,
+              )
+            : BenchStepResult(
+                status: BenchStatus.failed,
+                error: outcome.error,
+                data: outcome.data,
+              ),
+      );
+      if (outcome.ok) _advance();
+    } catch (e) {
+      if (!ref.mounted) return;
+      _setResult(
+        step,
+        BenchStepResult(status: BenchStatus.failed, error: '$e'),
+      );
+    }
+  }
+
+  Future<BenchStepOutcome> _runStep(BenchSession session, BenchStep step) =>
+      switch (step) {
+        BenchStep.connect => session.connect(),
+        BenchStep.bothHands => session.bothHands(),
+        BenchStep.firmwareConfig => session.firmwareConfig(),
+        BenchStep.stillLeft => session.still(0),
+        BenchStep.stillRight => session.still(1),
+        BenchStep.moveLeft => session.move(0),
+        BenchStep.moveRight => session.move(1),
+        BenchStep.capture => session.capture(),
+        BenchStep.latency => session.latency(),
+        BenchStep.photo ||
+        BenchStep.serialLog ||
+        BenchStep.export => throw StateError('Step $step does not run'),
+      };
+
+  /// Marks a prompt step done and moves on.
+  Future<void> confirmCurrent() async {
+    final step = state.step;
+    if (!step.isPrompt || state.busy) return;
+    _setResult(
+      step,
+      BenchStepResult(
+        status: BenchStatus.done,
+        summary: step == BenchStep.photo ? 'Photo taken' : 'Serial log saved',
+      ),
+    );
+    _advance();
+  }
+
+  /// Records the step as skipped and moves on. The export step cannot be
+  /// skipped: the run ends in a bundle.
+  void skipCurrent() {
+    final step = state.step;
+    if (state.busy || step == BenchStep.export) return;
+    _setResult(step, const BenchStepResult(status: BenchStatus.skipped));
+    _advance();
+  }
+
+  /// Writes the same zip as Export test bundle, with these results in the
+  /// manifest, then shares it.
+  Future<void> exportBundle() async {
+    if (state.exporting) return;
+    state = state.copyWith(exporting: true, clearBundleError: true);
+    try {
+      final bundle = await ref.read(exportTestBundleProvider)();
+      if (!ref.mounted) return;
+      _setResult(
+        BenchStep.export,
+        BenchStepResult(
+          status: BenchStatus.done,
+          summary: 'Shared ${bundle.fileName}',
+          data: {'file': bundle.fileName, 'present': bundle.present},
+        ),
+      );
+      state = state.copyWith(
+        exporting: false,
+        bundlePath: bundle.path,
+        fileName: bundle.fileName,
+        present: bundle.present,
+        missing: bundle.missing,
+      );
+    } catch (e) {
+      if (!ref.mounted) return;
+      _setResult(
+        BenchStep.export,
+        BenchStepResult(status: BenchStatus.failed, error: '$e'),
+      );
+      state = state.copyWith(exporting: false, bundleError: '$e');
+    }
+  }
+
+  void _advance() {
+    final next = state.index + 1;
+    if (next >= BenchStep.values.length) return;
+    state = state.copyWith(step: BenchStep.values[next]);
+    _publish();
+  }
+
+  void _setResult(BenchStep step, BenchStepResult result) {
+    state = state.copyWith(results: {...state.results, step: result});
+    _publish();
+  }
+
+  /// Keeps the manifest copy in step with the screen.
+  void _publish() {
+    ref
+        .read(benchBundleProvider.notifier)
+        .publish(
+          BenchBundleRun([
+            for (final step in BenchStep.values)
+              BenchBundleStep(
+                id: step.id,
+                status: _statusName(state.resultFor(step).status),
+                summary: state.resultFor(step).summary,
+                detail: state.resultFor(step).error,
+                data: state.resultFor(step).data,
+              ),
+          ]),
+        );
+  }
+
+  static String _statusName(BenchStatus status) => switch (status) {
+    BenchStatus.pending => 'not_run',
+    BenchStatus.running => 'running',
+    BenchStatus.done => 'done',
+    BenchStatus.skipped => 'skipped',
+    BenchStatus.failed => 'failed',
+  };
+}

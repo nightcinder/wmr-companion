@@ -1,0 +1,470 @@
+import 'dart:async';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/protocol/wmr_fragment.dart';
+import 'package:wmr_core/services/capture_files.dart';
+import 'package:wmr_core/services/capture_recorder.dart';
+import 'package:wmr_core/services/config_client.dart';
+import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_core/services/latency_files.dart';
+import 'package:wmr_core/services/latency_recorder.dart';
+
+import '../capture/capture_providers.dart';
+import '../connect/connect_providers.dart';
+import '../latency/latency_providers.dart';
+
+/// How long each measured step runs. Tests override it to a few milliseconds.
+class BenchDurations {
+  const BenchDurations({
+    this.still = const Duration(seconds: 20),
+    this.move = const Duration(seconds: 20),
+    this.capture = const Duration(seconds: 60),
+    this.latency = const Duration(seconds: 30),
+    this.handTimeout = const Duration(seconds: 5),
+    this.firmwareTimeout = const Duration(seconds: 3),
+  });
+
+  final Duration still;
+  final Duration move;
+  final Duration capture;
+  final Duration latency;
+
+  /// How long to wait for the first frames of both hands.
+  final Duration handTimeout;
+
+  /// How long to wait for the one-time FF16 read.
+  final Duration firmwareTimeout;
+}
+
+final benchDurationsProvider = Provider<BenchDurations>(
+  (ref) => const BenchDurations(),
+);
+
+/// Order of the wizard. The id is what the manifest and the tests key on.
+enum BenchStep {
+  connect('connect'),
+  bothHands('both_hands'),
+  firmwareConfig('firmware_config'),
+  stillLeft('still_left'),
+  stillRight('still_right'),
+  moveLeft('move_left'),
+  moveRight('move_right'),
+  capture('capture'),
+  latency('latency'),
+  photo('photo'),
+  serialLog('serial_log'),
+  export('export');
+
+  const BenchStep(this.id);
+
+  final String id;
+
+  String get title => switch (this) {
+    BenchStep.connect => 'Connect the bridge',
+    BenchStep.bothHands => 'Both hands seen',
+    BenchStep.firmwareConfig => 'Firmware and config',
+    BenchStep.stillLeft => 'LEFT: hold still',
+    BenchStep.stillRight => 'RIGHT: hold still',
+    BenchStep.moveLeft => 'LEFT: slow move',
+    BenchStep.moveRight => 'RIGHT: slow move',
+    BenchStep.capture => 'Record 60 s of FF11',
+    BenchStep.latency => 'Measure latency',
+    BenchStep.photo => 'LED photo',
+    BenchStep.serialLog => 'Serial log',
+    BenchStep.export => 'Write the test bundle',
+  };
+
+  String instructions(BenchDurations durations) => switch (this) {
+    BenchStep.connect =>
+      'Connect one bridge for each hand from the Connect screen. This step '
+          'checks that the link is up before the run starts.',
+    BenchStep.bothHands =>
+      'Turn both controllers on and press any button on each. The run waits '
+          'until raw frames from LEFT and RIGHT have arrived.',
+    BenchStep.firmwareConfig =>
+      'Reads the firmware version (FF16) and both controller config blocks '
+          '(FF13). A controller that does not answer is recorded, not fatal.',
+    BenchStep.stillLeft =>
+      'Put the LEFT controller on a flat surface, ring up, and do not touch '
+          'it for ${durations.still.inSeconds} s.',
+    BenchStep.stillRight =>
+      'Put the RIGHT controller on a flat surface, ring up, and do not touch '
+          'it for ${durations.still.inSeconds} s.',
+    BenchStep.moveLeft =>
+      'Hold the LEFT controller and move it slowly and smoothly for '
+          '${durations.move.inSeconds} s. No fast flicks.',
+    BenchStep.moveRight =>
+      'Hold the RIGHT controller and move it slowly and smoothly for '
+          '${durations.move.inSeconds} s. No fast flicks.',
+    BenchStep.capture =>
+      'Records the FF11 raw stream for ${durations.capture.inSeconds} s and '
+          'saves it with the other captures.',
+    BenchStep.latency =>
+      'Runs the link measurement for ${durations.latency.inSeconds} s and '
+          'saves the CSV and JSON with the other latency runs.',
+    BenchStep.photo =>
+      'Take a photo of the bridge LED with the controller powered on. The '
+          'photo is attached outside the app; mark this step done once you '
+          'have it.',
+    BenchStep.serialLog =>
+      'Save the bridge serial log (Pi daemon log or USB console) from this '
+          'run. Attach it outside the app; mark this step done once you have '
+          'it.',
+    BenchStep.export =>
+      'Writes the same zip as Export test bundle, with this run\'s step '
+          'results in the manifest, then opens the share sheet.',
+  };
+
+  /// Prompts are confirmed by the tester; they do not run a measurement.
+  bool get isPrompt => this == BenchStep.photo || this == BenchStep.serialLog;
+
+  bool get isMeasured => !isPrompt && this != BenchStep.export;
+}
+
+/// The outcome of one step, before it goes into the manifest.
+class BenchStepOutcome {
+  const BenchStepOutcome.done(this.summary, {this.data = const {}})
+    : ok = true,
+      error = null;
+
+  const BenchStepOutcome.failed(this.error, {this.data = const {}})
+    : ok = false,
+      summary = null;
+
+  final bool ok;
+  final String? summary;
+  final String? error;
+  final Map<String, Object?> data;
+}
+
+/// Runs the bench steps against the live service. One instance per run; the
+/// wizard creates it when the first step starts.
+abstract class BenchSession {
+  Future<BenchStepOutcome> connect();
+  Future<BenchStepOutcome> bothHands();
+  Future<BenchStepOutcome> firmwareConfig();
+  Future<BenchStepOutcome> still(int hand);
+  Future<BenchStepOutcome> move(int hand);
+  Future<BenchStepOutcome> capture();
+  Future<BenchStepOutcome> latency();
+}
+
+/// The real session: reads and records through [ControllerService], the same
+/// paths the Capture and Latency screens use.
+class RealBenchSession implements BenchSession {
+  RealBenchSession({
+    required this.service,
+    required this.clock,
+    required this.captureStore,
+    required this.latencyStore,
+    required this.durations,
+    this.mtu,
+  });
+
+  final ControllerService service;
+  final MonotonicClock clock;
+  final CaptureStore captureStore;
+  final LatencyStore latencyStore;
+  final BenchDurations durations;
+  final int? mtu;
+
+  static String handName(int hand) => hand == wmrHandLeft ? 'LEFT' : 'RIGHT';
+
+  @override
+  Future<BenchStepOutcome> connect() async {
+    if (service.deviceIds.isEmpty) {
+      return const BenchStepOutcome.failed(
+        'No bridge is connected. Connect one on the Connect screen.',
+      );
+    }
+    final links = await service.bridgeLinks();
+    final described = [
+      for (final link in links)
+        '${link.bridgeId} (MTU ${link.mtu ?? '-'}, ${link.mode.name})',
+    ];
+    return BenchStepOutcome.done(
+      '${links.length} bridge(s): ${described.join(', ')}',
+      data: {
+        'bridges': [
+          for (final link in links)
+            {
+              'id': link.bridgeId,
+              'mtu': link.mtu,
+              'mode': link.mode.name,
+              'firmware': link.protocol?.firmwareVersion,
+            },
+        ],
+      },
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> bothHands() async {
+    await _ensureMode(StreamMode.raw);
+    final seen = <int>{};
+    final completer = Completer<void>();
+    final sub = service.frames.listen((frame) {
+      seen.add(frame.frame.hand);
+      if (seen.length >= wmrNumControllers && !completer.isCompleted) {
+        completer.complete();
+      }
+    });
+    try {
+      await completer.future.timeout(durations.handTimeout, onTimeout: () {});
+    } finally {
+      await sub.cancel();
+    }
+    final missing = [
+      for (var hand = 0; hand < wmrNumControllers; hand++)
+        if (!seen.contains(hand)) handName(hand),
+    ];
+    if (missing.isNotEmpty) {
+      return BenchStepOutcome.failed(
+        'No frames from ${missing.join(' and ')}. Press a button on each '
+        'controller and try again.',
+        data: {
+          'hands': [for (final hand in seen) handName(hand)],
+          'missing': missing,
+        },
+      );
+    }
+    return BenchStepOutcome.done(
+      'Frames from LEFT and RIGHT',
+      data: {
+        'hands': [for (final hand in seen) handName(hand)],
+      },
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> firmwareConfig() async {
+    await _waitForProtocols();
+    final firmware = <String, Object?>{};
+    var firmwareRead = false;
+    for (final id in service.deviceIds) {
+      final protocol = service.protocolFor(id);
+      firmware[id] = {
+        'version': protocol?.firmwareVersion,
+        'malformed': protocol?.firmwareVersionMalformed,
+        'feature_present': protocol?.features.firmwareVersion,
+        'unavailable': protocol == null,
+      };
+      if (protocol != null) firmwareRead = true;
+    }
+
+    final configs = <Map<String, Object?>>[];
+    var configRead = false;
+    for (final id in service.deviceIds) {
+      for (var hand = 0; hand < wmrNumControllers; hand++) {
+        final result = await ConfigClient(service.transport, id).read(hand);
+        final blob = result.blob;
+        configs.add({
+          'bridge': id,
+          'hand': handName(hand),
+          'bytes': blob?.length,
+          'crc32': result.crc?.toRadixString(16),
+          if (result.failure != null) 'failure': result.failure!.name,
+          if (result.state != null) 'state': result.state!.name,
+        });
+        if (blob != null) configRead = true;
+      }
+    }
+
+    final data = <String, Object?>{'firmware': firmware, 'config': configs};
+    if (!firmwareRead && !configRead) {
+      return BenchStepOutcome.failed(
+        'Neither FF16 nor FF13 returned a value.',
+        data: data,
+      );
+    }
+    final parts = <String>[
+      if (firmwareRead) 'firmware read',
+      if (configRead) 'config read',
+    ];
+    return BenchStepOutcome.done(parts.join(', '), data: data);
+  }
+
+  @override
+  Future<BenchStepOutcome> still(int hand) =>
+      _measure(hand, durations.still, moving: false);
+
+  @override
+  Future<BenchStepOutcome> move(int hand) =>
+      _measure(hand, durations.move, moving: true);
+
+  Future<BenchStepOutcome> _measure(
+    int hand,
+    Duration duration, {
+    required bool moving,
+  }) async {
+    await _ensureMode(StreamMode.raw);
+    final before = service.stats.hands[hand];
+    await Future<void>.delayed(duration);
+    final after = service.stats.hands[hand];
+    final frames = after.frames - before.frames;
+    final gaps = after.gaps - before.gaps;
+    final total = frames + gaps;
+    final seconds = duration.inMicroseconds / Duration.microsecondsPerSecond;
+    final data = <String, Object?>{
+      'hand': handName(hand),
+      'motion': moving ? 'slow_move' : 'still',
+      'seconds': seconds,
+      'frames': frames,
+      'gaps': gaps,
+      'loss': total == 0 ? null : gaps / total,
+      'rate_hz': seconds == 0 ? null : frames / seconds,
+    };
+    if (frames == 0) {
+      return BenchStepOutcome.failed(
+        'No ${handName(hand)} frames arrived during the step.',
+        data: data,
+      );
+    }
+    return BenchStepOutcome.done(
+      '${handName(hand)} ${moving ? 'slow move' : 'still'}: $frames frames, '
+      '${(frames / seconds).toStringAsFixed(1)} Hz, '
+      '${gaps == 0 ? 'no gaps' : '$gaps gaps'}',
+      data: data,
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> capture() async {
+    await _ensureMode(StreamMode.raw);
+    final now = DateTime.now();
+    final file = captureStore.newFile(wmrHandLeft, now);
+    final recorder = CaptureRecorder(
+      sink: FileCaptureSink(file),
+      hand: wmrHandLeft,
+      mtu: mtu,
+      started: now,
+      originUs: clock.nowUs,
+    )..beginPhase('bench', clock.nowUs);
+    final sub = service.frames.listen(recorder.addFrame);
+    try {
+      await Future<void>.delayed(durations.capture);
+    } finally {
+      await sub.cancel();
+    }
+    final summary = recorder.endPhase(clock.nowUs);
+    await recorder.close();
+    final data = <String, Object?>{
+      'path': file.path,
+      'seconds': durations.capture.inSeconds,
+      'frames': summary.totalFrames,
+      'lossy': summary.lossy,
+    };
+    if (summary.totalFrames == 0) {
+      return BenchStepOutcome.failed(
+        'The capture recorded no frames; see ${file.path}',
+        data: data,
+      );
+    }
+    return BenchStepOutcome.done(
+      '${summary.totalFrames} frames in ${durations.capture.inSeconds} s; '
+      'saved ${file.path}',
+      data: data,
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> latency() async {
+    await _ensureMode(StreamMode.raw);
+    final recorder = LatencyRecorder(
+      started: DateTime.now(),
+      originUs: clock.nowUs,
+      stream: service.mode.name,
+    );
+    final sub = service.frames.listen(
+      (frame) => recorder.addFrame(
+        frame.frame.hand,
+        frame.frame.sequence,
+        frame.receivedAtUs,
+        bridgeId: frame.bridgeId,
+      ),
+    );
+    try {
+      await Future<void>.delayed(durations.latency);
+    } finally {
+      await sub.cancel();
+    }
+    final links = <String, LatencyLink>{};
+    for (final link in await service.bridgeLinks()) {
+      links[link.bridgeId] = LatencyLink(
+        mtu: link.mtu,
+        rssiStart: link.rssi,
+        connectionIntervalUs: link.connectionIntervalUs,
+        phy: link.phy,
+      );
+    }
+    final report = recorder.report(
+      nowUs: clock.nowUs,
+      links: links,
+      counters: _counters(),
+    );
+    final saved = await latencyStore.save(recorder, report);
+    final data = <String, Object?>{
+      'files': saved.paths,
+      'seconds': durations.latency.inSeconds,
+      'rows': recorder.rows.length,
+    };
+    if (recorder.rows.isEmpty) {
+      return BenchStepOutcome.failed(
+        'The latency run recorded no rows.',
+        data: data,
+      );
+    }
+    return BenchStepOutcome.done(
+      '${recorder.rows.length} rows in ${durations.latency.inSeconds} s; '
+      'saved ${saved.csvPath}',
+      data: data,
+    );
+  }
+
+  Future<void> _ensureMode(StreamMode mode) async {
+    if (service.mode != mode) await service.setMode(mode);
+  }
+
+  Future<void> _waitForProtocols() async {
+    final deadline = DateTime.now().add(durations.firmwareTimeout);
+    while (service.deviceIds.any((id) => service.protocolFor(id) == null) &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
+
+  Map<String, int> _counters() {
+    final raw = service.stats;
+    final decoded = service.decodedStats;
+    var incomplete = 0;
+    for (final hand in raw.hands) {
+      incomplete += hand.incomplete;
+    }
+    return {
+      'incomplete_frames': incomplete,
+      'reassembly_errors': raw.errors,
+      'decoded_parse_errors': decoded.parseErrors,
+    };
+  }
+}
+
+/// Resolves the session from the live connection, or null when nothing is
+/// connected. The wizard calls it again on each step, so a bridge that comes
+/// back after a drop is picked up.
+final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
+  return () async {
+    final device = ref.read(realDeviceProvider);
+    final service = ref.read(realDeviceProvider.notifier).service;
+    if (service == null || !device.connected) return null;
+    return RealBenchSession(
+      service: service,
+      clock: service.transport.clock,
+      captureStore: await ref.read(captureStoreProvider.future),
+      latencyStore: await ref.read(latencyStoreProvider.future),
+      durations: ref.read(benchDurationsProvider),
+      mtu: device.status.mtu,
+    );
+  };
+});

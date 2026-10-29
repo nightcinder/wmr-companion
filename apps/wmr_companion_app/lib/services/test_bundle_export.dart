@@ -154,6 +154,7 @@ final testBundleInputProvider = Provider<Future<TestBundleInput> Function()>((
       bridges: bridges,
       latencyFiles: latest?.paths ?? const [],
       captureFiles: [for (final capture in captureStore.list()) capture.path],
+      benchRun: ref.read(benchBundleProvider),
     );
   };
 });
@@ -179,6 +180,22 @@ final exportTestBundleProvider = Provider<Future<TestBundle> Function()>((ref) {
     return bundle;
   };
 });
+
+/// Step results from the guided bench wizard, when the export ends one. The
+/// plain Export test bundle action leaves it null and the manifest says so.
+final benchBundleProvider =
+    NotifierProvider<BenchBundleNotifier, BenchBundleRun?>(
+      BenchBundleNotifier.new,
+    );
+
+class BenchBundleNotifier extends Notifier<BenchBundleRun?> {
+  @override
+  BenchBundleRun? build() => null;
+
+  void publish(BenchBundleRun run) => state = run;
+
+  void clear() => state = null;
+}
 
 Map<String, Object?>? _rawStatsJson(StreamStats? stats) {
   if (stats == null) return null;
