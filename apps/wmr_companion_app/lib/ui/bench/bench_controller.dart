@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle.dart';
 import '../../services/test_bundle_export.dart';
+import 'bench_pose.dart';
 import 'bench_run.dart';
 import 'bench_tracking.dart';
 
@@ -37,21 +40,21 @@ class BenchRunState {
     this.present = const [],
     this.missing = const [],
     this.bundleError,
-    this.captureProgress,
+    this.poseSegment = 0,
   });
 
   final BenchMode mode;
   final BenchStep step;
   final Map<BenchStep, BenchStepResult> results;
+
+  /// Index into [benchPoseSequence] while [step] is [BenchStep.poseCapture].
+  final int poseSegment;
   final bool exporting;
   final String? bundlePath;
   final String? fileName;
   final List<String> present;
   final List<String> missing;
   final String? bundleError;
-
-  /// The segment the pose capture is recording, while it runs.
-  final BenchCaptureProgress? captureProgress;
 
   BenchStepResult resultFor(BenchStep step) =>
       results[step] ?? const BenchStepResult();
@@ -91,23 +94,20 @@ class BenchRunState {
     List<String>? present,
     List<String>? missing,
     String? bundleError,
-    BenchCaptureProgress? captureProgress,
     bool clearBundleError = false,
-    bool clearCaptureProgress = false,
+    int? poseSegment,
   }) {
     return BenchRunState(
       mode: mode ?? this.mode,
       step: step ?? this.step,
       results: results ?? this.results,
+      poseSegment: poseSegment ?? this.poseSegment,
       exporting: exporting ?? this.exporting,
       bundlePath: bundlePath ?? this.bundlePath,
       fileName: fileName ?? this.fileName,
       present: present ?? this.present,
       missing: missing ?? this.missing,
       bundleError: clearBundleError ? null : (bundleError ?? this.bundleError),
-      captureProgress: clearCaptureProgress
-          ? null
-          : (captureProgress ?? this.captureProgress),
     );
   }
 }
@@ -120,6 +120,10 @@ final benchControllerProvider =
 /// Drives one step at a time. Measurements run through [BenchSession] so the
 /// machine is testable against the fake bridge without any UI.
 class BenchController extends Notifier<BenchRunState> {
+  final List<Map<String, Object?>> _poseEntries = [];
+  Completer<void>? _poseCancel;
+  bool _poseSkipRest = false;
+
   @override
   BenchRunState build() => const BenchRunState();
 
@@ -177,12 +181,12 @@ class BenchController extends Notifier<BenchRunState> {
         );
         return;
       }
-      final outcome = await _runStep(session, step, (progress) {
-        if (!ref.mounted) return;
-        state = state.copyWith(captureProgress: progress);
-      });
+      if (step == BenchStep.poseCapture) {
+        await _runPoseSegment(session);
+        return;
+      }
+      final outcome = await _runStep(session, step);
       if (!ref.mounted) return;
-      state = state.copyWith(clearCaptureProgress: true);
       _setResult(
         step,
         outcome.ok
@@ -207,26 +211,117 @@ class BenchController extends Notifier<BenchRunState> {
     }
   }
 
-  Future<BenchStepOutcome> _runStep(
-    BenchSession session,
-    BenchStep step,
-    void Function(BenchCaptureProgress progress) onProgress,
-  ) => switch (step) {
-    BenchStep.deviceSummary => session.deviceSummary(),
-    BenchStep.connect => session.connect(),
-    BenchStep.bothHands => session.bothHands(),
-    BenchStep.firmwareConfig => session.firmwareConfig(),
-    BenchStep.stillLeft => session.still(0),
-    BenchStep.stillRight => session.still(1),
-    BenchStep.moveLeft => session.move(0),
-    BenchStep.moveRight => session.move(1),
-    BenchStep.capture => session.capture(),
-    BenchStep.latency => session.latency(),
-    BenchStep.poseCapture => session.poseCapture(onProgress),
-    BenchStep.photo ||
-    BenchStep.serialLog ||
-    BenchStep.export => throw StateError('Step $step does not run'),
-  };
+  Future<BenchStepOutcome> _runStep(BenchSession session, BenchStep step) =>
+      switch (step) {
+        BenchStep.deviceSummary => session.deviceSummary(),
+        BenchStep.connect => session.connect(),
+        BenchStep.bothHands => session.bothHands(),
+        BenchStep.firmwareConfig => session.firmwareConfig(),
+        BenchStep.stillLeft => session.still(0),
+        BenchStep.stillRight => session.still(1),
+        BenchStep.moveLeft => session.move(0),
+        BenchStep.moveRight => session.move(1),
+        BenchStep.capture => session.capture(),
+        BenchStep.latency => session.latency(),
+        BenchStep.poseCapture ||
+        BenchStep.photo ||
+        BenchStep.serialLog ||
+        BenchStep.export => throw StateError('Step $step does not run'),
+      };
+
+  /// Runs one segment of the 6DoF step. Each segment keeps the step current so
+  /// the screen can show its own prompt and countdown; the step ends after the
+  /// last segment, or on skip.
+  Future<void> _runPoseSegment(BenchSession session) async {
+    final index = state.poseSegment;
+    if (index >= benchPoseSequence.length) return;
+    final spec = benchPoseSequence[index];
+    final durations = ref.read(benchDurationsProvider);
+    _setResult(
+      BenchStep.poseCapture,
+      BenchStepResult(
+        status: BenchStatus.running,
+        data: {
+          'segments': [..._poseEntries],
+        },
+      ),
+    );
+    final cancel = Completer<void>();
+    _poseCancel = cancel;
+    final outcome = await session.poseSegment(
+      spec.hand,
+      spec.segment,
+      durations.poseDuration(spec.segment),
+      cancel: cancel.future,
+    );
+    _poseCancel = null;
+    if (!ref.mounted) return;
+    _poseEntries.add({
+      ...outcome.data,
+      'runtime':
+          outcome.data['runtime'] ??
+          ref.read(benchPoseAvailabilityProvider).runtime,
+      'hand': RealBenchSession.handName(spec.hand),
+      'segment': spec.segment.id,
+      'status': outcome.ok ? 'done' : 'skipped',
+      if (!outcome.ok) 'reason': outcome.error ?? 'failed',
+    });
+    final skipRest = _poseSkipRest;
+    _poseSkipRest = false;
+    if (index + 1 >= benchPoseSequence.length) {
+      _finishPose();
+      return;
+    }
+    if (skipRest) {
+      _skipRemainingPose(index + 1);
+      return;
+    }
+    state = state.copyWith(poseSegment: index + 1);
+    _publishPoseProgress();
+  }
+
+  void _finishPose() {
+    _poseCancel = null;
+    _poseSkipRest = false;
+    final done = _poseEntries.where((e) => e['status'] == 'done').length;
+    final status = done == 0 ? BenchStatus.skipped : BenchStatus.done;
+    _setResult(
+      BenchStep.poseCapture,
+      BenchStepResult(
+        status: status,
+        summary: done == 0
+            ? 'No pose segments recorded'
+            : '$done of ${_poseEntries.length} pose segments recorded',
+        error: done == 0 ? 'all segments skipped' : null,
+        data: {
+          'segments': [..._poseEntries],
+        },
+      ),
+    );
+    _advance();
+  }
+
+  void _skipRemainingPose(int from) {
+    for (var index = from; index < benchPoseSequence.length; index++) {
+      _recordSkippedSegment(index);
+    }
+    _finishPose();
+  }
+
+  /// Republishes the segments captured so far while the step is still current.
+  void _publishPoseProgress() {
+    state = state.copyWith(
+      results: {
+        ...state.results,
+        BenchStep.poseCapture: BenchStepResult(
+          data: {
+            'segments': [..._poseEntries],
+          },
+        ),
+      },
+    );
+    _publish();
+  }
 
   /// Marks a prompt step done and moves on.
   Future<void> confirmCurrent() async {
@@ -242,13 +337,19 @@ class BenchController extends Notifier<BenchRunState> {
     _advance();
   }
 
-  /// Records the step as skipped and moves on. The export step cannot be
+  /// Skips the step on screen and moves on. For the 6DoF step this skips only
+  /// the segment shown, aborting its recording when one is in progress; use
+  /// [skipRemainingPose] to abandon the rest. The export step cannot be
   /// skipped: the run ends in a bundle.
   void skipCurrent() {
     final step = state.step;
-    if (state.busy || step == BenchStep.export) return;
-    // Keep any partial data (for example the captures a failed segment saved)
-    // so the bundle still carries it.
+    if (step == BenchStep.export || state.exporting) return;
+    if (step == BenchStep.poseCapture) {
+      _skipPoseSegment();
+      return;
+    }
+    if (state.busy) return;
+    // Keep any partial data so the bundle still carries it.
     final previous = state.resultFor(step);
     _setResult(
       step,
@@ -259,6 +360,48 @@ class BenchController extends Notifier<BenchRunState> {
       ),
     );
     _advance();
+  }
+
+  /// Skips the segment on screen: aborts it when it is recording, otherwise
+  /// records it skipped, then moves to the next segment.
+  void _skipPoseSegment() {
+    final index = state.poseSegment;
+    if (index >= benchPoseSequence.length) return;
+    if (state.current.status == BenchStatus.running) {
+      final cancel = _poseCancel;
+      if (cancel != null && !cancel.isCompleted) cancel.complete();
+      return;
+    }
+    _recordSkippedSegment(index);
+    if (index + 1 >= benchPoseSequence.length) {
+      _finishPose();
+      return;
+    }
+    state = state.copyWith(poseSegment: index + 1);
+    _publishPoseProgress();
+  }
+
+  /// Skips the segment on screen and every segment after it.
+  void skipRemainingPose() {
+    if (state.step != BenchStep.poseCapture) return;
+    if (state.current.status == BenchStatus.running) {
+      _poseSkipRest = true;
+      final cancel = _poseCancel;
+      if (cancel != null && !cancel.isCompleted) cancel.complete();
+      return;
+    }
+    _skipRemainingPose(state.poseSegment);
+  }
+
+  void _recordSkippedSegment(int index) {
+    final spec = benchPoseSequence[index];
+    _poseEntries.add({
+      'runtime': ref.read(benchPoseAvailabilityProvider).runtime,
+      'hand': RealBenchSession.handName(spec.hand),
+      'segment': spec.segment.id,
+      'status': 'skipped',
+      'reason': 'skipped by tester',
+    });
   }
 
   /// Writes the same zip as Export test bundle, with these results in the
@@ -314,23 +457,31 @@ class BenchController extends Notifier<BenchRunState> {
         continue;
       }
       // Combined runs with no hand-joint source skip the capture visibly and
-      // still reach the export.
-      if (step == BenchStep.poseCapture &&
-          !ref.read(benchHandTrackingProvider).available) {
-        _setResult(
-          step,
-          const BenchStepResult(
-            status: BenchStatus.skipped,
-            summary: 'No hand-tracking source with hand joints is attached.',
-          ),
-        );
-        next++;
-        continue;
+      // still reach the export. In 6DoF only the mode cannot be selected
+      // without hand joints, so this is the combined path.
+      if (step == BenchStep.poseCapture) {
+        final availability = ref.read(benchPoseAvailabilityProvider);
+        if (!availability.available) {
+          _setResult(
+            step,
+            BenchStepResult(
+              status: BenchStatus.skipped,
+              summary: availability.reason,
+              error: availability.reason,
+              data: const {'segments': []},
+            ),
+          );
+          next++;
+          continue;
+        }
+        _poseEntries.clear();
+        _poseCancel = null;
+        _poseSkipRest = false;
       }
       break;
     }
     if (next >= steps.length) return;
-    state = state.copyWith(step: steps[next], clearCaptureProgress: true);
+    state = state.copyWith(step: steps[next], poseSegment: 0);
     _publish();
   }
 

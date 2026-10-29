@@ -12,11 +12,13 @@ import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_core/services/latency_recorder.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
+import '../../services/test_bundle_export.dart';
 import '../capture/capture_providers.dart';
 import '../connect/connect_providers.dart';
 import '../debug/debug_providers.dart';
 import '../debug/pose_recording_store.dart';
 import '../latency/latency_providers.dart';
+import 'bench_pose.dart';
 
 /// How long each measured step runs. Tests override it to a few milliseconds.
 class BenchDurations {
@@ -25,97 +27,43 @@ class BenchDurations {
     this.move = const Duration(seconds: 20),
     this.capture = const Duration(seconds: 60),
     this.latency = const Duration(seconds: 30),
-    this.handTimeout = const Duration(seconds: 5),
-    this.firmwareTimeout = const Duration(seconds: 3),
     this.poseStill = const Duration(seconds: 10),
-    this.poseHeldDrift = const Duration(seconds: 10),
+    this.poseDrifting = const Duration(seconds: 10),
     this.poseSlowPan = const Duration(seconds: 18),
     this.poseMediumPan = const Duration(seconds: 10),
-    this.poseFastFlick = const Duration(seconds: 10),
+    this.poseFastFlick = const Duration(seconds: 20),
+    this.handTimeout = const Duration(seconds: 5),
+    this.firmwareTimeout = const Duration(seconds: 3),
   });
 
   final Duration still;
   final Duration move;
   final Duration capture;
   final Duration latency;
+  final Duration poseStill;
+  final Duration poseDrifting;
+  final Duration poseSlowPan;
+  final Duration poseMediumPan;
+  final Duration poseFastFlick;
+
+  Duration poseDuration(PoseSegment segment) => switch (segment) {
+    PoseSegment.still => poseStill,
+    PoseSegment.drifting => poseDrifting,
+    PoseSegment.slowPan => poseSlowPan,
+    PoseSegment.mediumPan => poseMediumPan,
+    PoseSegment.fastFlick => poseFastFlick,
+  };
 
   /// How long to wait for the first frames of both hands.
   final Duration handTimeout;
 
   /// How long to wait for the one-time FF16 read.
   final Duration firmwareTimeout;
-
-  final Duration poseStill;
-  final Duration poseHeldDrift;
-  final Duration poseSlowPan;
-  final Duration poseMediumPan;
-  final Duration poseFastFlick;
-
-  Duration forPoseSegment(PoseSegment segment) => switch (segment) {
-    PoseSegment.still => poseStill,
-    PoseSegment.heldDrift => poseHeldDrift,
-    PoseSegment.slowPan => poseSlowPan,
-    PoseSegment.mediumPan => poseMediumPan,
-    PoseSegment.fastFlick => poseFastFlick,
-  };
 }
 
-/// One capture segment from filter-spec rev 4 section 8.
-///
-/// The id is part of the capture file name and the manifest, so it stays
-/// stable even when the prompt text changes.
-enum PoseSegment {
-  still(
-    'still',
-    'Still',
-    'Hold the hand still, arm braced, as if it rested on a table.',
-  ),
-  heldDrift(
-    'heldDrift',
-    'Held, drifting',
-    'Hold the hand as if aiming and let it wander slowly.',
-  ),
-  slowPan(
-    'slowPan',
-    'Slow pan',
-    'Move 30 cm sideways over 3 s, back and forth, 3 times.',
-  ),
-  mediumPan(
-    'mediumPan',
-    'Medium pan',
-    'Move 50 cm sideways in 1 s, back and forth, for 10 s.',
-  ),
-  fastFlick(
-    'fastFlick',
-    'Fast flick',
-    'Flick 45 cm in 0.3 s, pause, then return. 10 times.',
-  );
-
-  const PoseSegment(this.id, this.label, this.prompt);
-
-  final String id;
-  final String label;
-  final String prompt;
-}
-
-/// The segment the capture step is recording now, for the screen prompt.
-class BenchCaptureProgress {
-  const BenchCaptureProgress({
-    required this.hand,
-    required this.segment,
-    required this.index,
-    required this.total,
-  });
-
-  final int hand;
-  final PoseSegment segment;
-
-  /// Zero-based index in the whole per-hand sequence, across both hands.
-  final int index;
-  final int total;
-
-  String get handName => hand == wmrHandLeft ? 'LEFT' : 'RIGHT';
-}
+final benchDurationsProvider = Provider<BenchDurations>(
+  (ref) => const BenchDurations(),
+);
 
 /// The wizard variant chosen on the bench page.
 enum BenchMode {
@@ -193,10 +141,6 @@ enum BenchMode {
   ];
 }
 
-final benchDurationsProvider = Provider<BenchDurations>(
-  (ref) => const BenchDurations(),
-);
-
 /// Every step any bench mode can use. Each [BenchMode] supplies its own order.
 /// The id is what the manifest and the tests key on.
 enum BenchStep {
@@ -232,7 +176,7 @@ enum BenchStep {
     BenchStep.latency => 'Measure latency',
     BenchStep.photo => 'LED photo',
     BenchStep.serialLog => 'Serial log',
-    BenchStep.poseCapture => 'Pose capture',
+    BenchStep.poseCapture => 'Capture 6DoF pose',
     BenchStep.export => 'Write the test bundle',
   };
 
@@ -276,9 +220,9 @@ enum BenchStep {
       'Reports the attached hand-tracking runtime and the joints and rate it '
           'offers. No bridge is needed for the 6DoF path.',
     BenchStep.poseCapture =>
-      'Records five segments with each hand from the attached tracking source. '
-          'Follow the prompt on screen; each segment becomes one pose recording '
-          'in the bundle.',
+      'Records one pose recording per hand and segment while a VITURE, XREAL '
+          'or Android XR source is tracking hands. Each segment has its own '
+          'screen and can be skipped.',
     BenchStep.export =>
       'Writes the same zip as Export test bundle, with this run\'s step '
           'results in the manifest, then opens the share sheet.',
@@ -315,11 +259,14 @@ abstract class BenchSession {
   Future<BenchStepOutcome> firmwareConfig();
   Future<BenchStepOutcome> still(int hand);
   Future<BenchStepOutcome> move(int hand);
+  Future<BenchStepOutcome> poseSegment(
+    int hand,
+    PoseSegment segment,
+    Duration duration, {
+    Future<void>? cancel,
+  });
   Future<BenchStepOutcome> capture();
   Future<BenchStepOutcome> latency();
-  Future<BenchStepOutcome> poseCapture(
-    void Function(BenchCaptureProgress progress) onProgress,
-  );
 }
 
 /// The real session: reads and records through [ControllerService], the same
@@ -328,12 +275,15 @@ class RealBenchSession implements BenchSession {
   RealBenchSession({
     this.service,
     this.tracking,
-    this.poseStore,
+    this.poseRecorder,
     required this.clock,
     required this.captureStore,
     required this.latencyStore,
     required this.durations,
     this.mtu,
+    this.appCommit = 'unknown',
+    this.firmwareSha,
+    this.applyMode,
   });
 
   /// Null in the 6DoF-only path, where no bridge is attached.
@@ -342,14 +292,20 @@ class RealBenchSession implements BenchSession {
   /// The attached hand-tracking runtime, already started.
   final TrackingSource? tracking;
 
-  /// Where pose captures are written. Null disables the capture step.
-  final PoseRecordingStore? poseStore;
+  /// Records one hand/segment. Null when no source reports hand joints.
+  final BenchPoseRecorder? poseRecorder;
 
   final MonotonicClock clock;
   final CaptureStore captureStore;
   final LatencyStore latencyStore;
   final BenchDurations durations;
   final int? mtu;
+  final String appCommit;
+  final String? firmwareSha;
+
+  /// Applies a stream mode to both the service and the app's mode choice, so
+  /// the debug pose path follows the bench.
+  final Future<void> Function(StreamMode mode)? applyMode;
 
   static String handName(int hand) => hand == wmrHandLeft ? 'LEFT' : 'RIGHT';
 
@@ -507,6 +463,64 @@ class RealBenchSession implements BenchSession {
   Future<BenchStepOutcome> move(int hand) =>
       _measure(hand, durations.move, moving: true);
 
+  @override
+  Future<BenchStepOutcome> poseSegment(
+    int hand,
+    PoseSegment segment,
+    Duration duration, {
+    Future<void>? cancel,
+  }) async {
+    final recorder = poseRecorder;
+    final handLabel = handName(hand);
+    if (recorder == null) {
+      return BenchStepOutcome.failed(
+        'unavailable: no 6DoF hand-tracking source',
+        data: {
+          'hand': handLabel,
+          'segment': segment.id,
+          'app_commit': appCommit,
+          'firmware_sha': firmwareSha,
+        },
+      );
+    }
+    // The debug pose path follows the app's stream mode; batched or decoded
+    // carries the controller records a pose recording needs.
+    await _ensureMode(StreamMode.batched);
+    try {
+      final result = await recorder.record(
+        hand: hand,
+        segment: segment,
+        duration: duration,
+        cancel: cancel,
+      );
+      return BenchStepOutcome.done(
+        '$handLabel ${segment.title}: ${result.samples} samples; '
+        'saved ${result.path}',
+        data: {
+          'runtime': result.runtime,
+          'hand': handLabel,
+          'segment': segment.id,
+          'file': result.path,
+          'samples': result.samples,
+          'seconds': result.seconds,
+          'app_commit': appCommit,
+          'firmware_sha': firmwareSha,
+        },
+      );
+    } on Object catch (error) {
+      return BenchStepOutcome.failed(
+        error is PoseSegmentCancelled ? 'skipped by tester' : '$error',
+        data: {
+          'runtime': recorder.runtime,
+          'hand': handLabel,
+          'segment': segment.id,
+          'app_commit': appCommit,
+          'firmware_sha': firmwareSha,
+        },
+      );
+    }
+  }
+
   Future<BenchStepOutcome> _measure(
     int hand,
     Duration duration, {
@@ -636,102 +650,16 @@ class RealBenchSession implements BenchSession {
     );
   }
 
-  @override
-  Future<BenchStepOutcome> poseCapture(
-    void Function(BenchCaptureProgress progress) onProgress,
-  ) async {
-    final source = tracking;
-    final store = poseStore;
-    final data = <String, Object?>{
-      'runtime': source?.vendor.name,
-      'files': const <Object?>[],
-      'empty': const <String>[],
-    };
-    if (source == null) {
-      return BenchStepOutcome.failed(
-        'No hand-tracking source is attached.',
-        data: data,
-      );
-    }
-    if (store == null) {
-      return BenchStepOutcome.failed(
-        'The pose recording store is unavailable.',
-        data: data,
-      );
-    }
-    final runtime = source.vendor.name;
-    final files = <Map<String, Object?>>[];
-    final empty = <String>[];
-    final total = wmrNumControllers * PoseSegment.values.length;
-    var index = 0;
-    for (var hand = 0; hand < wmrNumControllers; hand++) {
-      final trackedHand = hand == wmrHandLeft
-          ? TrackedHand.left
-          : TrackedHand.right;
-      for (final segment in PoseSegment.values) {
-        onProgress(
-          BenchCaptureProgress(
-            hand: hand,
-            segment: segment,
-            index: index,
-            total: total,
-          ),
-        );
-        index++;
-        final builder = PoseRecordingBuilder();
-        final sub = source.frames.listen((frame) {
-          final anchor = frame.hand(trackedHand)?.controllerAnchor;
-          if (anchor == null || !anchor.isTracked) return;
-          builder.add(hostTimeNs: frame.fusionTimeNs, tracking: frame);
-        });
-        try {
-          await Future<void>.delayed(durations.forPoseSegment(segment));
-        } finally {
-          await sub.cancel();
-        }
-        if (builder.length < 2) {
-          empty.add('${handName(hand)} ${segment.id}');
-          continue;
-        }
-        final file = await store.saveCapture(
-          builder.build(),
-          runtime: runtime,
-          hand: handName(hand).toLowerCase(),
-          segment: segment.id,
-          now: DateTime.now(),
-        );
-        files.add({
-          'path': file.path,
-          'runtime': runtime,
-          'hand': handName(hand).toLowerCase(),
-          'segment': segment.id,
-        });
-      }
-    }
-    data
-      ..['files'] = files
-      ..['empty'] = empty;
-    if (files.isEmpty) {
-      return BenchStepOutcome.failed(
-        'No hand-joint samples arrived during any segment.',
-        data: data,
-      );
-    }
-    if (empty.isNotEmpty) {
-      return BenchStepOutcome.failed(
-        'Saved ${files.length} of $total captures; no hand-joint samples for '
-        '${empty.join(', ')}.',
-        data: data,
-      );
-    }
-    return BenchStepOutcome.done(
-      '${files.length} pose captures saved from $runtime',
-      data: data,
-    );
-  }
-
   Future<void> _ensureMode(StreamMode mode) async {
-    if (_service.mode != mode) await _service.setMode(mode);
+    final apply = applyMode;
+    if (apply != null) {
+      await apply(mode);
+      return;
+    }
+    final service = this.service;
+    if (service != null && service.mode != mode) {
+      await service.setMode(mode);
+    }
   }
 
   Future<void> _waitForProtocols() async {
@@ -763,23 +691,61 @@ class RealBenchSession implements BenchSession {
 final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
   return () async {
     final device = ref.read(realDeviceProvider);
-    final service = ref.read(realDeviceProvider.notifier).service;
+    final notifier = ref.read(realDeviceProvider.notifier);
+    final service = notifier.service;
     final connected = service != null && device.connected;
-    final tracking = ref
-        .read(debugTrackingSourceProvider)
-        .attachment
-        .value
-        ?.source;
+    final selection = ref.read(debugTrackingSourceProvider);
+    final tracking = selection.attachment.value?.source;
     if (!connected && tracking == null) return null;
+    final availability = ref.read(benchPoseAvailabilityProvider);
+    final poseRecorder = availability.available
+        ? RealBenchPoseRecorder(
+            ref: ref,
+            store: await ref.read(poseRecordingStoreProvider.future),
+            runtime: availability.runtime!,
+          )
+        : null;
     return RealBenchSession(
       service: connected ? service : null,
       tracking: tracking,
-      poseStore: await ref.read(poseRecordingStoreProvider.future),
+      poseRecorder: poseRecorder,
       clock: service?.transport.clock ?? MonotonicClock(),
       captureStore: await ref.read(captureStoreProvider.future),
       latencyStore: await ref.read(latencyStoreProvider.future),
       durations: ref.read(benchDurationsProvider),
       mtu: device.status.mtu,
+      appCommit: ref.read(appCommitProvider),
+      firmwareSha: connected
+          ? firmwareShaFromVersions({
+              for (final id in service.deviceIds)
+                id: service.protocolFor(id)?.firmwareVersion,
+            })
+          : null,
+      applyMode: notifier.setStreamMode,
     );
   };
 });
+
+/// The short SHA in an FF16 git description, or null when FF16 has none.
+///
+/// Only the `-g<sha>` shape a git-describe version carries counts. A bare hex
+/// token is not a SHA: versions and build stamps can look identical.
+String? gitShaFromFirmware(String? version) {
+  if (version == null) return null;
+  final match = RegExp(r'(?:^|-)g([0-9a-f]{7,40})(?:[-\s+]|$)')
+      .firstMatch(version.trim());
+  return match?.group(1);
+}
+
+/// The SHA recorded for a run: one value when every bridge that exposes a git
+/// description agrees, a per-bridge list when they differ, else `unknown`.
+String firmwareShaFromVersions(Map<String, String?> versions) {
+  final found = <String, String>{};
+  for (final entry in versions.entries) {
+    final sha = gitShaFromFirmware(entry.value);
+    if (sha != null) found[entry.key] = sha;
+  }
+  if (found.isEmpty) return 'unknown';
+  if (found.values.toSet().length == 1) return found.values.first;
+  return found.entries.map((entry) => '${entry.key}=${entry.value}').join('; ');
+}

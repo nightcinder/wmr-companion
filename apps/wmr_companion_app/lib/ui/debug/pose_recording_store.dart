@@ -15,25 +15,18 @@ class PoseRecordingStore {
   static final RegExp _namePattern = RegExp(r'^pose-\d{8}-\d{6}\.json$');
 
   /// Writes [recording] and returns the new file.
-  Future<File> save(PoseRecording recording, DateTime now) =>
-      _write(recording, fileName(now));
-
-  /// Writes one guided-bench capture with the ONY-505 file name.
-  Future<File> saveCapture(
-    PoseRecording recording, {
-    required String runtime,
-    required String hand,
-    required String segment,
-    required DateTime now,
-  }) => _write(
-    recording,
-    captureFileName(runtime: runtime, hand: hand, segment: segment),
-  );
-
-  Future<File> _write(PoseRecording recording, String name) async {
+  ///
+  /// [name] lets the guided bench use its fixed
+  /// `pose_capture_<runtime>_<hand>_<segment>.json` name; the debug screen
+  /// keeps the timestamped default.
+  Future<File> save(
+    PoseRecording recording,
+    DateTime now, {
+    String? name,
+  }) async {
     await directory.create(recursive: true);
     final separator = Platform.pathSeparator;
-    final file = File('${directory.path}$separator$name');
+    final file = File('${directory.path}$separator${name ?? fileName(now)}');
     await file.writeAsString(recording.encode());
     return file;
   }
@@ -66,12 +59,6 @@ class PoseRecordingStore {
         '${two(now.month)}${two(now.day)}'
         '-${two(now.hour)}${two(now.minute)}${two(now.second)}.json';
   }
-
-  static String captureFileName({
-    required String runtime,
-    required String hand,
-    required String segment,
-  }) => 'pose_capture_${runtime}_${hand}_$segment.json';
 }
 
 /// The store for this run's app documents directory.

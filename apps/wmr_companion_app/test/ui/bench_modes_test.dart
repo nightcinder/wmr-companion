@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
+import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
@@ -42,18 +43,23 @@ class _FakeSession implements BenchSession {
       BenchStepOutcome.done('8000 rows saved');
 
   @override
-  Future<BenchStepOutcome> poseCapture(
-    void Function(BenchCaptureProgress progress) onProgress,
-  ) async {
-    onProgress(
-      const BenchCaptureProgress(
-        hand: 0,
-        segment: PoseSegment.still,
-        index: 0,
-        total: 10,
-      ),
+  Future<BenchStepOutcome> poseSegment(
+    int hand,
+    PoseSegment segment,
+    Duration duration, {
+    Future<void>? cancel,
+  }) async {
+    final name = hand == 0 ? 'left' : 'right';
+    return BenchStepOutcome.done(
+      '$name ${segment.id}: 3 samples',
+      data: {
+        'runtime': 'fake',
+        'hand': name.toUpperCase(),
+        'segment': segment.id,
+        'file': '/tmp/pose_capture_fake_${name}_${segment.id}.json',
+        'samples': 3,
+      },
     );
-    return BenchStepOutcome.done('10 pose captures saved');
   }
 }
 
@@ -156,9 +162,14 @@ void main() {
     await tap(tester, 'bench-start');
     expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
     expect(find.byKey(const Key('bench-capture-prompt')), findsOneWidget);
-    expect(find.textContaining('LEFT · Still (1 of 10)'), findsOneWidget);
+    expect(find.textContaining('Pose 1 of 10'), findsOneWidget);
 
     await tap(tester, 'bench-start');
+    final segment = container.read(benchControllerProvider);
+    expect(segment.step, BenchStep.poseCapture);
+    expect(segment.poseSegment, 1);
+
+    await tap(tester, 'bench-skip-remaining');
     expect(container.read(benchControllerProvider).step, BenchStep.export);
     final published = container.read(benchBundleProvider)!;
     expect(published.mode, '6dof_only');
@@ -166,6 +177,11 @@ void main() {
       final recorded = published.steps.firstWhere((s) => s.id == step.id);
       expect(recorded.status, 'skipped');
     }
+    final pose = published.steps.firstWhere((s) => s.id == 'pose_capture');
+    expect(pose.status, 'done');
+    final segments = (pose.data['segments']! as List).cast<Map>();
+    expect(segments, hasLength(benchPoseSequence.length));
+    expect(segments.first['file'], contains('pose_capture_fake_left'));
   });
 
   testWidgets('skipping in 6DoF only jumps over the recorded bridge skips', (
@@ -195,7 +211,7 @@ void main() {
     expect(state.step, BenchStep.export);
     final capture = state.resultFor(BenchStep.poseCapture);
     expect(capture.status, BenchStatus.skipped);
-    expect(capture.summary, contains('No hand-tracking source'));
+    expect(capture.summary, contains('no 6DoF hand-tracking source'));
 
     await tap(tester, 'bench-export');
     expect(

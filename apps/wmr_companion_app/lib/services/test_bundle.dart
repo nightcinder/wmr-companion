@@ -136,9 +136,9 @@ class BenchBundleRun {
   };
 }
 
-/// One pose capture file that belongs in the bundle.
-class BundlePoseCapture {
-  const BundlePoseCapture({
+/// One recorded 6DoF pose file and the labels its zip name uses.
+class PoseCaptureFile {
+  const PoseCaptureFile({
     required this.path,
     required this.runtime,
     required this.hand,
@@ -146,8 +146,14 @@ class BundlePoseCapture {
   });
 
   final String path;
+
+  /// `androidXr`, `viture` or `xreal`.
   final String runtime;
+
+  /// `left` or `right`.
   final String hand;
+
+  /// [PoseSegment.id] from the guided bench.
   final String segment;
 
   String get fileName => path.split(RegExp(r'[\\/]')).last;
@@ -168,16 +174,16 @@ class TestBundleInput {
     required this.phone,
     required this.androidVersion,
     required this.streamMode,
+    this.appCommit = 'unknown',
     this.streamFault,
     this.rawStats,
     this.decodedStats,
     this.bridges = const [],
     this.latencyFiles = const [],
     this.captureFiles = const [],
-    this.benchRun,
     this.poseCaptures = const [],
+    this.benchRun,
     this.benchRuntime,
-    this.appCommit,
     this.firmwareSha,
   });
 
@@ -186,6 +192,9 @@ class TestBundleInput {
 
   /// `0.2.2+4` from the package metadata.
   final String appVersion;
+
+  /// Short git commit the APK was built from, or `unknown`.
+  final String appCommit;
 
   /// Manufacturer and model, or the platform's own description.
   final String phone;
@@ -210,17 +219,14 @@ class TestBundleInput {
   /// Every saved FF11 capture.
   final List<String> captureFiles;
 
+  /// 6DoF pose recordings from the guided bench.
+  final List<PoseCaptureFile> poseCaptures;
+
   /// The guided bench run, null when the tester exported without one.
   final BenchBundleRun? benchRun;
 
-  /// The ONY-249 pose recordings produced by the capture step.
-  final List<BundlePoseCapture> poseCaptures;
-
   /// The attached hand-tracking runtime, when the capture step ran.
   final String? benchRuntime;
-
-  /// The app commit, when the build supplied one.
-  final String? appCommit;
 
   /// The attached bridge's firmware identity, null without a bridge.
   final String? firmwareSha;
@@ -312,18 +318,21 @@ Future<TestBundle> writeTestBundle(
   }
 
   final poseNames = <String>[];
-  for (final capture in input.poseCaptures) {
-    final name = capture.fileName;
-    final bytes = await _read(capture.path);
+  for (final pose in input.poseCaptures) {
+    final name = poseCaptureName(pose);
+    final bytes = await _read(pose.path);
     if (bytes == null) {
-      missing.add('Pose capture `$name` — the saved recording was missing.');
+      missing.add('6DoF pose capture `$name` — the saved file was missing.');
       continue;
     }
     files[name] = bytes;
     poseNames.add(name);
   }
   if (poseNames.isNotEmpty) {
-    present.add('Pose captures: ${poseNames.length} file(s)');
+    present.add(
+      '6DoF pose captures: ${poseNames.length} file(s) '
+      '(${poseNames.join(', ')})',
+    );
   }
 
   final firmware = _firmwareSummary(input.bridges);
@@ -353,7 +362,11 @@ Future<TestBundle> writeTestBundle(
   final diagnostics = const JsonEncoder.withIndent('  ').convert({
     'format': 'wmr-test-bundle/1',
     'generated_at': input.now.toUtc().toIso8601String(),
-    'app': {'name': 'wmr_companion_app', 'version': input.appVersion},
+    'app': {
+      'name': 'wmr_companion_app',
+      'version': input.appVersion,
+      'commit': input.appCommit,
+    },
     'device': {'phone': input.phone, 'android': input.androidVersion},
     'stream': {
       'mode': input.streamMode,
@@ -404,6 +417,10 @@ Future<List<int>?> _read(String path) async {
 }
 
 String _baseName(String path) => path.split(RegExp(r'[\\/]')).last;
+
+/// The archive name the task fixes for one pose capture.
+String poseCaptureName(PoseCaptureFile pose) =>
+    'pose_capture_${pose.runtime}_${pose.hand}_${pose.segment}.json';
 
 String _two(int value) => value.toString().padLeft(2, '0');
 
@@ -462,7 +479,7 @@ String _manifest(TestBundleInput input) {
     )
     ..writeln('- MTU: ${_mtuSummary(input.bridges) ?? 'not reported'}')
     ..writeln('- App: WMR Companion ${input.appVersion}')
-    ..writeln('- App commit: ${input.appCommit ?? 'unknown'}')
+    ..writeln('- App commit: ${input.appCommit}')
     ..writeln('- Bridges: ${input.bridges.length}')
     ..writeln('- Firmware SHA: ${input.firmwareSha ?? 'none (no bridge)'}')
     ..writeln('- Bench mode: ${input.benchRun?.mode ?? 'not selected'}')
@@ -482,14 +499,29 @@ String _manifest(TestBundleInput input) {
     }
     buffer.writeln();
   }
-  if (input.poseCaptures.isNotEmpty) {
+  final poseSegments = _poseSegments(bench);
+  if (poseSegments.isNotEmpty) {
+    final first = poseSegments.first;
     buffer
-      ..writeln('## Pose captures')
-      ..writeln();
-    for (final capture in input.poseCaptures) {
+      ..writeln('## 6DoF pose captures')
+      ..writeln()
+      ..writeln('- Runtime: ${first['runtime'] ?? 'unknown'}')
+      ..writeln('- App commit: ${first['app_commit'] ?? input.appCommit}')
+      ..writeln(
+        '- Firmware SHA: ${first['firmware_sha'] ?? 'none (no bridge)'}',
+      )
+      ..writeln()
+      ..writeln('| File | Hand | Segment | Status | Samples | Reason |')
+      ..writeln('|---|---|---|---|---:|---|');
+    for (final segment in poseSegments) {
+      final file = segment['file'] as String?;
       buffer.writeln(
-        '- `${capture.fileName}` — runtime ${capture.runtime}, '
-        'hand ${capture.hand}, segment ${capture.segment}',
+        '| ${file == null ? '—' : _baseName(file)} '
+        '| ${segment['hand'] ?? '—'} '
+        '| ${segment['segment'] ?? '—'} '
+        '| ${segment['status'] ?? '—'} '
+        '| ${segment['samples'] ?? '—'} '
+        '| ${segment['reason'] ?? '—'} |',
       );
     }
     buffer.writeln();
@@ -499,6 +531,22 @@ String _manifest(TestBundleInput input) {
     'the Connect screen.',
   );
   return buffer.toString();
+}
+
+/// Segment rows from a pose step, or an empty list when the run had none.
+List<Map<String, Object?>> _poseSegments(BenchBundleRun? bench) {
+  if (bench == null) return const [];
+  for (final step in bench.steps) {
+    if (step.id != 'pose_capture') continue;
+    final segments = step.data['segments'];
+    if (segments is! List) return const [];
+    return [
+      for (final segment in segments)
+        if (segment is Map)
+          {for (final entry in segment.entries) '${entry.key}': entry.value},
+    ];
+  }
+  return const [];
 }
 
 String _readme(

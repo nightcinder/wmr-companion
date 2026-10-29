@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -6,8 +5,6 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:vector_math/vector_math_64.dart';
-import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
@@ -17,13 +14,47 @@ import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
+import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
-import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 /// A 700-byte block exercises both FF13 windows (496 + 204).
 Uint8List _configBlob(int seed) =>
     Uint8List.fromList([for (var i = 0; i < 700; i++) (i + seed) & 0xff]);
+
+/// Writes a valid pose file with the guided bench's fixed name.
+class _FakePoseRecorder implements BenchPoseRecorder {
+  _FakePoseRecorder(this.dir);
+
+  final Directory dir;
+
+  @override
+  String get runtime => 'viture';
+
+  @override
+  Future<PoseCaptureResult> record({
+    required int hand,
+    required PoseSegment segment,
+    required Duration duration,
+    Future<void>? cancel,
+  }) async {
+    final name =
+        'pose_capture_viture_${hand == 0 ? 'left' : 'right'}_'
+        '${segment.id}.json';
+    final file = File('${dir.path}/$name')
+      ..writeAsStringSync(
+        '{"format":"wmr-pose-recording","version":1,'
+        '"samples":[]}',
+      );
+    return PoseCaptureResult(
+      runtime: runtime,
+      path: file.path,
+      samples: 3,
+      seconds: duration.inSeconds,
+    );
+  }
+}
 
 void main() {
   late Directory dir;
@@ -50,10 +81,18 @@ void main() {
         move: Duration(milliseconds: 80),
         capture: Duration(milliseconds: 250),
         latency: Duration(milliseconds: 250),
+        poseStill: Duration(milliseconds: 10),
+        poseDrifting: Duration(milliseconds: 10),
+        poseSlowPan: Duration(milliseconds: 10),
+        poseMediumPan: Duration(milliseconds: 10),
+        poseFastFlick: Duration(milliseconds: 10),
         handTimeout: Duration(seconds: 2),
         firmwareTimeout: Duration(seconds: 2),
       ),
       mtu: 185,
+      poseRecorder: _FakePoseRecorder(dir),
+      appCommit: 'abc1234',
+      firmwareSha: 'deadbee',
     );
   }
 
@@ -147,14 +186,25 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => session),
+        benchPoseAvailabilityProvider.overrideWithValue(
+          const BenchPoseAvailability.available('viture'),
+        ),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) => writeTestBundle(
             TestBundleInput(
               now: DateTime(2026, 10, 29, 13),
               appVersion: '0.2.2+4',
+              appCommit: 'abc1234',
               phone: 'Test Phone',
               androidVersion: 'Android 14 (API 34)',
               streamMode: 'raw',
+              bridges: const [
+                BundleBridge(
+                  id: fakeBridgeDeviceId,
+                  firmwareVersion: 'v0.2.4-3-gdeadbee',
+                ),
+              ],
+              poseCaptures: poseCapturesFromRun(benchRun),
               benchRun: benchRun,
             ),
             Directory('${dir.path}/out'),
@@ -167,13 +217,23 @@ void main() {
     final sub = container.listen(benchControllerProvider, (_, _) {});
     addTearDown(sub.close);
     final controller = container.read(benchControllerProvider.notifier);
+    controller.selectMode(BenchMode.combined);
 
-    for (var i = 0; i < 9; i++) {
+    for (var i = 0; i < 30; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
+        break;
+      }
       await controller.runCurrent();
     }
     expect(container.read(benchControllerProvider).step, BenchStep.photo);
     await controller.confirmCurrent();
     await controller.confirmCurrent();
+    for (var i = 0; i < benchPoseSequence.length; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.export) {
+        break;
+      }
+      await controller.runCurrent();
+    }
     await controller.exportBundle();
 
     final state = container.read(benchControllerProvider);
@@ -183,84 +243,105 @@ void main() {
     );
     final file = archive.files.firstWhere((f) => f.name == 'manifest.md');
     final manifest = utf8.decode(file.content as List<int>);
-    for (final step in BenchMode.threeDofOnly.steps) {
+    for (final step in BenchMode.combined.steps) {
       expect(manifest, contains('- ${step.id}: done'), reason: step.id);
     }
-    expect(manifest, contains('- Bench mode: 3dof_only'));
+    expect(manifest, contains('- Bench mode: combined'));
+    expect(manifest, contains('## 6DoF pose captures'));
+    expect(manifest, contains('pose_capture_viture_left_still.json'));
+    expect(manifest, contains('pose_capture_viture_right_fast_flick.json'));
+    // The header commit is the app build, not the per-segment fallback.
+    final header = manifest.split('## 6DoF').first;
+    expect(header, contains('- App commit: abc1234'));
+    expect(manifest, contains('- Firmware SHA: deadbee'));
+    // Every recorded segment is in the zip, not just in the manifest table.
+    final poseFiles = archive.files
+        .map((f) => f.name)
+        .where((name) => name.startsWith('pose_capture_'))
+        .toList();
+    expect(poseFiles, hasLength(benchPoseSequence.length));
+    expect(poseFiles, contains('pose_capture_viture_left_still.json'));
   });
 
-  test('pose capture writes one recording per hand and segment', () async {
-    final source = FakeTrackingSource();
-    await source.start();
-    addTearDown(source.dispose);
-    final session = RealBenchSession(
-      tracking: source,
-      poseStore: PoseRecordingStore(Directory('${dir.path}/pose')),
-      clock: MonotonicClock(),
-      captureStore: CaptureStore(Directory('${dir.path}/captures')),
-      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
-      durations: const BenchDurations(
-        poseStill: Duration(milliseconds: 20),
-        poseHeldDrift: Duration(milliseconds: 20),
-        poseSlowPan: Duration(milliseconds: 20),
-        poseMediumPan: Duration(milliseconds: 20),
-        poseFastFlick: Duration(milliseconds: 20),
+  group('firmware SHA', () {
+    test('only a git-describe shape yields a SHA', () {
+      expect(gitShaFromFirmware('v0.2.4-3-gdeadbee'), 'deadbee');
+      expect(gitShaFromFirmware('0.2.4-g1234567'), '1234567');
+      expect(gitShaFromFirmware('2026-10-29 deadbee'), isNull);
+      expect(gitShaFromFirmware('deadbee'), isNull);
+      expect(gitShaFromFirmware('v0.2.4'), isNull);
+      expect(gitShaFromFirmware(null), isNull);
+    });
+
+    test('one SHA for agreeing bridges, per-bridge when they differ', () {
+      expect(firmwareShaFromVersions({'a': 'v1-gdeadbee'}), 'deadbee');
+      expect(
+        firmwareShaFromVersions({'a': 'v1-gdeadbee', 'b': 'v1-gdeadbee'}),
+        'deadbee',
+      );
+      expect(
+        firmwareShaFromVersions({'a': 'v1-gdeadbee', 'b': 'v1-gc0ffee0'}),
+        'a=deadbee; b=c0ffee0',
+      );
+      expect(
+        firmwareShaFromVersions({'a': '2026-10-29', 'b': null}),
+        'unknown',
+      );
+    });
+  });
+
+  group('pose gate', () {
+    DebugTrackingSelection selection(
+      DebugTrackingSource choice, {
+      TrackingSource? source,
+    }) => DebugTrackingSelection(
+      choice: choice,
+      attachment: AsyncValue.data(
+        DebugTrackingAttachment(choice: choice, source: source),
       ),
     );
 
-    var timeNs = 0;
-    final timer = Timer.periodic(const Duration(milliseconds: 2), (_) {
-      timeNs += 2000000;
-      source.addFrame(
-        TrackingFrame(
-          timeNs: timeNs,
-          hostTimeNs: timeNs,
-          leftHand: HandPose(
-            hand: TrackedHand.left,
-            palm: TrackedPose(
-              pose: Pose(
-                translation: Vector3(-0.2, -0.25, -0.35),
-                rotation: Quaternion.identity(),
-              ),
-            ),
+    test('no source, simulated and jointless sources are unavailable', () {
+      expect(
+        BenchPoseAvailability.fromSelection(selection(DebugTrackingSource.none))
+            .available,
+        isFalse,
+      );
+      expect(
+        BenchPoseAvailability.fromSelection(
+          selection(
+            DebugTrackingSource.simulated,
+            source: FakeTrackingSource(),
           ),
-          rightHand: HandPose(
-            hand: TrackedHand.right,
-            palm: TrackedPose(
-              pose: Pose(
-                translation: Vector3(0.2, -0.25, -0.35),
-                rotation: Quaternion.identity(),
-              ),
-            ),
-          ),
+        ).available,
+        isFalse,
+        reason: 'the simulator is not a real 6DoF runtime',
+      );
+      final jointless = FakeTrackingSource(
+        capabilities: const TrackingCapabilities(
+          features: {TrackingFeature.headPose6Dof},
         ),
       );
+      expect(
+        BenchPoseAvailability.fromSelection(
+          selection(DebugTrackingSource.viture, source: jointless),
+        ).available,
+        isFalse,
+      );
     });
-    addTearDown(timer.cancel);
 
-    final progress = <BenchCaptureProgress>[];
-    final outcome = await session.poseCapture(progress.add);
-    timer.cancel();
-
-    expect(outcome.ok, isTrue, reason: outcome.error);
-    expect(progress, hasLength(10));
-    expect(progress.first.handName, 'LEFT');
-    expect(progress.first.segment, PoseSegment.still);
-    expect(progress.last.handName, 'RIGHT');
-    expect(progress.last.segment, PoseSegment.fastFlick);
-
-    final files = (outcome.data['files']! as List).cast<Map<String, Object?>>();
-    expect(files, hasLength(10));
-    final namePattern = RegExp(
-      r'^pose_capture_fake_(left|right)_'
-      r'(still|heldDrift|slowPan|mediumPan|fastFlick)\.json$',
-    );
-    for (final entry in files) {
-      final path = entry['path']! as String;
-      expect(path.split(Platform.pathSeparator).last, matches(namePattern));
-      final recording = PoseRecording.decode(File(path).readAsStringSync());
-      expect(recording.samples.length, greaterThanOrEqualTo(2));
-      expect(recording.samples.first.tracking, isNotNull);
-    }
+    test('a running vendor source with hand joints offers the step', () {
+      for (final choice in [
+        DebugTrackingSource.viture,
+        DebugTrackingSource.xreal,
+        DebugTrackingSource.androidXr,
+      ]) {
+        final availability = BenchPoseAvailability.fromSelection(
+          selection(choice, source: FakeTrackingSource()),
+        );
+        expect(availability.available, isTrue, reason: choice.name);
+        expect(availability.runtime, choice.name);
+      }
+    });
   });
 }
