@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-    # A `v*` tag publishes the signed tester APK (job `release`, ONY-493).
+    # A `v*` tag publishes the signed tester APKs: `release` builds `base`
+    # (ONY-493) and `release-unified` builds the both-vendors `unified` flavor
+    # (ONY-508). `release-checksums` then writes one SHA256SUMS for both.
     tags: ['v*']
   pull_request:
 
@@ -486,6 +488,13 @@ jobs:
               "${prerelease_args[@]}" \
               --title "$VERSION" \
               --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device ABI; SHA256SUMS lists their digests."
+            # `release-unified` creates the same release in parallel; losing
+            # that race is fine, the release exists either way.
+            gh release create "$VERSION" \
+              "${prerelease_args[@]}" \
+              --title "$VERSION" \
+              --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device ABI; SHA256SUMS lists their digests." \
+              || gh release view "$VERSION" >/dev/null
           fi
           gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/* --clobber
           gh release view "$VERSION" --json assets --jq '.assets[].name'
@@ -493,3 +502,204 @@ jobs:
       - name: Remove the decoded keystore
         if: ${{ always() }}
         run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
+
+  release-unified:
+    # The unified flavor links one shared unityLibrary that carries both VITURE
+    # 0.9.0 and XREAL 3.1.0, selected at runtime (ONY-508). Unity only produces
+    # that export once, on a workstation; CI downloads the approved zip and
+    # builds the APKs with Gradle like any other flavor.
+    #
+    # Same gate as `release`: a `v*` tag whose commit is already on main.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    # The export is 272 MB and the per-ABI release APKs are hundreds of MB, so
+    # this build is slower than `release`.
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.ref_name }}
+      UNITY_EXPORT_TAG: unity-export-1.0
+      # ONY-354's approved export. A different digest is not the artifact the
+      # owner approved, so the job refuses to build from it.
+      UNITY_EXPORT_SHA256: 945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5
+    steps:
+      # The ancestry guard below compares the tagged commit with origin/main;
+      # the default depth-1 checkout has no history to compare against.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a tag that is not on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $VERSION points at $GITHUB_SHA, which is not an ancestor of origin/main; refusing to publish a release."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Same optional download as `android-flavors`: a missing key only means
+      # the app reports an absent controller config block.
+      - name: Fetch Monado config key
+        continue-on-error: true
+        working-directory: apps/wmr_companion_app
+        run: dart run ../../tool/fetch_wmr_config_key.dart
+
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.WMR_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::WMR_RELEASE_KEYSTORE_BASE64 is not set; nothing can be signed."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode \
+            > apps/wmr_companion_app/android/wmr-release.keystore
+
+      # The export is a 272 MB release asset on a stable tag, never a file in
+      # the repository or in this branch's history.
+      - name: Download the approved Unity export
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unity-export"
+          gh release download "$UNITY_EXPORT_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern unityLibrary.zip \
+            --dir "$RUNNER_TEMP/unity-export"
+          echo "$UNITY_EXPORT_SHA256  $RUNNER_TEMP/unity-export/unityLibrary.zip" \
+            | sha256sum --check --strict
+
+      - name: Install the export as the unified unityLibrary
+        working-directory: apps/wmr_companion_app
+        run: tool/install_unity_export.sh unified "$RUNNER_TEMP/unity-export/unityLibrary.zip"
+
+      - name: Build signed unified APKs
+        working-directory: apps/wmr_companion_app
+        env:
+          WMR_RELEASE_STORE_FILE: ../wmr-release.keystore
+          WMR_RELEASE_STORE_PASSWORD: ${{ secrets.WMR_RELEASE_STORE_PASSWORD }}
+          WMR_RELEASE_KEY_ALIAS: wmr-companion
+          WMR_RELEASE_KEY_PASSWORD: ${{ secrets.WMR_RELEASE_KEY_PASSWORD }}
+        run: tool/build_flavor.sh unified --release --split-per-abi
+
+      # The pre-flight checker proves both Unity runtimes and their hand
+      # tracking libraries are in the APK. The export ships arm64-v8a natives
+      # only, so that is the split the checker applies to.
+      - name: Check the unified APK carries both vendors
+        working-directory: apps/wmr_companion_app
+        run: |
+          set -euo pipefail
+          python3 tool/check_unified_apk.py \
+            build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
+
+      - name: Verify every APK is signed with the project key
+        working-directory: apps/wmr_companion_app
+        run: |
+          set -euo pipefail
+          apksigner="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
+          if [ ! -x "$apksigner" ]; then
+            echo "::error::apksigner not found under $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/release-assets"
+          mkdir -p "$out"
+          shopt -s nullglob
+          apks=(build/app/outputs/flutter-apk/app-*-unified-release.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "::error::--split-per-abi produced no app-*-unified-release.apk"
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            certs="$("$apksigner" verify --print-certs "$apk")"
+            echo "$certs"
+            if grep -q 'CN=Android Debug' <<<"$certs"; then
+              echo "::error::$apk is signed with the Android debug key"
+              exit 1
+            fi
+            if ! grep -q 'CN=WMR Companion' <<<"$certs"; then
+              echo "::error::$apk has no CN=WMR Companion signer"
+              exit 1
+            fi
+            if ! grep -qi 'bdaa32b51ad3afd267d0f80f28a473b85319f8c37e26289cf1dc1ff7cfaae256' <<<"$certs"; then
+              echo "::error::$apk certificate SHA-256 does not match the documented key"
+              exit 1
+            fi
+            name="${apk##*/}"
+            abi="${name#app-}"
+            abi="${abi%-unified-release.apk}"
+            cp "$apk" "$out/wmr-companion-${VERSION#v}-unified-$abi.apk"
+          done
+          ls -l "$out"
+
+      # SHA256SUMS is recomputed by `release-checksums` once both flavors have
+      # uploaded; this job only adds its APKs.
+      - name: Publish the release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prerelease_args=()
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease_args+=(--prerelease)
+            echo "$VERSION is not vX.Y.Z; publishing as a prerelease."
+          fi
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release create "$VERSION" \
+              "${prerelease_args[@]}" \
+              --title "$VERSION" \
+              --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device; SHA256SUMS lists their digests. Use the unified APK for VITURE or XREAL glasses, base for Android XR." \
+              || gh release view "$VERSION" >/dev/null
+          fi
+          gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/*.apk --clobber
+          gh release view "$VERSION" --json assets --jq '.assets[].name'
+
+      - name: Remove the decoded keystore
+        if: ${{ always() }}
+        run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
+
+  release-checksums:
+    # `release` and `release-unified` run in parallel and each would overwrite
+    # the other's SHA256SUMS. Once both have uploaded, recompute one file that
+    # covers every APK on the release.
+    needs: [release, release-unified]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.release.result == 'success' && needs['release-unified'].result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Recompute SHA256SUMS from every published APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/release-assets"
+          mkdir -p "$out"
+          gh release download "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'wmr-companion-*.apk' \
+            --dir "$out"
+          (cd "$out" && sha256sum ./*.apk | sed 's| \./| |' > SHA256SUMS)
+          cat "$out/SHA256SUMS"
+          gh release upload "$VERSION" "$out/SHA256SUMS" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'

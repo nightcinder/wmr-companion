@@ -76,12 +76,34 @@ Signer #1 certificate SHA-256 digest: bdaa32b51ad3afd267d0f80f28a473b85319f8c37e
 
 A release APK signed by the debug key (`CN=Android Debug`) is a regression.
 
-## CI release: tag to downloadable APK (ONY-493)
+## CI release: tag to downloadable APK (ONY-493, ONY-508)
 
-Pushing a `v*` tag runs the `release` job in `.github/workflows/ci.yml`; no local
-build is needed. The job decodes the keystore, builds
-`tool/build_flavor.sh base --release --split-per-abi`, checks each APK with
-`apksigner`, and attaches the assets to that tag's GitHub Release.
+Pushing a `v*` tag runs two build jobs in `.github/workflows/ci.yml`; no local
+build is needed. Both decode the same keystore, check every APK with
+`apksigner`, and attach the assets to that tag's GitHub Release. A third job,
+`release-checksums`, then writes one `SHA256SUMS` covering both flavors.
+
+| Job | Flavor | Build |
+|---|---|---|
+| `release` | `base` | `tool/build_flavor.sh base --release --split-per-abi` |
+| `release-unified` | `unified` | downloads the approved export, `tool/install_unity_export.sh unified`, then `tool/build_flavor.sh unified --release --split-per-abi` |
+
+`unified` is the artifact testers with VITURE or XREAL glasses install: one
+APK links a single `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0 and
+selects the vendor at runtime. The export is never committed or built in CI;
+`release-unified` downloads `unityLibrary.zip` from the `unity-export-1.0`
+release, refuses it unless its SHA-256 is
+`945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5` (the ONY-354
+export), and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
+publishing. Re-publishing that asset is a one-off from a machine holding the
+zip:
+
+```sh
+gh release create unity-export-1.0 --prerelease \
+  --title unity-export-1.0 \
+  --notes "Approved Unity UaaL export (VITURE 0.9.0 + XREAL 3.1.0) used by the unified release job."
+gh release upload unity-export-1.0 /paperclip/unity-export/unityLibrary.zip
+```
 
 Repository secrets (`Settings → Secrets and variables → Actions`):
 
@@ -101,13 +123,20 @@ Release assets for tag `vX.Y.Z`:
 wmr-companion-X.Y.Z-base-arm64-v8a.apk
 wmr-companion-X.Y.Z-base-armeabi-v7a.apk
 wmr-companion-X.Y.Z-base-x86_64.apk    # emulator
+wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
+wmr-companion-X.Y.Z-unified-armeabi-v7a.apk
+wmr-companion-X.Y.Z-unified-x86_64.apk       # emulator
 SHA256SUMS
 ```
 
 `wmr-companion-X.Y.Z-base-arm64-v8a.apk` is the phone/tablet asset testers
-should install. The job fails if an APK is debug-signed, lacks a
-`CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so
-a green tag run means the published APKs match this document.
+without vendor glasses should install; `wmr-companion-X.Y.Z-unified-arm64-v8a.apk`
+is the one for VITURE or XREAL glasses. Only the arm64-v8a unified APK carries
+the Unity runtimes: the approved export ships `arm64-v8a` natives only, so the
+other ABIs come out equivalent to `base`. The jobs fail if an APK is
+debug-signed, lacks a `CN=WMR Companion` signer, or its certificate SHA-256 is
+not the one above, so a green tag run means the published APKs match this
+document.
 
 ## Offline backup
 
