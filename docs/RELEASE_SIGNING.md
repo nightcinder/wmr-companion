@@ -69,6 +69,39 @@ Signer #1 certificate SHA-256 digest: 315443400405ec7dcb7d75f8474183450c741ae1bf
 
 A release APK signed by the debug key (`CN=Android Debug`) is a regression.
 
+## CI release: tag to downloadable APK (ONY-493)
+
+Pushing a `v*` tag runs the `release` job in `.github/workflows/ci.yml`; no local
+build is needed. The job decodes the keystore, builds
+`tool/build_flavor.sh base --release --split-per-abi`, checks each APK with
+`apksigner`, and attaches the assets to that tag's GitHub Release.
+
+Repository secrets (`Settings → Secrets and variables → Actions`):
+
+| Secret | Value |
+|---|---|
+| `WMR_RELEASE_KEYSTORE_BASE64` | `base64 -w0 apps/wmr_companion_app/android/wmr-release.keystore` |
+| `WMR_RELEASE_STORE_PASSWORD` | keystore store password |
+| `WMR_RELEASE_KEY_PASSWORD` | `wmr-companion` key password |
+
+The alias is fixed to `wmr-companion` in the workflow. `key.properties` wins
+over the environment, so a tag build never picks up a local key.properties from
+the checkout (it is gitignored anyway).
+
+Release assets for tag `vX.Y.Z`:
+
+```text
+wmr-companion-X.Y.Z-base-arm64-v8a.apk
+wmr-companion-X.Y.Z-base-armeabi-v7a.apk
+wmr-companion-X.Y.Z-base-x86_64.apk    # emulator
+SHA256SUMS
+```
+
+`wmr-companion-X.Y.Z-base-arm64-v8a.apk` is the phone/tablet asset testers
+should install. The job fails if an APK is debug-signed, lacks a
+`CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so
+a green tag run means the published APKs match this document.
+
 ## Offline backup
 
 Do this once now, then after any re-export of the keystore (key rotation).

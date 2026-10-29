@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    # A `v*` tag publishes the signed tester APK (job `release`, ONY-493).
+    tags: ['v*']
   pull_request:
 
 concurrency:
@@ -11,6 +13,8 @@ concurrency:
 
 jobs:
   build:
+    # Tag pushes build only the release job; these gates run on branches/PRs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -155,6 +159,8 @@ jobs:
           flutter build apk --debug
 
   gate7-clock-replay:
+    # Tag pushes build only the release job; these gates run on branches/PRs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -185,6 +191,8 @@ jobs:
           done
 
   gate8-fallback-quality:
+    # Tag pushes build only the release job; these gates run on branches/PRs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -212,6 +220,8 @@ jobs:
           retention-days: 14
 
   android-flavors:
+    # Tag pushes build only the release job; these gates run on branches/PRs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -277,6 +287,8 @@ jobs:
           retention-days: 14
 
   gatt-probe:
+    # Tag pushes build only the release job; these gates run on branches/PRs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -302,6 +314,8 @@ jobs:
           retention-days: 14
 
   ios:
+    # Tag pushes build only the release job; these gates run on branches/PRs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
@@ -332,3 +346,125 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign
+
+  # A `v*` tag is the whole input: the release keystore comes from repository
+  # secrets, the app is built as the `base` flavor with every Dart adapter
+  # compiled in, and the per-ABI APKs plus their SHA-256 sums are attached to
+  # that tag's GitHub Release so a tester downloads them without building
+  # (ONY-493). No store upload.
+  release:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      # Same optional download as `android-flavors`: a missing key only means
+      # the app reports an absent controller config block.
+      - name: Fetch Monado config key
+        continue-on-error: true
+        working-directory: apps/wmr_companion_app
+        run: dart run ../../tool/fetch_wmr_config_key.dart
+
+      # The keystore is never committed; it travels base64-encoded in the
+      # repository secret. `*.keystore` is gitignored, and the key is removed
+      # from the workspace at the end of the job.
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.WMR_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::WMR_RELEASE_KEYSTORE_BASE64 is not set; nothing can be signed."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode \
+            > apps/wmr_companion_app/android/wmr-release.keystore
+
+      - name: Build signed base APKs
+        working-directory: apps/wmr_companion_app
+        env:
+          # `file(...)` resolves this from android/app, so it lands on the key
+          # decoded above at android/wmr-release.keystore.
+          WMR_RELEASE_STORE_FILE: ../wmr-release.keystore
+          WMR_RELEASE_STORE_PASSWORD: ${{ secrets.WMR_RELEASE_STORE_PASSWORD }}
+          WMR_RELEASE_KEY_ALIAS: wmr-companion
+          WMR_RELEASE_KEY_PASSWORD: ${{ secrets.WMR_RELEASE_KEY_PASSWORD }}
+        run: tool/build_flavor.sh base --release --split-per-abi
+
+      - name: Verify every APK is signed with the project key
+        working-directory: apps/wmr_companion_app
+        run: |
+          set -euo pipefail
+          apksigner="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
+          if [ ! -x "$apksigner" ]; then
+            echo "::error::apksigner not found under $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/release-assets"
+          mkdir -p "$out"
+          shopt -s nullglob
+          apks=(build/app/outputs/flutter-apk/app-*-base-release.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "::error::--split-per-abi produced no app-*-base-release.apk"
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            certs="$("$apksigner" verify --print-certs "$apk")"
+            echo "$certs"
+            # A debug-signed APK is the regression docs/RELEASE_SIGNING.md forbids.
+            if grep -q 'CN=Android Debug' <<<"$certs"; then
+              echo "::error::$apk is signed with the Android debug key"
+              exit 1
+            fi
+            if ! grep -q 'CN=WMR Companion' <<<"$certs"; then
+              echo "::error::$apk has no CN=WMR Companion signer"
+              exit 1
+            fi
+            if ! grep -qi '315443400405ec7dcb7d75f8474183450c741ae1bf3484fc1bdf3287a641fca2' <<<"$certs"; then
+              echo "::error::$apk certificate SHA-256 does not match the documented key"
+              exit 1
+            fi
+            name="${apk##*/}"
+            abi="${name#app-}"
+            abi="${abi%-base-release.apk}"
+            cp "$apk" "$out/wmr-companion-${VERSION#v}-base-$abi.apk"
+          done
+          (cd "$out" && sha256sum ./*.apk | sed 's| \./| |' > SHA256SUMS)
+          ls -l "$out"
+          cat "$out/SHA256SUMS"
+
+      - name: Publish the release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release create "$VERSION" \
+              --title "$VERSION" \
+              --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device ABI; SHA256SUMS lists their digests."
+          fi
+          gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/* --clobber
+          gh release view "$VERSION" --json assets --jq '.assets[].name'
+
+      - name: Remove the decoded keystore
+        if: ${{ always() }}
+        run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
