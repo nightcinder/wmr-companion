@@ -15,8 +15,9 @@ File vector(String name) {
 }
 
 HandInput hand(List<String> f, int at) {
-  if (f[at] == '0')
+  if (f[at] == '0') {
     return HandInput(); // connected flag is checked by the caller
+  }
   return HandInput(
     buttons: int.parse(f[at + 1]),
     stick: [double.parse(f[at + 2]), double.parse(f[at + 3])],
