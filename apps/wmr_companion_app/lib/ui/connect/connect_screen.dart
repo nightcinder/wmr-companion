@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 
 import '../../services/test_bundle_export.dart';
+import '../bench/bench_screen.dart';
 import '../capture/capture_screen.dart';
 
 import 'package:wmr_core/services/controller_service.dart';
@@ -158,6 +159,14 @@ class RealPanel extends ConsumerWidget {
                 child: const Text('Latency test'),
               ),
             const _ExportBundleButton(),
+            if (s.connected)
+              FilledButton.tonal(
+                key: const Key('open-guided-bench'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
+                ),
+                child: const Text('Run guided bench'),
+              ),
           ],
         ),
         if (s.connected && s.mode != null) ...[
