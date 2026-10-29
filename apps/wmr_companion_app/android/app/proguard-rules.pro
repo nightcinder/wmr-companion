@@ -14,3 +14,10 @@
 -dontwarn com.android.extensions.xr.splitengine.RequestCallback
 -dontwarn com.android.extensions.xr.splitengine.SystemRendererConnection
 -dontwarn com.android.extensions.xr.subspace.Subspace
+
+# R8 may shrink but must not rename the shared Unity runtime and the vendor
+# pending-start gates: the unified release pre-flight check
+# (tool/check_unified_apk.py) proves they are in the dex, and their names keep
+# crash reports readable (ONY-508).
+-keepnames class **.SharedUnityRuntime
+-keepnames class **.PendingStartGate
