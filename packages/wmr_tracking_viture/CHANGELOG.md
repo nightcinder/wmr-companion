@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Migrate the Android plugin to AGP 9 built-in Kotlin: drop the Kotlin Gradle Plugin classpath and `org.jetbrains.kotlin.android`, and require Flutter 3.44 or later.
+
 ## 0.2.2
 
 - Target VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`, Unity 6000.0.27f1) in the
