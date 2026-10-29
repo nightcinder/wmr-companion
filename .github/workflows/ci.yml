@@ -523,13 +523,18 @@ jobs:
       - run: flutter pub get
 
       # Monado's config key (BSL-1.0) is not committed, but the published APK
-      # must carry it, so a failed download or a wrong-sized key fails the job.
+      # must carry it, so a failed download, a wrong size, or a header that is
+      # not the pinned one fails the job. The URL is pinned to the last monado
+      # commit that touched the file, and the SHA-256 covers the extracted key.
       - name: Fetch Monado config key
         working-directory: apps/wmr_companion_app
         run: |
           set -euo pipefail
-          dart run ../../tool/fetch_wmr_config_key.dart
+          dart run ../../tool/fetch_wmr_config_key.dart \
+            --url https://gitlab.freedesktop.org/monado/monado/-/raw/01c6e4ed28dc6e85b84d4683831947862a64844c/src/xrt/drivers/wmr/wmr_config_key.h
           test "$(stat -c%s assets/monado/wmr_config_key.bin)" = "1024"
+          echo "f0fbc70a916dbe0b87e9162ddee6b9fd768696354d9cd3cd0e7f9ddd90f6f1dc  assets/monado/wmr_config_key.bin" \
+            | sha256sum --check --strict
 
       - name: Decode release keystore
         env:

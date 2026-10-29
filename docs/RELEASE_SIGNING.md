@@ -124,22 +124,17 @@ the checkout (it is gitignored anyway).
 Release assets for tag `vX.Y.Z`:
 
 ```text
-wmr-companion-X.Y.Z-base-arm64-v8a.apk
-wmr-companion-X.Y.Z-base-armeabi-v7a.apk
-wmr-companion-X.Y.Z-base-x86_64.apk    # emulator
 wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
 SHA256SUMS
 ```
 
-`wmr-companion-X.Y.Z-base-arm64-v8a.apk` is the phone/tablet asset testers
-without vendor glasses should install; `wmr-companion-X.Y.Z-unified-arm64-v8a.apk`
-is the one for VITURE or XREAL glasses. The unified flavor is published for
-`arm64-v8a` only: the approved export ships `arm64-v8a` natives, so a 32-bit or
-x86_64 unified split would install without any Unity runtime and report VITURE
-and XREAL as `unavailable`. Base keeps its three ABIs. The jobs fail if an APK is
-debug-signed, lacks a `CN=WMR Companion` signer, or its certificate SHA-256 is
-not the one above, so a green tag run means the published APKs match this
-document.
+`wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
+XREAL glasses install. The unified flavor is published for `arm64-v8a` only:
+the approved export ships `arm64-v8a` natives, so a 32-bit or x86_64 unified
+split would install without any Unity runtime and report VITURE and XREAL as
+`unavailable`. The job fails if an APK is debug-signed, lacks a
+`CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so a
+green tag run means the published APK matches this document.
 
 ## Offline backup
 
@@ -184,5 +179,5 @@ to Android `versionName`/`versionCode`; confirm with:
 
 ```sh
 "$ANDROID_HOME"/build-tools/<version>/aapt dump badging \
-  build/app/outputs/flutter-apk/app-base-release.apk | grep package:
+  build/app/outputs/flutter-apk/app-unified-release.apk | grep package:
 ```

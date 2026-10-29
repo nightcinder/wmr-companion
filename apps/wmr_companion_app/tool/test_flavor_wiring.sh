@@ -30,13 +30,21 @@ fi
 # remove a directory this script created itself.
 backup_root=""
 created_stub=0
+created_vendor_stub=0
 
 cleanup() {
   if [ "$created_stub" -eq 1 ]; then
     rm -rf "$unity_root/unified"
   fi
+  if [ "$created_vendor_stub" -eq 1 ]; then
+    rm -rf "$unity_root/viture"
+  fi
   if [ -n "$backup_root" ]; then
-    mv "$backup_root/unified" "$unity_root/unified"
+    for saved in "$backup_root"/*; do
+      if [ -e "$saved" ]; then
+        mv "$saved" "$unity_root/"
+      fi
+    done
     rmdir "$backup_root"
   fi
 }
@@ -112,6 +120,29 @@ if ! has_permission "$(apk_path)" "$unified_permission"; then
   exit 1
 fi
 echo "PASS: unified linked the unified unityLibrary"
+
+echo "==> unified plus a per-vendor export must fail at configuration"
+# settings.gradle.kts rejects a unified export next to a per-vendor one; an
+# empty directory is enough because the guard runs before any module builds.
+if [ -e "$unity_root/viture" ]; then
+  [ -n "$backup_root" ] || backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
+  echo "==> preserving existing $unity_root/viture (restored on exit)"
+  mv "$unity_root/viture" "$backup_root/viture"
+fi
+created_vendor_stub=1
+mkdir -p "$unity_root/viture/unityLibrary"
+if build_output="$(build 2>&1)"; then
+  echo "FAIL: unified plus a per-vendor export built instead of failing" >&2
+  exit 1
+fi
+if ! grep -q "cannot be combined with per-vendor" <<<"$build_output"; then
+  echo "FAIL: expected the unified/per-vendor guard, got:" >&2
+  echo "$build_output" >&2
+  exit 1
+fi
+rm -rf "$unity_root/viture"
+created_vendor_stub=0
+echo "PASS: unified refused a per-vendor export"
 
 echo "==> unified with no export must still build"
 rm -rf "$unity_root/unified"
