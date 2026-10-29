@@ -230,7 +230,22 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
       ];
     }
     if (result.status == BenchStatus.running || state.exporting) {
-      return const [Center(child: CircularProgressIndicator())];
+      if (step != BenchStep.poseCapture) {
+        return const [Center(child: CircularProgressIndicator())];
+      }
+      return [
+        TextButton(
+          key: const Key('bench-skip'),
+          onPressed: controller.skipCurrent,
+          child: const Text('Skip segment'),
+        ),
+        if (state.poseSegment + 1 < benchPoseSequence.length)
+          TextButton(
+            key: const Key('bench-skip-remaining'),
+            onPressed: controller.skipRemainingPose,
+            child: const Text('Skip remaining'),
+          ),
+      ];
     }
     return [
       FilledButton(
@@ -246,8 +261,14 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
       TextButton(
         key: const Key('bench-skip'),
         onPressed: controller.skipCurrent,
-        child: const Text('Skip step'),
+        child: Text(poseSpec == null ? 'Skip step' : 'Skip segment'),
       ),
+      if (poseSpec != null && state.poseSegment + 1 < benchPoseSequence.length)
+        TextButton(
+          key: const Key('bench-skip-remaining'),
+          onPressed: controller.skipRemainingPose,
+          child: const Text('Skip remaining'),
+        ),
     ];
   }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,10 +11,20 @@ import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 
 class _FakeSession implements BenchSession {
-  _FakeSession({this.failing = const {}, this.throwing = const {}});
+  _FakeSession({
+    this.failing = const {},
+    this.throwing = const {},
+    this.failingSegments = const {},
+    this.holdPose = false,
+  });
 
   final Set<BenchStep> failing;
   final Set<BenchStep> throwing;
+  final Set<PoseSegment> failingSegments;
+
+  /// When true, a pose segment waits until it is cancelled, as the real
+  /// recorder does while it collects samples.
+  final bool holdPose;
 
   Future<BenchStepOutcome> _outcome(BenchStep step, String summary) async {
     if (throwing.contains(step)) throw StateError('${step.id} exploded');
@@ -50,11 +62,39 @@ class _FakeSession implements BenchSession {
   Future<BenchStepOutcome> poseSegment(
     int hand,
     PoseSegment segment,
-    Duration duration,
-  ) => _outcome(
-    BenchStep.poseCapture,
-    '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} saved',
-  );
+    Duration duration, {
+    Future<void>? cancel,
+  }) async {
+    if (holdPose) {
+      final stop = Completer<bool>();
+      cancel?.then((_) {
+        if (!stop.isCompleted) stop.complete(true);
+      });
+      await stop.future;
+      return BenchStepOutcome.failed(
+        'skipped by tester',
+        data: {
+          'runtime': 'viture',
+          'hand': hand == 0 ? 'LEFT' : 'RIGHT',
+          'segment': segment.id,
+        },
+      );
+    }
+    if (failingSegments.contains(segment)) {
+      return BenchStepOutcome.failed(
+        '${segment.id} failed',
+        data: {
+          'runtime': 'viture',
+          'hand': hand == 0 ? 'LEFT' : 'RIGHT',
+          'segment': segment.id,
+        },
+      );
+    }
+    return _outcome(
+      BenchStep.poseCapture,
+      '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} saved',
+    );
+  }
 
   @override
   Future<BenchStepOutcome> capture() =>
@@ -223,7 +263,7 @@ void main() {
     );
   });
 
-  testWidgets('skipping the pose step records every segment and continues', (
+  testWidgets('skipping pose segments records them and continues', (
     tester,
   ) async {
     final container = await open(tester, _FakeSession());
@@ -237,18 +277,120 @@ void main() {
     expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
 
     await tap(tester, 'bench-skip');
+    var state = container.read(benchControllerProvider);
+    expect(state.step, BenchStep.poseCapture);
+    expect(state.poseSegment, 1);
+    var step = container
+        .read(benchBundleProvider)!
+        .steps
+        .firstWhere((s) => s.id == 'pose_capture');
+    var segments = step.data['segments']! as List;
+    expect(segments, hasLength(1));
+    expect((segments.first as Map)['status'], 'skipped');
+    expect((segments.first as Map)['reason'], 'skipped by tester');
 
-    final state = container.read(benchControllerProvider);
+    await tap(tester, 'bench-skip-remaining');
+    state = container.read(benchControllerProvider);
     expect(state.step, BenchStep.capture);
     expect(state.resultFor(BenchStep.poseCapture).status, BenchStatus.skipped);
-    final published = container.read(benchBundleProvider)!;
-    final step = published.steps.firstWhere((s) => s.id == 'pose_capture');
+    step = container
+        .read(benchBundleProvider)!
+        .steps
+        .firstWhere((s) => s.id == 'pose_capture');
     expect(step.status, 'skipped');
-    final segments = step.data['segments']! as List;
+    segments = step.data['segments']! as List;
     expect(segments, hasLength(benchPoseSequence.length));
     expect(
       segments.every((segment) => (segment as Map)['status'] == 'skipped'),
       isTrue,
+    );
+  });
+
+  testWidgets('a segment already recording can be skipped', (tester) async {
+    final container = await open(tester, _FakeSession(holdPose: true));
+    for (var i = 0; i < 10; i++) {
+      if (container.read(benchControllerProvider).step ==
+          BenchStep.poseCapture) {
+        break;
+      }
+      await tap(tester, 'bench-start');
+    }
+    await tap(tester, 'bench-start');
+    expect(
+      container.read(benchControllerProvider).current.status,
+      BenchStatus.running,
+    );
+    expect(find.text('Skip segment'), findsOneWidget);
+
+    await tap(tester, 'bench-skip');
+    await tester.pump();
+
+    final state = container.read(benchControllerProvider);
+    expect(state.step, BenchStep.poseCapture);
+    expect(state.poseSegment, 1);
+    final segments =
+        container
+                .read(benchBundleProvider)!
+                .steps
+                .firstWhere((s) => s.id == 'pose_capture')
+                .data['segments']!
+            as List;
+    expect(segments, hasLength(1));
+    expect((segments.first as Map)['status'], 'skipped');
+    expect((segments.first as Map)['reason'], 'skipped by tester');
+  });
+
+  testWidgets('a failed segment is recorded skipped and the run continues', (
+    tester,
+  ) async {
+    final container = await open(
+      tester,
+      _FakeSession(failingSegments: {PoseSegment.still}),
+    );
+    for (var i = 0; i < 10; i++) {
+      if (container.read(benchControllerProvider).step ==
+          BenchStep.poseCapture) {
+        break;
+      }
+      await tap(tester, 'bench-start');
+    }
+    await tap(tester, 'bench-start'); // the failing still segment
+
+    var state = container.read(benchControllerProvider);
+    expect(state.step, BenchStep.poseCapture);
+    expect(state.poseSegment, 1);
+    var segments =
+        container
+                .read(benchBundleProvider)!
+                .steps
+                .firstWhere((s) => s.id == 'pose_capture')
+                .data['segments']!
+            as List;
+    expect((segments.first as Map)['status'], 'skipped');
+    expect((segments.first as Map)['reason'], 'still failed');
+
+    for (var i = 1; i < benchPoseSequence.length; i++) {
+      await tap(tester, 'bench-start');
+    }
+    state = container.read(benchControllerProvider);
+    expect(state.step, BenchStep.capture);
+    expect(state.resultFor(BenchStep.poseCapture).status, BenchStatus.done);
+    segments =
+        container
+                .read(benchBundleProvider)!
+                .steps
+                .firstWhere((s) => s.id == 'pose_capture')
+                .data['segments']!
+            as List;
+    expect(segments, hasLength(benchPoseSequence.length));
+    // Both hands' still segments fail; every other segment is recorded.
+    expect(
+      segments.where((segment) => (segment as Map)['status'] == 'skipped'),
+      hasLength(2),
+    );
+    expect(
+      segments.where((segment) => (segment as Map)['status'] == 'done'),
+      hasLength(benchPoseSequence.length - 2),
     );
   });
 

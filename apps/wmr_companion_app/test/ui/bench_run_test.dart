@@ -37,6 +37,7 @@ class _FakePoseRecorder implements BenchPoseRecorder {
     required int hand,
     required PoseSegment segment,
     required Duration duration,
+    Future<void>? cancel,
   }) async {
     final name =
         'pose_capture_viture_${hand == 0 ? 'left' : 'right'}_'
@@ -193,9 +194,17 @@ void main() {
             TestBundleInput(
               now: DateTime(2026, 10, 29, 13),
               appVersion: '0.2.2+4',
+              appCommit: 'abc1234',
               phone: 'Test Phone',
               androidVersion: 'Android 14 (API 34)',
               streamMode: 'raw',
+              bridges: const [
+                BundleBridge(
+                  id: fakeBridgeDeviceId,
+                  firmwareVersion: 'v0.2.4-3-gdeadbee',
+                ),
+              ],
+              poseCaptures: poseCapturesFromRun(benchRun),
               benchRun: benchRun,
             ),
             Directory('${dir.path}/out'),
@@ -233,7 +242,44 @@ void main() {
     expect(manifest, contains('## 6DoF pose captures'));
     expect(manifest, contains('pose_capture_viture_left_still.json'));
     expect(manifest, contains('pose_capture_viture_right_fast_flick.json'));
-    expect(manifest, contains('- App commit: abc1234'));
+    // The header commit is the app build, not the per-segment fallback.
+    final header = manifest.split('## 6DoF').first;
+    expect(header, contains('- App commit: abc1234'));
+    expect(manifest, contains('- Firmware SHA: deadbee'));
+    // Every recorded segment is in the zip, not just in the manifest table.
+    final poseFiles = archive.files
+        .map((f) => f.name)
+        .where((name) => name.startsWith('pose_capture_'))
+        .toList();
+    expect(poseFiles, hasLength(benchPoseSequence.length));
+    expect(poseFiles, contains('pose_capture_viture_left_still.json'));
+  });
+
+  group('firmware SHA', () {
+    test('only a git-describe shape yields a SHA', () {
+      expect(gitShaFromFirmware('v0.2.4-3-gdeadbee'), 'deadbee');
+      expect(gitShaFromFirmware('0.2.4-g1234567'), '1234567');
+      expect(gitShaFromFirmware('2026-10-29 deadbee'), isNull);
+      expect(gitShaFromFirmware('deadbee'), isNull);
+      expect(gitShaFromFirmware('v0.2.4'), isNull);
+      expect(gitShaFromFirmware(null), isNull);
+    });
+
+    test('one SHA for agreeing bridges, per-bridge when they differ', () {
+      expect(firmwareShaFromVersions({'a': 'v1-gdeadbee'}), 'deadbee');
+      expect(
+        firmwareShaFromVersions({'a': 'v1-gdeadbee', 'b': 'v1-gdeadbee'}),
+        'deadbee',
+      );
+      expect(
+        firmwareShaFromVersions({'a': 'v1-gdeadbee', 'b': 'v1-gc0ffee0'}),
+        'a=deadbee; b=c0ffee0',
+      );
+      expect(
+        firmwareShaFromVersions({'a': '2026-10-29', 'b': null}),
+        'unknown',
+      );
+    });
   });
 
   group('pose gate', () {

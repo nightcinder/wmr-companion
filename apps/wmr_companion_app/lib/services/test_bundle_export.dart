@@ -167,7 +167,7 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       bridges: bridges,
       latencyFiles: latest?.paths ?? const [],
       captureFiles: [for (final capture in captureStore.list()) capture.path],
-      poseCaptures: _poseCaptures(run),
+      poseCaptures: poseCapturesFromRun(run),
       benchRun: run,
     );
   };
@@ -218,7 +218,10 @@ class BenchBundleNotifier extends Notifier<BenchBundleRun?> {
 }
 
 /// Recorded pose files named by the pose step's segment data.
-List<PoseCaptureFile> _poseCaptures(BenchBundleRun? run) {
+///
+/// Shared with the bench tests so the zip they inspect goes through the same
+/// selection the app uses.
+List<PoseCaptureFile> poseCapturesFromRun(BenchBundleRun? run) {
   if (run == null) return const [];
   final captures = <PoseCaptureFile>[];
   for (final step in run.steps) {

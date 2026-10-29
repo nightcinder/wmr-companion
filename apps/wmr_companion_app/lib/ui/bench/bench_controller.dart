@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle.dart';
@@ -104,6 +106,8 @@ final benchControllerProvider =
 /// machine is testable against the fake bridge without any UI.
 class BenchController extends Notifier<BenchRunState> {
   final List<Map<String, Object?>> _poseEntries = [];
+  Completer<void>? _poseCancel;
+  bool _poseSkipRest = false;
 
   @override
   BenchRunState build() => const BenchRunState();
@@ -192,11 +196,15 @@ class BenchController extends Notifier<BenchRunState> {
         },
       ),
     );
+    final cancel = Completer<void>();
+    _poseCancel = cancel;
     final outcome = await session.poseSegment(
       spec.hand,
       spec.segment,
       durations.poseDuration(spec.segment),
+      cancel: cancel.future,
     );
+    _poseCancel = null;
     if (!ref.mounted) return;
     _poseEntries.add({
       ...outcome.data,
@@ -208,25 +216,23 @@ class BenchController extends Notifier<BenchRunState> {
       'status': outcome.ok ? 'done' : 'skipped',
       if (!outcome.ok) 'reason': outcome.error ?? 'failed',
     });
+    final skipRest = _poseSkipRest;
+    _poseSkipRest = false;
     if (index + 1 >= benchPoseSequence.length) {
       _finishPose();
       return;
     }
-    state = state.copyWith(
-      poseSegment: index + 1,
-      results: {
-        ...state.results,
-        BenchStep.poseCapture: BenchStepResult(
-          data: {
-            'segments': [..._poseEntries],
-          },
-        ),
-      },
-    );
-    _publish();
+    if (skipRest) {
+      _skipRemainingPose(index + 1);
+      return;
+    }
+    state = state.copyWith(poseSegment: index + 1);
+    _publishPoseProgress();
   }
 
   void _finishPose() {
+    _poseCancel = null;
+    _poseSkipRest = false;
     final done = _poseEntries.where((e) => e['status'] == 'done').length;
     final status = done == 0 ? BenchStatus.skipped : BenchStatus.done;
     _setResult(
@@ -245,22 +251,26 @@ class BenchController extends Notifier<BenchRunState> {
     _advance();
   }
 
-  void _skipRemainingPose() {
-    for (
-      var index = state.poseSegment;
-      index < benchPoseSequence.length;
-      index++
-    ) {
-      final spec = benchPoseSequence[index];
-      _poseEntries.add({
-        'runtime': ref.read(benchPoseAvailabilityProvider).runtime,
-        'hand': RealBenchSession.handName(spec.hand),
-        'segment': spec.segment.id,
-        'status': 'skipped',
-        'reason': 'skipped by tester',
-      });
+  void _skipRemainingPose(int from) {
+    for (var index = from; index < benchPoseSequence.length; index++) {
+      _recordSkippedSegment(index);
     }
     _finishPose();
+  }
+
+  /// Republishes the segments captured so far while the step is still current.
+  void _publishPoseProgress() {
+    state = state.copyWith(
+      results: {
+        ...state.results,
+        BenchStep.poseCapture: BenchStepResult(
+          data: {
+            'segments': [..._poseEntries],
+          },
+        ),
+      },
+    );
+    _publish();
   }
 
   /// Marks a prompt step done and moves on.
@@ -277,17 +287,62 @@ class BenchController extends Notifier<BenchRunState> {
     _advance();
   }
 
-  /// Records the step as skipped and moves on. The export step cannot be
+  /// Skips the step on screen and moves on. For the 6DoF step this skips only
+  /// the segment shown, aborting its recording when one is in progress; use
+  /// [skipRemainingPose] to abandon the rest. The export step cannot be
   /// skipped: the run ends in a bundle.
   void skipCurrent() {
     final step = state.step;
-    if (state.busy || step == BenchStep.export) return;
+    if (step == BenchStep.export || state.exporting) return;
     if (step == BenchStep.poseCapture) {
-      _skipRemainingPose();
+      _skipPoseSegment();
       return;
     }
+    if (state.busy) return;
     _setResult(step, const BenchStepResult(status: BenchStatus.skipped));
     _advance();
+  }
+
+  /// Skips the segment on screen: aborts it when it is recording, otherwise
+  /// records it skipped, then moves to the next segment.
+  void _skipPoseSegment() {
+    final index = state.poseSegment;
+    if (index >= benchPoseSequence.length) return;
+    if (state.current.status == BenchStatus.running) {
+      final cancel = _poseCancel;
+      if (cancel != null && !cancel.isCompleted) cancel.complete();
+      return;
+    }
+    _recordSkippedSegment(index);
+    if (index + 1 >= benchPoseSequence.length) {
+      _finishPose();
+      return;
+    }
+    state = state.copyWith(poseSegment: index + 1);
+    _publishPoseProgress();
+  }
+
+  /// Skips the segment on screen and every segment after it.
+  void skipRemainingPose() {
+    if (state.step != BenchStep.poseCapture) return;
+    if (state.current.status == BenchStatus.running) {
+      _poseSkipRest = true;
+      final cancel = _poseCancel;
+      if (cancel != null && !cancel.isCompleted) cancel.complete();
+      return;
+    }
+    _skipRemainingPose(state.poseSegment);
+  }
+
+  void _recordSkippedSegment(int index) {
+    final spec = benchPoseSequence[index];
+    _poseEntries.add({
+      'runtime': ref.read(benchPoseAvailabilityProvider).runtime,
+      'hand': RealBenchSession.handName(spec.hand),
+      'segment': spec.segment.id,
+      'status': 'skipped',
+      'reason': 'skipped by tester',
+    });
   }
 
   /// Writes the same zip as Export test bundle, with these results in the
@@ -355,6 +410,8 @@ class BenchController extends Notifier<BenchRunState> {
           continue;
         }
         _poseEntries.clear();
+        _poseCancel = null;
+        _poseSkipRest = false;
       }
       break;
     }

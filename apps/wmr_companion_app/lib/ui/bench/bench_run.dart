@@ -177,8 +177,9 @@ abstract class BenchSession {
   Future<BenchStepOutcome> poseSegment(
     int hand,
     PoseSegment segment,
-    Duration duration,
-  );
+    Duration duration, {
+    Future<void>? cancel,
+  });
   Future<BenchStepOutcome> capture();
   Future<BenchStepOutcome> latency();
 }
@@ -341,8 +342,9 @@ class RealBenchSession implements BenchSession {
   Future<BenchStepOutcome> poseSegment(
     int hand,
     PoseSegment segment,
-    Duration duration,
-  ) async {
+    Duration duration, {
+    Future<void>? cancel,
+  }) async {
     final recorder = poseRecorder;
     final handLabel = handName(hand);
     if (recorder == null) {
@@ -364,6 +366,7 @@ class RealBenchSession implements BenchSession {
         hand: hand,
         segment: segment,
         duration: duration,
+        cancel: cancel,
       );
       return BenchStepOutcome.done(
         '$handLabel ${segment.title}: ${result.samples} samples; '
@@ -381,7 +384,7 @@ class RealBenchSession implements BenchSession {
       );
     } on Object catch (error) {
       return BenchStepOutcome.failed(
-        '$error',
+        error is PoseSegmentCancelled ? 'skipped by tester' : '$error',
         data: {
           'runtime': recorder.runtime,
           'hand': handLabel,
@@ -579,21 +582,35 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
       mtu: device.status.mtu,
       poseRecorder: poseRecorder,
       appCommit: ref.read(appCommitProvider),
-      firmwareSha: _firmwareSha(service),
+      firmwareSha: firmwareShaFromVersions({
+        for (final id in service.deviceIds)
+          id: service.protocolFor(id)?.firmwareVersion,
+      }),
       applyMode: ref.read(realDeviceProvider.notifier).setStreamMode,
     );
   };
 });
 
-/// The FF16 string is the only firmware identity the app sees. When the
-/// packaged version includes a git description, its short hash is recorded;
-/// otherwise the manifest says the SHA is not exposed.
-String _firmwareSha(ControllerService service) {
-  for (final id in service.deviceIds) {
-    final version = service.protocolFor(id)?.firmwareVersion;
-    if (version == null) continue;
-    final match = RegExp(r'\b([0-9a-f]{7,40})\b').firstMatch(version);
-    if (match != null) return match.group(1)!;
+/// The short SHA in an FF16 git description, or null when FF16 has none.
+///
+/// Only the `-g<sha>` shape a git-describe version carries counts. A bare hex
+/// token is not a SHA: versions and build stamps can look identical.
+String? gitShaFromFirmware(String? version) {
+  if (version == null) return null;
+  final match = RegExp(r'(?:^|-)g([0-9a-f]{7,40})(?:[-\s+]|$)')
+      .firstMatch(version.trim());
+  return match?.group(1);
+}
+
+/// The SHA recorded for a run: one value when every bridge that exposes a git
+/// description agrees, a per-bridge list when they differ, else `unknown`.
+String firmwareShaFromVersions(Map<String, String?> versions) {
+  final found = <String, String>{};
+  for (final entry in versions.entries) {
+    final sha = gitShaFromFirmware(entry.value);
+    if (sha != null) found[entry.key] = sha;
   }
-  return 'unknown';
+  if (found.isEmpty) return 'unknown';
+  if (found.values.toSet().length == 1) return found.values.first;
+  return found.entries.map((entry) => '${entry.key}=${entry.value}').join('; ');
 }

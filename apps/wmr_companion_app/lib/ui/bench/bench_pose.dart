@@ -132,14 +132,25 @@ class PoseCaptureResult {
   final int seconds;
 }
 
+/// Thrown when the tester skips a segment while it is recording.
+class PoseSegmentCancelled implements Exception {
+  const PoseSegmentCancelled();
+
+  @override
+  String toString() => 'skipped by tester';
+}
+
 /// The recorder seam: the wizard talks to this, tests replace it.
 abstract interface class BenchPoseRecorder {
   String get runtime;
 
+  /// Records one segment. Completing [cancel] stops the recording early; the
+  /// caller then gets a [PoseSegmentCancelled] and nothing is saved.
   Future<PoseCaptureResult> record({
     required int hand,
     required PoseSegment segment,
     required Duration duration,
+    Future<void>? cancel,
   });
 }
 
@@ -164,6 +175,7 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
     required int hand,
     required PoseSegment segment,
     required Duration duration,
+    Future<void>? cancel,
   }) async {
     final selection = ref.read(debugTrackingSourceProvider);
     final source = selection.attachment.value?.source;
@@ -178,11 +190,18 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
       debugPosesProvider(DebugSource.real),
       (_, next) => _capture(builder, next.value),
     );
+    var aborted = false;
     try {
-      await Future<void>.delayed(duration);
+      final stop = Completer<void>();
+      cancel?.then((_) {
+        if (!stop.isCompleted) stop.complete();
+      });
+      await Future.any([Future<void>.delayed(duration), stop.future]);
+      aborted = cancel != null && stop.isCompleted;
     } finally {
       sub.close();
     }
+    if (aborted) throw const PoseSegmentCancelled();
 
     final recording = builder.build();
     if (recording.isEmpty) {
