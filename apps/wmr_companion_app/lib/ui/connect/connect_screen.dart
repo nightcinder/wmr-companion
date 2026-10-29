@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
 
+import '../../services/test_bundle_export.dart';
 import '../capture/capture_screen.dart';
 
 import 'package:wmr_core/services/controller_service.dart';
@@ -156,6 +157,7 @@ class RealPanel extends ConsumerWidget {
                 ),
                 child: const Text('Latency test'),
               ),
+            const _ExportBundleButton(),
           ],
         ),
         if (s.connected && s.mode != null) ...[
@@ -370,6 +372,68 @@ class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
           onPressed: widget.busy ? null : _connect,
           child: const Text('Connect over Wi-Fi'),
         ),
+      ],
+    );
+  }
+}
+
+/// One tap on the Connect screen: zip what the app already holds and open the
+/// system share sheet. Available without a connection, so saved captures and
+/// latency runs can still be exported.
+class _ExportBundleButton extends ConsumerStatefulWidget {
+  const _ExportBundleButton();
+
+  @override
+  ConsumerState<_ExportBundleButton> createState() =>
+      _ExportBundleButtonState();
+}
+
+class _ExportBundleButtonState extends ConsumerState<_ExportBundleButton> {
+  bool _busy = false;
+  String? _message;
+  String? _error;
+
+  Future<void> _export() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+      _error = null;
+    });
+    try {
+      final bundle = await ref.read(exportTestBundleProvider)();
+      if (!mounted) return;
+      final missing = bundle.missing.length;
+      setState(() {
+        _message =
+            'Shared ${bundle.fileName}'
+            '${missing == 0 ? '.' : '. Missing $missing item(s): see README.md.'}';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Export failed: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FilledButton.tonal(
+          key: const Key('export-test-bundle'),
+          onPressed: _busy ? null : _export,
+          child: Text(_busy ? 'Exporting...' : 'Export test bundle'),
+        ),
+        if (_message != null) Text(_message!, style: theme.textTheme.bodySmall),
+        if (_error != null)
+          Text(
+            _error!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          ),
       ],
     );
   }
