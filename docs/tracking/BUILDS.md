@@ -29,6 +29,14 @@ checks the merged permissions, both Unity runtimes and their versions, the vendo
 metadata and the tracking/session classes in the dex. It passed on the v0.2.2
 artifact; the open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
 
+## Release signing
+
+Release APKs use the project-owned RSA-4096 key (`CN=WMR Companion`), not the
+Android debug key. Configure `apps/wmr_companion_app/android/key.properties` or
+the `WMR_RELEASE_*` environment variables; debug builds keep the debug key. Key
+storage, the offline backup procedure, `apksigner` verification and the
+versionCode bump are documented in [RELEASE_SIGNING.md](../RELEASE_SIGNING.md).
+
 ## Flavors
 
 | Flavor | `--dart-define` | Unity export linked | What it ships |
