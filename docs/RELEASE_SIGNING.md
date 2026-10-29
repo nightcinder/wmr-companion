@@ -62,9 +62,9 @@ Signing rules:
 
 ```sh
 cd apps/wmr_companion_app
-tool/build_flavor.sh base --release
+tool/build_flavor.sh unified --release
 "$ANDROID_HOME"/build-tools/<version>/apksigner verify --print-certs \
-  build/app/outputs/flutter-apk/app-base-release.apk
+  build/app/outputs/flutter-apk/app-unified-release.apk
 ```
 
 Expected certificate:
@@ -76,16 +76,19 @@ Signer #1 certificate SHA-256 digest: bdaa32b51ad3afd267d0f80f28a473b85319f8c37e
 
 A release APK signed by the debug key (`CN=Android Debug`) is a regression.
 
-## CI release: tag to downloadable APK (ONY-493, ONY-508)
+## CI release: tag to downloadable APK (ONY-493, ONY-508, ONY-520)
 
-Pushing a `v*` tag runs two build jobs in `.github/workflows/ci.yml`; no local
-build is needed. Both decode the same keystore, check every APK with
-`apksigner`, and attach the assets to that tag's GitHub Release. A third job,
-`release-checksums`, then writes one `SHA256SUMS` covering both flavors.
+Pushing a `v*` tag runs one build job in `.github/workflows/ci.yml`; no local
+build is needed. It decodes the keystore, checks the APK with `apksigner`, and
+attaches the assets to that tag's GitHub Release. `release-checksums` then
+writes one `SHA256SUMS` covering the published APKs.
+
+CI publishes only the `unified` flavor. `base`, `viture` and `xreal` remain
+buildable locally with `tool/build_flavor.sh`, but they have no release path
+(ONY-520).
 
 | Job | Flavor | Build |
 |---|---|---|
-| `release` | `base` | `tool/build_flavor.sh base --release --split-per-abi` |
 | `release-unified` | `unified` | downloads the approved export, `tool/install_unity_export.sh unified`, then `tool/build_flavor.sh unified --release --split-per-abi --target-platform android-arm64` |
 
 `unified` is the artifact testers with VITURE or XREAL glasses install: one
@@ -95,8 +98,9 @@ selects the vendor at runtime. The export is never committed or built in CI;
 release, refuses it unless its SHA-256 is
 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5` (the ONY-354
 export), and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
-publishing. Re-publishing that asset is a one-off from a machine holding the
-zip:
+publishing. The Monado config key fetch is not optional: the job fails unless
+the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that
+asset is a one-off from a machine holding the zip:
 
 ```sh
 gh release create unity-export-1.0 --prerelease \
