@@ -6,8 +6,8 @@ certificate instead of `CN=Android Debug`.
 
 The ONY-492 key was regenerated in ONY-493 before any tester build was
 distributed: its store and key passwords were not recoverable, so every release
-build failed at signing. The current key uses a random store password kept in
-the Paperclip secret and the documented `wmr-companion` key password. No
+build failed at signing. The current key uses a random store password and a
+separate key password, both kept in Paperclip secrets. No
 installed app uses a different certificate, so in-place updates are unaffected.
 
 ## Key facts
@@ -21,7 +21,7 @@ installed app uses a different certificate, so in-place updates are unaffected.
 | Validity | 10,000 days (2026-10-29 to 2054-03-16) |
 | Package | `com.onyxlens.wmr_companion` |
 | Certificate SHA-256 | `BD:AA:32:B5:1A:D3:AF:D2:67:D0:F8:0F:28:A4:73:B8:53:19:F8:C3:7E:26:28:9C:F1:DC:1F:F7:CF:AA:E2:56` |
-| Password secrets | store password: Paperclip `wmr-companion/release-store-password`; key password: `wmr-companion` |
+| Password secrets | store password: Paperclip `wmr-companion/release-store-password`; key password: Paperclip `wmr-companion/release-key-password` |
 
 The keystore file is attached to the ONY-493 task for the owner's offline
 backup (the ONY-492 attachment is the superseded first key). It is not part of
@@ -89,7 +89,7 @@ Repository secrets (`Settings → Secrets and variables → Actions`):
 |---|---|
 | `WMR_RELEASE_KEYSTORE_BASE64` | `base64 -w0 apps/wmr_companion_app/android/wmr-release.keystore` |
 | `WMR_RELEASE_STORE_PASSWORD` | keystore store password |
-| `WMR_RELEASE_KEY_PASSWORD` | `wmr-companion` key password |
+| `WMR_RELEASE_KEY_PASSWORD` | key password from Paperclip `wmr-companion/release-key-password` |
 
 The alias is fixed to `wmr-companion` in the workflow. `key.properties` wins
 over the environment, so a tag build never picks up a local key.properties from
@@ -113,8 +113,9 @@ a green tag run means the published APKs match this document.
 
 Do this once now, then after any re-export of the keystore (key rotation).
 
-1. Download `wmr-release.keystore` from the ONY-492 task attachment (or copy it
-   from `apps/wmr_companion_app/android/wmr-release.keystore`).
+1. Download `wmr-release.keystore` from the ONY-493 task attachment — the
+   ONY-492 attachment is the superseded key — or copy it from
+   `apps/wmr_companion_app/android/wmr-release.keystore`.
 2. Copy it to **two** offline media in separate physical locations (for example
    two USB sticks or an encrypted archive on a disconnected drive). Do not keep
    the only copy in git, the build workspace, or a synced cloud folder.
