@@ -46,10 +46,8 @@ because the five plugins now declare Flutter 3.44.
 ## GitHub Actions runtime
 
 The workflows use Node 24 action majors: `actions/checkout@v7`,
-`actions/setup-java@v6`, `actions/upload-artifact@v7`,
-`actions/download-artifact@v8`, `actions/cache@v6`,
+`actions/setup-java@v6`, `actions/upload-artifact@v7`, `actions/cache@v6`,
 `gradle/actions/setup-gradle@v6`, `dorny/paths-filter@v4`,
-`actions/configure-pages@v6`, `actions/upload-pages-artifact@v5`,
-`actions/deploy-pages@v5`, `actions/setup-dotnet@v6` and
-`subosito/flutter-action@v2` (composite, current major). Only action versions
-changed; no workflow inputs, jobs or steps were altered.
+`actions/setup-dotnet@v6` and `subosito/flutter-action@v2` (composite,
+current major). Only action versions changed; no workflow inputs, jobs or
+steps were altered.
