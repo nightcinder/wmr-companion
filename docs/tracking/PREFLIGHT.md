@@ -71,7 +71,7 @@ parser (UTF-16 and UTF-8 pools) and that camera gate.
 | Merged permissions | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `CAMERA` present; `HAND_TRACKING` and `HEAD_TRACKING` also merged (Android XR plugin) |
 | Features | `bluetooth_le`, `usb.host`, and `camera` declared `required=false` |
 | Both runtimes | `libVitureUnityXR.so`, `libXREALXRPlugin.so`, one `libunity.so`; Unity subsystems 0.9.0 and 3.1.0 |
-| Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin`, `SharedUnityRuntime`, `PendingStartGate` in the dex |
+| Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 may rename them in a release build |
 | Activities | Flutter `MainActivity`, `UnityPlayerActivity`, XREAL `NRXRActivity` |
 | Vendor metadata | VITURE `sdk 0.9.0`, `dof 6dof`; XREAL `supportDevices` present |
 

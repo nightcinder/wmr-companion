@@ -3,8 +3,8 @@
 
 Validates what can be proved without a device: the binary Android manifest is
 merged from the app and both vendor SDK manifests, both Unity XR runtimes are
-present with their hand-tracking libraries, the Dart/Kotlin tracking classes are
-in the dex, and the permission/session contract the run sheet relies on is
+present with their hand-tracking libraries, the Dart/Kotlin plugin entry classes
+are in the dex, and the permission/session contract the run sheet relies on is
 declared. It does not prove that a vendor runtime starts, that permissions are
 granted, or that hands are tracked; those stay on the hardware gates.
 
@@ -42,6 +42,10 @@ REQUIRED_DEX_CLASSES = {
     "WmrTrackingXrealPlugin",
     "WmrTrackingViturePlugin",
     "WmrTrackingDispatchPlugin",
+}
+# R8 in a `--release` build may rename or inline these, so they are reported
+# but not required: only the Flutter-registered plugin entry classes survive.
+OPTIONAL_DEX_CLASSES = {
     "SharedUnityRuntime",
     "PendingStartGate",
 }
@@ -200,6 +204,11 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             print(f"PASS dex: {sorted(REQUIRED_DEX_CLASSES)}")
+        optional = ", ".join(
+            f"{name}={'present' if name.encode() in dex else 'renamed/inlined'}"
+            for name in sorted(OPTIONAL_DEX_CLASSES)
+        )
+        print(f"INFO dex (release may rename): {optional}")
 
         for path, (plugin_name, version_expected) in UNITY_SUBSYSTEMS.items():
             if path not in names:

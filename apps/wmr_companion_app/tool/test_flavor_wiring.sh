@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Prove the ONY-271/ONY-355 Unity include path, flavor isolation and the
-# mutual exclusion guard. Creates throwaway `unityLibrary` stubs in the
-# gitignored locations, builds flavors, then removes them. Needs an Android SDK
+# Prove the ONY-355 unified Unity include path: a unified export is linked into
+# the unified APK, and a unified build with no export still succeeds without a
+# Unity runtime (ONY-520). Creates a throwaway `unityLibrary` stub in the
+# gitignored location, builds the flavor, then removes it. Needs an Android SDK
 # with aapt; no Unity or vendor SDK is required.
 #
 #   tool/test_flavor_wiring.sh
@@ -11,8 +12,6 @@ app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 unity_root="$app_dir/android/unity"
 build_root="$app_dir/build"
 
-viture_permission="com.onyxlens.wmr.UNITY_STUB_VITURE"
-xreal_permission="com.onyxlens.wmr.UNITY_STUB_XREAL"
 unified_permission="com.onyxlens.wmr.UNITY_STUB_UNIFIED"
 
 aapt=""
@@ -26,42 +25,40 @@ if [ -z "$aapt" ]; then
   exit 1
 fi
 
-# A developer may have a real (proprietary, gitignored) VITURE/XREAL/unified
-# export at these paths. Move any such directory aside before writing stubs and
-# put it back on exit; only remove directories this script created itself.
+# A developer may have a real (proprietary, gitignored) unified export at this
+# path. Move it aside before writing the stub and put it back on exit; only
+# remove a directory this script created itself.
 backup_root=""
-restored_vendors=()
-created_vendors=()
+created_stub=0
+created_vendor_stub=0
 
 cleanup() {
-  local vendor
-  for vendor in "${created_vendors[@]+"${created_vendors[@]}"}"; do
-    rm -rf "$unity_root/$vendor"
-  done
+  if [ "$created_stub" -eq 1 ]; then
+    rm -rf "$unity_root/unified"
+  fi
+  if [ "$created_vendor_stub" -eq 1 ]; then
+    rm -rf "$unity_root/viture"
+  fi
   if [ -n "$backup_root" ]; then
-    for vendor in "${restored_vendors[@]+"${restored_vendors[@]}"}"; do
-      mv "$backup_root/$vendor" "$unity_root/$vendor"
+    for saved in "$backup_root"/*; do
+      if [ -e "$saved" ]; then
+        mv "$saved" "$unity_root/"
+      fi
     done
     rmdir "$backup_root"
   fi
 }
 trap cleanup EXIT
 
-for vendor in viture xreal unified; do
-  if [ -e "$unity_root/$vendor" ] || [ -L "$unity_root/$vendor" ]; then
-    if [ -z "$backup_root" ]; then
-      backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
-    fi
-    echo "==> preserving existing $unity_root/$vendor (restored on exit)"
-    mv "$unity_root/$vendor" "$backup_root/$vendor"
-    restored_vendors+=("$vendor")
-  fi
-done
+if [ -e "$unity_root/unified" ] || [ -L "$unity_root/unified" ]; then
+  backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
+  echo "==> preserving existing $unity_root/unified (restored on exit)"
+  mv "$unity_root/unified" "$backup_root/unified"
+fi
 
 create_stub() {
-  local vendor="$1" permission="$2" namespace="com.onyxlens.wmr.unitystub.$1"
-  local dir="$unity_root/$vendor/unityLibrary"
-  created_vendors+=("$vendor")
+  local dir="$unity_root/unified/unityLibrary"
+  created_stub=1
   mkdir -p "$dir/src/main"
   cat >"$dir/build.gradle" <<EOF
 // Throwaway stand-in for a Unity UaaL export, used by tool/test_flavor_wiring.sh.
@@ -77,7 +74,7 @@ buildscript {
 apply plugin: 'com.android.library'
 
 android {
-    namespace = '$namespace'
+    namespace = 'com.onyxlens.wmr.unitystub.unified'
     compileSdk = 36
 
     defaultConfig {
@@ -87,13 +84,13 @@ android {
 EOF
   cat >"$dir/src/main/AndroidManifest.xml" <<EOF
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="$permission" />
+    <uses-permission android:name="$unified_permission" />
 </manifest>
 EOF
 }
 
 apk_path() {
-  echo "$build_root/app/outputs/flutter-apk/app-$1-debug.apk"
+  echo "$build_root/app/outputs/flutter-apk/app-unified-debug.apk"
 }
 
 has_permission() {
@@ -104,99 +101,55 @@ has_permission() {
 # settings.gradle.kts probes the export directories at configuration time, which
 # the configuration cache cannot track. The project disables the cache, but drop
 # any entry anyway so a forced `--configuration-cache` run still re-probes after
-# each stub change (ONY-355).
+# the stub change (ONY-355).
 reset_configuration_cache() {
   rm -rf "$app_dir/android/.gradle/configuration-cache"
 }
 
 build() {
-  local flavor="$1"
   reset_configuration_cache
-  (cd "$app_dir" && tool/build_flavor.sh "$flavor")
+  (cd "$app_dir" && tool/build_flavor.sh unified)
 }
 
-remove_stub() {
-  rm -rf "$unity_root/$1"
-}
-
-expect_build_failure() {
-  local flavor="$1" expected="$2"
-  local output status
-  reset_configuration_cache
-  set +e
-  output="$(cd "$app_dir" && tool/build_flavor.sh "$flavor" 2>&1)"
-  status=$?
-  set -e
-  if [ "$status" -eq 0 ]; then
-    echo "FAIL: $flavor build accepted incompatible Unity exports" >&2
-    exit 1
-  fi
-  if ! grep -q "$expected" <<<"$output"; then
-    echo "FAIL: $flavor failure did not name the conflict:" >&2
-    echo "$output" >&2
-    exit 1
-  fi
-}
-
-echo "==> base with a VITURE unityLibrary present must not link Unity"
-create_stub viture "$viture_permission"
-build base
-if has_permission "$(apk_path base)" "$viture_permission"; then
-  echo "FAIL: base APK linked the VITURE unityLibrary" >&2
-  exit 1
-fi
-echo "PASS: base ignored the VITURE unityLibrary"
-
-echo "==> viture must link the VITURE unityLibrary"
-rm -rf "$build_root/app/outputs/flutter-apk/app-viture-debug.apk"
-build viture
-if ! has_permission "$(apk_path viture)" "$viture_permission"; then
-  echo "FAIL: viture APK did not contain the VITURE unityLibrary manifest" >&2
-  exit 1
-fi
-echo "PASS: viture linked the VITURE unityLibrary"
-
-echo "==> xreal + VITURE both present must fail with a clear message"
-create_stub xreal "$xreal_permission"
-expect_build_failure xreal "Cannot link both Unity libraries"
-echo "PASS: both libraries fail the build with a clear message"
-
-echo "==> xreal with no export must still build"
-remove_stub xreal
-remove_stub viture
-build xreal
-if has_permission "$(apk_path xreal)" "$viture_permission"; then
-  echo "FAIL: xreal APK linked the VITURE unityLibrary" >&2
-  exit 1
-fi
-echo "PASS: xreal built without a Unity export"
-
-echo "==> a unified stub must link only the unified unityLibrary"
-create_stub unified "$unified_permission"
-rm -rf "$build_root/app/outputs/flutter-apk/app-unified-debug.apk"
-build unified
-if ! has_permission "$(apk_path unified)" "$unified_permission"; then
+echo "==> a unified stub must link the unified unityLibrary"
+create_stub
+rm -rf "$(apk_path)"
+build
+if ! has_permission "$(apk_path)" "$unified_permission"; then
   echo "FAIL: unified APK did not contain the unified unityLibrary manifest" >&2
   exit 1
 fi
-for permission in "$viture_permission" "$xreal_permission"; do
-  if has_permission "$(apk_path unified)" "$permission"; then
-    echo "FAIL: unified APK linked a per-vendor unityLibrary ($permission)" >&2
-    exit 1
-  fi
-done
-echo "PASS: unified linked only the unified unityLibrary"
+echo "PASS: unified linked the unified unityLibrary"
 
-echo "==> unified + a VITURE export must fail with a clear message"
-create_stub viture "$viture_permission"
-expect_build_failure unified "cannot be combined with per-vendor Unity exports"
-echo "PASS: unified plus a per-vendor export fails the build with a clear message"
+echo "==> unified plus a per-vendor export must fail at configuration"
+# settings.gradle.kts rejects a unified export next to a per-vendor one; an
+# empty directory is enough because the guard runs before any module builds.
+if [ -e "$unity_root/viture" ]; then
+  [ -n "$backup_root" ] || backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
+  echo "==> preserving existing $unity_root/viture (restored on exit)"
+  mv "$unity_root/viture" "$backup_root/viture"
+fi
+created_vendor_stub=1
+mkdir -p "$unity_root/viture/unityLibrary"
+if build_output="$(build 2>&1)"; then
+  echo "FAIL: unified plus a per-vendor export built instead of failing" >&2
+  exit 1
+fi
+if ! grep -q "cannot be combined with per-vendor" <<<"$build_output"; then
+  echo "FAIL: expected the unified/per-vendor guard, got:" >&2
+  echo "$build_output" >&2
+  exit 1
+fi
+rm -rf "$unity_root/viture"
+created_vendor_stub=0
+echo "PASS: unified refused a per-vendor export"
 
 echo "==> unified with no export must still build"
-remove_stub viture
-remove_stub unified
-build unified
-if has_permission "$(apk_path unified)" "$unified_permission"; then
+rm -rf "$unity_root/unified"
+created_stub=0
+rm -rf "$(apk_path)"
+build
+if has_permission "$(apk_path)" "$unified_permission"; then
   echo "FAIL: unified APK without an export linked a Unity stub" >&2
   exit 1
 fi

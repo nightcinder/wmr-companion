@@ -166,6 +166,11 @@ class MainTest(unittest.TestCase):
             code, output = run_checker(build_apk(Path(tmp), "false"))
         self.assertEqual(code, 0, output)
         self.assertIn("RESULT: PASS", output)
+        self.assertIn(
+            "INFO dex (release may rename): PendingStartGate=renamed/inlined, "
+            "SharedUnityRuntime=renamed/inlined",
+            output,
+        )
 
     def test_camera_required_by_default_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
