@@ -1,4 +1,4 @@
-# Build matrix — tracking flavors (v0.2.1)
+# Build matrix — tracking flavors (v0.2.2)
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
 `apps/wmr_companion_app/tool/install_unity_export.sh`,
@@ -6,27 +6,27 @@ Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.
 `apps/wmr_companion_app/android/settings.gradle.kts`. No build here has been run on
 hardware; these are compile/packaging facts only.
 
-## Current release: v0.2.1 unified APK
+## Current release: v0.2.2 unified APK
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.2.1` → `58b5c40` |
-| App version | `0.2.1+3` (`versionName 0.2.1`, `versionCode 3`) |
-| Artifact | `wmr-companion-0.2.1-unified-debug.apk`, 584,438,127 B, SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b` |
+| Tag / commit | `v0.2.2` (release tag) |
+| App version | `0.2.2+4` (`versionName 0.2.2`, `versionCode 4`) |
+| Artifact | `wmr-companion-0.2.2-unified-debug.apk`, 584,288,364 B, SHA-256 `2507626a981b060566d2e3c7da41a7aa24844435c0db6ea7fbd68d5ca222c755` |
 | Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
 | Unified or fallback | Truly unified. The approved all-flags `base` fallback was **not** used |
 | Signing | Android debug key; not suitable for store distribution |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
 | Licence gate | The owner approved bundling both proprietary SDKs and exported the shared `unityLibrary` (ONY-354; export SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`) |
 
-Release notes: [`v0.2.1`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1).
-The APK was built from PR #103 head `0c3bb40`, whose tree is identical to the tagged
-commit `58b5c40`. The GATT probe asset, `wmr-gatt-probe-0.2.1-debug.apk`, is unchanged
-in shape from v0.2.0.
+Release notes: [`v0.2.2`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.2).
+The APK was built from the ONY-481 release branch with the owner export, and the
+GATT probe asset is `wmr-gatt-probe-0.2.2-debug.apk`. The only app change from
+v0.2.1 is the FF16 firmware string and FF11–FF16 feature bits on the Debug screen.
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
-metadata and the tracking/session classes in the dex. It passed on the v0.2.1
+metadata and the tracking/session classes in the dex. It passed on the v0.2.2
 artifact; the open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
 
 ## Flavors

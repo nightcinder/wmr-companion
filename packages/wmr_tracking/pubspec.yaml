@@ -2,7 +2,7 @@ name: wmr_tracking
 description: >-
   Vendor-neutral headset head and hand tracking sources, timestamps and 6DoF
   controller-pose fusion for the WMR companion.
-version: 0.2.1
+version: 0.2.2
 repository: https://github.com/nightcinder/wmr-companion
 issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 

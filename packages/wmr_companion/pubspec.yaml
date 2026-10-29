@@ -2,7 +2,7 @@ name: wmr_companion
 description: >-
   Public, framework-agnostic facade over the WMR Bridge controller pipeline:
   scan, connect, decode, fuse and map WMR controllers in-process.
-version: 0.2.1
+version: 0.2.2
 repository: https://github.com/nightcinder/wmr-companion
 issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 
@@ -13,8 +13,8 @@ resolution: workspace
 
 dependencies:
   vector_math: ^2.4.3
-  wmr_core: ^0.2.1
-  wmr_tracking: ^0.2.1
+  wmr_core: ^0.2.2
+  wmr_tracking: ^0.2.2
 
 dev_dependencies:
   test: ^1.25.0

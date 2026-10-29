@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- `WmrCompanion` now takes the FF16 `WmrProtocolVersion` from `ControllerService` instead of issuing a second GATT discovery and read. No public API change.
+- Version aligned with the v0.2.2 release; `wmr_core` and `wmr_tracking` constraints raised to `^0.2.2`. No breaking public API change.
+
 ## 0.2.1
 
 - Version aligned with the v0.2.1 gate and harness release; `wmr_core` and `wmr_tracking` constraints raised to `^0.2.1`. No breaking public API change.
