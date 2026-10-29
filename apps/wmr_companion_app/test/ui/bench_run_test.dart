@@ -14,11 +14,46 @@ import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
+import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 /// A 700-byte block exercises both FF13 windows (496 + 204).
 Uint8List _configBlob(int seed) =>
     Uint8List.fromList([for (var i = 0; i < 700; i++) (i + seed) & 0xff]);
+
+/// Writes a valid pose file with the guided bench's fixed name.
+class _FakePoseRecorder implements BenchPoseRecorder {
+  _FakePoseRecorder(this.dir);
+
+  final Directory dir;
+
+  @override
+  String get runtime => 'viture';
+
+  @override
+  Future<PoseCaptureResult> record({
+    required int hand,
+    required PoseSegment segment,
+    required Duration duration,
+  }) async {
+    final name =
+        'pose_capture_viture_${hand == 0 ? 'left' : 'right'}_'
+        '${segment.id}.json';
+    final file = File('${dir.path}/$name')
+      ..writeAsStringSync(
+        '{"format":"wmr-pose-recording","version":1,'
+        '"samples":[]}',
+      );
+    return PoseCaptureResult(
+      runtime: runtime,
+      path: file.path,
+      samples: 3,
+      seconds: duration.inSeconds,
+    );
+  }
+}
 
 void main() {
   late Directory dir;
@@ -45,10 +80,18 @@ void main() {
         move: Duration(milliseconds: 80),
         capture: Duration(milliseconds: 250),
         latency: Duration(milliseconds: 250),
+        poseStill: Duration(milliseconds: 10),
+        poseDrifting: Duration(milliseconds: 10),
+        poseSlowPan: Duration(milliseconds: 10),
+        poseMediumPan: Duration(milliseconds: 10),
+        poseFastFlick: Duration(milliseconds: 10),
         handTimeout: Duration(seconds: 2),
         firmwareTimeout: Duration(seconds: 2),
       ),
       mtu: 185,
+      poseRecorder: _FakePoseRecorder(dir),
+      appCommit: 'abc1234',
+      firmwareSha: 'deadbee',
     );
   }
 
@@ -142,6 +185,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => session),
+        benchPoseAvailabilityProvider.overrideWithValue(
+          const BenchPoseAvailability.available('viture'),
+        ),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) => writeTestBundle(
             TestBundleInput(
@@ -163,7 +209,10 @@ void main() {
     addTearDown(sub.close);
     final controller = container.read(benchControllerProvider.notifier);
 
-    for (var i = 0; i < 9; i++) {
+    for (var i = 0; i < 30; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
+        break;
+      }
       await controller.runCurrent();
     }
     expect(container.read(benchControllerProvider).step, BenchStep.photo);
@@ -181,5 +230,64 @@ void main() {
     for (final step in BenchStep.values) {
       expect(manifest, contains('- ${step.id}: done'), reason: step.id);
     }
+    expect(manifest, contains('## 6DoF pose captures'));
+    expect(manifest, contains('pose_capture_viture_left_still.json'));
+    expect(manifest, contains('pose_capture_viture_right_fast_flick.json'));
+    expect(manifest, contains('- App commit: abc1234'));
+  });
+
+  group('pose gate', () {
+    DebugTrackingSelection selection(
+      DebugTrackingSource choice, {
+      TrackingSource? source,
+    }) => DebugTrackingSelection(
+      choice: choice,
+      attachment: AsyncValue.data(
+        DebugTrackingAttachment(choice: choice, source: source),
+      ),
+    );
+
+    test('no source, simulated and jointless sources are unavailable', () {
+      expect(
+        BenchPoseAvailability.fromSelection(selection(DebugTrackingSource.none))
+            .available,
+        isFalse,
+      );
+      expect(
+        BenchPoseAvailability.fromSelection(
+          selection(
+            DebugTrackingSource.simulated,
+            source: FakeTrackingSource(),
+          ),
+        ).available,
+        isFalse,
+        reason: 'the simulator is not a real 6DoF runtime',
+      );
+      final jointless = FakeTrackingSource(
+        capabilities: const TrackingCapabilities(
+          features: {TrackingFeature.headPose6Dof},
+        ),
+      );
+      expect(
+        BenchPoseAvailability.fromSelection(
+          selection(DebugTrackingSource.viture, source: jointless),
+        ).available,
+        isFalse,
+      );
+    });
+
+    test('a running vendor source with hand joints offers the step', () {
+      for (final choice in [
+        DebugTrackingSource.viture,
+        DebugTrackingSource.xreal,
+        DebugTrackingSource.androidXr,
+      ]) {
+        final availability = BenchPoseAvailability.fromSelection(
+          selection(choice, source: FakeTrackingSource()),
+        );
+        expect(availability.available, isTrue, reason: choice.name);
+        expect(availability.runtime, choice.name);
+      }
+    });
   });
 }

@@ -15,10 +15,18 @@ class PoseRecordingStore {
   static final RegExp _namePattern = RegExp(r'^pose-\d{8}-\d{6}\.json$');
 
   /// Writes [recording] and returns the new file.
-  Future<File> save(PoseRecording recording, DateTime now) async {
+  ///
+  /// [name] lets the guided bench use its fixed
+  /// `pose_capture_<runtime>_<hand>_<segment>.json` name; the debug screen
+  /// keeps the timestamped default.
+  Future<File> save(
+    PoseRecording recording,
+    DateTime now, {
+    String? name,
+  }) async {
     await directory.create(recursive: true);
     final separator = Platform.pathSeparator;
-    final file = File('${directory.path}$separator${fileName(now)}');
+    final file = File('${directory.path}$separator${name ?? fileName(now)}');
     await file.writeAsString(recording.encode());
     return file;
   }

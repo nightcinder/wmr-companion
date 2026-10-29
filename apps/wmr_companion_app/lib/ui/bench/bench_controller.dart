@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle.dart';
 import '../../services/test_bundle_export.dart';
+import 'bench_pose.dart';
 import 'bench_run.dart';
 
 enum BenchStatus { pending, running, done, skipped, failed }
@@ -35,10 +36,14 @@ class BenchRunState {
     this.present = const [],
     this.missing = const [],
     this.bundleError,
+    this.poseSegment = 0,
   });
 
   final BenchStep step;
   final Map<BenchStep, BenchStepResult> results;
+
+  /// Index into [benchPoseSequence] while [step] is [BenchStep.poseCapture].
+  final int poseSegment;
   final bool exporting;
   final String? bundlePath;
   final String? fileName;
@@ -74,10 +79,12 @@ class BenchRunState {
     List<String>? missing,
     String? bundleError,
     bool clearBundleError = false,
+    int? poseSegment,
   }) {
     return BenchRunState(
       step: step ?? this.step,
       results: results ?? this.results,
+      poseSegment: poseSegment ?? this.poseSegment,
       exporting: exporting ?? this.exporting,
       bundlePath: bundlePath ?? this.bundlePath,
       fileName: fileName ?? this.fileName,
@@ -96,6 +103,8 @@ final benchControllerProvider =
 /// Drives one step at a time. Measurements run through [BenchSession] so the
 /// machine is testable against the fake bridge without any UI.
 class BenchController extends Notifier<BenchRunState> {
+  final List<Map<String, Object?>> _poseEntries = [];
+
   @override
   BenchRunState build() => const BenchRunState();
 
@@ -117,6 +126,10 @@ class BenchController extends Notifier<BenchRunState> {
             error: 'Not connected to the bridge.',
           ),
         );
+        return;
+      }
+      if (step == BenchStep.poseCapture) {
+        await _runPoseSegment(session);
         return;
       }
       final outcome = await _runStep(session, step);
@@ -156,10 +169,99 @@ class BenchController extends Notifier<BenchRunState> {
         BenchStep.moveRight => session.move(1),
         BenchStep.capture => session.capture(),
         BenchStep.latency => session.latency(),
+        BenchStep.poseCapture ||
         BenchStep.photo ||
         BenchStep.serialLog ||
         BenchStep.export => throw StateError('Step $step does not run'),
       };
+
+  /// Runs one segment of the 6DoF step. Each segment keeps the step current so
+  /// the screen can show its own prompt and countdown; the step ends after the
+  /// last segment, or on skip.
+  Future<void> _runPoseSegment(BenchSession session) async {
+    final index = state.poseSegment;
+    if (index >= benchPoseSequence.length) return;
+    final spec = benchPoseSequence[index];
+    final durations = ref.read(benchDurationsProvider);
+    _setResult(
+      BenchStep.poseCapture,
+      BenchStepResult(
+        status: BenchStatus.running,
+        data: {
+          'segments': [..._poseEntries],
+        },
+      ),
+    );
+    final outcome = await session.poseSegment(
+      spec.hand,
+      spec.segment,
+      durations.poseDuration(spec.segment),
+    );
+    if (!ref.mounted) return;
+    _poseEntries.add({
+      ...outcome.data,
+      'runtime':
+          outcome.data['runtime'] ??
+          ref.read(benchPoseAvailabilityProvider).runtime,
+      'hand': RealBenchSession.handName(spec.hand),
+      'segment': spec.segment.id,
+      'status': outcome.ok ? 'done' : 'skipped',
+      if (!outcome.ok) 'reason': outcome.error ?? 'failed',
+    });
+    if (index + 1 >= benchPoseSequence.length) {
+      _finishPose();
+      return;
+    }
+    state = state.copyWith(
+      poseSegment: index + 1,
+      results: {
+        ...state.results,
+        BenchStep.poseCapture: BenchStepResult(
+          data: {
+            'segments': [..._poseEntries],
+          },
+        ),
+      },
+    );
+    _publish();
+  }
+
+  void _finishPose() {
+    final done = _poseEntries.where((e) => e['status'] == 'done').length;
+    final status = done == 0 ? BenchStatus.skipped : BenchStatus.done;
+    _setResult(
+      BenchStep.poseCapture,
+      BenchStepResult(
+        status: status,
+        summary: done == 0
+            ? 'No pose segments recorded'
+            : '$done of ${_poseEntries.length} pose segments recorded',
+        error: done == 0 ? 'all segments skipped' : null,
+        data: {
+          'segments': [..._poseEntries],
+        },
+      ),
+    );
+    _advance();
+  }
+
+  void _skipRemainingPose() {
+    for (
+      var index = state.poseSegment;
+      index < benchPoseSequence.length;
+      index++
+    ) {
+      final spec = benchPoseSequence[index];
+      _poseEntries.add({
+        'runtime': ref.read(benchPoseAvailabilityProvider).runtime,
+        'hand': RealBenchSession.handName(spec.hand),
+        'segment': spec.segment.id,
+        'status': 'skipped',
+        'reason': 'skipped by tester',
+      });
+    }
+    _finishPose();
+  }
 
   /// Marks a prompt step done and moves on.
   Future<void> confirmCurrent() async {
@@ -180,6 +282,10 @@ class BenchController extends Notifier<BenchRunState> {
   void skipCurrent() {
     final step = state.step;
     if (state.busy || step == BenchStep.export) return;
+    if (step == BenchStep.poseCapture) {
+      _skipRemainingPose();
+      return;
+    }
     _setResult(step, const BenchStepResult(status: BenchStatus.skipped));
     _advance();
   }
@@ -228,9 +334,32 @@ class BenchController extends Notifier<BenchRunState> {
   }
 
   void _advance() {
-    final next = state.index + 1;
+    var next = state.index + 1;
+    while (next < BenchStep.values.length) {
+      final step = BenchStep.values[next];
+      // The pose step is offered only when a hand-tracking runtime is active.
+      // With none, it records itself skipped and the run continues.
+      if (step == BenchStep.poseCapture) {
+        final availability = ref.read(benchPoseAvailabilityProvider);
+        if (!availability.available) {
+          _setResult(
+            step,
+            BenchStepResult(
+              status: BenchStatus.skipped,
+              summary: availability.reason,
+              error: availability.reason,
+              data: const {'segments': []},
+            ),
+          );
+          next++;
+          continue;
+        }
+        _poseEntries.clear();
+      }
+      break;
+    }
     if (next >= BenchStep.values.length) return;
-    state = state.copyWith(step: BenchStep.values[next]);
+    state = state.copyWith(step: BenchStep.values[next], poseSegment: 0);
     _publish();
   }
 

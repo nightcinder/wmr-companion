@@ -37,6 +37,94 @@ void main() {
     loss: const [0.001, null],
   );
 
+  test('adds pose captures with fixed names and provenance', () async {
+    final pose = File('${dir.path}/pose_capture_viture_left_still.json')
+      ..writeAsStringSync(
+        '{"format":"wmr-pose-recording","version":1,'
+        '"samples":[]}',
+      );
+    final bench = BenchBundleRun([
+      BenchBundleStep(
+        id: 'pose_capture',
+        status: 'done',
+        summary: '1 of 1 pose segments recorded',
+        data: {
+          'segments': [
+            {
+              'runtime': 'viture',
+              'hand': 'LEFT',
+              'segment': 'still',
+              'status': 'done',
+              'file': pose.path,
+              'samples': 7,
+              'app_commit': 'abc1234',
+              'firmware_sha': 'deadbee',
+            },
+            {
+              'runtime': 'viture',
+              'hand': 'LEFT',
+              'segment': 'drifting',
+              'status': 'skipped',
+              'reason': 'skipped by tester',
+            },
+          ],
+        },
+      ),
+    ]);
+
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 10, 29, 16, 30),
+        appVersion: '0.2.2+4',
+        appCommit: 'abc1234',
+        phone: 'Test Phone',
+        androidVersion: 'Android 14 (API 34)',
+        streamMode: 'batched',
+        bridges: [bridge('0.3.0')],
+        poseCaptures: [
+          PoseCaptureFile(
+            path: pose.path,
+            runtime: 'viture',
+            hand: 'left',
+            segment: 'still',
+          ),
+        ],
+        benchRun: bench,
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final names = [for (final file in archive.files) file.name];
+    expect(names, contains('pose_capture_viture_left_still.json'));
+    expect(
+      bundle.present.join('\n'),
+      contains('6DoF pose captures: 1 file(s)'),
+    );
+
+    final manifest = text(archive, 'manifest.md');
+    expect(manifest, contains('- App commit: abc1234'));
+    expect(manifest, contains('## 6DoF pose captures'));
+    expect(manifest, contains('- Runtime: viture'));
+    expect(manifest, contains('- Firmware SHA: deadbee'));
+    expect(
+      manifest,
+      contains(
+        '| pose_capture_viture_left_still.json | LEFT '
+        '| still | done | 7 | — |',
+      ),
+    );
+    expect(
+      manifest,
+      contains(
+        '| — | LEFT | drifting | skipped | — | '
+        'skipped by tester |',
+      ),
+    );
+  });
+
   test(
     'zips the manifest, diagnostics, latest latency run and captures',
     () async {
@@ -107,6 +195,7 @@ void main() {
       expect(diagnostics['app'], {
         'name': 'wmr_companion_app',
         'version': '0.2.2+4',
+        'commit': 'unknown',
       });
       expect((diagnostics['stream'] as Map)['mode'], 'raw');
       final bridgeJson = (diagnostics['bridges'] as List).single as Map;

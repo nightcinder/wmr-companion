@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle_export.dart';
 import 'bench_controller.dart';
+import 'bench_pose.dart';
 import 'bench_run.dart';
 
 /// One step per screen, every step skippable, ending in the test bundle zip.
@@ -16,6 +19,9 @@ class BenchScreen extends ConsumerStatefulWidget {
 
 class _BenchScreenState extends ConsumerState<BenchScreen> {
   late final BenchBundleNotifier _bundles;
+  Timer? _poseTimer;
+  int? _poseTimerSegment;
+  int _poseRemaining = 0;
 
   @override
   void initState() {
@@ -34,9 +40,45 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
 
   @override
   void dispose() {
+    _poseTimer?.cancel();
     // A finished run must not attach itself to a later plain export.
     _bundles.clear();
     super.dispose();
+  }
+
+  double _poseProgress(BenchDurations durations, PoseSegment segment) {
+    final total = durations.poseDuration(segment).inSeconds;
+    if (total <= 0 || _poseRemaining <= 0) return 1;
+    return 1 - _poseRemaining / total;
+  }
+
+  /// Counts down only while a pose segment is running. The controller owns the
+  /// segment index, so a new index restarts the count.
+  void _syncPoseCountdown(BenchRunState state, BenchDurations durations) {
+    final running =
+        state.step == BenchStep.poseCapture &&
+        state.current.status == BenchStatus.running;
+    if (!running) {
+      _poseTimer?.cancel();
+      _poseTimer = null;
+      _poseTimerSegment = null;
+      return;
+    }
+    if (_poseTimer != null && _poseTimerSegment == state.poseSegment) return;
+    _poseTimer?.cancel();
+    _poseTimerSegment = state.poseSegment;
+    final spec = benchPoseSequence[state.poseSegment];
+    final seconds = durations.poseDuration(spec.segment).inSeconds;
+    _poseRemaining = seconds;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _poseTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() {
+          if (_poseRemaining > 0) _poseRemaining--;
+        });
+      });
+    });
   }
 
   @override
@@ -50,6 +92,10 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final result = state.current;
     final total = BenchStep.values.length;
     final finished = state.completed + state.skipped + state.failed;
+    final poseSpec = step == BenchStep.poseCapture
+        ? benchPoseSequence[state.poseSegment]
+        : null;
+    _syncPoseCountdown(state, durations);
 
     return PopScope(
       canPop: !state.busy,
@@ -61,12 +107,38 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
             LinearProgressIndicator(value: finished / total),
             const SizedBox(height: 12),
             Text(
-              'Step ${state.index + 1} of $total',
+              poseSpec == null
+                  ? 'Step ${state.index + 1} of $total'
+                  : 'Step ${state.index + 1} of $total  ·  '
+                        'Pose ${state.poseSegment + 1} of '
+                        '${benchPoseSequence.length}',
               style: theme.textTheme.labelLarge,
             ),
-            Text(step.title, style: theme.textTheme.headlineSmall),
+            Text(
+              poseSpec == null
+                  ? step.title
+                  : '${poseSpec.segment.title} — '
+                        '${RealBenchSession.handName(poseSpec.hand)}',
+              style: theme.textTheme.headlineSmall,
+            ),
             const SizedBox(height: 8),
-            Text(step.instructions(durations)),
+            Text(
+              poseSpec == null
+                  ? step.instructions(durations)
+                  : '${RealBenchSession.handName(poseSpec.hand)}: '
+                        '${poseSpec.segment.prompt}',
+            ),
+            if (poseSpec != null && result.status == BenchStatus.running) ...[
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: _poseProgress(durations, poseSpec.segment),
+              ),
+              Text(
+                '$_poseRemaining s left',
+                key: const Key('bench-pose-countdown'),
+                style: theme.textTheme.titleMedium,
+              ),
+            ],
             const SizedBox(height: 16),
             _status(result, mono, theme),
             const SizedBox(height: 16),
@@ -100,6 +172,9 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   ) {
     final step = state.step;
     final result = state.current;
+    final poseSpec = step == BenchStep.poseCapture
+        ? benchPoseSequence[state.poseSegment]
+        : null;
     if (step == BenchStep.export) {
       return [
         FilledButton(
@@ -161,7 +236,11 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
       FilledButton(
         key: const Key('bench-start'),
         onPressed: controller.runCurrent,
-        child: Text(_startLabel(step, durations)),
+        child: Text(
+          poseSpec == null
+              ? _startLabel(step, durations)
+              : 'Start ${durations.poseDuration(poseSpec.segment).inSeconds} s',
+        ),
       ),
       const SizedBox(height: 8),
       TextButton(
@@ -218,6 +297,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         BenchStep.stillRight => 'Start ${durations.still.inSeconds} s',
         BenchStep.moveLeft ||
         BenchStep.moveRight => 'Start ${durations.move.inSeconds} s',
+        BenchStep.poseCapture => 'Start',
         BenchStep.capture => 'Start ${durations.capture.inSeconds} s capture',
         BenchStep.latency => 'Start ${durations.latency.inSeconds} s',
         BenchStep.photo ||

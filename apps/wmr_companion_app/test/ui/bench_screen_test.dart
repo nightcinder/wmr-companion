@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
+import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 
@@ -46,6 +47,16 @@ class _FakeSession implements BenchSession {
   );
 
   @override
+  Future<BenchStepOutcome> poseSegment(
+    int hand,
+    PoseSegment segment,
+    Duration duration,
+  ) => _outcome(
+    BenchStep.poseCapture,
+    '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} saved',
+  );
+
+  @override
   Future<BenchStepOutcome> capture() =>
       _outcome(BenchStep.capture, '2400 frames saved');
 
@@ -64,11 +75,15 @@ void main() {
 
   Future<ProviderContainer> open(
     WidgetTester tester,
-    BenchSession session,
-  ) async {
+    BenchSession session, {
+    BenchPoseAvailability pose = const BenchPoseAvailability.available(
+      'viture',
+    ),
+  }) async {
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => session),
+        benchPoseAvailabilityProvider.overrideWithValue(pose),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) async => bundle(),
         ),
@@ -98,19 +113,31 @@ void main() {
   ) async {
     final container = await open(tester, _FakeSession());
 
-    expect(find.text('Step 2 of 12'), findsOneWidget);
+    expect(find.text('Step 2 of 13'), findsOneWidget);
     expect(find.text('Both hands seen'), findsWidgets);
 
-    for (var i = 0; i < 8; i++) {
+    // Walk the measured steps, including all ten pose segments, until the
+    // photo prompt.
+    for (var i = 0; i < 30; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
+        break;
+      }
       await tap(tester, 'bench-start');
     }
-    expect(find.text('Step 10 of 12'), findsOneWidget);
+    expect(find.text('Step 11 of 13'), findsOneWidget);
     expect(find.text('LED photo'), findsOneWidget);
+    expect(
+      container
+          .read(benchControllerProvider)
+          .resultFor(BenchStep.poseCapture)
+          .status,
+      BenchStatus.done,
+    );
 
     await tap(tester, 'bench-confirm');
-    expect(find.text('Step 11 of 12'), findsOneWidget);
+    expect(find.text('Step 12 of 13'), findsOneWidget);
     await tap(tester, 'bench-confirm');
-    expect(find.text('Step 12 of 12'), findsOneWidget);
+    expect(find.text('Step 13 of 13'), findsOneWidget);
 
     await tap(tester, 'bench-export');
 
@@ -138,7 +165,7 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
 
     await tap(tester, 'bench-skip');
-    expect(find.text('Step 4 of 12'), findsOneWidget);
+    expect(find.text('Step 4 of 13'), findsOneWidget);
 
     final state = container.read(benchControllerProvider);
     expect(
@@ -160,10 +187,69 @@ void main() {
 
     await tap(tester, 'bench-start');
     expect(find.textContaining('both_hands exploded'), findsOneWidget);
-    expect(find.text('Step 2 of 12'), findsOneWidget);
+    expect(find.text('Step 2 of 13'), findsOneWidget);
 
     final state = container.read(benchControllerProvider);
     expect(state.resultFor(BenchStep.bothHands).status, BenchStatus.failed);
+  });
+
+  testWidgets('pose step is skipped when no hand-tracking source is active', (
+    tester,
+  ) async {
+    final container = await open(
+      tester,
+      _FakeSession(),
+      pose: const BenchPoseAvailability.unavailable(
+        'unavailable: no 6DoF hand-tracking source',
+      ),
+    );
+
+    for (var i = 0; i < 10; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.capture) {
+        break;
+      }
+      await tap(tester, 'bench-start');
+    }
+
+    final state = container.read(benchControllerProvider);
+    expect(state.step, BenchStep.capture);
+    final pose = state.resultFor(BenchStep.poseCapture);
+    expect(pose.status, BenchStatus.skipped);
+    expect(pose.summary, contains('unavailable: no 6DoF hand-tracking source'));
+    final published = container.read(benchBundleProvider)!;
+    expect(
+      published.steps.firstWhere((step) => step.id == 'pose_capture').status,
+      'skipped',
+    );
+  });
+
+  testWidgets('skipping the pose step records every segment and continues', (
+    tester,
+  ) async {
+    final container = await open(tester, _FakeSession());
+    for (var i = 0; i < 10; i++) {
+      if (container.read(benchControllerProvider).step ==
+          BenchStep.poseCapture) {
+        break;
+      }
+      await tap(tester, 'bench-start');
+    }
+    expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
+
+    await tap(tester, 'bench-skip');
+
+    final state = container.read(benchControllerProvider);
+    expect(state.step, BenchStep.capture);
+    expect(state.resultFor(BenchStep.poseCapture).status, BenchStatus.skipped);
+    final published = container.read(benchBundleProvider)!;
+    final step = published.steps.firstWhere((s) => s.id == 'pose_capture');
+    expect(step.status, 'skipped');
+    final segments = step.data['segments']! as List;
+    expect(segments, hasLength(benchPoseSequence.length));
+    expect(
+      segments.every((segment) => (segment as Map)['status'] == 'skipped'),
+      isTrue,
+    );
   });
 
   testWidgets('leaving the screen clears the run before a plain export', (
