@@ -35,6 +35,10 @@ class _FakeSession implements BenchSession {
   }
 
   @override
+  Future<BenchStepOutcome> deviceSummary() =>
+      _outcome(BenchStep.deviceSummary, 'fake: 26 hand joints');
+
+  @override
   Future<BenchStepOutcome> connect() =>
       _outcome(BenchStep.connect, '1 bridge: fake (MTU 185, raw)');
 
@@ -119,6 +123,7 @@ void main() {
     BenchPoseAvailability pose = const BenchPoseAvailability.available(
       'viture',
     ),
+    BenchMode mode = BenchMode.threeDofOnly,
   }) async {
     final container = ProviderContainer(
       overrides: [
@@ -139,6 +144,13 @@ void main() {
     // initState runs the connect step after the first frame.
     await tester.pump();
     await tester.pump();
+    if (mode != BenchMode.threeDofOnly) {
+      container.read(benchControllerProvider.notifier).selectMode(mode);
+      await tester.pump();
+      await container.read(benchControllerProvider.notifier).runCurrent();
+      await tester.pump();
+      await tester.pump();
+    }
     return container;
   }
 
@@ -148,10 +160,28 @@ void main() {
     await tester.pump();
   }
 
+  /// Runs or confirms steps until [target] is on screen.
+  Future<void> walkTo(
+    WidgetTester tester,
+    ProviderContainer container,
+    BenchStep target,
+  ) async {
+    for (var i = 0; i < 40; i++) {
+      final state = container.read(benchControllerProvider);
+      if (state.step == target) return;
+      await tap(tester, state.step.isPrompt ? 'bench-confirm' : 'bench-start');
+    }
+    fail('did not reach ${target.id}');
+  }
+
   testWidgets('happy path: one step per screen through the bundle', (
     tester,
   ) async {
-    final container = await open(tester, _FakeSession());
+    final container = await open(
+      tester,
+      _FakeSession(),
+      mode: BenchMode.combined,
+    );
 
     expect(find.text('Step 2 of 13'), findsOneWidget);
     expect(find.text('Both hands seen'), findsWidgets);
@@ -164,8 +194,17 @@ void main() {
       }
       await tap(tester, 'bench-start');
     }
-    expect(find.text('Step 11 of 13'), findsOneWidget);
+    expect(find.text('Step 10 of 13'), findsOneWidget);
     expect(find.text('LED photo'), findsOneWidget);
+
+    await tap(tester, 'bench-confirm');
+    expect(find.text('Step 11 of 13'), findsOneWidget);
+    await tap(tester, 'bench-confirm');
+    expect(find.textContaining('Step 12 of 13'), findsOneWidget);
+
+    for (var i = 0; i < benchPoseSequence.length; i++) {
+      await tap(tester, 'bench-start');
+    }
     expect(
       container
           .read(benchControllerProvider)
@@ -173,10 +212,6 @@ void main() {
           .status,
       BenchStatus.done,
     );
-
-    await tap(tester, 'bench-confirm');
-    expect(find.text('Step 12 of 13'), findsOneWidget);
-    await tap(tester, 'bench-confirm');
     expect(find.text('Step 13 of 13'), findsOneWidget);
 
     await tap(tester, 'bench-export');
@@ -184,13 +219,14 @@ void main() {
     expect(find.textContaining('wmr-ext-20261029.zip'), findsWidgets);
     final state = container.read(benchControllerProvider);
     expect(state.bundlePath, '/tmp/wmr-ext-20261029.zip');
-    for (final step in BenchStep.values) {
+    for (final step in state.steps) {
       expect(state.resultFor(step).status, BenchStatus.done, reason: step.id);
     }
     final published = container.read(benchBundleProvider)!;
-    expect(published.steps, hasLength(BenchStep.values.length));
+    expect(published.steps, hasLength(state.steps.length));
     expect(published.steps.every((s) => s.status == 'done'), isTrue);
-    expect(published.steps.map((s) => s.id), BenchStep.values.map((s) => s.id));
+    expect(published.steps.map((s) => s.id), state.steps.map((s) => s.id));
+    expect(published.mode, 'combined');
   });
 
   testWidgets('a failed step is shown and can be skipped', (tester) async {
@@ -205,7 +241,7 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
 
     await tap(tester, 'bench-skip');
-    expect(find.text('Step 4 of 13'), findsOneWidget);
+    expect(find.text('Step 4 of 12'), findsOneWidget);
 
     final state = container.read(benchControllerProvider);
     expect(
@@ -227,7 +263,7 @@ void main() {
 
     await tap(tester, 'bench-start');
     expect(find.textContaining('both_hands exploded'), findsOneWidget);
-    expect(find.text('Step 2 of 13'), findsOneWidget);
+    expect(find.text('Step 2 of 12'), findsOneWidget);
 
     final state = container.read(benchControllerProvider);
     expect(state.resultFor(BenchStep.bothHands).status, BenchStatus.failed);
@@ -242,17 +278,20 @@ void main() {
       pose: const BenchPoseAvailability.unavailable(
         'unavailable: no 6DoF hand-tracking source',
       ),
+      mode: BenchMode.combined,
     );
 
     for (var i = 0; i < 10; i++) {
-      if (container.read(benchControllerProvider).step == BenchStep.capture) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
         break;
       }
       await tap(tester, 'bench-start');
     }
+    await tap(tester, 'bench-confirm');
+    await tap(tester, 'bench-confirm');
 
     final state = container.read(benchControllerProvider);
-    expect(state.step, BenchStep.capture);
+    expect(state.step, BenchStep.export);
     final pose = state.resultFor(BenchStep.poseCapture);
     expect(pose.status, BenchStatus.skipped);
     expect(pose.summary, contains('unavailable: no 6DoF hand-tracking source'));
@@ -266,15 +305,12 @@ void main() {
   testWidgets('skipping pose segments records them and continues', (
     tester,
   ) async {
-    final container = await open(tester, _FakeSession());
-    for (var i = 0; i < 10; i++) {
-      if (container.read(benchControllerProvider).step ==
-          BenchStep.poseCapture) {
-        break;
-      }
-      await tap(tester, 'bench-start');
-    }
-    expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
+    final container = await open(
+      tester,
+      _FakeSession(),
+      mode: BenchMode.combined,
+    );
+    await walkTo(tester, container, BenchStep.poseCapture);
 
     await tap(tester, 'bench-skip');
     var state = container.read(benchControllerProvider);
@@ -291,7 +327,7 @@ void main() {
 
     await tap(tester, 'bench-skip-remaining');
     state = container.read(benchControllerProvider);
-    expect(state.step, BenchStep.capture);
+    expect(state.step, BenchStep.export);
     expect(state.resultFor(BenchStep.poseCapture).status, BenchStatus.skipped);
     step = container
         .read(benchBundleProvider)!
@@ -307,14 +343,12 @@ void main() {
   });
 
   testWidgets('a segment already recording can be skipped', (tester) async {
-    final container = await open(tester, _FakeSession(holdPose: true));
-    for (var i = 0; i < 10; i++) {
-      if (container.read(benchControllerProvider).step ==
-          BenchStep.poseCapture) {
-        break;
-      }
-      await tap(tester, 'bench-start');
-    }
+    final container = await open(
+      tester,
+      _FakeSession(holdPose: true),
+      mode: BenchMode.combined,
+    );
+    await walkTo(tester, container, BenchStep.poseCapture);
     await tap(tester, 'bench-start');
     expect(
       container.read(benchControllerProvider).current.status,
@@ -346,14 +380,9 @@ void main() {
     final container = await open(
       tester,
       _FakeSession(failingSegments: {PoseSegment.still}),
+      mode: BenchMode.combined,
     );
-    for (var i = 0; i < 10; i++) {
-      if (container.read(benchControllerProvider).step ==
-          BenchStep.poseCapture) {
-        break;
-      }
-      await tap(tester, 'bench-start');
-    }
+    await walkTo(tester, container, BenchStep.poseCapture);
     await tap(tester, 'bench-start'); // the failing still segment
 
     var state = container.read(benchControllerProvider);
@@ -373,7 +402,7 @@ void main() {
       await tap(tester, 'bench-start');
     }
     state = container.read(benchControllerProvider);
-    expect(state.step, BenchStep.capture);
+    expect(state.step, BenchStep.export);
     expect(state.resultFor(BenchStep.poseCapture).status, BenchStatus.done);
     segments =
         container

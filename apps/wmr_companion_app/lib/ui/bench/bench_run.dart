@@ -10,10 +10,13 @@ import 'package:wmr_core/services/config_client.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_core/services/latency_recorder.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
+import '../../services/firmware_identity.dart';
 import '../../services/test_bundle_export.dart';
 import '../capture/capture_providers.dart';
 import '../connect/connect_providers.dart';
+import '../debug/debug_providers.dart';
 import '../debug/pose_recording_store.dart';
 import '../latency/latency_providers.dart';
 import 'bench_pose.dart';
@@ -63,8 +66,86 @@ final benchDurationsProvider = Provider<BenchDurations>(
   (ref) => const BenchDurations(),
 );
 
-/// Order of the wizard. The id is what the manifest and the tests key on.
+/// The wizard variant chosen on the bench page.
+enum BenchMode {
+  threeDofOnly('3dof_only', '3DoF only'),
+  sixDofOnly('6dof_only', '6DoF only'),
+  combined('combined', 'Combined');
+
+  const BenchMode(this.id, this.label);
+
+  final String id;
+  final String label;
+
+  List<BenchStep> get steps => switch (this) {
+    BenchMode.threeDofOnly => const [
+      BenchStep.connect,
+      BenchStep.bothHands,
+      BenchStep.firmwareConfig,
+      BenchStep.stillLeft,
+      BenchStep.stillRight,
+      BenchStep.moveLeft,
+      BenchStep.moveRight,
+      BenchStep.capture,
+      BenchStep.latency,
+      BenchStep.photo,
+      BenchStep.serialLog,
+      BenchStep.export,
+    ],
+    BenchMode.sixDofOnly => const [
+      BenchStep.deviceSummary,
+      BenchStep.connect,
+      BenchStep.bothHands,
+      BenchStep.firmwareConfig,
+      BenchStep.stillLeft,
+      BenchStep.stillRight,
+      BenchStep.moveLeft,
+      BenchStep.moveRight,
+      BenchStep.capture,
+      BenchStep.latency,
+      BenchStep.photo,
+      BenchStep.serialLog,
+      BenchStep.poseCapture,
+      BenchStep.export,
+    ],
+    BenchMode.combined => const [
+      BenchStep.connect,
+      BenchStep.bothHands,
+      BenchStep.firmwareConfig,
+      BenchStep.stillLeft,
+      BenchStep.stillRight,
+      BenchStep.moveLeft,
+      BenchStep.moveRight,
+      BenchStep.capture,
+      BenchStep.latency,
+      BenchStep.photo,
+      BenchStep.serialLog,
+      BenchStep.poseCapture,
+      BenchStep.export,
+    ],
+  };
+
+  /// Steps that need the bridge. In [sixDofOnly] they are recorded as skipped
+  /// instead of being removed, so the manifest says why they did not run.
+  static const List<BenchStep> bridgeOnlySteps = [
+    BenchStep.connect,
+    BenchStep.bothHands,
+    BenchStep.firmwareConfig,
+    BenchStep.stillLeft,
+    BenchStep.stillRight,
+    BenchStep.moveLeft,
+    BenchStep.moveRight,
+    BenchStep.capture,
+    BenchStep.latency,
+    BenchStep.photo,
+    BenchStep.serialLog,
+  ];
+}
+
+/// Every step any bench mode can use. Each [BenchMode] supplies its own order.
+/// The id is what the manifest and the tests key on.
 enum BenchStep {
+  deviceSummary('device_summary'),
   connect('connect'),
   bothHands('both_hands'),
   firmwareConfig('firmware_config'),
@@ -72,11 +153,11 @@ enum BenchStep {
   stillRight('still_right'),
   moveLeft('move_left'),
   moveRight('move_right'),
-  poseCapture('pose_capture'),
   capture('capture'),
   latency('latency'),
   photo('photo'),
   serialLog('serial_log'),
+  poseCapture('pose_capture'),
   export('export');
 
   const BenchStep(this.id);
@@ -84,6 +165,7 @@ enum BenchStep {
   final String id;
 
   String get title => switch (this) {
+    BenchStep.deviceSummary => 'Device and capability summary',
     BenchStep.connect => 'Connect the bridge',
     BenchStep.bothHands => 'Both hands seen',
     BenchStep.firmwareConfig => 'Firmware and config',
@@ -91,11 +173,11 @@ enum BenchStep {
     BenchStep.stillRight => 'RIGHT: hold still',
     BenchStep.moveLeft => 'LEFT: slow move',
     BenchStep.moveRight => 'RIGHT: slow move',
-    BenchStep.poseCapture => 'Capture 6DoF pose',
     BenchStep.capture => 'Record 60 s of FF11',
     BenchStep.latency => 'Measure latency',
     BenchStep.photo => 'LED photo',
     BenchStep.serialLog => 'Serial log',
+    BenchStep.poseCapture => 'Capture 6DoF pose',
     BenchStep.export => 'Write the test bundle',
   };
 
@@ -121,10 +203,6 @@ enum BenchStep {
     BenchStep.moveRight =>
       'Hold the RIGHT controller and move it slowly and smoothly for '
           '${durations.move.inSeconds} s. No fast flicks.',
-    BenchStep.poseCapture =>
-      'Records one pose recording per hand and segment while a VITURE, XREAL '
-          'or Android XR source is tracking hands. Each segment has its own '
-          'screen and can be skipped.',
     BenchStep.capture =>
       'Records the FF11 raw stream for ${durations.capture.inSeconds} s and '
           'saves it with the other captures.',
@@ -139,6 +217,13 @@ enum BenchStep {
       'Save the bridge serial log (Pi daemon log or USB console) from this '
           'run. Attach it outside the app; mark this step done once you have '
           'it.',
+    BenchStep.deviceSummary =>
+      'Reports the attached hand-tracking runtime and the joints and rate it '
+          'offers. No bridge is needed for the 6DoF path.',
+    BenchStep.poseCapture =>
+      'Records one pose recording per hand and segment while a VITURE, XREAL '
+          'or Android XR source is tracking hands. Each segment has its own '
+          'screen and can be skipped.',
     BenchStep.export =>
       'Writes the same zip as Export test bundle, with this run\'s step '
           'results in the manifest, then opens the share sheet.',
@@ -169,6 +254,7 @@ class BenchStepOutcome {
 /// Runs the bench steps against the live service. One instance per run; the
 /// wizard creates it when the first step starts.
 abstract class BenchSession {
+  Future<BenchStepOutcome> deviceSummary();
   Future<BenchStepOutcome> connect();
   Future<BenchStepOutcome> bothHands();
   Future<BenchStepOutcome> firmwareConfig();
@@ -188,27 +274,35 @@ abstract class BenchSession {
 /// paths the Capture and Latency screens use.
 class RealBenchSession implements BenchSession {
   RealBenchSession({
-    required this.service,
+    this.service,
+    this.tracking,
+    this.poseRecorder,
     required this.clock,
     required this.captureStore,
     required this.latencyStore,
     required this.durations,
     this.mtu,
-    this.poseRecorder,
     this.appCommit = 'unknown',
-    this.firmwareSha = 'unknown',
+    this.firmwareSha,
     this.applyMode,
   });
 
-  final ControllerService service;
+  /// Null in the 6DoF-only path, where no bridge is attached.
+  final ControllerService? service;
+
+  /// The attached hand-tracking runtime, already started.
+  final TrackingSource? tracking;
+
+  /// Records one hand/segment. Null when no source reports hand joints.
+  final BenchPoseRecorder? poseRecorder;
+
   final MonotonicClock clock;
   final CaptureStore captureStore;
   final LatencyStore latencyStore;
   final BenchDurations durations;
   final int? mtu;
-  final BenchPoseRecorder? poseRecorder;
   final String appCommit;
-  final String firmwareSha;
+  final String? firmwareSha;
 
   /// Applies a stream mode to both the service and the app's mode choice, so
   /// the debug pose path follows the bench.
@@ -216,9 +310,41 @@ class RealBenchSession implements BenchSession {
 
   static String handName(int hand) => hand == wmrHandLeft ? 'LEFT' : 'RIGHT';
 
+  ControllerService get _service {
+    final service = this.service;
+    if (service == null) throw StateError('This step needs a bridge.');
+    return service;
+  }
+
+  @override
+  Future<BenchStepOutcome> deviceSummary() async {
+    final source = tracking;
+    final caps = source?.capabilities;
+    final data = <String, Object?>{
+      'runtime': source?.vendor.name,
+      'runtime_id': source?.id,
+      'hand_joints': caps?.hasHandTracking ?? false,
+      'hand_joint_count': caps?.handJointCount,
+      'max_hand_rate_hz': caps?.maxHandRateHz,
+      'bridges': service?.deviceIds.length ?? 0,
+    };
+    if (source == null || caps == null || !caps.hasHandTracking) {
+      return BenchStepOutcome.failed(
+        'No hand-tracking source with hand joints is attached.',
+        data: data,
+      );
+    }
+    return BenchStepOutcome.done(
+      '${source.vendor.name}: ${caps.handJointCount} hand joints, '
+      'up to ${caps.maxHandRateHz} Hz',
+      data: data,
+    );
+  }
+
   @override
   Future<BenchStepOutcome> connect() async {
-    if (service.deviceIds.isEmpty) {
+    final service = this.service;
+    if (service == null || service.deviceIds.isEmpty) {
       return const BenchStepOutcome.failed(
         'No bridge is connected. Connect one on the Connect screen.',
       );
@@ -249,7 +375,7 @@ class RealBenchSession implements BenchSession {
     await _ensureMode(StreamMode.raw);
     final seen = <int>{};
     final completer = Completer<void>();
-    final sub = service.frames.listen((frame) {
+    final sub = _service.frames.listen((frame) {
       seen.add(frame.frame.hand);
       if (seen.length >= wmrNumControllers && !completer.isCompleted) {
         completer.complete();
@@ -287,8 +413,8 @@ class RealBenchSession implements BenchSession {
     await _waitForProtocols();
     final firmware = <String, Object?>{};
     var firmwareRead = false;
-    for (final id in service.deviceIds) {
-      final protocol = service.protocolFor(id);
+    for (final id in _service.deviceIds) {
+      final protocol = _service.protocolFor(id);
       firmware[id] = {
         'version': protocol?.firmwareVersion,
         'malformed': protocol?.firmwareVersionMalformed,
@@ -300,9 +426,9 @@ class RealBenchSession implements BenchSession {
 
     final configs = <Map<String, Object?>>[];
     var configRead = false;
-    for (final id in service.deviceIds) {
+    for (final id in _service.deviceIds) {
       for (var hand = 0; hand < wmrNumControllers; hand++) {
-        final result = await ConfigClient(service.transport, id).read(hand);
+        final result = await ConfigClient(_service.transport, id).read(hand);
         final blob = result.blob;
         configs.add({
           'bridge': id,
@@ -402,9 +528,9 @@ class RealBenchSession implements BenchSession {
     required bool moving,
   }) async {
     await _ensureMode(StreamMode.raw);
-    final before = service.stats.hands[hand];
+    final before = _service.stats.hands[hand];
     await Future<void>.delayed(duration);
-    final after = service.stats.hands[hand];
+    final after = _service.stats.hands[hand];
     final frames = after.frames - before.frames;
     final gaps = after.gaps - before.gaps;
     final total = frames + gaps;
@@ -444,7 +570,7 @@ class RealBenchSession implements BenchSession {
       started: now,
       originUs: clock.nowUs,
     )..beginPhase('bench', clock.nowUs);
-    final sub = service.frames.listen(recorder.addFrame);
+    final sub = _service.frames.listen(recorder.addFrame);
     try {
       await Future<void>.delayed(durations.capture);
     } finally {
@@ -477,9 +603,9 @@ class RealBenchSession implements BenchSession {
     final recorder = LatencyRecorder(
       started: DateTime.now(),
       originUs: clock.nowUs,
-      stream: service.mode.name,
+      stream: _service.mode.name,
     );
-    final sub = service.frames.listen(
+    final sub = _service.frames.listen(
       (frame) => recorder.addFrame(
         frame.frame.hand,
         frame.frame.sequence,
@@ -493,7 +619,7 @@ class RealBenchSession implements BenchSession {
       await sub.cancel();
     }
     final links = <String, LatencyLink>{};
-    for (final link in await service.bridgeLinks()) {
+    for (final link in await _service.bridgeLinks()) {
       links[link.bridgeId] = LatencyLink(
         mtu: link.mtu,
         rssiStart: link.rssi,
@@ -531,20 +657,23 @@ class RealBenchSession implements BenchSession {
       await apply(mode);
       return;
     }
-    if (service.mode != mode) await service.setMode(mode);
+    final service = this.service;
+    if (service != null && service.mode != mode) {
+      await service.setMode(mode);
+    }
   }
 
   Future<void> _waitForProtocols() async {
     final deadline = DateTime.now().add(durations.firmwareTimeout);
-    while (service.deviceIds.any((id) => service.protocolFor(id) == null) &&
+    while (_service.deviceIds.any((id) => _service.protocolFor(id) == null) &&
         DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   }
 
   Map<String, int> _counters() {
-    final raw = service.stats;
-    final decoded = service.decodedStats;
+    final raw = _service.stats;
+    final decoded = _service.decodedStats;
     var incomplete = 0;
     for (final hand in raw.hands) {
       incomplete += hand.incomplete;
@@ -557,14 +686,18 @@ class RealBenchSession implements BenchSession {
   }
 }
 
-/// Resolves the session from the live connection, or null when nothing is
-/// connected. The wizard calls it again on each step, so a bridge that comes
-/// back after a drop is picked up.
+/// Resolves the session from the live connection or the attached hand-tracking
+/// source, or null when neither exists. The wizard calls it again on each step,
+/// so a bridge that comes back after a drop is picked up.
 final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
   return () async {
     final device = ref.read(realDeviceProvider);
-    final service = ref.read(realDeviceProvider.notifier).service;
-    if (service == null || !device.connected) return null;
+    final notifier = ref.read(realDeviceProvider.notifier);
+    final service = notifier.service;
+    final connected = service != null && device.connected;
+    final selection = ref.read(debugTrackingSourceProvider);
+    final tracking = selection.attachment.value?.source;
+    if (!connected && tracking == null) return null;
     final availability = ref.read(benchPoseAvailabilityProvider);
     final poseRecorder = availability.available
         ? RealBenchPoseRecorder(
@@ -574,43 +707,24 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
           )
         : null;
     return RealBenchSession(
-      service: service,
-      clock: service.transport.clock,
+      service: connected ? service : null,
+      tracking: tracking,
+      poseRecorder: poseRecorder,
+      clock: service?.transport.clock ?? MonotonicClock(),
       captureStore: await ref.read(captureStoreProvider.future),
       latencyStore: await ref.read(latencyStoreProvider.future),
       durations: ref.read(benchDurationsProvider),
       mtu: device.status.mtu,
-      poseRecorder: poseRecorder,
       appCommit: ref.read(appCommitProvider),
-      firmwareSha: firmwareShaFromVersions({
-        for (final id in service.deviceIds)
-          id: service.protocolFor(id)?.firmwareVersion,
-      }),
-      applyMode: ref.read(realDeviceProvider.notifier).setStreamMode,
+      firmwareSha: connected
+          ? firmwareShaFromVersions({
+              for (final id in service.deviceIds)
+                id: service.protocolFor(id)?.firmwareVersion,
+            })
+          : null,
+      applyMode: notifier.setStreamMode,
     );
   };
 });
 
-/// The short SHA in an FF16 git description, or null when FF16 has none.
-///
-/// Only the `-g<sha>` shape a git-describe version carries counts. A bare hex
-/// token is not a SHA: versions and build stamps can look identical.
-String? gitShaFromFirmware(String? version) {
-  if (version == null) return null;
-  final match = RegExp(r'(?:^|-)g([0-9a-f]{7,40})(?:[-\s+]|$)')
-      .firstMatch(version.trim());
-  return match?.group(1);
-}
-
-/// The SHA recorded for a run: one value when every bridge that exposes a git
-/// description agrees, a per-bridge list when they differ, else `unknown`.
-String firmwareShaFromVersions(Map<String, String?> versions) {
-  final found = <String, String>{};
-  for (final entry in versions.entries) {
-    final sha = gitShaFromFirmware(entry.value);
-    if (sha != null) found[entry.key] = sha;
-  }
-  if (found.isEmpty) return 'unknown';
-  if (found.values.toSet().length == 1) return found.values.first;
-  return found.entries.map((entry) => '${entry.key}=${entry.value}').join('; ');
-}
+/// The SHA recorded for a run lives in `services/firmware_identity.dart`.

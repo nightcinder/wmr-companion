@@ -6,6 +6,7 @@ import '../../services/test_bundle.dart';
 import '../../services/test_bundle_export.dart';
 import 'bench_pose.dart';
 import 'bench_run.dart';
+import 'bench_tracking.dart';
 
 enum BenchStatus { pending, running, done, skipped, failed }
 
@@ -30,6 +31,7 @@ class BenchStepResult {
 
 class BenchRunState {
   const BenchRunState({
+    this.mode = BenchMode.threeDofOnly,
     this.step = BenchStep.connect,
     this.results = const {},
     this.exporting = false,
@@ -41,6 +43,7 @@ class BenchRunState {
     this.poseSegment = 0,
   });
 
+  final BenchMode mode;
   final BenchStep step;
   final Map<BenchStep, BenchStepResult> results;
 
@@ -58,7 +61,17 @@ class BenchRunState {
 
   BenchStepResult get current => resultFor(step);
 
-  int get index => BenchStep.values.indexOf(step);
+  List<BenchStep> get steps => mode.steps;
+
+  int get index => steps.indexOf(step);
+
+  /// True once a step past the automatic connect check has a result, so the
+  /// mode cannot be changed under a run that is already measuring.
+  bool get started => results.entries.any(
+    (entry) =>
+        entry.key != BenchStep.connect &&
+        entry.value.status != BenchStatus.skipped,
+  );
 
   bool get busy => current.status == BenchStatus.running || exporting;
 
@@ -72,6 +85,7 @@ class BenchRunState {
       results.values.where((r) => r.status == BenchStatus.failed).length;
 
   BenchRunState copyWith({
+    BenchMode? mode,
     BenchStep? step,
     Map<BenchStep, BenchStepResult>? results,
     bool? exporting,
@@ -84,6 +98,7 @@ class BenchRunState {
     int? poseSegment,
   }) {
     return BenchRunState(
+      mode: mode ?? this.mode,
       step: step ?? this.step,
       results: results ?? this.results,
       poseSegment: poseSegment ?? this.poseSegment,
@@ -112,11 +127,45 @@ class BenchController extends Notifier<BenchRunState> {
   @override
   BenchRunState build() => const BenchRunState();
 
+  /// Switches the wizard to [mode] before it has meaningful results.
+  ///
+  /// 6DoF only pre-records every bridge step as skipped with its reason, so the
+  /// manifest explains why the bridge work did not run. The tester starts at
+  /// the device summary instead of at the connect step.
+  void selectMode(BenchMode mode) {
+    if (state.busy || state.started) return;
+    final tracking = ref.read(benchHandTrackingProvider);
+    if (mode == BenchMode.sixDofOnly && !tracking.available) return;
+    final results = <BenchStep, BenchStepResult>{};
+    if (mode == BenchMode.sixDofOnly) {
+      for (final step in BenchMode.bridgeOnlySteps) {
+        results[step] = const BenchStepResult(
+          status: BenchStatus.skipped,
+          summary: 'No bridge in 6DoF only mode.',
+        );
+      }
+    }
+    state = BenchRunState(mode: mode, step: mode.steps.first, results: results);
+    _publish();
+  }
+
   Future<void> runCurrent() async {
     final step = state.step;
     if (state.busy || step == BenchStep.export) return;
     if (step.isPrompt) {
       await confirmCurrent();
+      return;
+    }
+    final tracking = ref.read(benchHandTrackingProvider);
+    if (step == BenchStep.poseCapture && !tracking.available) {
+      _setResult(
+        step,
+        const BenchStepResult(
+          status: BenchStatus.skipped,
+          summary: 'No hand-tracking source with hand joints is attached.',
+        ),
+      );
+      _advance();
       return;
     }
     _setResult(step, const BenchStepResult(status: BenchStatus.running));
@@ -164,6 +213,7 @@ class BenchController extends Notifier<BenchRunState> {
 
   Future<BenchStepOutcome> _runStep(BenchSession session, BenchStep step) =>
       switch (step) {
+        BenchStep.deviceSummary => session.deviceSummary(),
         BenchStep.connect => session.connect(),
         BenchStep.bothHands => session.bothHands(),
         BenchStep.firmwareConfig => session.firmwareConfig(),
@@ -299,7 +349,16 @@ class BenchController extends Notifier<BenchRunState> {
       return;
     }
     if (state.busy) return;
-    _setResult(step, const BenchStepResult(status: BenchStatus.skipped));
+    // Keep any partial data so the bundle still carries it.
+    final previous = state.resultFor(step);
+    _setResult(
+      step,
+      BenchStepResult(
+        status: BenchStatus.skipped,
+        summary: previous.summary,
+        data: previous.data,
+      ),
+    );
     _advance();
   }
 
@@ -389,11 +448,17 @@ class BenchController extends Notifier<BenchRunState> {
   }
 
   void _advance() {
+    final steps = state.steps;
     var next = state.index + 1;
-    while (next < BenchStep.values.length) {
-      final step = BenchStep.values[next];
-      // The pose step is offered only when a hand-tracking runtime is active.
-      // With none, it records itself skipped and the run continues.
+    while (next < steps.length) {
+      final step = steps[next];
+      if (state.resultFor(step).finished) {
+        next++;
+        continue;
+      }
+      // Combined runs with no hand-joint source skip the capture visibly and
+      // still reach the export. In 6DoF only the mode cannot be selected
+      // without hand joints, so this is the combined path.
       if (step == BenchStep.poseCapture) {
         final availability = ref.read(benchPoseAvailabilityProvider);
         if (!availability.available) {
@@ -415,8 +480,8 @@ class BenchController extends Notifier<BenchRunState> {
       }
       break;
     }
-    if (next >= BenchStep.values.length) return;
-    state = state.copyWith(step: BenchStep.values[next], poseSegment: 0);
+    if (next >= steps.length) return;
+    state = state.copyWith(step: steps[next], poseSegment: 0);
     _publish();
   }
 
@@ -431,7 +496,7 @@ class BenchController extends Notifier<BenchRunState> {
         .read(benchBundleProvider.notifier)
         .publish(
           BenchBundleRun([
-            for (final step in BenchStep.values)
+            for (final step in state.steps)
               BenchBundleStep(
                 id: step.id,
                 status: _statusName(state.resultFor(step).status),
@@ -439,7 +504,7 @@ class BenchController extends Notifier<BenchRunState> {
                 detail: state.resultFor(step).error,
                 data: state.resultFor(step).data,
               ),
-          ]),
+          ], mode: state.mode.id),
         );
   }
 

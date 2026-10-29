@@ -301,4 +301,85 @@ void main() {
     expect(steps[3]['id'], 'latency');
     expect(steps[3]['status'], 'failed');
   });
+
+  test('lists every pose capture file and the bench mode', () async {
+    final captures = Directory('${dir.path}/pose')..createSync();
+    final left = File('${captures.path}/pose_capture_fake_left_still.json')
+      ..writeAsStringSync('{"format":"wmr-pose-recording","version":1}');
+    final right = File(
+      '${captures.path}/pose_capture_fake_right_fastFlick.json',
+    )..writeAsStringSync('{"format":"wmr-pose-recording","version":1}');
+
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 10, 29, 15),
+        appVersion: '0.2.2+4',
+        phone: 'Galaxy XR',
+        androidVersion: 'Android 16 (API 36)',
+        streamMode: 'none',
+        benchRun: const BenchBundleRun([
+          BenchBundleStep(id: 'device_summary', status: 'done'),
+          BenchBundleStep(
+            id: 'pose_capture',
+            status: 'done',
+            data: {
+              'segments': [
+                {
+                  'file': '/tmp/pose_capture_fake_left_still.json',
+                  'runtime': 'fake',
+                  'hand': 'LEFT',
+                  'segment': 'still',
+                  'status': 'done',
+                  'samples': 30,
+                },
+                {
+                  'file': '/tmp/pose_capture_fake_right_fastFlick.json',
+                  'runtime': 'fake',
+                  'hand': 'RIGHT',
+                  'segment': 'fastFlick',
+                  'status': 'done',
+                  'samples': 30,
+                },
+              ],
+            },
+          ),
+          BenchBundleStep(id: 'export', status: 'done'),
+        ], mode: '6dof_only'),
+        benchRuntime: 'fake',
+        appCommit: 'abc1234',
+        poseCaptures: [
+          PoseCaptureFile(
+            path: left.path,
+            runtime: 'fake',
+            hand: 'left',
+            segment: 'still',
+          ),
+          PoseCaptureFile(
+            path: right.path,
+            runtime: 'fake',
+            hand: 'right',
+            segment: 'fastFlick',
+          ),
+        ],
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final names = archive.files.map((file) => file.name).toSet();
+    expect(names, contains('pose_capture_fake_left_still.json'));
+    expect(names, contains('pose_capture_fake_right_fastFlick.json'));
+
+    final manifest = text(archive, 'manifest.md');
+    expect(manifest, contains('- Bench mode: 6dof_only'));
+    expect(manifest, contains('- Tracking runtime: fake'));
+    expect(manifest, contains('- App commit: abc1234'));
+    expect(manifest, contains('- Firmware SHA: none (no bridge)'));
+    expect(manifest, contains('## 6DoF pose captures'));
+    expect(manifest, contains('pose_capture_fake_left_still.json'));
+    expect(manifest, contains('| LEFT | still | done | 30 |'));
+    expect(manifest, contains('pose_capture_fake_right_fastFlick.json'));
+  });
 }

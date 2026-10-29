@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle_export.dart';
+import '../debug/debug_providers.dart';
 import 'bench_controller.dart';
 import 'bench_pose.dart';
 import 'bench_run.dart';
+import 'bench_tracking.dart';
 
 /// One step per screen, every step skippable, ending in the test bundle zip.
-/// Entered from the Connect screen with a bridge already connected.
+/// Entered from the Connect screen with a bridge already connected, or with a
+/// hand-tracking source for the 6DoF-only path.
 class BenchScreen extends ConsumerStatefulWidget {
   const BenchScreen({super.key});
 
@@ -27,7 +30,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   void initState() {
     super.initState();
     _bundles = ref.read(benchBundleProvider.notifier);
-    // The first step only checks the link, so run it as the screen opens.
+    // The first step only checks the link, so run it as the screen opens. A
+    // 6DoF-only run starts at the capability summary and waits for the tester.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final state = ref.read(benchControllerProvider);
@@ -86,11 +90,18 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final state = ref.watch(benchControllerProvider);
     final controller = ref.read(benchControllerProvider.notifier);
     final durations = ref.watch(benchDurationsProvider);
+    final tracking = ref.watch(benchHandTrackingProvider);
+    final selection = ref.watch(debugTrackingSourceProvider);
+    // The simulated source is fed by the debug pose viewer; keep that pump
+    // alive so a 6DoF capture can run without hardware.
+    if (selection.choice == DebugTrackingSource.simulated) {
+      ref.watch(debugPosesProvider(DebugSource.real));
+    }
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace');
     final step = state.step;
     final result = state.current;
-    final total = BenchStep.values.length;
+    final total = state.steps.length;
     final finished = state.completed + state.skipped + state.failed;
     final poseSpec = step == BenchStep.poseCapture
         ? benchPoseSequence[state.poseSegment]
@@ -104,6 +115,45 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            Text('Bench mode', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final mode in BenchMode.values)
+                  _modeButton(mode, state, controller, tracking),
+              ],
+            ),
+            if (!tracking.available) ...[
+              const SizedBox(height: 4),
+              Text(
+                tracking.reason ?? 'No hand-tracking source is attached.',
+                key: const Key('bench-6dof-reason'),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text('Hand tracking source', style: theme.textTheme.labelLarge),
+            DropdownButton<DebugTrackingSource>(
+              key: const Key('bench-tracking-source'),
+              isExpanded: true,
+              value: selection.choice,
+              onChanged: state.started || state.busy
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        ref
+                            .read(debugTrackingSourceProvider.notifier)
+                            .set(value);
+                      }
+                    },
+              items: [
+                for (final choice in DebugTrackingSource.values)
+                  DropdownMenuItem(value: choice, child: Text(choice.label)),
+              ],
+            ),
+            const SizedBox(height: 8),
             LinearProgressIndicator(value: finished / total),
             const SizedBox(height: 12),
             Text(
@@ -127,6 +177,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   ? step.instructions(durations)
                   : '${RealBenchSession.handName(poseSpec.hand)}: '
                         '${poseSpec.segment.prompt}',
+              key: poseSpec == null ? null : const Key('bench-capture-prompt'),
             ),
             if (poseSpec != null && result.status == BenchStatus.running) ...[
               const SizedBox(height: 8),
@@ -142,13 +193,13 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
             const SizedBox(height: 16),
             _status(result, mono, theme),
             const SizedBox(height: 16),
-            ..._actions(state, controller, durations, theme),
+            ..._actions(state, controller, durations, theme, poseSpec),
             if (step == BenchStep.export && state.bundlePath != null)
               ..._bundle(state, theme, mono),
             const SizedBox(height: 24),
             Text('Steps', style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
-            for (final item in BenchStep.values)
+            for (final item in state.steps)
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -164,17 +215,38 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     );
   }
 
+  Widget _modeButton(
+    BenchMode mode,
+    BenchRunState state,
+    BenchController controller,
+    BenchHandTracking tracking,
+  ) {
+    final selected = state.mode == mode;
+    final enabled =
+        !state.started &&
+        !state.busy &&
+        (mode != BenchMode.sixDofOnly || tracking.available);
+    return OutlinedButton(
+      key: Key('bench-mode-${mode.id}'),
+      onPressed: enabled ? () => controller.selectMode(mode) : null,
+      style: selected
+          ? OutlinedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+            )
+          : null,
+      child: Text(mode.label),
+    );
+  }
+
   List<Widget> _actions(
     BenchRunState state,
     BenchController controller,
     BenchDurations durations,
     ThemeData theme,
+    BenchPoseSpec? poseSpec,
   ) {
     final step = state.step;
     final result = state.current;
-    final poseSpec = step == BenchStep.poseCapture
-        ? benchPoseSequence[state.poseSegment]
-        : null;
     if (step == BenchStep.export) {
       return [
         FilledButton(
@@ -299,7 +371,9 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         ],
       ),
       BenchStatus.skipped => Text(
-        'Skipped. The manifest records the step as skipped.',
+        result.summary == null
+            ? 'Skipped. The manifest records the step as skipped.'
+            : 'Skipped: ${result.summary}',
         style: mono,
       ),
       BenchStatus.failed => Text(
@@ -311,6 +385,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
 
   static String _startLabel(BenchStep step, BenchDurations durations) =>
       switch (step) {
+        BenchStep.deviceSummary => 'Check capabilities',
         BenchStep.connect => 'Check connection',
         BenchStep.bothHands => 'Wait for both hands',
         BenchStep.firmwareConfig => 'Read firmware and config',
@@ -318,9 +393,9 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         BenchStep.stillRight => 'Start ${durations.still.inSeconds} s',
         BenchStep.moveLeft ||
         BenchStep.moveRight => 'Start ${durations.move.inSeconds} s',
-        BenchStep.poseCapture => 'Start',
         BenchStep.capture => 'Start ${durations.capture.inSeconds} s capture',
         BenchStep.latency => 'Start ${durations.latency.inSeconds} s',
+        BenchStep.poseCapture => 'Start',
         BenchStep.photo ||
         BenchStep.serialLog ||
         BenchStep.export => 'Continue',

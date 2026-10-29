@@ -56,6 +56,12 @@ case "$flavor" in
     ;;
 esac
 
+# The bundle manifest records the commit the capture came from.
+app_commit="${WMR_APP_COMMIT:-$(git -C "$app_dir" rev-parse --short HEAD 2>/dev/null || true)}"
+if [ -n "$app_commit" ]; then
+  defines+=(--dart-define=WMR_APP_COMMIT="$app_commit")
+fi
+
 mode=--debug
 passthrough=()
 for arg in "$@"; do

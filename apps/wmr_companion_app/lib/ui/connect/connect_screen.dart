@@ -159,14 +159,14 @@ class RealPanel extends ConsumerWidget {
                 child: const Text('Latency test'),
               ),
             const _ExportBundleButton(),
-            if (s.connected)
-              FilledButton.tonal(
-                key: const Key('open-guided-bench'),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
-                ),
-                child: const Text('Run guided bench'),
+            // Also without a bridge: the 6DoF-only bench path needs no link.
+            FilledButton.tonal(
+              key: const Key('open-guided-bench'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
               ),
+              child: const Text('Run guided bench'),
+            ),
           ],
         ),
         if (s.connected && s.mode != null) ...[
