@@ -159,10 +159,7 @@ void main() {
     });
 
     test('refuses a release build without signing properties', () {
-      expect(
-        appBuild,
-        contains('Release signing is not configured'),
-      );
+      expect(appBuild, contains('Release signing is not configured'));
       expect(appBuild, contains('gradle.taskGraph.whenReady'));
     });
   });
