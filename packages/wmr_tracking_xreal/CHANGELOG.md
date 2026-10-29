@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Migrate the Android plugin to AGP 9 built-in Kotlin: drop the Kotlin Gradle Plugin classpath and `org.jetbrains.kotlin.android`, and require Flutter 3.44 or later.
+
 ## 0.2.2
 
 - Target XREAL SDK 3.1.0 in the Unity project and declare its AR Foundation,
