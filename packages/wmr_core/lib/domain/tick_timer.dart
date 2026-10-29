@@ -215,3 +215,5 @@ class TickTimer {
     return k > 1 ? k - 1 : 0;
   }
 }
+
+// ONY-513 CI probe: Dart-only change, no Android source touched.
