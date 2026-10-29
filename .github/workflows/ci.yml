@@ -598,11 +598,16 @@ jobs:
           WMR_RELEASE_STORE_PASSWORD: ${{ secrets.WMR_RELEASE_STORE_PASSWORD }}
           WMR_RELEASE_KEY_ALIAS: wmr-companion
           WMR_RELEASE_KEY_PASSWORD: ${{ secrets.WMR_RELEASE_KEY_PASSWORD }}
-        run: tool/build_flavor.sh unified --release --split-per-abi
+        # The export ships arm64-v8a natives only, so a 32-bit or x86_64
+        # split would install but carry no Unity runtime at all: VITURE and
+        # XREAL would report typed `unavailable` on an artifact labelled
+        # unified. Build the one ABI that can actually hold both vendors.
+        run: >-
+          tool/build_flavor.sh unified --release --split-per-abi
+          --target-platform android-arm64
 
       # The pre-flight checker proves both Unity runtimes and their hand
-      # tracking libraries are in the APK. The export ships arm64-v8a natives
-      # only, so that is the split the checker applies to.
+      # tracking libraries are in the APK.
       - name: Check the unified APK carries both vendors
         working-directory: apps/wmr_companion_app
         run: |

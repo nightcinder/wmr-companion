@@ -86,7 +86,7 @@ build is needed. Both decode the same keystore, check every APK with
 | Job | Flavor | Build |
 |---|---|---|
 | `release` | `base` | `tool/build_flavor.sh base --release --split-per-abi` |
-| `release-unified` | `unified` | downloads the approved export, `tool/install_unity_export.sh unified`, then `tool/build_flavor.sh unified --release --split-per-abi` |
+| `release-unified` | `unified` | downloads the approved export, `tool/install_unity_export.sh unified`, then `tool/build_flavor.sh unified --release --split-per-abi --target-platform android-arm64` |
 
 `unified` is the artifact testers with VITURE or XREAL glasses install: one
 APK links a single `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0 and
@@ -124,16 +124,15 @@ wmr-companion-X.Y.Z-base-arm64-v8a.apk
 wmr-companion-X.Y.Z-base-armeabi-v7a.apk
 wmr-companion-X.Y.Z-base-x86_64.apk    # emulator
 wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
-wmr-companion-X.Y.Z-unified-armeabi-v7a.apk
-wmr-companion-X.Y.Z-unified-x86_64.apk       # emulator
 SHA256SUMS
 ```
 
 `wmr-companion-X.Y.Z-base-arm64-v8a.apk` is the phone/tablet asset testers
 without vendor glasses should install; `wmr-companion-X.Y.Z-unified-arm64-v8a.apk`
-is the one for VITURE or XREAL glasses. Only the arm64-v8a unified APK carries
-the Unity runtimes: the approved export ships `arm64-v8a` natives only, so the
-other ABIs come out equivalent to `base`. The jobs fail if an APK is
+is the one for VITURE or XREAL glasses. The unified flavor is published for
+`arm64-v8a` only: the approved export ships `arm64-v8a` natives, so a 32-bit or
+x86_64 unified split would install without any Unity runtime and report VITURE
+and XREAL as `unavailable`. Base keeps its three ABIs. The jobs fail if an APK is
 debug-signed, lacks a `CN=WMR Companion` signer, or its certificate SHA-256 is
 not the one above, so a green tag run means the published APKs match this
 document.
