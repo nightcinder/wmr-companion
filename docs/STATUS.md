@@ -188,6 +188,14 @@ The honest current state is that the companion still ships 3DoF. Calling it 6DoF
 
 **Named 1.0 path (ONY-440, 2026-10-28): XREAL Air 2 Ultra**, hosted by an existing Beam Pro or Samsung S24-or-later phone; VITURE (Luma Ultra + Pro Neckband) is the fallback and needs two purchases. The `v0.2.1` unified APK was checked host-side: merged `CAMERA`/`HAND_TRACKING`/`HEAD_TRACKING` declarations, both vendor runtimes, and the shared-runtime session classes are present. Nothing was installed or started. Decision and open gaps: [tracking/PREFLIGHT.md](tracking/PREFLIGHT.md).
 
+### Hand-anchor pose filter (ONY-502, 2026-10-29)
+
+ONY-501 kept the One Euro structure and required a constant change. The structural half is in place: the fuser now filters hand anchors on the anchor sample's own clock, once per new anchor sample, and holds the value between samples. Filtering the display tick had inflated the speed estimate. `minDt` now follows the anchor rate (about 11 ms at 90 Hz) instead of the 240 Hz IMU; `maxDt` stays 100 ms.
+
+**The tuning constants are unchanged and not chosen by reasoning.** `minCutoff = 1 Hz`, `beta = 0.02` and `dCutoff = 1 Hz` remain the published defaults until a hardware capture exists. The grid harness (`packages/wmr_tracking/tool/pose_filter_tune.dart`) searches the ONY-501 grid, takes the lowest-lag point that meets the jitter bound, and writes the full table plus per-capture before/after metrics. Its committed test vectors are synthetic placeholders, clearly marked `kind: synthetic`; they exercise the harness and are not a tuning result.
+
+The task is blocked on four >=30 s hardware runs per motion class (still, slow pan, medium pan, fast flick, and hand-anchor with occlusion) recorded with the ONY-249 recorder, with the app commit and firmware SHA attached. Procedure and acceptance: [runs/sheets/pose-filter.md](runs/sheets/pose-filter.md).
+
 ## Not yet run on hardware (as of 2026-10-27)
 
 Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
@@ -203,6 +211,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
 - `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); the name is unchanged in `0.2.1`.
 - Headset head/hand tracking on any device, and every vendor adapter path in [TRACKING.md](TRACKING.md): Android XR permissions/session, XREAL Unity hand tracking, RayNeo ARDK head pose, Rokid UXR gestures, VITURE Carina pose/stereo frames and VITURE Neckband Unity hands. The framework itself is unit-tested only.
+- The ONY-502 pose-filter constants on real anchor traces. The tuner and structural fix are tested, but no hardware capture exists, so the constants are still the published defaults.
 
 ## Where things are
 

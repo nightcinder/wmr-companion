@@ -288,4 +288,78 @@ void main() {
       throwsA(isA<ArgumentError>()),
     );
   });
+
+  group('anchor clock (ONY-502)', () {
+    test('filters once per anchor sample, not per controller tick', () {
+      const anchorDt = 33333333;
+      const tickDt = 5555555;
+      final fuser = SixDofFuser();
+      final direct = const PoseFilterConfig().createFilter();
+      final random = math.Random(11);
+      var frameTime = 1000000000;
+
+      for (var i = 0; i < 90; i++) {
+        final target =
+            Vector3(0.2 + i * 0.0005, -0.25, -0.35) +
+            Vector3(
+              _gaussian(random) * 0.0005,
+              _gaussian(random) * 0.0005,
+              _gaussian(random) * 0.0005,
+            );
+        fuser.onTrackingFrame(_handFrame(frameTime, _palmFor(target)));
+        final pose = fuser.update(
+          hand: TrackedHand.right,
+          orientation: Quaternion.identity(),
+          hostTimeNs: frameTime,
+        );
+        final reference = direct.filter(target, frameTime);
+        expect((pose.position! - reference).length, lessThan(1e-12));
+
+        for (var tick = 1; tick <= 5; tick++) {
+          final held = fuser.update(
+            hand: TrackedHand.right,
+            orientation: Quaternion.identity(),
+            hostTimeNs: frameTime + tick * tickDt,
+          );
+          expect((held.position! - pose.position!).length, lessThan(1e-12));
+        }
+        frameTime += anchorDt;
+      }
+    });
+
+    test('a long anchor interval uses the anchor timestamp', () {
+      final fuser = SixDofFuser();
+      final direct = const PoseFilterConfig().createFilter();
+      const start = 1000000000;
+      const gap = 90000000;
+      final first = Vector3(0.2, -0.25, -0.35);
+      final second = Vector3(0.21, -0.25, -0.35);
+
+      fuser.onTrackingFrame(_handFrame(start, _palmFor(first)));
+      fuser.update(
+        hand: TrackedHand.right,
+        orientation: Quaternion.identity(),
+        hostTimeNs: start,
+      );
+      direct.filter(first, start);
+
+      for (var tick = 1; tick <= 17; tick++) {
+        fuser.update(
+          hand: TrackedHand.right,
+          orientation: Quaternion.identity(),
+          hostTimeNs: start + tick * 5000000,
+        );
+      }
+
+      fuser.onTrackingFrame(_handFrame(start + gap, _palmFor(second)));
+      final after = fuser.update(
+        hand: TrackedHand.right,
+        orientation: Quaternion.identity(),
+        hostTimeNs: start + gap,
+      );
+      final reference = direct.filter(second, start + gap);
+
+      expect((after.position! - reference).length, lessThan(1e-12));
+    });
+  });
 }

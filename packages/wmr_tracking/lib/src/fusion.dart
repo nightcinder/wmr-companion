@@ -124,6 +124,7 @@ class SixDofFusionConfig {
     this.lateTolerance = const Duration(milliseconds: 5),
     this.positionSmoothing = 0.5,
     this.maxFrames = 128,
+    this.poseFilter = const PoseFilterConfig(),
     this.defaultGripOffset,
     this.leftHeadLocalOffset,
     this.rightHeadLocalOffset,
@@ -146,6 +147,11 @@ class SixDofFusionConfig {
 
   /// Maximum number of buffered tracking frames.
   final int maxFrames;
+
+  /// One Euro tuning for hand-anchor positions. The grid tuner supplies a
+  /// replacement config once captures exist; the default stays at the
+  /// published values until then.
+  final PoseFilterConfig poseFilter;
 
   /// Controller pose relative to the palm, used when no calibration has run.
   /// The default places the controller centre 2 cm below and 6 cm forward of
@@ -188,8 +194,9 @@ class SixDofFusionConfig {
 /// 3. a head-relative offset learned from the last real position,
 /// 4. orientation only.
 ///
-/// Hand-anchor positions pass through a [OneEuroFilter] on the controller
-/// sample clock. Runtime controller poses keep [SixDofFusionConfig.positionSmoothing]
+/// Hand-anchor positions pass through a [OneEuroFilter] on the anchor sample
+/// clock, once per new anchor sample; between samples the filtered value is
+/// held. Runtime controller poses keep [SixDofFusionConfig.positionSmoothing]
 /// for compatibility, and the head-relative/orientation fallbacks are never
 /// smoothed. Crossing between sources resets the filter, so a fallback is not
 /// disguised as a tracked hand.
@@ -205,6 +212,10 @@ class SixDofFuser {
       _gripOffsets = {
         TrackedHand.left: config.gripOffset,
         TrackedHand.right: config.gripOffset,
+      },
+      _handFilters = {
+        TrackedHand.left: config.poseFilter.createFilter(),
+        TrackedHand.right: config.poseFilter.createFilter(),
       };
 
   final SixDofFusionConfig _config;
@@ -213,11 +224,10 @@ class SixDofFuser {
   final Map<TrackedHand, Vector3> _lastWorld = {};
   final Map<TrackedHand, Vector3> _headLocal = {};
   final Map<TrackedHand, Vector3> _lastOutput = {};
-  final Map<TrackedHand, OneEuroFilter> _handFilters = {
-    TrackedHand.left: OneEuroFilter(),
-    TrackedHand.right: OneEuroFilter(),
-  };
+  final Map<TrackedHand, OneEuroFilter> _handFilters;
   final Map<TrackedHand, ControllerPoseSource> _lastSource = {};
+  final Map<TrackedHand, int> _anchorFrameTimeNs = {};
+  final Map<TrackedHand, Vector3> _heldAnchor = {};
 
   SixDofFusionConfig get config => _config;
 
@@ -310,13 +320,16 @@ class SixDofFuser {
     if (source == ControllerPoseSource.handAnchor &&
         previousSource != ControllerPoseSource.handAnchor) {
       _handFilters[hand]!.reset();
+      _clearAnchorState(hand);
     } else if (source == ControllerPoseSource.runtimeController &&
         previousSource != ControllerPoseSource.runtimeController) {
       _lastOutput.remove(hand);
+      _clearAnchorState(hand);
     } else if (source == ControllerPoseSource.headRelative) {
       // Never smooth a guess into a tracked anchor, or the other way round.
       _handFilters[hand]!.reset();
       _lastOutput.remove(hand);
+      _clearAnchorState(hand);
     }
 
     if (target != null && source != ControllerPoseSource.headRelative) {
@@ -329,7 +342,16 @@ class SixDofFuser {
     }
 
     if (target != null && source == ControllerPoseSource.handAnchor) {
-      target = _handFilters[hand]!.filter(target, hostTimeNs);
+      // Filter on the anchor sample's own clock, once per new sample. The
+      // controller runs faster than the anchor, so feeding the display tick
+      // would shrink dt, inflate the speed estimate and pump the cutoff.
+      final anchorTimeNs = frame.fusionTimeNs;
+      final lastFrameTime = _anchorFrameTimeNs[hand];
+      if (lastFrameTime == null || anchorTimeNs > lastFrameTime) {
+        _heldAnchor[hand] = _handFilters[hand]!.filter(target, anchorTimeNs);
+        _anchorFrameTimeNs[hand] = anchorTimeNs;
+      }
+      target = _heldAnchor[hand] ?? target;
     } else if (target != null &&
         source == ControllerPoseSource.runtimeController &&
         _config.positionSmoothing < 1) {
@@ -377,6 +399,8 @@ class SixDofFuser {
     _headLocal.clear();
     _lastOutput.clear();
     _lastSource.clear();
+    _anchorFrameTimeNs.clear();
+    _heldAnchor.clear();
     for (final filter in _handFilters.values) {
       filter.reset();
     }
@@ -389,6 +413,12 @@ class SixDofFuser {
   void _resetHand(TrackedHand hand) {
     _handFilters[hand]!.reset();
     _lastSource.remove(hand);
+    _clearAnchorState(hand);
+  }
+
+  void _clearAnchorState(TrackedHand hand) {
+    _anchorFrameTimeNs.remove(hand);
+    _heldAnchor.remove(hand);
   }
 
   static bool _isFinite(Vector3 value) =>

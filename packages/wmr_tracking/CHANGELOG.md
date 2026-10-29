@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- ONY-502: the hand-anchor `OneEuroFilter` now runs on the anchor sample's own
+  clock, once per new anchor sample, and the fuser holds the filtered value
+  between samples. `minDt` follows the anchor rate (11 ms) instead of the
+  240 Hz IMU. Adds `PoseFilterConfig`, `PoseCapture`, the offline grid tuner
+  (`tool/pose_filter_tune.dart`) and the synthetic harness-vector generator
+  (`tool/generate_pose_captures.dart`). The `minCutoff`/`beta`/`dCutoff`
+  defaults stay at the published values until hardware captures exist; no
+  point is chosen by reasoning.
+
 ## 0.2.2
 
 - Update the VITURE capability profile to name VITURE XR SDK for Unity 0.9.0
