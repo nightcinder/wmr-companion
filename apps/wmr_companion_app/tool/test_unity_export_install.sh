@@ -99,6 +99,10 @@ android {
 }
 EOF
   printf 'not really an ELF\n' >"$library/src/main/jniLibs/arm64-v8a/libunity.so"
+  cat >"$library/proguard-unity.txt" <<'EOF'
+-keep class com.unity3d.player.* { *; }
+-ignorewarnings
+EOF
   make_aar "$library/libs/VitureUnityXR.aar" com.viture.xr.unity
   make_aar "$library/libs/xr-lib.aar" com.xreal.xr.lib
   make_aar "$library/libs/nr_loader.aar" nrsdk.pack
@@ -161,6 +165,13 @@ check_normalised() {
   [ -f "$target/unityLibrary/libs/VitureUnityXR.aar" ] ||
     fail "vendor AAR was not copied"
 
+  local proguard="$target/unityLibrary/proguard-unity.txt"
+  [ -f "$proguard" ] || fail "proguard-unity.txt was not copied"
+  grep -q '^-ignorewarnings$' "$proguard" &&
+    fail "-ignorewarnings survived in the consumer ProGuard file"
+  grep -q '^-keep class com.unity3d.player' "$proguard" ||
+    fail "Unity keep rules were dropped from proguard-unity.txt"
+
   local duplicate_package
   duplicate_package="$(unzip -p "$target/unityLibrary/libs/nr_loader.aar" \
     AndroidManifest.xml | sed -n 's/.*package="\([^"]*\)".*/\1/p')"
@@ -175,11 +186,13 @@ check_normalised() {
 
 echo "==> normalise a directory export"
 make_export "$tmp/source"
-source_before="$(sha256sum "$tmp/source/unityLibrary/build.gradle")"
+source_before="$(cat "$tmp/source/unityLibrary/build.gradle" \
+  "$tmp/source/unityLibrary/proguard-unity.txt" | sha256sum)"
 "$installer" unified "$tmp/source" \
   --ndk-version 28.2.13676358 --target-root "$tmp/target-dir" >/dev/null
 check_normalised "$tmp/target-dir/unified"
-source_after="$(sha256sum "$tmp/source/unityLibrary/build.gradle")"
+source_after="$(cat "$tmp/source/unityLibrary/build.gradle" \
+  "$tmp/source/unityLibrary/proguard-unity.txt" | sha256sum)"
 [ "$source_before" = "$source_after" ] ||
   fail "installer modified the source export"
 echo "PASS: directory export normalised; source untouched"

@@ -237,6 +237,16 @@ if grep -q 'unityStreamingAssets' "$build_gradle" &&
     "$build_gradle"
 fi
 
+# 8. AGP 9 rejects global options in a consumer ProGuard file. Unity writes
+#    `-ignorewarnings` into proguard-unity.txt, which the module exposes as
+#    `consumerProguardFiles`, so `exportReleaseConsumerProguardFiles` fails.
+#    It only suppresses build warnings; drop it and keep the keep rules.
+proguard_unity="$src/proguard-unity.txt"
+if [ -f "$proguard_unity" ]; then
+  perl -0pi -e \
+    's{^[ \t]*-ignorewarnings[ \t]*(?:\r?\n|\z)}{}mg' "$proguard_unity"
+fi
+
 if grep -Eq "implementation[[:blank:]]*\([[:blank:]]*name:" "$build_gradle"; then
   echo "FAIL: local-AAR module notation survived normalisation" >&2
   exit 1
@@ -263,6 +273,10 @@ if grep -Eq '^[[:blank:]]*ndkPath[[:blank:]]' "$build_gradle"; then
 fi
 if ! grep -q "\"$ndk_version\"" "$build_gradle"; then
   echo "FAIL: ndkVersion $ndk_version was not written" >&2
+  exit 1
+fi
+if grep -Eq '^[[:blank:]]*-ignorewarnings[[:blank:]]*$' "$proguard_unity" 2>/dev/null; then
+  echo "FAIL: -ignorewarnings survived in proguard-unity.txt" >&2
   exit 1
 fi
 
