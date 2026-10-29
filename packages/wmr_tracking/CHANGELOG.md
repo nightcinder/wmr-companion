@@ -7,9 +7,13 @@
   between samples. `minDt` follows the anchor rate (11 ms) instead of the
   240 Hz IMU. Adds `PoseFilterConfig`, `PoseCapture`, the offline grid tuner
   (`tool/pose_filter_tune.dart`) and the synthetic harness-vector generator
-  (`tool/generate_pose_captures.dart`). The `minCutoff`/`beta`/`dCutoff`
-  defaults stay at the published values until hardware captures exist; no
-  point is chosen by reasoning.
+  (`tool/generate_pose_captures.dart`). The tuner evaluates the full
+  `filter-spec` rev 4 grid (4,264 points per runtime), scores `J`, `J_D`,
+  slow/medium/fast lag, selects the lowest-`J_D` passing point and treats a
+  winner on a bar-limiting boundary as inconclusive. `PoseCapture.fromRecording`
+  keeps the raw anchor joint position so the harness measures what the filter
+  sees. The `minCutoff`/`beta`/`dCutoff` defaults stay at the published values
+  until hardware captures exist; no point is chosen by reasoning.
 
 ## 0.2.2
 

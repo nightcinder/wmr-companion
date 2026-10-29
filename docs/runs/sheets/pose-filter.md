@@ -3,8 +3,12 @@
 > **Status: blocked awaiting captures. No constants were chosen.** ONY-501
 > requires the grid search to run on recorded anchor traces, not on reasoning.
 > No such capture exists yet, so `minCutoff`, `beta` and `dCutoff` are still the
-> published defaults. The structural fix and the grid harness are implemented
-> and tested; the table below is deliberately unfilled.
+> published defaults. The structural fix and the 4,264-point harness are
+> implemented and tested; the tables below are deliberately unfilled.
+>
+> Normative source: ONY-501's `filter-spec` **revision 4**. Where this sheet and
+> that document disagree, the document wins. Revision 1's grid, speeds and
+> acceptance text are superseded.
 
 ## What landed
 
@@ -23,73 +27,106 @@ structural half is independent of the tuning and is in
 `SixDofFusionConfig.poseFilter` and `PoseFilterConfig` let the harness or a
 caller supply a tuned config without another fuser change.
 
+`PoseCapture.fromRecording` now takes the **raw anchor joint position**
+(`anchor.pose.translation`) and the tracking frame's own timestamp. It does not
+apply a grip offset. Per `filter-spec` sections 3 and 4 the filter sees the
+joint, and `R_imu * offset` is applied after filtering; the offset is
+calibrated per hand, per joint, per runtime.
+
 ## The grid harness
 
 `packages/wmr_tracking/tool/pose_filter_tune.dart` replays anchor captures and
-evaluates the ONY-501 grid:
+evaluates the whole `filter-spec` rev 4 section 7 grid:
 
-- `minCutoff ∈ {1, 2, 4, 8, 16} Hz`
-- `beta ∈ {0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2}`
-- `dCutoff ∈ {1, 2, 4} Hz`
+| Constant | Min | Max | Step | Points |
+|---|---|---|---|---|
+| `minCutoff` | 1.0 Hz | 4.0 Hz | 0.25 Hz | 13 |
+| `beta` | 0.00 | 0.40 Hz per cm/s | 0.01 | 41 |
+| `dCutoff` | 0.5 Hz | 4.0 Hz | 0.5 Hz | 8 |
 
-For each point it reports static jitter `J`, median and peak best-fit lag `L`,
-and the fast-flick 90 % rise time. It takes the lowest-`L` point that meets the
-jitter bound and writes the full grid plus every capture's before/after metrics
-to `build/pose_filter_tune.json`. If no point passes, it exits 1 and says to
-escalate to ONY-501; the thresholds are not adjusted.
+That is **4,264 points per runtime**, all evaluated by capture replay. There is
+no early stop and no coarse-to-fine pruning. `minDt` is not searched; it follows
+the anchor rate per section 5.
 
-`PoseCapture.fromRecording` converts an ONY-249 `PoseRecording` into an anchor
-trace: one position and one timestamp per new tracking frame for the selected
-hand, with repeated viewer samples collapsed. The 60 traces under
-`packages/wmr_tracking/test/fixtures/pose_filter_captures/synthetic/` are
-**synthetic harness vectors**, not captures: they say `kind: synthetic`,
-`app_commit: null`, `firmware_sha: null`. They prove the harness runs; they
-must not be used to choose the constants.
+`beta` is in hertz per centimetre per second. `OneEuroFilter` scales metre
+inputs to centimetres internally, so these grid values are passed to
+`PoseFilterConfig.beta` unchanged. An implementation that estimates speed in
+metres per second without that scaling must multiply a rev 4 beta by 100. The
+old paper betas (0.02-0.05) are in different units and are not grid bounds.
+
+For each point the harness reports static jitter `J`, drift jitter `J_D`, median
+best-fit lag `L` on slow, medium and fast sweeps, and the fast-flick 90 % rise
+time. It selects the passing point with the **lowest `J_D`**, breaking ties by
+the lowest median `L` on medium.
+
+**Edge rule.** If the selected point, or the only passing region, touches a
+bar-limiting boundary (`beta = 0.40`, `minCutoff = 1.0` or `4.0`,
+`dCutoff = 0.5` or `4.0`), the result is inconclusive: not a pass and not
+grounds to escalate. The harness extends that axis by 50 % at the same step,
+reruns the whole grid and writes both runs. If the extended run still selects a
+boundary point, it exits 3 and says to take both grids to ONY-501.
 
 ## Acceptance
 
-Per runtime, from ONY-501's `filter-spec` rev 1:
+Per runtime, from ONY-501's `filter-spec` rev 4 sections 1 and 8:
 
-- `J <= 0.5 mm` RMS on a 10 s static hold, measured from the filtered
-  position's 1 s moving mean.
-- median `L <= 20 ms` on medium and fast lateral sweeps, where `L` is the
-  best-fit time shift between raw and filtered.
-- the whole grid is published, not just the winner.
+| Metric | Bar | Applies to |
+|---|---|---|
+| Jitter `J` (RMS from 1 s moving mean) | <= 0.5 mm | segment S, every runtime |
+| Jitter `J_D` (residual from 1 s quadratic) | <= 0.75 mm | segment D, every runtime |
+| Median lag `L` | <= 20 ms | medium and fast sweeps |
+| Median lag `L` | <= 160 ms | slow sweeps, regression check only |
+
+The whole grid is published, not just the winner. The synthetic vectors under
+`packages/wmr_tracking/test/fixtures/pose_filter_captures/synthetic/` are
+harness vectors, not captures: they say `kind: synthetic`, `app_commit: null`,
+`firmware_sha: null`, and must not be used to choose constants.
 
 ## Before and after (pending captures)
 
 Every cell stays empty until the hardware runs exist. Fill one row group per
-runtime; the tuner prints the numbers in this shape.
+runtime; the tuner writes the numbers in this shape.
 
-| Runtime | Motion | `J` before | `J` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Android XR | still | | | — | — | — | — | — | — |
-| Android XR | slow pan | — | — | | | | | — | — |
-| Android XR | medium pan | — | — | | | | | — | — |
-| Android XR | fast flick | — | — | | | | | | |
-| Android XR | occlusion | — | — | | | | | — | — |
-| VITURE | still | | | — | — | — | — | — | — |
-| VITURE | slow pan | — | — | | | | | — | — |
-| VITURE | medium pan | — | — | | | | | — | — |
-| VITURE | fast flick | — | — | | | | | | |
-| VITURE | occlusion | — | — | | | | | — | — |
-| XREAL | still | | | — | — | — | — | — | — |
-| XREAL | slow pan | — | — | | | | | — | — |
-| XREAL | medium pan | — | — | | | | | — | — |
-| XREAL | fast flick | — | — | | | | | | |
-| XREAL | occlusion | — | — | | | | | — | — |
+| Runtime | Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Android XR | still | | | — | — | — | — | — | — | — | — |
+| Android XR | held, drifting | — | — | | | — | — | — | — | — | — |
+| Android XR | slow pan | — | — | — | — | | | | | — | — |
+| Android XR | medium pan | — | — | — | — | | | | | — | — |
+| Android XR | fast flick | — | — | — | — | | | | | | |
+| Android XR | occlusion | — | — | — | — | | | | | — | — |
+| VITURE | still | | | — | — | — | — | — | — | — | — |
+| VITURE | held, drifting | — | — | | | — | — | — | — | — | — |
+| VITURE | slow pan | — | — | — | — | | | | | — | — |
+| VITURE | medium pan | — | — | — | — | | | | | — | — |
+| VITURE | fast flick | — | — | — | — | | | | | | |
+| VITURE | occlusion | — | — | — | — | | | | | — | — |
+| XREAL | still | | | — | — | — | — | — | — | — | — |
+| XREAL | held, drifting | — | — | | | — | — | — | — | — | — |
+| XREAL | slow pan | — | — | — | — | | | | | — | — |
+| XREAL | medium pan | — | — | — | — | | | | | — | — |
+| XREAL | fast flick | — | — | — | — | | | | | | |
+| XREAL | occlusion | — | — | — | — | | | | | — | — |
 
-## Capture procedure (ONY-249)
+## Capture protocol (ONY-249)
 
-Record at least four runs per motion class, each at least 30 s, per runtime:
+`filter-spec` rev 4 section 8 maps the segment names to speeds. The operator
+follows the path and duration; analysis bins samples by the speed measured from
+the reference trajectory and scores only samples within ±25 % of nominal.
 
-1. **Still:** controller on a fixed surface, device flat; this is the noise
-   floor.
-2. **Slow pan:** lateral sweeps around 0.06 m/s.
-3. **Medium pan:** lateral sweeps around 0.3 m/s.
-4. **Fast flick:** lateral flicks around 1 m/s or faster.
-5. **Occlusion:** hand-anchor motion with the hand briefly hidden; the
-   recording must contain the dropout.
+| Segment | Sheet name | Nominal speed | How to perform | Duration | Scores |
+|---|---|---|---|---|---|
+| S | still | 0 | Controller rested in the hand, arm braced | 10 s | J |
+| D | held, drifting | 10-50 cm/s | Hold as if aiming; let it wander slowly | 10 s | J_D |
+| slow | slow pan | 10 cm/s | 30 cm sideways in 3 s, back and forth | 3 x 6 s | L <= 160 ms |
+| M | medium pan | 50 cm/s | 50 cm sideways in 1 s, back and forth | 10 s | L <= 20 ms |
+| F | fast flick | 150 cm/s | 45 cm flick in 0.3 s, pause, return | 10 reps | L <= 20 ms |
+
+Record at least four runs per motion class per runtime, each at least 30 s:
+repeat the segment path until the run is long enough. Record **each hand**
+separately (`TrackedHand.left` and `TrackedHand.right`). Include an occlusion
+run (hand-anchor motion with the hand briefly hidden) for diagnostics; rev 4 has
+no bar for that class.
 
 For every file record the runtime (`androidXr`, `viture`, `xreal`), the app
 commit, the firmware short SHA, the anchor rate and the run index in the
@@ -107,8 +144,8 @@ controller pose or a hand palm/grip anchor from the XR runtime.
 The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) records 60 s of the
 FF11 raw controller stream, a still hold and a slow move per hand, and exports
 a test bundle. It has no pose-recorder step, so it writes no `TrackingFrame`s,
-and it has no medium, fast or occlusion class. Its files cannot feed the
-tuner.
+and it has no held-drift, medium, fast or occlusion class. Its files cannot feed
+the tuner.
 
 Controller-only recordings do not close the gap either: with no runtime anchor
 the fuser falls back to the head-relative offset or orientation only

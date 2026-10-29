@@ -28,8 +28,12 @@ TrackingFrame _handFrame(
   );
 }
 
-/// Palm position that makes the fuser's default grip offset land on [target].
-Vector3 _palmFor(Vector3 target) => target - _grip;
+/// Palm position that makes the fuser's default grip offset land on [target]
+/// when the controller IMU has [orientation].
+Vector3 _palmFor(Vector3 target, [Quaternion? orientation]) =>
+    target -
+    (Vector3.copy(_grip)
+      ..applyQuaternion(orientation ?? Quaternion.identity()));
 
 double _gaussian(math.Random random) {
   final u1 = 1 - random.nextDouble();
@@ -109,7 +113,7 @@ void main() {
     for (var i = 0; i < 300; i++) {
       final timeNs = (i + 1) * _hz30;
       final palm =
-          _palmFor(truth) +
+          _palmFor(truth, orientation) +
           Vector3(
             _gaussian(random) * 0.005,
             _gaussian(random) * 0.005,
@@ -126,7 +130,7 @@ void main() {
       expect(pose.orientation.z, orientation.normalized().z);
       expect(pose.orientation.w, orientation.normalized().w);
       if (i >= 30) {
-        raw.add(palm + _grip);
+        raw.add(palm + (Vector3.copy(_grip)..applyQuaternion(orientation)));
         filtered.add(pose.position!);
       }
     }
@@ -261,6 +265,34 @@ void main() {
     );
     expect(hand.source, ControllerPoseSource.handAnchor);
     expect(hand.position, Vector3(0.3, 1.1, -0.4));
+  });
+
+  test('the lever arm follows IMU rotation without being filtered', () {
+    final fuser = SixDofFuser();
+    const start = 1000000000;
+    final joint = Vector3(0.2, 1.1, -0.4);
+    fuser.onTrackingFrame(_handFrame(start, joint));
+    final first = fuser.update(
+      hand: TrackedHand.right,
+      orientation: Quaternion.identity(),
+      hostTimeNs: start,
+    );
+    expect(first.position, joint + _grip);
+
+    // A new controller tick with the same held anchor sample and a rotated
+    // IMU orientation. The anchor joint is filtered once; the offset must be
+    // applied at display rate so the lever arm is not low-passed.
+    final rotated = Quaternion.axisAngle(Vector3(0, 1, 0), math.pi / 2);
+    final second = fuser.update(
+      hand: TrackedHand.right,
+      orientation: rotated,
+      hostTimeNs: start + 5555555,
+    );
+    expect(second.source, ControllerPoseSource.handAnchor);
+    expect(
+      second.position,
+      joint + (Vector3.copy(_grip)..applyQuaternion(rotated)),
+    );
   });
 
   test('a non-finite anchor pose is rejected', () {

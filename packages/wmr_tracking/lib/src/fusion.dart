@@ -196,7 +196,10 @@ class SixDofFusionConfig {
 ///
 /// Hand-anchor positions pass through a [OneEuroFilter] on the anchor sample
 /// clock, once per new anchor sample; between samples the filtered value is
-/// held. Runtime controller poses keep [SixDofFusionConfig.positionSmoothing]
+/// held. The filter sees the anchor joint itself; the grip offset is applied
+/// afterwards with the unfiltered IMU orientation, so rotation-induced lever
+/// motion is not low-passed. Runtime controller poses keep
+/// [SixDofFusionConfig.positionSmoothing]
 /// for compatibility, and the head-relative/orientation fallbacks are never
 /// smoothed. Crossing between sources resets the filter, so a fallback is not
 /// disguised as a tracked hand.
@@ -281,18 +284,27 @@ class SixDofFuser {
     final headPose = head != null && head.isTracked ? head.pose : null;
 
     Vector3? target;
+    Vector3? worldTarget;
     var source = ControllerPoseSource.orientationOnly;
     var confidence = TrackingConfidence.none;
 
     final runtime = frame.controller(hand);
     if (runtime != null && runtime.isTracked) {
       target = runtime.pose.translation;
+      worldTarget = target;
       source = ControllerPoseSource.runtimeController;
       confidence = runtime.confidence;
     } else {
       final anchor = frame.hand(hand)?.controllerAnchor;
       if (anchor != null && anchor.isTracked) {
-        target = (anchor.pose * _gripOffsets[hand]!).translation;
+        // filter-spec section 3: filter the anchor joint, then apply the grip
+        // offset with the unfiltered controller IMU orientation. Filtering the
+        // offset-applied position would low-pass rotation-induced lever motion.
+        final joint = anchor.pose.translation;
+        final offset = Vector3.copy(_gripOffsets[hand]!.translation)
+          ..applyQuaternion(orientation);
+        target = joint;
+        worldTarget = joint + offset;
         source = ControllerPoseSource.handAnchor;
         confidence = anchor.confidence;
       } else if (headPose != null) {
@@ -335,9 +347,10 @@ class SixDofFuser {
     if (target != null && source != ControllerPoseSource.headRelative) {
       // Learn the head-local offset from the raw anchor, not the lagging
       // filtered position.
-      _lastWorld[hand] = Vector3.copy(target);
+      final world = worldTarget ?? target;
+      _lastWorld[hand] = Vector3.copy(world);
       if (headPose != null) {
-        _headLocal[hand] = headPose.inverse().transformPoint(target);
+        _headLocal[hand] = headPose.inverse().transformPoint(world);
       }
     }
 
@@ -351,7 +364,11 @@ class SixDofFuser {
         _heldAnchor[hand] = _handFilters[hand]!.filter(target, anchorTimeNs);
         _anchorFrameTimeNs[hand] = anchorTimeNs;
       }
-      target = _heldAnchor[hand] ?? target;
+      final joint = _heldAnchor[hand] ?? target;
+      target =
+          joint +
+          (Vector3.copy(_gripOffsets[hand]!.translation)
+            ..applyQuaternion(orientation));
     } else if (target != null &&
         source == ControllerPoseSource.runtimeController &&
         _config.positionSmoothing < 1) {

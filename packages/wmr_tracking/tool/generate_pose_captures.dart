@@ -74,6 +74,8 @@ PoseCapture _capture(
   final random = math.Random(seed);
   final (durationS, gapS) = switch (motion) {
     PoseMotion.occlusion => (30.0, 10.0),
+    // `filter-spec` rev 4 section 8: slow pan is 3 x 6 s.
+    PoseMotion.slowPan => (18.0, 0.0),
     _ => (10.0, 0.0),
   };
   final dt = 1 / rateHz;
@@ -114,26 +116,38 @@ PoseCapture _capture(
       'seed': seed,
       'anchor_rate_hz': rateHz,
       'noise_sigma_mm': _noiseSigmaM * 1000,
+      'speeds_m_s': _speedBands,
       'app_commit': null,
       'firmware_sha': null,
       'note':
-          'Synthetic placeholder. Replace with an ONY-249 app recording '
-          'before treating these numbers as hardware results.',
+          'Synthetic placeholder for filter-spec rev 4. Replace with an '
+          'ONY-249 app recording before treating these numbers as hardware '
+          'results.',
     },
     samples: samples,
   );
 }
 
+/// Nominal speeds from `filter-spec` rev 4 section 8.
+const Map<String, double> _speedBands = {
+  'still': 0,
+  'heldDrift': 0.2,
+  'slowPan': 0.10,
+  'mediumPan': 0.50,
+  'fastFlick': 1.50,
+};
+
 Vector3 _motionOffset(PoseMotion motion, double t) {
   return switch (motion) {
     PoseMotion.still => Vector3.zero(),
+    PoseMotion.heldDrift => _drift(t),
     PoseMotion.slowPan => Vector3(
-      _sweep(t, amplitude: 0.10, speed: 0.06),
+      _sweep(t, amplitude: 0.10, speed: 0.10),
       0,
       0,
     ),
     PoseMotion.mediumPan => Vector3(
-      _sweep(t, amplitude: 0.12, speed: 0.30),
+      _sweep(t, amplitude: 0.25, speed: 0.50),
       0,
       0,
     ),
@@ -146,16 +160,27 @@ Vector3 _motionOffset(PoseMotion motion, double t) {
   };
 }
 
+/// Segment D: held as if aiming, wandering at 10-50 cm/s. The wander is slow
+/// enough that a 1 s quadratic fit removes the trend and leaves the jitter.
+Vector3 _drift(double t) => Vector3(
+  0.25 * math.sin(2 * math.pi * 0.10 * t) +
+      0.08 * math.sin(2 * math.pi * 0.17 * t + 0.7) +
+      0.02 * math.sin(2 * math.pi * 0.05 * t + 2.0),
+  0.12 * math.sin(2 * math.pi * 0.13 * t + 1.1),
+  0.05 * math.sin(2 * math.pi * 0.08 * t + 2.4),
+);
+
 /// Sinusoid whose peak speed is [speed] m/s.
 double _sweep(double t, {required double amplitude, required double speed}) {
   final frequency = speed / (2 * math.pi * amplitude);
   return amplitude * math.sin(2 * math.pi * frequency * t);
 }
 
-/// Three 0.2 m lateral flicks, each a smooth 100 ms ramp, with holds between.
+/// Ten out-and-back 0.45 m flicks at a 1.5 m/s peak, one per second.
 double _flick(double t) {
-  double step(double at) => 0.5 * (1 + _tanh((t - at) / 0.030));
-  return 0.2 * (step(2.0) - step(5.0) + step(8.0)) - 0.1;
+  final phase = t - (t / 1.0).floorToDouble();
+  double move(double at) => 0.5 * (1 + _tanh((phase - at) / 0.15));
+  return 0.45 * (move(0.10) - move(0.55));
 }
 
 double _tanh(double value) {
