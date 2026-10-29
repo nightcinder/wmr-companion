@@ -1,6 +1,6 @@
 name: wmr_companion_hid_android
 description: Android Bluetooth HID gamepad output for wmr_companion hosts.
-version: 0.2.1
+version: 0.2.2
 repository: https://github.com/nightcinder/wmr-companion
 issue_tracker: https://github.com/nightcinder/wmr-companion/issues
 
@@ -13,13 +13,13 @@ resolution: workspace
 dependencies:
   flutter:
     sdk: flutter
-  wmr_companion: ^0.2.1
+  wmr_companion: ^0.2.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  wmr_core: ^0.2.1
+  wmr_core: ^0.2.2
 
 flutter:
   plugin:

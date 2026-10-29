@@ -6,6 +6,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 
 import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/orientation.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
@@ -254,6 +255,8 @@ class DebugScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
           BridgeLinkTable(bridges, style: mono, transportKinds: transportKinds),
+          const SizedBox(height: 8),
+          BridgeFirmwareView(bridges, style: mono),
           if (decoded)
             if (view == null)
               const Text('Waiting for the decoded stream...')
@@ -500,6 +503,56 @@ class BridgeLinkTable extends StatelessWidget {
   String _kindLabel(String bridgeId) => transportKinds[bridgeId] == null
       ? ''
       : '${transportKinds[bridgeId]!.label}  ';
+}
+
+/// The FF16 firmware string and the FF11-FF16 feature matrix of each bridge.
+///
+/// Every state is explicit: a bridge without FF16 is older firmware, a value
+/// that did not decode is malformed, and a protocol that has not arrived yet
+/// is still being read. Nothing here issues a BLE read; the service reads
+/// FF16 once after connect.
+class BridgeFirmwareView extends StatelessWidget {
+  const BridgeFirmwareView(this.bridges, {super.key, this.style});
+
+  final List<BridgeLinkSnapshot> bridges;
+  final TextStyle? style;
+
+  static String versionLabel(WmrProtocolVersion? protocol) {
+    if (protocol == null) return 'firmware reading...';
+    if (protocol.firmwareVersionMalformed) {
+      return 'firmware malformed (FF16 present)';
+    }
+    if (!protocol.hasFirmwareVersion) {
+      return 'firmware n/a (no FF16, older firmware)';
+    }
+    return 'firmware ${protocol.firmwareVersion}';
+  }
+
+  static String featuresLabel(WmrBridgeFeatures features) => [
+    'FF11${features.rawStream ? '+' : '-'}',
+    'FF12${features.decodedStream ? '+' : '-'}',
+    'FF13${features.configBlock ? '+' : '-'}',
+    'FF14${features.batchedStream ? '+' : '-'}',
+    'FF15${features.echo ? '+' : '-'}',
+    'FF16${features.firmwareVersion ? '+' : '-'}',
+  ].join(' ');
+
+  @override
+  Widget build(BuildContext context) {
+    if (bridges.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final bridge in bridges)
+          Text(
+            '${bridge.bridgeId}  '
+            '${versionLabel(bridge.protocol)}  '
+            '${featuresLabel(bridge.protocol?.features ?? WmrBridgeFeatures.none)}',
+            style: style,
+          ),
+      ],
+    );
+  }
 }
 
 class DecodedStatsView extends StatelessWidget {

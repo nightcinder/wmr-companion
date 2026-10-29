@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-27 (records the v0.2.1 unified APK release; earlier updates were the M13.3 0.2 security posture and the ONY-202 headset-tracking research and framework). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-29 (records the v0.2.2 unified APK release, which adds the FF16 firmware readout on the Debug screen; earlier updates were the M13.3 0.2 security posture and the ONY-202 headset-tracking research and framework). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -26,20 +26,20 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ## Current state
 
-### Current release (v0.2.1, 2026-10-27)
+### Current release (v0.2.2, 2026-10-29)
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.2.1` → `58b5c40` |
-| App version | `0.2.1+3` (`versionName 0.2.1`, `versionCode 3`); all twelve Dart packages are `0.2.1` |
-| Android artifact | `wmr-companion-0.2.1-unified-debug.apk`, 584,438,127 B, SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b` |
-| GATT probe | `wmr-gatt-probe-0.2.1-debug.apk`, 5,961,348 B, SHA-256 `c8457f78b2d45297307c78d5fbacae27d495a25edb537ffd18409956d4171649` |
+| Tag / commit | `v0.2.2` (release tag) |
+| App version | `0.2.2+4` (`versionName 0.2.2`, `versionCode 4`); all twelve Dart packages are `0.2.2` |
+| Android artifact | `wmr-companion-0.2.2-unified-debug.apk`, 584,288,364 B, SHA-256 `2507626a981b060566d2e3c7da41a7aa24844435c0db6ea7fbd68d5ca222c755` |
+| GATT probe | `wmr-gatt-probe-0.2.2-debug.apk`, 5,961,348 B, SHA-256 `d0c076aeda16448720125df2fd913280bcf424a62458a0ecc802952c0e9e1b07` |
 | Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. This is the truly unified artifact, **not** the approved base fallback |
 | Signing | Android debug key. Not suitable for store distribution |
 | Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified |
 | Licence gate | The owner approved bundling both proprietary SDKs and exported the shared `unityLibrary` (ONY-354; export SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`) |
 
-Release notes: [`v0.2.1`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1). Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
+Release notes: [`v0.2.2`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.2). This release adds the FF16 firmware string and FF11–FF16 feature bits to the Debug screen (GitHub #107) and bumps the app and all twelve Dart packages to `0.2.2`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
 
 ### Milestones (see [PLAN.md](PLAN.md))
 
@@ -47,7 +47,7 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 
 | Milestone | Scope | State |
 |---|---|---|
-| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.1` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
+| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.2` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
 | **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
 | **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
 | **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion `v0.2.1` unified debug APK published 2026-10-27 (tag `58b5c40`; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.2 (owner choice below). **Open:** M13.4 README rewrite around M12 results. |

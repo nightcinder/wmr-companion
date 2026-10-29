@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - Update the VITURE capability profile to name VITURE XR SDK for Unity 0.9.0
   and Unity 6000.0.27f1. No API change.
+- Version aligned with the v0.2.2 release; no breaking public API change.
 
 ## 0.2.1
 

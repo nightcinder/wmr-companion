@@ -151,8 +151,9 @@ can match a running bridge to a release without a serial console. A build made
 directly with `idf.py` reports that project's `PROJECT_VER` (ESP-IDF's default
 is `1`).
 
-The facade reads FF16 once after connect, after the transport's MTU/priority
-setup, and publishes the result on `WmrLinkSnapshot.protocol`:
+The controller service reads FF16 once after connect, after the transport's
+MTU/priority setup, and the facade publishes the result on
+`WmrLinkSnapshot.protocol`:
 
 ```dart
 wmr.link.listen((WmrLinkSnapshot snapshot) {
@@ -169,7 +170,7 @@ thrown. A discovery failure leaves `protocol` null; a failed FF16 read leaves
 `firmwareVersion` null (the feature matrix is still published). The read is
 fired after `connect` reports `ready`, so a slow read does not delay the
 stream. `UniversalBleTransport` caches the GATT table from its connect
-sequence, so the facade's lookup does not run a second platform discovery on a
+sequence, so the service's lookup does not run a second platform discovery on a
 live link; a custom transport should do the same or expect one extra
 `discoverServices` call after connect.
 

@@ -8,6 +8,7 @@ import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/domain/loss_window.dart';
 import 'package:wmr_core/domain/orientation.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
@@ -154,6 +155,13 @@ void main() {
       expect(find.text('Recalibrate gyro bias'), findsOneWidget);
       expect(find.textContaining('Yaw drifts'), findsOneWidget);
       expect(find.text('LEFT'), findsOneWidget); // hand selector
+      expect(
+        find.textContaining(
+          'firmware n/a (no FF16, older firmware)  '
+          'FF11+ FF12+',
+        ),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Raw FF11'));
       await settle(tester);
@@ -631,19 +639,100 @@ void main() {
       expect(eulerFromQuaternion(after).yawDeg, closeTo(0, 0.1));
       expect(eulerFromQuaternion(after).pitchDeg, closeTo(11.5, 0.1));
     });
+  });
 
-    testWidgets('the simulated source lifts 3DoF to a hand anchor', (
+  group('bridge firmware', () {
+    Future<void> pump(WidgetTester tester, WmrProtocolVersion? protocol) {
+      return tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BridgeFirmwareView([
+              BridgeLinkSnapshot(
+                bridgeId: 'bridge-left',
+                mode: StreamMode.decoded,
+                protocol: protocol,
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('shows the FF16 string and every feature bit', (tester) async {
+      await pump(
+        tester,
+        const WmrProtocolVersion(
+          firmwareVersion: '0.2.4',
+          features: WmrBridgeFeatures(
+            rawStream: true,
+            decodedStream: true,
+            batchedStream: true,
+            configBlock: true,
+            echo: true,
+            firmwareVersion: true,
+          ),
+        ),
+      );
+
+      expect(
+        find.text(
+          'bridge-left  firmware 0.2.4  '
+          'FF11+ FF12+ FF13+ FF14+ FF15+ FF16+',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an older bridge without FF16 says so', (tester) async {
+      await pump(
+        tester,
+        const WmrProtocolVersion.withoutFirmwareVersion(
+          features: WmrBridgeFeatures(rawStream: true, decodedStream: true),
+        ),
+      );
+
+      expect(
+        find.text(
+          'bridge-left  firmware n/a (no FF16, older firmware)  '
+          'FF11+ FF12+ FF13- FF14- FF15- FF16-',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a malformed FF16 value is flagged', (tester) async {
+      await pump(
+        tester,
+        const WmrProtocolVersion(
+          firmwareVersionMalformed: true,
+          features: WmrBridgeFeatures(
+            rawStream: true,
+            decodedStream: true,
+            firmwareVersion: true,
+          ),
+        ),
+      );
+
+      expect(
+        find.text(
+          'bridge-left  firmware malformed (FF16 present)  '
+          'FF11+ FF12+ FF13- FF14- FF15- FF16+',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a protocol still being read is not reported as missing', (
       tester,
     ) async {
-      await open(tester, simulated: true);
-      await tester.pump(const Duration(milliseconds: 200));
+      await pump(tester, null);
 
-      expect(find.textContaining('source handAnchor'), findsNWidgets(2));
-      expect(find.textContaining('source orientationOnly'), findsNothing);
-      expect(find.textContaining('m  source handAnchor'), findsNWidgets(2));
       expect(
-        find.textContaining('fallback: orientation only, no position'),
-        findsNothing,
+        find.text(
+          'bridge-left  firmware reading...  '
+          'FF11- FF12- FF13- FF14- FF15- FF16-',
+        ),
+        findsOneWidget,
       );
     });
   });

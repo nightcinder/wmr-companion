@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../ble/ble_transport.dart';
 import '../domain/axis_mapping.dart';
@@ -9,6 +10,7 @@ import '../domain/stick_centre.dart';
 import '../domain/tick_timer.dart';
 import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
+import '../protocol/firmware_version.dart';
 import '../protocol/gatt.dart';
 import '../protocol/wmr_fragment.dart';
 
@@ -290,6 +292,7 @@ class BridgeLinkSnapshot {
     this.phy,
     this.rateHz = const [0, 0],
     this.loss = const [null, null],
+    this.protocol,
   });
 
   final String bridgeId;
@@ -308,6 +311,10 @@ class BridgeLinkSnapshot {
 
   /// Per-hand loss, or null for a hand this bridge has not fed yet.
   final List<double?> loss;
+
+  /// The bridge's FF16 firmware version and FF11-FF16 feature matrix, null
+  /// until the one-time post-connect read finishes and when discovery failed.
+  final WmrProtocolVersion? protocol;
 
   /// Total rate over both hands.
   double get totalRateHz => rateHz.fold(0, (sum, rate) => sum + rate);
@@ -479,6 +486,11 @@ class ControllerService {
   final Map<String, _RawBridgeState> _rawBridges = {};
   final Map<String, _DecodedBridgeState> _decodedBridges = {};
 
+  /// FF16 firmware version and feature matrix, keyed by transport device id.
+  final Map<String, WmrProtocolVersion> _protocols = {};
+  final StreamController<Map<String, WmrProtocolVersion>> _protocolChanges =
+      StreamController.broadcast();
+
   // Merged per-hand counters, across every bridge (the fused view). They are
   // kept separately from the per-bridge states so removing a bridge does not
   // rewrite the history the merged view already showed.
@@ -542,6 +554,17 @@ class ControllerService {
   /// other one.
   Stream<String> get deviceRemovals => _deviceRemovals.stream;
 
+  /// The FF16 firmware version and GATT feature matrix of one bridge, or null
+  /// while the one-time read after connect has not finished and when
+  /// discovery failed. A bridge without FF16 reports
+  /// [WmrProtocolVersion.withoutFirmwareVersion].
+  WmrProtocolVersion? protocolFor(String bridgeId) => _protocols[bridgeId];
+
+  /// Emits the per-bridge protocol map whenever a read or a removal changes
+  /// it.
+  Stream<Map<String, WmrProtocolVersion>> get protocolChanges =>
+      _protocolChanges.stream;
+
   StreamMode get mode => _mode;
   ModeFault? get fault => _fault;
   ModeState get modeState => ModeState(_mode, fault: _fault);
@@ -579,10 +602,81 @@ class ControllerService {
         await transport.connect(id);
       }
       _started = true;
-      if (_mode == StreamMode.none) return;
+      if (_mode == StreamMode.none) {
+        _readProtocols();
+        return;
+      }
       await _subscribe();
+      _readProtocols();
     } finally {
       _starting = false;
+    }
+  }
+
+  /// Reads FF16 and the feature matrix once per connected bridge.
+  ///
+  /// Best-effort and never awaited by a caller: a slow or failed read must not
+  /// delay the stream or connect. A missing FF16 is an older bridge, not an
+  /// error; a malformed value is flagged on the snapshot.
+  void _readProtocols() {
+    for (final id in _deviceIds) {
+      unawaited(_readProtocol(id));
+    }
+  }
+
+  Future<void> _readProtocol(String bridgeId) async {
+    final WmrBridgeFeatures features;
+    try {
+      final services = await transport.discoverServices(bridgeId);
+      var foundService = false;
+      var characteristicUuids = const <String>[];
+      for (final discovered in services) {
+        if (discovered.uuid.toLowerCase() == wmrBridgeServiceUuid) {
+          foundService = true;
+          characteristicUuids = discovered.characteristicUuids;
+          break;
+        }
+      }
+      if (!foundService) {
+        // A bridge without FF10 is not a WMR bridge: leave it unknown rather
+        // than claiming an empty capability set.
+        return;
+      }
+      features = WmrBridgeFeatures.fromCharacteristics(characteristicUuids);
+    } catch (_) {
+      // Discovery is optional for streaming; leave the protocol unknown.
+      return;
+    }
+    if (!_deviceIds.contains(bridgeId)) return;
+
+    WmrProtocolVersion protocol;
+    if (features.firmwareVersion) {
+      Uint8List? value;
+      try {
+        value = await transport.read(
+          bridgeId,
+          wmrBridgeServiceUuid,
+          wmrBridgeVersionCharUuid,
+        );
+      } catch (_) {
+        // A failed read is the same status as a missing FF16: no version.
+        value = null;
+      }
+      if (!_deviceIds.contains(bridgeId)) return;
+      protocol = WmrProtocolVersion.parseFirmwareVersion(
+        value,
+        features: features,
+      );
+    } else {
+      protocol = WmrProtocolVersion.withoutFirmwareVersion(features: features);
+    }
+    _protocols[bridgeId] = protocol;
+    _emitProtocols();
+  }
+
+  void _emitProtocols() {
+    if (!_protocolChanges.isClosed) {
+      _protocolChanges.add(Map.unmodifiable(_protocols));
     }
   }
 
@@ -603,6 +697,7 @@ class ControllerService {
           }
           _emitMode();
         }
+        unawaited(_readProtocol(deviceId));
       } catch (_) {
         _deviceIds.remove(deviceId);
         final sub = _subscriptions.remove(deviceId);
@@ -621,6 +716,7 @@ class ControllerService {
     _deviceIds.remove(deviceId);
     _rawBridges.remove(deviceId);
     _decodedBridges.remove(deviceId);
+    if (_protocols.remove(deviceId) != null) _emitProtocols();
     final sub = _subscriptions.remove(deviceId);
     await sub?.cancel();
     for (var h = 0; h < wmrNumControllers; h++) {
@@ -1130,6 +1226,7 @@ class ControllerService {
               ? decoded.tickLoss(h) ?? decoded.sequenceLoss(h)
               : raw.loss(h),
       ],
+      protocol: _protocols[bridgeId],
     );
   }
 
@@ -1143,5 +1240,6 @@ class ControllerService {
     await _samples.close();
     await _modeChanges.close();
     await _deviceRemovals.close();
+    await _protocolChanges.close();
   }
 }

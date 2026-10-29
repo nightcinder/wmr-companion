@@ -1,7 +1,7 @@
 name: wmr_companion_app
 description: "Companion app for the ESP32 WMR Bridge."
 publish_to: 'none'
-version: 0.2.1+3
+version: 0.2.2+4
 
 environment:
   sdk: ^3.13.5
@@ -15,17 +15,17 @@ dependencies:
   path_provider: ^2.1.6
   share_plus: ^13.3.1
   vector_math: ^2.4.3
-  wmr_core: ^0.2.1
-  wmr_ble: ^0.2.1
-  wmr_ws: ^0.2.1
-  wmr_companion: ^0.2.1
-  wmr_companion_ui: ^0.2.1
-  wmr_companion_hid_android: ^0.2.1
-  wmr_fusion: ^0.2.1
-  wmr_tracking: ^0.2.1
-  wmr_tracking_android_xr: ^0.2.1
-  wmr_tracking_viture: ^0.2.1
-  wmr_tracking_xreal: ^0.2.1
+  wmr_core: ^0.2.2
+  wmr_ble: ^0.2.2
+  wmr_ws: ^0.2.2
+  wmr_companion: ^0.2.2
+  wmr_companion_ui: ^0.2.2
+  wmr_companion_hid_android: ^0.2.2
+  wmr_fusion: ^0.2.2
+  wmr_tracking: ^0.2.2
+  wmr_tracking_android_xr: ^0.2.2
+  wmr_tracking_viture: ^0.2.2
+  wmr_tracking_xreal: ^0.2.2
 
 dev_dependencies:
   flutter_test:

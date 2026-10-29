@@ -119,6 +119,7 @@ final bridgeLinksProvider =
       if (service == null) return Stream.value(const []);
       late final StreamController<List<BridgeLinkSnapshot>> controller;
       Timer? poll;
+      StreamSubscription<void>? protocolSub;
       var closed = false;
 
       Future<void> read() async {
@@ -130,6 +131,11 @@ final bridgeLinksProvider =
       controller = StreamController<List<BridgeLinkSnapshot>>(
         onListen: () {
           unawaited(read());
+          // The one-time FF16 read lands after the first poll; refresh then
+          // rather than waiting up to two seconds to show the firmware.
+          protocolSub = service.protocolChanges.listen(
+            (_) => unawaited(read()),
+          );
           poll = Timer.periodic(
             const Duration(seconds: 2),
             (_) => unawaited(read()),
@@ -138,11 +144,13 @@ final bridgeLinksProvider =
         onCancel: () {
           closed = true;
           poll?.cancel();
+          protocolSub?.cancel();
         },
       );
       ref.onDispose(() {
         closed = true;
         poll?.cancel();
+        protocolSub?.cancel();
         controller.close();
       });
       return controller.stream;
