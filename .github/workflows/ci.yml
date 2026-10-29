@@ -361,7 +361,23 @@ jobs:
     env:
       VERSION: ${{ github.ref_name }}
     steps:
+      # The ancestry guard below compares the tagged commit with origin/main;
+      # the default depth-1 checkout has no history to compare against.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # A tag can point at any commit, including one that will never reach
+      # main. Publishing that would hand a tester an APK main never had, so
+      # refuse before spending 40 minutes on a build.
+      - name: Refuse a tag that is not on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $VERSION points at $GITHUB_SHA, which is not an ancestor of origin/main; refusing to publish a release."
+            exit 1
+          fi
 
       - uses: actions/setup-java@v5
         with:
@@ -457,8 +473,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Only a plain vX.Y.Z tag is a production release. Any other shape
+          # (a scratch tag, v0.3.0-rc1) publishes as a prerelease so it can
+          # never look like the shipped tester build.
+          prerelease_args=()
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease_args+=(--prerelease)
+            echo "$VERSION is not vX.Y.Z; publishing as a prerelease."
+          fi
           if ! gh release view "$VERSION" >/dev/null 2>&1; then
             gh release create "$VERSION" \
+              "${prerelease_args[@]}" \
               --title "$VERSION" \
               --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device ABI; SHA256SUMS lists their digests."
           fi
