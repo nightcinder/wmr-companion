@@ -189,8 +189,18 @@ class BenchController extends Notifier<BenchRunState> {
   Future<void> exportBundle() async {
     if (state.exporting) return;
     state = state.copyWith(exporting: true, clearBundleError: true);
+    // Record and publish the export before the writer reads the run, so the
+    // manifest does not say `not_run` for a step that is finishing now.
+    _setResult(
+      BenchStep.export,
+      const BenchStepResult(
+        status: BenchStatus.done,
+        summary: 'Bundle written',
+      ),
+    );
+    final run = ref.read(benchBundleProvider);
     try {
-      final bundle = await ref.read(exportTestBundleProvider)();
+      final bundle = await ref.read(exportTestBundleProvider)(benchRun: run);
       if (!ref.mounted) return;
       _setResult(
         BenchStep.export,

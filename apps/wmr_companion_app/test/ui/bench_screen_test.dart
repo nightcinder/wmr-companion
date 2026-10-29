@@ -69,7 +69,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => session),
-        exportTestBundleProvider.overrideWithValue(() async => bundle()),
+        exportTestBundleProvider.overrideWithValue(
+          ({BenchBundleRun? benchRun}) async => bundle(),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -164,13 +166,28 @@ void main() {
     expect(state.resultFor(BenchStep.bothHands).status, BenchStatus.failed);
   });
 
+  testWidgets('leaving the screen clears the run before a plain export', (
+    tester,
+  ) async {
+    final container = await open(tester, _FakeSession());
+    await tap(tester, 'bench-start');
+    expect(container.read(benchBundleProvider), isNotNull);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pump();
+
+    expect(container.read(benchBundleProvider), isNull);
+  });
+
   testWidgets('notes an unconnected session instead of crashing', (
     tester,
   ) async {
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => null),
-        exportTestBundleProvider.overrideWithValue(() async => bundle()),
+        exportTestBundleProvider.overrideWithValue(
+          ({BenchBundleRun? benchRun}) async => bundle(),
+        ),
       ],
     );
     addTearDown(container.dispose);

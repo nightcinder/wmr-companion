@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
@@ -9,6 +12,8 @@ import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
+import 'package:wmr_companion_app/services/test_bundle_export.dart';
+import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 
 /// A 700-byte block exercises both FF13 windows (496 + 204).
@@ -132,49 +137,49 @@ void main() {
     expect(still.data['frames'], 0);
   });
 
-  test('the step results survive into the manifest', () async {
+  test('the wizard run reaches the manifest, export included', () async {
     final session = await open();
-    final outcomes = <BenchStep, BenchStepOutcome>{
-      BenchStep.connect: await session.connect(),
-      BenchStep.bothHands: await session.bothHands(),
-      BenchStep.firmwareConfig: await session.firmwareConfig(),
-      BenchStep.stillLeft: await session.still(wmrHandLeft),
-      BenchStep.stillRight: await session.still(wmrHandRight),
-      BenchStep.moveLeft: await session.move(wmrHandLeft),
-      BenchStep.moveRight: await session.move(wmrHandRight),
-      BenchStep.capture: await session.capture(),
-      BenchStep.latency: await session.latency(),
-      BenchStep.photo: const BenchStepOutcome.done('Photo taken'),
-      BenchStep.serialLog: const BenchStepOutcome.done('Serial log saved'),
-    };
-    final run = BenchBundleRun([
-      for (final step in BenchStep.values)
-        BenchBundleStep(
-          id: step.id,
-          status: outcomes[step]?.ok == true
-              ? 'done'
-              : outcomes.containsKey(step)
-              ? 'failed'
-              : 'skipped',
-          summary: outcomes[step]?.summary,
-          detail: outcomes[step]?.error,
+    final container = ProviderContainer(
+      overrides: [
+        benchSessionProvider.overrideWithValue(() async => session),
+        exportTestBundleProvider.overrideWithValue(
+          ({BenchBundleRun? benchRun}) => writeTestBundle(
+            TestBundleInput(
+              now: DateTime(2026, 10, 29, 13),
+              appVersion: '0.2.2+4',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+              streamMode: 'raw',
+              benchRun: benchRun,
+            ),
+            Directory('${dir.path}/out'),
+          ),
         ),
-    ]);
-    final bundle = await writeTestBundle(
-      TestBundleInput(
-        now: DateTime(2026, 10, 29, 13),
-        appVersion: '0.2.2+4',
-        phone: 'Test Phone',
-        androidVersion: 'Android 14 (API 34)',
-        streamMode: 'raw',
-        bridges: const [],
-        benchRun: run,
-      ),
-      Directory('${dir.path}/out'),
+      ],
     );
+    addTearDown(container.dispose);
+    // Keep the auto-dispose controller alive across the async steps.
+    final sub = container.listen(benchControllerProvider, (_, _) {});
+    addTearDown(sub.close);
+    final controller = container.read(benchControllerProvider.notifier);
 
-    final manifest = File(bundle.path).existsSync();
-    expect(manifest, isTrue);
-    expect(bundle.present, contains(contains('11 done')));
+    for (var i = 0; i < 9; i++) {
+      await controller.runCurrent();
+    }
+    expect(container.read(benchControllerProvider).step, BenchStep.photo);
+    await controller.confirmCurrent();
+    await controller.confirmCurrent();
+    await controller.exportBundle();
+
+    final state = container.read(benchControllerProvider);
+    expect(state.bundleError, isNull);
+    final archive = ZipDecoder().decodeBytes(
+      File(state.bundlePath!).readAsBytesSync(),
+    );
+    final file = archive.files.firstWhere((f) => f.name == 'manifest.md');
+    final manifest = utf8.decode(file.content as List<int>);
+    for (final step in BenchStep.values) {
+      expect(manifest, contains('- ${step.id}: done'), reason: step.id);
+    }
   });
 }
