@@ -22,6 +22,10 @@ class _FakeSession implements BenchSession {
   }
 
   @override
+  Future<BenchStepOutcome> deviceSummary() =>
+      _outcome(BenchStep.deviceSummary, 'fake: 26 hand joints');
+
+  @override
   Future<BenchStepOutcome> connect() =>
       _outcome(BenchStep.connect, '1 bridge: fake (MTU 185, raw)');
 
@@ -52,6 +56,21 @@ class _FakeSession implements BenchSession {
   @override
   Future<BenchStepOutcome> latency() =>
       _outcome(BenchStep.latency, '8000 rows saved');
+
+  @override
+  Future<BenchStepOutcome> poseCapture(
+    void Function(BenchCaptureProgress progress) onProgress,
+  ) {
+    onProgress(
+      const BenchCaptureProgress(
+        hand: 0,
+        segment: PoseSegment.still,
+        index: 0,
+        total: 10,
+      ),
+    );
+    return _outcome(BenchStep.poseCapture, '10 pose captures saved');
+  }
 }
 
 void main() {
@@ -117,13 +136,14 @@ void main() {
     expect(find.textContaining('wmr-ext-20261029.zip'), findsWidgets);
     final state = container.read(benchControllerProvider);
     expect(state.bundlePath, '/tmp/wmr-ext-20261029.zip');
-    for (final step in BenchStep.values) {
+    for (final step in state.steps) {
       expect(state.resultFor(step).status, BenchStatus.done, reason: step.id);
     }
     final published = container.read(benchBundleProvider)!;
-    expect(published.steps, hasLength(BenchStep.values.length));
+    expect(published.steps, hasLength(state.steps.length));
     expect(published.steps.every((s) => s.status == 'done'), isTrue);
-    expect(published.steps.map((s) => s.id), BenchStep.values.map((s) => s.id));
+    expect(published.steps.map((s) => s.id), state.steps.map((s) => s.id));
+    expect(published.mode, '3dof_only');
   });
 
   testWidgets('a failed step is shown and can be skipped', (tester) async {

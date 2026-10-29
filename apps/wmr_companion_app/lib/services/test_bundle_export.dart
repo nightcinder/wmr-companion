@@ -9,10 +9,18 @@ import 'package:share_plus/share_plus.dart';
 import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 
+import '../ui/bench/bench_tracking.dart';
 import '../ui/capture/capture_providers.dart';
 import '../ui/connect/connect_providers.dart';
 import '../ui/latency/latency_providers.dart';
 import 'test_bundle.dart';
+
+/// The commit baked in by `tool/build_flavor.sh`, null in a build that did not
+/// pass `--dart-define=WMR_APP_COMMIT`.
+final appCommitProvider = Provider<String?>((ref) {
+  const commit = String.fromEnvironment('WMR_APP_COMMIT');
+  return commit.isEmpty ? null : commit;
+});
 
 /// App and device facts that go into the manifest and diagnostics.
 class BundleDeviceInfo {
@@ -143,6 +151,39 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
     final captureStore = await ref.read(captureStoreProvider.future);
     final runs = latencyStore.list();
     final latest = runs.isEmpty ? null : runs.first;
+    final run = benchRun ?? ref.read(benchBundleProvider);
+    final captures = <BundlePoseCapture>[];
+    final poseFiles = run?.step('pose_capture')?.data['files'];
+    if (poseFiles is List) {
+      for (final raw in poseFiles) {
+        if (raw is! Map) continue;
+        final path = raw['path'];
+        final runtime = raw['runtime'];
+        final hand = raw['hand'];
+        final segment = raw['segment'];
+        if (path is! String ||
+            runtime is! String ||
+            hand is! String ||
+            segment is! String) {
+          continue;
+        }
+        captures.add(
+          BundlePoseCapture(
+            path: path,
+            runtime: runtime,
+            hand: hand,
+            segment: segment,
+          ),
+        );
+      }
+    }
+    String? firmwareSha;
+    for (final bridge in bridges) {
+      if (bridge.firmwareVersion != null) {
+        firmwareSha = bridge.firmwareVersion;
+        break;
+      }
+    }
 
     return TestBundleInput(
       now: ref.read(bundleClockProvider)(),
@@ -158,7 +199,11 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       bridges: bridges,
       latencyFiles: latest?.paths ?? const [],
       captureFiles: [for (final capture in captureStore.list()) capture.path],
-      benchRun: benchRun ?? ref.read(benchBundleProvider),
+      benchRun: run,
+      poseCaptures: captures,
+      benchRuntime: ref.read(benchHandTrackingProvider).runtime,
+      appCommit: ref.read(appCommitProvider),
+      firmwareSha: firmwareSha,
     );
   };
 });

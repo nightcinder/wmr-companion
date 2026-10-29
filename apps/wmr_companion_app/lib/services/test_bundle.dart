@@ -112,16 +112,51 @@ class BenchBundleStep {
 
 /// The guided bench run that produced this bundle, in step order.
 class BenchBundleRun {
-  const BenchBundleRun(this.steps);
+  const BenchBundleRun(this.steps, {this.mode = '3dof_only'});
 
   final List<BenchBundleStep> steps;
+
+  /// `3dof_only`, `6dof_only` or `combined`.
+  final String mode;
 
   int get done => steps.where((s) => s.status == 'done').length;
   int get skipped => steps.where((s) => s.status == 'skipped').length;
   int get failed => steps.where((s) => s.status == 'failed').length;
 
+  BenchBundleStep? step(String id) {
+    for (final step in steps) {
+      if (step.id == id) return step;
+    }
+    return null;
+  }
+
   Map<String, Object?> toJson() => {
+    'mode': mode,
     'steps': [for (final step in steps) step.toJson()],
+  };
+}
+
+/// One pose capture file that belongs in the bundle.
+class BundlePoseCapture {
+  const BundlePoseCapture({
+    required this.path,
+    required this.runtime,
+    required this.hand,
+    required this.segment,
+  });
+
+  final String path;
+  final String runtime;
+  final String hand;
+  final String segment;
+
+  String get fileName => path.split(RegExp(r'[\\/]')).last;
+
+  Map<String, Object?> toJson() => {
+    'file': fileName,
+    'runtime': runtime,
+    'hand': hand,
+    'segment': segment,
   };
 }
 
@@ -140,6 +175,10 @@ class TestBundleInput {
     this.latencyFiles = const [],
     this.captureFiles = const [],
     this.benchRun,
+    this.poseCaptures = const [],
+    this.benchRuntime,
+    this.appCommit,
+    this.firmwareSha,
   });
 
   /// Local time; the file name uses its date and the manifest its timestamp.
@@ -173,6 +212,18 @@ class TestBundleInput {
 
   /// The guided bench run, null when the tester exported without one.
   final BenchBundleRun? benchRun;
+
+  /// The ONY-249 pose recordings produced by the capture step.
+  final List<BundlePoseCapture> poseCaptures;
+
+  /// The attached hand-tracking runtime, when the capture step ran.
+  final String? benchRuntime;
+
+  /// The app commit, when the build supplied one.
+  final String? appCommit;
+
+  /// The attached bridge's firmware identity, null without a bridge.
+  final String? firmwareSha;
 }
 
 /// What one export produced, for the screen and for tests.
@@ -260,6 +311,21 @@ Future<TestBundle> writeTestBundle(
     );
   }
 
+  final poseNames = <String>[];
+  for (final capture in input.poseCaptures) {
+    final name = capture.fileName;
+    final bytes = await _read(capture.path);
+    if (bytes == null) {
+      missing.add('Pose capture `$name` — the saved recording was missing.');
+      continue;
+    }
+    files[name] = bytes;
+    poseNames.add(name);
+  }
+  if (poseNames.isNotEmpty) {
+    present.add('Pose captures: ${poseNames.length} file(s)');
+  }
+
   final firmware = _firmwareSummary(input.bridges);
   if (firmware == null) {
     missing.add('Firmware version (FF16) — ${_firmwareReason(input.bridges)}');
@@ -297,6 +363,14 @@ Future<TestBundle> writeTestBundle(
     },
     'bridges': [for (final bridge in input.bridges) bridge.toJson()],
     if (bench != null) 'bench': bench.toJson(),
+    'bench_mode': input.benchRun?.mode,
+    'tracking_runtime': input.benchRuntime,
+    'app_commit': input.appCommit,
+    'firmware_sha': input.firmwareSha,
+    if (input.poseCaptures.isNotEmpty)
+      'pose_captures': [
+        for (final capture in input.poseCaptures) capture.toJson(),
+      ],
   });
 
   final archive = Archive();
@@ -388,7 +462,11 @@ String _manifest(TestBundleInput input) {
     )
     ..writeln('- MTU: ${_mtuSummary(input.bridges) ?? 'not reported'}')
     ..writeln('- App: WMR Companion ${input.appVersion}')
+    ..writeln('- App commit: ${input.appCommit ?? 'unknown'}')
     ..writeln('- Bridges: ${input.bridges.length}')
+    ..writeln('- Firmware SHA: ${input.firmwareSha ?? 'none (no bridge)'}')
+    ..writeln('- Bench mode: ${input.benchRun?.mode ?? 'not selected'}')
+    ..writeln('- Tracking runtime: ${input.benchRuntime ?? 'none'}')
     ..writeln();
   final bench = input.benchRun;
   if (bench != null) {
@@ -400,6 +478,18 @@ String _manifest(TestBundleInput input) {
       buffer.writeln(
         '- ${step.id}: ${step.status}'
         '${note == null ? '' : ' — $note'}',
+      );
+    }
+    buffer.writeln();
+  }
+  if (input.poseCaptures.isNotEmpty) {
+    buffer
+      ..writeln('## Pose captures')
+      ..writeln();
+    for (final capture in input.poseCaptures) {
+      buffer.writeln(
+        '- `${capture.fileName}` — runtime ${capture.runtime}, '
+        'hand ${capture.hand}, segment ${capture.segment}',
       );
     }
     buffer.writeln();

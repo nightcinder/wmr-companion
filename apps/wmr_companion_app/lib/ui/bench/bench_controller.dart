@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/test_bundle.dart';
 import '../../services/test_bundle_export.dart';
 import 'bench_run.dart';
+import 'bench_tracking.dart';
 
 enum BenchStatus { pending, running, done, skipped, failed }
 
@@ -27,6 +28,7 @@ class BenchStepResult {
 
 class BenchRunState {
   const BenchRunState({
+    this.mode = BenchMode.threeDofOnly,
     this.step = BenchStep.connect,
     this.results = const {},
     this.exporting = false,
@@ -35,8 +37,10 @@ class BenchRunState {
     this.present = const [],
     this.missing = const [],
     this.bundleError,
+    this.captureProgress,
   });
 
+  final BenchMode mode;
   final BenchStep step;
   final Map<BenchStep, BenchStepResult> results;
   final bool exporting;
@@ -46,12 +50,25 @@ class BenchRunState {
   final List<String> missing;
   final String? bundleError;
 
+  /// The segment the pose capture is recording, while it runs.
+  final BenchCaptureProgress? captureProgress;
+
   BenchStepResult resultFor(BenchStep step) =>
       results[step] ?? const BenchStepResult();
 
   BenchStepResult get current => resultFor(step);
 
-  int get index => BenchStep.values.indexOf(step);
+  List<BenchStep> get steps => mode.steps;
+
+  int get index => steps.indexOf(step);
+
+  /// True once a step past the automatic connect check has a result, so the
+  /// mode cannot be changed under a run that is already measuring.
+  bool get started => results.entries.any(
+    (entry) =>
+        entry.key != BenchStep.connect &&
+        entry.value.status != BenchStatus.skipped,
+  );
 
   bool get busy => current.status == BenchStatus.running || exporting;
 
@@ -65,6 +82,7 @@ class BenchRunState {
       results.values.where((r) => r.status == BenchStatus.failed).length;
 
   BenchRunState copyWith({
+    BenchMode? mode,
     BenchStep? step,
     Map<BenchStep, BenchStepResult>? results,
     bool? exporting,
@@ -73,9 +91,12 @@ class BenchRunState {
     List<String>? present,
     List<String>? missing,
     String? bundleError,
+    BenchCaptureProgress? captureProgress,
     bool clearBundleError = false,
+    bool clearCaptureProgress = false,
   }) {
     return BenchRunState(
+      mode: mode ?? this.mode,
       step: step ?? this.step,
       results: results ?? this.results,
       exporting: exporting ?? this.exporting,
@@ -84,6 +105,9 @@ class BenchRunState {
       present: present ?? this.present,
       missing: missing ?? this.missing,
       bundleError: clearBundleError ? null : (bundleError ?? this.bundleError),
+      captureProgress: clearCaptureProgress
+          ? null
+          : (captureProgress ?? this.captureProgress),
     );
   }
 }
@@ -99,11 +123,45 @@ class BenchController extends Notifier<BenchRunState> {
   @override
   BenchRunState build() => const BenchRunState();
 
+  /// Switches the wizard to [mode] before it has meaningful results.
+  ///
+  /// 6DoF only pre-records every bridge step as skipped with its reason, so the
+  /// manifest explains why the bridge work did not run. The tester starts at
+  /// the device summary instead of at the connect step.
+  void selectMode(BenchMode mode) {
+    if (state.busy || state.started) return;
+    final tracking = ref.read(benchHandTrackingProvider);
+    if (mode == BenchMode.sixDofOnly && !tracking.available) return;
+    final results = <BenchStep, BenchStepResult>{};
+    if (mode == BenchMode.sixDofOnly) {
+      for (final step in BenchMode.bridgeOnlySteps) {
+        results[step] = const BenchStepResult(
+          status: BenchStatus.skipped,
+          summary: 'No bridge in 6DoF only mode.',
+        );
+      }
+    }
+    state = BenchRunState(mode: mode, step: mode.steps.first, results: results);
+    _publish();
+  }
+
   Future<void> runCurrent() async {
     final step = state.step;
     if (state.busy || step == BenchStep.export) return;
     if (step.isPrompt) {
       await confirmCurrent();
+      return;
+    }
+    final tracking = ref.read(benchHandTrackingProvider);
+    if (step == BenchStep.poseCapture && !tracking.available) {
+      _setResult(
+        step,
+        const BenchStepResult(
+          status: BenchStatus.skipped,
+          summary: 'No hand-tracking source with hand joints is attached.',
+        ),
+      );
+      _advance();
       return;
     }
     _setResult(step, const BenchStepResult(status: BenchStatus.running));
@@ -119,8 +177,12 @@ class BenchController extends Notifier<BenchRunState> {
         );
         return;
       }
-      final outcome = await _runStep(session, step);
+      final outcome = await _runStep(session, step, (progress) {
+        if (!ref.mounted) return;
+        state = state.copyWith(captureProgress: progress);
+      });
       if (!ref.mounted) return;
+      state = state.copyWith(clearCaptureProgress: true);
       _setResult(
         step,
         outcome.ok
@@ -145,21 +207,26 @@ class BenchController extends Notifier<BenchRunState> {
     }
   }
 
-  Future<BenchStepOutcome> _runStep(BenchSession session, BenchStep step) =>
-      switch (step) {
-        BenchStep.connect => session.connect(),
-        BenchStep.bothHands => session.bothHands(),
-        BenchStep.firmwareConfig => session.firmwareConfig(),
-        BenchStep.stillLeft => session.still(0),
-        BenchStep.stillRight => session.still(1),
-        BenchStep.moveLeft => session.move(0),
-        BenchStep.moveRight => session.move(1),
-        BenchStep.capture => session.capture(),
-        BenchStep.latency => session.latency(),
-        BenchStep.photo ||
-        BenchStep.serialLog ||
-        BenchStep.export => throw StateError('Step $step does not run'),
-      };
+  Future<BenchStepOutcome> _runStep(
+    BenchSession session,
+    BenchStep step,
+    void Function(BenchCaptureProgress progress) onProgress,
+  ) => switch (step) {
+    BenchStep.deviceSummary => session.deviceSummary(),
+    BenchStep.connect => session.connect(),
+    BenchStep.bothHands => session.bothHands(),
+    BenchStep.firmwareConfig => session.firmwareConfig(),
+    BenchStep.stillLeft => session.still(0),
+    BenchStep.stillRight => session.still(1),
+    BenchStep.moveLeft => session.move(0),
+    BenchStep.moveRight => session.move(1),
+    BenchStep.capture => session.capture(),
+    BenchStep.latency => session.latency(),
+    BenchStep.poseCapture => session.poseCapture(onProgress),
+    BenchStep.photo ||
+    BenchStep.serialLog ||
+    BenchStep.export => throw StateError('Step $step does not run'),
+  };
 
   /// Marks a prompt step done and moves on.
   Future<void> confirmCurrent() async {
@@ -180,7 +247,17 @@ class BenchController extends Notifier<BenchRunState> {
   void skipCurrent() {
     final step = state.step;
     if (state.busy || step == BenchStep.export) return;
-    _setResult(step, const BenchStepResult(status: BenchStatus.skipped));
+    // Keep any partial data (for example the captures a failed segment saved)
+    // so the bundle still carries it.
+    final previous = state.resultFor(step);
+    _setResult(
+      step,
+      BenchStepResult(
+        status: BenchStatus.skipped,
+        summary: previous.summary,
+        data: previous.data,
+      ),
+    );
     _advance();
   }
 
@@ -228,9 +305,32 @@ class BenchController extends Notifier<BenchRunState> {
   }
 
   void _advance() {
-    final next = state.index + 1;
-    if (next >= BenchStep.values.length) return;
-    state = state.copyWith(step: BenchStep.values[next]);
+    final steps = state.steps;
+    var next = state.index + 1;
+    while (next < steps.length) {
+      final step = steps[next];
+      if (state.resultFor(step).finished) {
+        next++;
+        continue;
+      }
+      // Combined runs with no hand-joint source skip the capture visibly and
+      // still reach the export.
+      if (step == BenchStep.poseCapture &&
+          !ref.read(benchHandTrackingProvider).available) {
+        _setResult(
+          step,
+          const BenchStepResult(
+            status: BenchStatus.skipped,
+            summary: 'No hand-tracking source with hand joints is attached.',
+          ),
+        );
+        next++;
+        continue;
+      }
+      break;
+    }
+    if (next >= steps.length) return;
+    state = state.copyWith(step: steps[next], clearCaptureProgress: true);
     _publish();
   }
 
@@ -245,7 +345,7 @@ class BenchController extends Notifier<BenchRunState> {
         .read(benchBundleProvider.notifier)
         .publish(
           BenchBundleRun([
-            for (final step in BenchStep.values)
+            for (final step in state.steps)
               BenchBundleStep(
                 id: step.id,
                 status: _statusName(state.resultFor(step).status),
@@ -253,7 +353,7 @@ class BenchController extends Notifier<BenchRunState> {
                 detail: state.resultFor(step).error,
                 data: state.resultFor(step).data,
               ),
-          ]),
+          ], mode: state.mode.id),
         );
   }
 

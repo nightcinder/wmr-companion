@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -5,6 +6,8 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vector_math/vector_math_64.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
@@ -15,6 +18,8 @@ import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
+import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 /// A 700-byte block exercises both FF13 windows (496 + 204).
 Uint8List _configBlob(int seed) =>
@@ -178,8 +183,84 @@ void main() {
     );
     final file = archive.files.firstWhere((f) => f.name == 'manifest.md');
     final manifest = utf8.decode(file.content as List<int>);
-    for (final step in BenchStep.values) {
+    for (final step in BenchMode.threeDofOnly.steps) {
       expect(manifest, contains('- ${step.id}: done'), reason: step.id);
+    }
+    expect(manifest, contains('- Bench mode: 3dof_only'));
+  });
+
+  test('pose capture writes one recording per hand and segment', () async {
+    final source = FakeTrackingSource();
+    await source.start();
+    addTearDown(source.dispose);
+    final session = RealBenchSession(
+      tracking: source,
+      poseStore: PoseRecordingStore(Directory('${dir.path}/pose')),
+      clock: MonotonicClock(),
+      captureStore: CaptureStore(Directory('${dir.path}/captures')),
+      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+      durations: const BenchDurations(
+        poseStill: Duration(milliseconds: 20),
+        poseHeldDrift: Duration(milliseconds: 20),
+        poseSlowPan: Duration(milliseconds: 20),
+        poseMediumPan: Duration(milliseconds: 20),
+        poseFastFlick: Duration(milliseconds: 20),
+      ),
+    );
+
+    var timeNs = 0;
+    final timer = Timer.periodic(const Duration(milliseconds: 2), (_) {
+      timeNs += 2000000;
+      source.addFrame(
+        TrackingFrame(
+          timeNs: timeNs,
+          hostTimeNs: timeNs,
+          leftHand: HandPose(
+            hand: TrackedHand.left,
+            palm: TrackedPose(
+              pose: Pose(
+                translation: Vector3(-0.2, -0.25, -0.35),
+                rotation: Quaternion.identity(),
+              ),
+            ),
+          ),
+          rightHand: HandPose(
+            hand: TrackedHand.right,
+            palm: TrackedPose(
+              pose: Pose(
+                translation: Vector3(0.2, -0.25, -0.35),
+                rotation: Quaternion.identity(),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+    addTearDown(timer.cancel);
+
+    final progress = <BenchCaptureProgress>[];
+    final outcome = await session.poseCapture(progress.add);
+    timer.cancel();
+
+    expect(outcome.ok, isTrue, reason: outcome.error);
+    expect(progress, hasLength(10));
+    expect(progress.first.handName, 'LEFT');
+    expect(progress.first.segment, PoseSegment.still);
+    expect(progress.last.handName, 'RIGHT');
+    expect(progress.last.segment, PoseSegment.fastFlick);
+
+    final files = (outcome.data['files']! as List).cast<Map<String, Object?>>();
+    expect(files, hasLength(10));
+    final namePattern = RegExp(
+      r'^pose_capture_fake_(left|right)_'
+      r'(still|heldDrift|slowPan|mediumPan|fastFlick)\.json$',
+    );
+    for (final entry in files) {
+      final path = entry['path']! as String;
+      expect(path.split(Platform.pathSeparator).last, matches(namePattern));
+      final recording = PoseRecording.decode(File(path).readAsStringSync());
+      expect(recording.samples.length, greaterThanOrEqualTo(2));
+      expect(recording.samples.first.tracking, isNotNull);
     }
   });
 }
