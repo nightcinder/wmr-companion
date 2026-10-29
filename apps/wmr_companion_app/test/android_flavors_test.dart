@@ -115,4 +115,55 @@ void main() {
       expect(defines, contains('WMR_XREAL_TRACKING=true'));
     });
   });
+
+  group('Release signing', () {
+    final buildTypes = RegExp(
+      r'buildTypes \{(.*?)\n    \}',
+      dotAll: true,
+    ).firstMatch(appBuild)?.group(1);
+
+    test('release uses the project signing config, never the debug key', () {
+      expect(buildTypes, isNotNull, reason: 'missing buildTypes block');
+      final release = RegExp(
+        r'release \{(.*?)\}',
+        dotAll: true,
+      ).firstMatch(buildTypes!)?.group(1);
+      expect(release, isNotNull, reason: 'missing release build type');
+      expect(release, contains('signingConfigs.findByName("release")'));
+      expect(
+        release,
+        isNot(contains('signingConfigs.getByName("debug")')),
+        reason: 'release must not fall back to the debug key',
+      );
+    });
+
+    test('debug builds keep the Android debug key', () {
+      final debug = RegExp(
+        r'debug \{(.*?)\}',
+        dotAll: true,
+      ).firstMatch(buildTypes!)?.group(1);
+      expect(debug, isNotNull, reason: 'missing debug build type');
+      expect(debug, contains('signingConfigs.getByName("debug")'));
+    });
+
+    test('reads key.properties and the WMR_RELEASE_* environment', () {
+      expect(appBuild, contains('rootProject.file("key.properties")'));
+      for (final variable in [
+        'WMR_RELEASE_STORE_FILE',
+        'WMR_RELEASE_STORE_PASSWORD',
+        'WMR_RELEASE_KEY_ALIAS',
+        'WMR_RELEASE_KEY_PASSWORD',
+      ]) {
+        expect(appBuild, contains(variable));
+      }
+    });
+
+    test('refuses a release build without signing properties', () {
+      expect(
+        appBuild,
+        contains('Release signing is not configured'),
+      );
+      expect(appBuild, contains('gradle.taskGraph.whenReady'));
+    });
+  });
 }
