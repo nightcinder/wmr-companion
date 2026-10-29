@@ -571,9 +571,7 @@ jobs:
             abi="${abi%-base-release.apk}"
             cp "$apk" "$out/wmr-companion-${VERSION#v}-base-$abi.apk"
           done
-          (cd "$out" && sha256sum ./*.apk | sed 's| \./| |' > SHA256SUMS)
           ls -l "$out"
-          cat "$out/SHA256SUMS"
 
       - name: Publish the release assets
         env:
@@ -589,10 +587,6 @@ jobs:
             echo "$VERSION is not vX.Y.Z; publishing as a prerelease."
           fi
           if ! gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release create "$VERSION" \
-              "${prerelease_args[@]}" \
-              --title "$VERSION" \
-              --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device ABI; SHA256SUMS lists their digests."
             # `release-unified` creates the same release in parallel; losing
             # that race is fine, the release exists either way.
             gh release create "$VERSION" \
@@ -601,7 +595,7 @@ jobs:
               --notes "Signed WMR Companion tester APKs, built by CI from ${GITHUB_SHA}. Download the APK matching your device ABI; SHA256SUMS lists their digests." \
               || gh release view "$VERSION" >/dev/null
           fi
-          gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/* --clobber
+          gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/*.apk --clobber
           gh release view "$VERSION" --json assets --jq '.assets[].name'
 
       - name: Remove the decoded keystore
@@ -786,9 +780,9 @@ jobs:
         run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
 
   release-checksums:
-    # `release` and `release-unified` run in parallel and each would overwrite
-    # the other's SHA256SUMS. Once both have uploaded, recompute one file that
-    # covers every APK on the release.
+    # `release` and `release-unified` upload their APKs in parallel; once both
+    # have finished, recompute one SHA256SUMS file that covers every APK on the
+    # release. Neither flavor job writes a digest of its own.
     needs: [release, release-unified]
     if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.release.result == 'success' && needs['release-unified'].result == 'success' }}
     runs-on: ubuntu-latest
