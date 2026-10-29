@@ -48,6 +48,11 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final durations = ref.watch(benchDurationsProvider);
     final tracking = ref.watch(benchHandTrackingProvider);
     final selection = ref.watch(debugTrackingSourceProvider);
+    // The simulated source is fed by the debug pose viewer; keep that pump
+    // alive so a 6DoF capture can run without hardware.
+    if (selection.choice == DebugTrackingSource.simulated) {
+      ref.watch(debugPosesProvider(DebugSource.real));
+    }
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace');
     final step = state.step;
