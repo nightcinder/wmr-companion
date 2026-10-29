@@ -1,8 +1,14 @@
-# Release signing (ONY-492)
+# Release signing (ONY-492; key rotated in ONY-493)
 
 External-tester APKs are signed with a project-owned key so that every build
 installs over the previous one and `apksigner` reports a single, stable
 certificate instead of `CN=Android Debug`.
+
+The ONY-492 key was regenerated in ONY-493 before any tester build was
+distributed: its store and key passwords were not recoverable, so every release
+build failed at signing. The current key uses a random store password kept in
+the Paperclip secret and the documented `wmr-companion` key password. No
+installed app uses a different certificate, so in-place updates are unaffected.
 
 ## Key facts
 
@@ -14,11 +20,12 @@ certificate instead of `CN=Android Debug`.
 | Algorithm | RSA 4096-bit |
 | Validity | 10,000 days (2026-10-29 to 2054-03-16) |
 | Package | `com.onyxlens.wmr_companion` |
-| Certificate SHA-256 | `31:54:43:40:04:05:EC:7D:CB:7D:75:F8:47:41:83:45:0C:74:1A:E1:BF:34:84:FC:1B:DF:32:87:A6:41:FC:A2` |
-| Password secrets | Paperclip `wmr-companion/release-store-password`, `wmr-companion/release-key-password` |
+| Certificate SHA-256 | `BD:AA:32:B5:1A:D3:AF:D2:67:D0:F8:0F:28:A4:73:B8:53:19:F8:C3:7E:26:28:9C:F1:DC:1F:F7:CF:AA:E2:56` |
+| Password secrets | store password: Paperclip `wmr-companion/release-store-password`; key password: `wmr-companion` |
 
-The keystore file is attached to the ONY-492 task for the owner's offline
-backup. It is not part of the repository.
+The keystore file is attached to the ONY-493 task for the owner's offline
+backup (the ONY-492 attachment is the superseded first key). It is not part of
+the repository.
 
 ## Configuration
 
@@ -64,7 +71,7 @@ Expected certificate:
 
 ```text
 Signer #1 certificate DN: CN=WMR Companion, OU=Android, O=OnyxLens, C=US
-Signer #1 certificate SHA-256 digest: 315443400405ec7dcb7d75f8474183450c741ae1bf3484fc1bdf3287a641fca2
+Signer #1 certificate SHA-256 digest: bdaa32b51ad3afd267d0f80f28a473b85319f8c37e26289cf1dc1ff7cfaae256
 ```
 
 A release APK signed by the debug key (`CN=Android Debug`) is a regression.
@@ -121,7 +128,7 @@ Do this once now, then after any re-export of the keystore (key rotation).
      | grep 'SHA256:'
    ```
 
-   The fingerprint must match `31:54:43:40:04:05:EC:7D:…:41:FC:A2` above.
+   The fingerprint must match `BD:AA:32:B5:…:AA:E2:56` above.
 5. Record the backup date and locations in the owner's password-manager entry.
 
 Losing this keystore means installed testers cannot receive an in-place update
