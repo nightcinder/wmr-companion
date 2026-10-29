@@ -65,5 +65,8 @@ for arg in "$@"; do
   esac
 done
 
+commit="$(git -C "$app_dir" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 cd "$app_dir"
-exec flutter build apk "$mode" --flavor "$flavor" "${defines[@]}" "${passthrough[@]+"${passthrough[@]}"}"
+exec flutter build apk "$mode" --flavor "$flavor" \
+  --dart-define=WMR_APP_COMMIT="$commit" \
+  "${defines[@]}" "${passthrough[@]+"${passthrough[@]}"}"
