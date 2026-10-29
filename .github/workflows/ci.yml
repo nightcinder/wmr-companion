@@ -301,18 +301,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # The runner image exports ANDROID_HOME outside the workflow's env
-      # context, so resolve it in a step before caching its NDK and CMake.
-      - name: Resolve the Android SDK path
-        id: android-sdk
-        run: echo "home=${ANDROID_HOME:?ANDROID_HOME is unset}" >> "$GITHUB_OUTPUT"
-
+      # The ubuntu-latest image installs the SDK at a fixed path, outside the
+      # workflow's env context; the NDK and CMake are what every run downloads.
       - name: Cache Android NDK and CMake
         uses: actions/cache@v4
         with:
           path: |
-            ${{ steps.android-sdk.outputs.home }}/ndk
-            ${{ steps.android-sdk.outputs.home }}/cmake
+            /usr/local/lib/android/sdk/ndk
+            /usr/local/lib/android/sdk/cmake
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
 
       - uses: gradle/actions/setup-gradle@v4
@@ -506,18 +502,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # The runner image exports ANDROID_HOME outside the workflow's env
-      # context, so resolve it in a step before caching its NDK and CMake.
-      - name: Resolve the Android SDK path
-        id: android-sdk
-        run: echo "home=${ANDROID_HOME:?ANDROID_HOME is unset}" >> "$GITHUB_OUTPUT"
-
+      # The ubuntu-latest image installs the SDK at a fixed path, outside the
+      # workflow's env context; the NDK and CMake are what every run downloads.
       - name: Cache Android NDK and CMake
         uses: actions/cache@v4
         with:
           path: |
-            ${{ steps.android-sdk.outputs.home }}/ndk
-            ${{ steps.android-sdk.outputs.home }}/cmake
+            /usr/local/lib/android/sdk/ndk
+            /usr/local/lib/android/sdk/cmake
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
 
       - uses: gradle/actions/setup-gradle@v4
