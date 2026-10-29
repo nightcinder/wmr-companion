@@ -11,6 +11,7 @@ import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
+import 'package:wmr_companion_app/services/firmware_identity.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
@@ -261,6 +262,78 @@ void main() {
         .toList();
     expect(poseFiles, hasLength(benchPoseSequence.length));
     expect(poseFiles, contains('pose_capture_viture_left_still.json'));
+  });
+
+  test('3DoF only still runs the old twelve-step wizard', () async {
+    final session = await open();
+    final container = ProviderContainer(
+      overrides: [
+        benchSessionProvider.overrideWithValue(() async => session),
+        exportTestBundleProvider.overrideWithValue(
+          ({BenchBundleRun? benchRun}) => writeTestBundle(
+            TestBundleInput(
+              now: DateTime(2026, 10, 29, 13),
+              appVersion: '0.2.2+4',
+              appCommit: 'abc1234',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+              streamMode: 'raw',
+              bridges: const [
+                BundleBridge(
+                  id: fakeBridgeDeviceId,
+                  firmwareVersion: 'v0.2.4-3-gdeadbee',
+                ),
+              ],
+              poseCaptures: poseCapturesFromRun(benchRun),
+              benchRun: benchRun,
+            ),
+            Directory('${dir.path}/out'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final sub = container.listen(benchControllerProvider, (_, _) {});
+    addTearDown(sub.close);
+    final controller = container.read(benchControllerProvider.notifier);
+    controller.selectMode(BenchMode.threeDofOnly);
+
+    for (var i = 0; i < 30; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
+        break;
+      }
+      await controller.runCurrent();
+    }
+    expect(container.read(benchControllerProvider).step, BenchStep.photo);
+    await controller.confirmCurrent();
+    await controller.confirmCurrent();
+    expect(
+      container.read(benchControllerProvider).step,
+      BenchStep.export,
+      reason: 'the old flow goes straight from the serial log to export',
+    );
+    await controller.exportBundle();
+
+    final state = container.read(benchControllerProvider);
+    expect(state.bundleError, isNull);
+    final archive = ZipDecoder().decodeBytes(
+      File(state.bundlePath!).readAsBytesSync(),
+    );
+    final manifest = utf8.decode(
+      archive.files.firstWhere((f) => f.name == 'manifest.md').content
+          as List<int>,
+    );
+    final steps = BenchMode.threeDofOnly.steps;
+    expect(steps, hasLength(12));
+    for (final step in steps) {
+      expect(manifest, contains('- ${step.id}: done'), reason: step.id);
+    }
+    expect(manifest, contains('- Bench mode: 3dof_only'));
+    expect(manifest, isNot(contains('## 6DoF pose captures')));
+    expect(
+      archive.files.where((f) => f.name.startsWith('pose_capture_')),
+      isEmpty,
+    );
   });
 
   group('firmware SHA', () {
