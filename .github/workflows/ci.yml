@@ -34,6 +34,11 @@ jobs:
         run: flutter analyze
       - working-directory: apps/wmr_companion_app
         run: flutter test
+      # Pure-stdlib tests for the APK pre-flight checker: build synthetic binary
+      # Android XML and APKs, so no SDK or large artifact is needed.
+      - name: APK checker tests
+        working-directory: apps/wmr_companion_app
+        run: python3 -m unittest -v tool/test_check_unified_apk.py
       # Each package's own test suite includes export_boundary_test.dart, which
       # asserts that its lib/ imports no Riverpod, file plugin or higher layer.
       - name: wmr_core package

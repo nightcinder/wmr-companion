@@ -1,6 +1,8 @@
-# Run sheet: pose validation — XREAL Air 2 Ultra
+# Run sheet: pose validation — XREAL Air 2 Ultra (named 1.0 path)
 
 > **Proposed sheet, not yet run.** Nothing here is a hardware result. Every figure is recorded by the owner; all result tables are empty and must not be pre-filled. The Unity-in-Flutter relay is implemented and host-tested, but no Air 2 Ultra run has happened.
+>
+> **ONY-440 selected this as the 6DoF path for 1.0** (VITURE is the fallback). The desk pre-flight, including the current unified APK's merged permissions and both Unity runtimes, is in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md).
 
 Companion documents:
 
@@ -24,7 +26,7 @@ Gates covered: **3** (Unity-in-Flutter smoke test), **5** (XREAL Air 2 Ultra han
 | Glasses | XREAL Air 2 Ultra (the only model with hand tracking). `One`/`OnePro` (6DoF head only, no hands) and `Air`/`Air2`/`Air2Pro`/`Light` (3DoF) are rejected by the adapter and must not be used for gate 5. |
 | Host | Beam Pro or Samsung S24/S25 or later. XREAL warns against Android 16 on dev devices. Record model and Android version. |
 | Unity | Unity 2021.3+/6000.0 with Android build support, `com.unity.xr.hands`, XREAL SDK 3.x (`com.xreal.xr`). External SDK gate; not redistributable. |
-| App build | Debug APK from wmr-companion `main` after ONY-214, built with `--dart-define=WMR_XREAL_TRACKING=true`, with the `unityLibrary` AAR linked. Record app commit. |
+| App build | Release `v0.2.1` unified debug APK (SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b`, all tracking flags on, both SDKs in one `unityLibrary`), or a local `tool/build_flavor.sh unified --debug` from the same export. Record app commit. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb`, terminal, logcat capture. |
 
@@ -36,13 +38,20 @@ Unity project settings (must be set before export; the bridge does not change th
 - `XREAL_DEVICE_CATEGORY_REALITY` included in Support Devices.
 - `WMR_XREAL_XR_SDK` and `WMR_UNITY_XR_HANDS` defined in the C# bridge.
 
-Build the APK:
+Build the APK (the release artifact needs no rebuild; this is for a local build
+from the owner export):
 
 ```bash
-cd apps/wmr_companion_app
-flutter build apk --debug --dart-define=WMR_XREAL_TRACKING=true
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
+apps/wmr_companion_app/tool/install_unity_export.sh unified path/to/unityLibrary.zip
+apps/wmr_companion_app/tool/build_flavor.sh unified --debug
+
+# either the local build or the release asset
+adb install -r apps/wmr_companion_app/build/app/outputs/flutter-apk/app-unified-debug.apk
 ```
+
+Before installing, run the desk check from `docs/tracking/PREFLIGHT.md`; it
+verifies the merged permissions, both vendor runtimes and the session classes
+without a device.
 
 Confirm the flag is live: the debug overlay shows "XREAL tracking: available" when the AAR is linked and the input source is Hands; otherwise `unavailable`.
 
@@ -54,8 +63,26 @@ Confirm the flag is live: the debug overlay shows "XREAL tracking: available" wh
 4. Connect the app to the bridge, select **Batched FF14**, confirm `STREAM` shows `stream=batched`, `sub=1`, live `rate_rx`. Confirm `bridge_hands=0`.
 5. Confirm the app reports the glasses model as `Air2Ultra` before gate 5; any other model makes gate 5 fail with `unsupported`.
 
-## 3. Gate 1 — camera capture (not defined for XREAL)
+## 2.1 Pre-flight (desk-only, done 2026-10-28)
 
+Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). On the
+v0.2.1 unified APK (SHA-256 above) the merged manifest declares `CAMERA`,
+`BLUETOOTH_SCAN`/`CONNECT`, `HAND_TRACKING`/`HEAD_TRACKING`, `usb.host` and an
+optional camera feature; both vendor runtimes and their Unity subsystems are
+present; and the session classes (`SharedUnityRuntime`, `PendingStartGate`,
+both vendor plugins) are in the dex. This is a build-content check only.
+
+Open items this sheet must answer or watch for:
+
+- `com.nreal.supportDevices` in the artifact lists `XrealLight`/`XrealAir`; if
+  `start` reports `unsupported`, the export is missing the Air 2 Ultra/REALITY
+  category (rebuild, §1).
+- `Initial Input Source = Hands` is a project setting; a Controller export
+  reports `unavailable` at start.
+- XREAL USB IDs are unknown and fail-closed on a bare phone host.
+- Android 16 is warned against by XREAL; record the host build before running.
+
+## 3. Gate 1 — camera capture (not defined for XREAL)
 XREAL exposes an RGB camera stream but hides the grayscale tracking cameras. There is no IR/optical question to settle here beyond noting that passthrough RGB is available and tracking cameras are not.
 
 Record:
