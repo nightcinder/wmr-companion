@@ -517,13 +517,22 @@ class BridgeFirmwareView extends StatelessWidget {
   final List<BridgeLinkSnapshot> bridges;
   final TextStyle? style;
 
-  static String versionLabel(WmrProtocolVersion? protocol) {
-    if (protocol == null) return 'firmware reading...';
+  static String versionLabel(
+    WmrProtocolVersion? protocol, {
+    bool unavailable = false,
+  }) {
+    if (protocol == null) {
+      return unavailable
+          ? 'firmware n/a (discovery failed)'
+          : 'firmware reading...';
+    }
     if (protocol.firmwareVersionMalformed) {
       return 'firmware malformed (FF16 present)';
     }
     if (!protocol.hasFirmwareVersion) {
-      return 'firmware n/a (no FF16, older firmware)';
+      return protocol.features.firmwareVersion
+          ? 'firmware n/a (FF16 read failed)'
+          : 'firmware n/a (no FF16, older firmware)';
     }
     return 'firmware ${protocol.firmwareVersion}';
   }
@@ -546,7 +555,7 @@ class BridgeFirmwareView extends StatelessWidget {
         for (final bridge in bridges)
           Text(
             '${bridge.bridgeId}  '
-            '${versionLabel(bridge.protocol)}  '
+            '${versionLabel(bridge.protocol, unavailable: bridge.protocolUnavailable)}  '
             '${featuresLabel(bridge.protocol?.features ?? WmrBridgeFeatures.none)}',
             style: style,
           ),

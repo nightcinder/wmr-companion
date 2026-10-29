@@ -96,6 +96,22 @@ void main() {
     expect(service.mode, StreamMode.decoded);
     expect(t.cccLog.last, 'on $wmrBridgeDecodedCharUuid');
   });
+
+  test('a bridge without FF10 is unavailable, not still reading', () async {
+    final other = FakeTransport(
+      devices: const [FakeDevice(id: 'not-a-bridge', services: [])],
+    );
+    final otherService = ControllerService(other, 'not-a-bridge');
+    await otherService.start();
+    await Future<void>.delayed(Duration.zero);
+
+    final link = await otherService.bridgeLink('not-a-bridge');
+    expect(link.protocol, isNull);
+    expect(link.protocolUnavailable, isTrue);
+
+    await otherService.dispose();
+    await other.dispose();
+  });
 }
 
 ImuCalibration _calibration() {

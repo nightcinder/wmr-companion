@@ -2,7 +2,7 @@
 
 ## 0.2.2
 
-- `ControllerService` reads FF16 once per bridge after connect and publishes the firmware version and feature matrix on `BridgeLinkSnapshot.protocol`, `ControllerService.protocolFor` and `ControllerService.protocolChanges`. A missing or failed FF16 read is an older-firmware status, not an error.
+- `ControllerService` reads FF16 once per bridge after connect and publishes the firmware version and feature matrix on `BridgeLinkSnapshot.protocol`, `ControllerService.protocolFor` and `ControllerService.protocolChanges`. A missing or failed FF16 read is an older-firmware status, not an error. `BridgeLinkSnapshot.protocolUnavailable` separates a read still in flight from discovery that failed and will produce no protocol.
 - Version aligned with the v0.2.2 release; `wmr_fusion` constraint raised to `^0.2.2`. No breaking public API change.
 
 ## 0.2.1

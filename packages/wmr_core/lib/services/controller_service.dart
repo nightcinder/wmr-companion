@@ -293,6 +293,7 @@ class BridgeLinkSnapshot {
     this.rateHz = const [0, 0],
     this.loss = const [null, null],
     this.protocol,
+    this.protocolUnavailable = false,
   });
 
   final String bridgeId;
@@ -315,6 +316,11 @@ class BridgeLinkSnapshot {
   /// The bridge's FF16 firmware version and FF11-FF16 feature matrix, null
   /// until the one-time post-connect read finishes and when discovery failed.
   final WmrProtocolVersion? protocol;
+
+  /// True when discovery failed or the bridge exposed no FF10 service, so
+  /// [protocol] will stay null: the read will never land. False while the
+  /// first read is still in flight and once it has produced a result.
+  final bool protocolUnavailable;
 
   /// Total rate over both hands.
   double get totalRateHz => rateHz.fold(0, (sum, rate) => sum + rate);
@@ -488,6 +494,10 @@ class ControllerService {
 
   /// FF16 firmware version and feature matrix, keyed by transport device id.
   final Map<String, WmrProtocolVersion> _protocols = {};
+
+  /// Bridges whose protocol discovery failed, so no read will land. A later
+  /// read clears the id and publishes a result.
+  final Set<String> _protocolUnavailable = {};
   final StreamController<Map<String, WmrProtocolVersion>> _protocolChanges =
       StreamController.broadcast();
 
@@ -620,6 +630,7 @@ class ControllerService {
   /// error; a malformed value is flagged on the snapshot.
   void _readProtocols() {
     for (final id in _deviceIds) {
+      _protocolUnavailable.remove(id);
       unawaited(_readProtocol(id));
     }
   }
@@ -640,14 +651,17 @@ class ControllerService {
       if (!foundService) {
         // A bridge without FF10 is not a WMR bridge: leave it unknown rather
         // than claiming an empty capability set.
+        _markProtocolUnavailable(bridgeId);
         return;
       }
       features = WmrBridgeFeatures.fromCharacteristics(characteristicUuids);
     } catch (_) {
       // Discovery is optional for streaming; leave the protocol unknown.
+      _markProtocolUnavailable(bridgeId);
       return;
     }
     if (!_deviceIds.contains(bridgeId)) return;
+    _protocolUnavailable.remove(bridgeId);
 
     WmrProtocolVersion protocol;
     if (features.firmwareVersion) {
@@ -680,6 +694,10 @@ class ControllerService {
     }
   }
 
+  void _markProtocolUnavailable(String bridgeId) {
+    if (_protocolUnavailable.add(bridgeId)) _emitProtocols();
+  }
+
   /// Connects and subscribes [deviceId] to the active stream.
   Future<void> addDevice(String deviceId) async {
     if (!_deviceIds.contains(deviceId)) {
@@ -697,6 +715,7 @@ class ControllerService {
           }
           _emitMode();
         }
+        _protocolUnavailable.remove(deviceId);
         unawaited(_readProtocol(deviceId));
       } catch (_) {
         _deviceIds.remove(deviceId);
@@ -716,6 +735,7 @@ class ControllerService {
     _deviceIds.remove(deviceId);
     _rawBridges.remove(deviceId);
     _decodedBridges.remove(deviceId);
+    _protocolUnavailable.remove(deviceId);
     if (_protocols.remove(deviceId) != null) _emitProtocols();
     final sub = _subscriptions.remove(deviceId);
     await sub?.cancel();
@@ -1227,6 +1247,7 @@ class ControllerService {
               : raw.loss(h),
       ],
       protocol: _protocols[bridgeId],
+      protocolUnavailable: _protocolUnavailable.contains(bridgeId),
     );
   }
 

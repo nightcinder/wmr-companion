@@ -157,7 +157,7 @@ void main() {
       expect(find.text('LEFT'), findsOneWidget); // hand selector
       expect(
         find.textContaining(
-          'firmware n/a (no FF16, older firmware)  '
+          'firmware n/a (FF16 read failed)  '
           'FF11+ FF12+',
         ),
         findsOneWidget,
@@ -639,10 +639,29 @@ void main() {
       expect(eulerFromQuaternion(after).yawDeg, closeTo(0, 0.1));
       expect(eulerFromQuaternion(after).pitchDeg, closeTo(11.5, 0.1));
     });
+
+    testWidgets('the simulated source lifts 3DoF to a hand anchor', (
+      tester,
+    ) async {
+      await open(tester, simulated: true);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.textContaining('source handAnchor'), findsNWidgets(2));
+      expect(find.textContaining('source orientationOnly'), findsNothing);
+      expect(find.textContaining('m  source handAnchor'), findsNWidgets(2));
+      expect(
+        find.textContaining('fallback: orientation only, no position'),
+        findsNothing,
+      );
+    });
   });
 
   group('bridge firmware', () {
-    Future<void> pump(WidgetTester tester, WmrProtocolVersion? protocol) {
+    Future<void> pump(
+      WidgetTester tester,
+      WmrProtocolVersion? protocol, {
+      bool unavailable = false,
+    }) {
       return tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -651,6 +670,7 @@ void main() {
                 bridgeId: 'bridge-left',
                 mode: StreamMode.decoded,
                 protocol: protocol,
+                protocolUnavailable: unavailable,
               ),
             ]),
           ),
@@ -730,6 +750,43 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware reading...  '
+          'FF11- FF12- FF13- FF14- FF15- FF16-',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an FF16 read that failed is distinct from an absent FF16', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        const WmrProtocolVersion.withoutFirmwareVersion(
+          features: WmrBridgeFeatures(
+            rawStream: true,
+            decodedStream: true,
+            firmwareVersion: true,
+          ),
+        ),
+      );
+
+      expect(
+        find.text(
+          'bridge-left  firmware n/a (FF16 read failed)  '
+          'FF11+ FF12+ FF13- FF14- FF15- FF16+',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('discovery that failed will not be reported as still reading', (
+      tester,
+    ) async {
+      await pump(tester, null, unavailable: true);
+
+      expect(
+        find.text(
+          'bridge-left  firmware n/a (discovery failed)  '
           'FF11- FF12- FF13- FF14- FF15- FF16-',
         ),
         findsOneWidget,
