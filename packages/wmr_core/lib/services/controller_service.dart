@@ -651,13 +651,13 @@ class ControllerService {
       if (!foundService) {
         // A bridge without FF10 is not a WMR bridge: leave it unknown rather
         // than claiming an empty capability set.
-        _markProtocolUnavailable(bridgeId);
+        if (_deviceIds.contains(bridgeId)) _markProtocolUnavailable(bridgeId);
         return;
       }
       features = WmrBridgeFeatures.fromCharacteristics(characteristicUuids);
     } catch (_) {
       // Discovery is optional for streaming; leave the protocol unknown.
-      _markProtocolUnavailable(bridgeId);
+      if (_deviceIds.contains(bridgeId)) _markProtocolUnavailable(bridgeId);
       return;
     }
     if (!_deviceIds.contains(bridgeId)) return;
