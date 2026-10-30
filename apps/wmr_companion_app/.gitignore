@@ -1,0 +1,4 @@
+
+# Python bytecode from local checker runs
+__pycache__/
+*.pyc

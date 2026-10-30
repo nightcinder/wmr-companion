@@ -26,6 +26,29 @@ from `packages/wmr_tracking_unity`, which selects VITURE or XREAL at runtime.
 With no export linked it builds exactly like `base`: both sources exist and
 `start()` reports `unavailable`.
 
+## One launcher icon
+
+The Flutter `MainActivity` is the only home-screen entry point. A Unity export
+is a library here, started from the app, but the XREAL SDK still marks its
+`ai.nreal.activitylife.NRXRActivity` as `MAIN`/`LAUNCHER` (and leanback) for
+standalone Unity apps, and Unity can mark `UnityPlayerActivity` the same way.
+If those filters survive manifest merging, the APK installs two icons; the
+extra one opens the bare Unity scene, which shows the Unity splash and then a
+black screen (ONY-561). The `xreal`, `viture` and `unified` flavor manifests in
+`android/app/src/` remove those filters with `tools:node="remove"`. Keep them
+when adding a flavor or upgrading a vendor SDK, and check the built APK:
+
+```sh
+aapt dump badging build/app/outputs/flutter-apk/app-unified-debug.apk |
+  grep launchable-activity
+# only com.onyxlens.wmr_companion.MainActivity
+```
+
+`tool/check_unified_apk.py` enforces this on the release artifact, and
+`tool/test_flavor_wiring.sh` builds a stub export whose activities carry
+launcher filters for each of the `unified`, `viture` and `xreal` flavors and
+asserts every merged APK exposes one icon.
+
 ## Build
 
 From the repository root:
