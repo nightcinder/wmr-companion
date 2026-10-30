@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- ONY-614: request `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and
+  `HEAD_TRACKING`, and create/configure the XR session only after every grant
+  and after the activity resumes. Native failures are caught as `Throwable` and
+  return typed errors naming the `permissions`, `sessionCreate`,
+  `sessionConfigure` or `trackingStart` stage. `SCENE_UNDERSTANDING_FINE` is
+  not requested.
 - Migrate the Android plugin to AGP 9 built-in Kotlin: drop the Kotlin Gradle Plugin classpath and `org.jetbrains.kotlin.android`, and require Flutter 3.44 or later.
 
 ## 0.2.2

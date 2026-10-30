@@ -1,6 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Runtime permissions for ARCore for Jetpack XR. They are inert on
-         devices without Android XR, and the Dart side stays off by default. -->
+         devices without Android XR, and the Dart side stays off by default.
+
+         SCENE_UNDERSTANDING_FINE ("Precise movement and area data") is not
+         requested: this source reads head and hand poses only, and only fine
+         scene geometry needs it. The four below are the set an XR session
+         needs before it is created (ONY-614). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.SCENE_UNDERSTANDING_COARSE" />
     <uses-permission android:name="android.permission.HAND_TRACKING" />
     <uses-permission android:name="android.permission.HEAD_TRACKING" />
+
+    <!-- CAMERA must not make the app unavailable on a device without one. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

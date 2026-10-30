@@ -3,10 +3,15 @@
 Default-off Android XR head and 26-joint hand tracking source for
 [`wmr_tracking`](../wmr_tracking).
 
-The Kotlin plugin owns an ARCore for Jetpack XR `Session`, requests
-`android.permission.HAND_TRACKING` and `android.permission.HEAD_TRACKING`,
-configures `HandTrackingMode.BOTH` with `DeviceTrackingMode.SPATIAL`, and
-forwards head pose plus both hands as `TrackingFrameCodec` JSON. The Dart
+The Kotlin plugin owns an ARCore for Jetpack XR `Session`. Before creating it
+the plugin requests `android.permission.CAMERA`,
+`android.permission.SCENE_UNDERSTANDING_COARSE`,
+`android.permission.HAND_TRACKING` and `android.permission.HEAD_TRACKING`, and
+waits for every grant and for the activity to resume. It configures
+`HandTrackingMode.BOTH` with `DeviceTrackingMode.SPATIAL`, and forwards head
+pose plus both hands as `TrackingFrameCodec` JSON. `SCENE_UNDERSTANDING_FINE`
+("Precise movement and area data") is not requested: it is only needed for fine
+scene geometry, and this source reads head and hand poses only. The Dart
 `AndroidXrTrackingSource` implements `TrackingSource`, so
 `WmrCompanion.attachTrackingSource` aligns timestamps and feeds
 `SixDofFuser`.
@@ -24,7 +29,9 @@ flag off, `create()` returns null without touching a platform channel.
 Failures are typed `TrackingException`s: a denied permission is
 `permissionDenied`, a non-XR device or a refused `SPATIAL` mode is
 `unsupported`, and activity detach or a missing runtime is `unavailable`.
-`start`, `stop` and `dispose` are idempotent. A Jetpack XR session is tied to
+Each platform failure also names the boundary that failed in
+`TrackingException.stage` (`permissions`, `sessionCreate`, `sessionConfigure`
+or `trackingStart`). `start`, `stop` and `dispose` are idempotent. A Jetpack XR session is tied to
 its activity, so activity recreation stops tracking and the consumer restarts
 the source.
 
