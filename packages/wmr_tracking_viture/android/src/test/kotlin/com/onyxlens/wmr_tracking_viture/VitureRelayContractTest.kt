@@ -92,6 +92,7 @@ class VitureRelayContractTest {
         assertFalse(VitureGlassesModelSpec.isReported("Unknown"))
         assertTrue(VitureGlassesModelSpec.isReported("LumaUltra"))
         assertTrue(VitureGlassesModelSpec.isReported("Pro"))
+        assertTrue(VitureGlassesModelSpec.isReported("LumaNext"))
     }
 
     @Test

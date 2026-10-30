@@ -104,16 +104,20 @@ internal enum class VitureGlassesModelSpec(
         }
 
         /**
-         * Whether [raw] names a model this plugin can classify.
+         * Whether [raw] is a model the SDK actually reported.
          *
          * A null, blank or `Unknown` value means the Unity scene has not
          * reported the model yet, either because the unified scene keeps its
          * vendor backend inactive until `start` or because the SDK query ran
          * before the XR loader was initialised. Callers must defer to the
          * Unity start handshake instead of failing closed in that case.
+         *
+         * Any other name is reported even when [fromSdkName] cannot classify
+         * it, so an unrecognised model still fails closed as `unsupported`.
          */
         fun isReported(raw: String?): Boolean =
-            !raw.isNullOrBlank() && fromSdkName(raw) != UNKNOWN
+            !raw.isNullOrBlank() &&
+                raw.replace("_", "").replace("-", "").lowercase() != "unknown"
     }
 }
 

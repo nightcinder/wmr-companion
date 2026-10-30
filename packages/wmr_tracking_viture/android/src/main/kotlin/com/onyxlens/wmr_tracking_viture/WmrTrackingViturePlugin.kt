@@ -218,6 +218,11 @@ class WmrTrackingViturePlugin internal constructor(
             )
         }
         val supported = modelSpec.head6Dof && modelSpec.handTracking
+        val modelName = if (modelSpec == VitureGlassesModelSpec.UNKNOWN) {
+            reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+        } else {
+            modelSpec.sdkName
+        }
         return mapOf(
             "unityAvailable" to true,
             "modelReported" to true,
@@ -227,11 +232,11 @@ class WmrTrackingViturePlugin internal constructor(
             "handGestures" to modelSpec.handTracking,
             "passthroughCamera" to supported,
             "handJointCount" to modelSpec.handJointCount,
-            "glassesModel" to modelSpec.sdkName,
+            "glassesModel" to modelName,
             "reason" to if (supported) {
                 null
             } else {
-                "VITURE hand tracking requires LumaUltra on Pro Neckband (found ${modelSpec.sdkName})"
+                "VITURE hand tracking requires LumaUltra on Pro Neckband (found $modelName)"
             },
             "permissions" to permissions,
         )
@@ -317,9 +322,14 @@ class WmrTrackingViturePlugin internal constructor(
             (!modelSpec.handTracking || !modelSpec.head6Dof)
         ) {
             runtime.release(GlassesVendor.VITURE)
+            val modelName = if (modelSpec == VitureGlassesModelSpec.UNKNOWN) {
+                reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+            } else {
+                modelSpec.sdkName
+            }
             reply.error(
                 ERROR_UNSUPPORTED,
-                "VITURE hand tracking requires LumaUltra on Pro Neckband (found ${modelSpec.sdkName})",
+                "VITURE hand tracking requires LumaUltra on Pro Neckband (found $modelName)",
             )
             return
         }
