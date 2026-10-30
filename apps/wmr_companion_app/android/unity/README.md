@@ -46,7 +46,8 @@ aapt dump badging build/app/outputs/flutter-apk/app-unified-debug.apk |
 
 `tool/check_unified_apk.py` enforces this on the release artifact, and
 `tool/test_flavor_wiring.sh` builds a stub export whose activities carry
-launcher filters and asserts the merged APK exposes one icon.
+launcher filters for each of the `unified`, `viture` and `xreal` flavors and
+asserts every merged APK exposes one icon.
 
 ## Build
 
