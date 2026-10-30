@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
@@ -18,6 +19,7 @@ import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
 import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 /// A 700-byte block exercises both FF13 windows (496 + 204).
@@ -29,6 +31,7 @@ class _FakePoseRecorder implements BenchPoseRecorder {
   _FakePoseRecorder(this.dir);
 
   final Directory dir;
+  final List<String> recorded = [];
 
   @override
   String get runtime => 'viture';
@@ -38,11 +41,16 @@ class _FakePoseRecorder implements BenchPoseRecorder {
     required int hand,
     required PoseSegment segment,
     required Duration duration,
+    int run = 1,
     Future<void>? cancel,
   }) async {
-    final name =
-        'pose_capture_viture_${hand == 0 ? 'left' : 'right'}_'
-        '${segment.id}.json';
+    recorded.add('$hand:${segment.id}:$run');
+    final name = poseCaptureFileName(
+      runtime: runtime,
+      hand: hand == 0 ? 'left' : 'right',
+      segment: segment.id,
+      run: run,
+    );
     final file = File('${dir.path}/$name')
       ..writeAsStringSync(
         '{"format":"wmr-pose-recording","version":1,'
@@ -53,6 +61,9 @@ class _FakePoseRecorder implements BenchPoseRecorder {
       path: file.path,
       samples: 3,
       seconds: duration.inSeconds,
+      run: run,
+      anchorRateHz: 90,
+      provenance: const {'runtime': 'viture', 'run_index': 1},
     );
   }
 }
@@ -60,8 +71,8 @@ class _FakePoseRecorder implements BenchPoseRecorder {
 void main() {
   late Directory dir;
   late FakeTransport transport;
-  late FakeWmrBridge bridge;
-  late ControllerService service;
+  FakeWmrBridge? bridge;
+  ControllerService? service;
 
   Future<BenchSession> open({List<int> hands = const [0, 1]}) async {
     transport = FakeTransport(devices: const [fakeBridgeDevice]);
@@ -71,7 +82,7 @@ void main() {
       configBlobs: [_configBlob(0), _configBlob(7)],
     )..start();
     service = ControllerService(transport, fakeBridgeDeviceId);
-    await service.start();
+    await service!.start();
     return RealBenchSession(
       service: service,
       clock: transport.clock,
@@ -102,8 +113,8 @@ void main() {
   });
 
   tearDown(() async {
-    bridge.stop();
-    await service.dispose();
+    bridge?.stop();
+    await service?.dispose();
     dir.deleteSync(recursive: true);
   });
 
@@ -173,7 +184,7 @@ void main() {
     final session = await open();
     await session.connect();
     await session.bothHands();
-    bridge.stop(); // no more frames from either hand
+    bridge!.stop(); // no more frames from either hand
 
     final still = await session.still(wmrHandLeft);
 
@@ -334,6 +345,83 @@ void main() {
       archive.files.where((f) => f.name.startsWith('pose_capture_')),
       isEmpty,
     );
+  });
+
+  test('an interrupted corpus resumes from the first missing run', () async {
+    final progress = PoseRecordingStore(Directory('${dir.path}/documents'));
+    final first = _FakePoseRecorder(Directory('${dir.path}/runs'));
+    final second = _FakePoseRecorder(Directory('${dir.path}/runs'));
+
+    RealBenchSession session(BenchPoseRecorder recorder) => RealBenchSession(
+      poseRecorder: recorder,
+      clock: MonotonicClock(),
+      captureStore: CaptureStore(Directory('${dir.path}/captures')),
+      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+      durations: const BenchDurations(
+        poseStill: Duration(milliseconds: 10),
+        poseDrifting: Duration(milliseconds: 10),
+        poseSlowPan: Duration(milliseconds: 10),
+        poseMediumPan: Duration(milliseconds: 10),
+        poseFastFlick: Duration(milliseconds: 10),
+        poseOcclusion: Duration(milliseconds: 10),
+      ),
+      appCommit: 'abc1234',
+      firmwareSha: 'deadbee',
+    );
+
+    ProviderContainer open(BenchSession session) {
+      final container = ProviderContainer(
+        overrides: [
+          benchSessionProvider.overrideWithValue(() async => session),
+          benchPoseAvailabilityProvider.overrideWithValue(
+            const BenchPoseAvailability.available('viture'),
+          ),
+          poseRecordingStoreProvider.overrideWith((ref) async => progress),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    Future<BenchController> start(ProviderContainer container) async {
+      final sub = container.listen(benchControllerProvider, (_, _) {});
+      addTearDown(sub.close);
+      final controller = container.read(benchControllerProvider.notifier);
+      controller.selectMode(BenchMode.sixDofOnly);
+      controller.skipCurrent(); // capability summary is not part of the corpus
+      return controller;
+    }
+
+    final firstContainer = open(session(first));
+    final firstController = await start(firstContainer);
+    for (var i = 0; i < 5; i++) {
+      await firstController.runCurrent();
+    }
+    expect(firstContainer.read(benchControllerProvider).poseSegment, 5);
+    expect(first.recorded, hasLength(5));
+    await firstController.poseProgressWritten;
+    firstContainer.dispose();
+
+    final secondContainer = open(session(second));
+    final secondController = await start(secondContainer);
+    await secondController.runCurrent();
+    expect(second.recorded, hasLength(1), reason: 'only the next run records');
+    expect(second.recorded.single, '0:drifting:2');
+    expect(secondContainer.read(benchControllerProvider).poseSegment, 6);
+
+    for (var i = 6; i < benchPoseSequence.length; i++) {
+      await secondController.runCurrent();
+    }
+    final state = secondContainer.read(benchControllerProvider);
+    expect(state.step, BenchStep.export);
+    final segments =
+        state.resultFor(BenchStep.poseCapture).data['segments']! as List;
+    expect(segments, hasLength(benchPoseSequence.length));
+    final keys = [
+      for (final segment in segments.cast<Map>())
+        '${segment['hand']}:${segment['segment']}:${segment['run']}',
+    ];
+    expect(keys.toSet(), hasLength(benchPoseSequence.length));
   });
 
   group('firmware SHA', () {

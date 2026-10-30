@@ -113,13 +113,13 @@ void main() {
       manifest,
       contains(
         '| pose_capture_viture_left_still.json | LEFT '
-        '| still | done | 7 | — |',
+        '| still | 1 | done | 7 | — | — |',
       ),
     );
     expect(
       manifest,
       contains(
-        '| — | LEFT | drifting | skipped | — | '
+        '| — | LEFT | drifting | 1 | skipped | — | — | '
         'skipped by tester |',
       ),
     );
@@ -379,7 +379,7 @@ void main() {
     expect(manifest, contains('- Firmware SHA: none (no bridge)'));
     expect(manifest, contains('## 6DoF pose captures'));
     expect(manifest, contains('pose_capture_fake_left_still.json'));
-    expect(manifest, contains('| LEFT | still | done | 30 |'));
+    expect(manifest, contains('| LEFT | still | 1 | done | 30 |'));
     expect(manifest, contains('pose_capture_fake_right_fastFlick.json'));
   });
 }

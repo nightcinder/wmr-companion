@@ -50,15 +50,24 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     super.dispose();
   }
 
-  double _poseProgress(BenchDurations durations, PoseSegment segment) {
-    final total = durations.poseDuration(segment).inSeconds;
+  double _poseProgress(
+    BenchDurations durations,
+    BenchPosePlan plan,
+    PoseSegment segment,
+  ) {
+    final total = durations.poseRunDuration(segment, plan).inSeconds;
     if (total <= 0 || _poseRemaining <= 0) return 1;
     return 1 - _poseRemaining / total;
   }
 
   /// Counts down only while a pose segment is running. The controller owns the
   /// segment index, so a new index restarts the count.
-  void _syncPoseCountdown(BenchRunState state, BenchDurations durations) {
+  void _syncPoseCountdown(
+    BenchRunState state,
+    BenchDurations durations,
+    BenchPosePlan plan,
+    List<BenchPoseSpec> sequence,
+  ) {
     final running =
         state.step == BenchStep.poseCapture &&
         state.current.status == BenchStatus.running;
@@ -71,8 +80,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     if (_poseTimer != null && _poseTimerSegment == state.poseSegment) return;
     _poseTimer?.cancel();
     _poseTimerSegment = state.poseSegment;
-    final spec = benchPoseSequence[state.poseSegment];
-    final seconds = durations.poseDuration(spec.segment).inSeconds;
+    final spec = sequence[state.poseSegment];
+    final seconds = durations.poseRunDuration(spec.segment, plan).inSeconds;
     _poseRemaining = seconds;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -90,6 +99,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final state = ref.watch(benchControllerProvider);
     final controller = ref.read(benchControllerProvider.notifier);
     final durations = ref.watch(benchDurationsProvider);
+    final plan = ref.watch(benchPosePlanProvider);
+    final sequence = ref.watch(benchPoseSequenceProvider);
     final tracking = ref.watch(benchHandTrackingProvider);
     final selection = ref.watch(debugTrackingSourceProvider);
     // The simulated source is fed by the debug pose viewer; keep that pump
@@ -104,9 +115,9 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final total = state.steps.length;
     final finished = state.completed + state.skipped + state.failed;
     final poseSpec = step == BenchStep.poseCapture
-        ? benchPoseSequence[state.poseSegment]
+        ? sequence[state.poseSegment]
         : null;
-    _syncPoseCountdown(state, durations);
+    _syncPoseCountdown(state, durations, plan, sequence);
 
     return PopScope(
       canPop: !state.busy,
@@ -161,14 +172,14 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   ? 'Step ${state.index + 1} of $total'
                   : 'Step ${state.index + 1} of $total  ·  '
                         'Pose ${state.poseSegment + 1} of '
-                        '${benchPoseSequence.length}',
+                        '${sequence.length}',
               style: theme.textTheme.labelLarge,
             ),
             Text(
               poseSpec == null
                   ? step.title
-                  : '${poseSpec.segment.title} — '
-                        '${RealBenchSession.handName(poseSpec.hand)}',
+                  : '${poseSpec.segment.title} — ${poseSpec.handName}'
+                        '${poseSpec.diagnostic ? ' (diagnostic)' : ' · run ${poseSpec.run}'}',
               style: theme.textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
@@ -182,7 +193,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
             if (poseSpec != null && result.status == BenchStatus.running) ...[
               const SizedBox(height: 8),
               LinearProgressIndicator(
-                value: _poseProgress(durations, poseSpec.segment),
+                value: _poseProgress(durations, plan, poseSpec.segment),
               ),
               Text(
                 '$_poseRemaining s left',
@@ -193,7 +204,15 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
             const SizedBox(height: 16),
             _status(result, mono, theme),
             const SizedBox(height: 16),
-            ..._actions(state, controller, durations, theme, poseSpec),
+            ..._actions(
+              state,
+              controller,
+              durations,
+              plan,
+              sequence,
+              theme,
+              poseSpec,
+            ),
             if (step == BenchStep.export && state.bundlePath != null)
               ..._bundle(state, theme, mono),
             const SizedBox(height: 24),
@@ -242,6 +261,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     BenchRunState state,
     BenchController controller,
     BenchDurations durations,
+    BenchPosePlan plan,
+    List<BenchPoseSpec> sequence,
     ThemeData theme,
     BenchPoseSpec? poseSpec,
   ) {
@@ -311,7 +332,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
           onPressed: controller.skipCurrent,
           child: const Text('Skip segment'),
         ),
-        if (state.poseSegment + 1 < benchPoseSequence.length)
+        if (state.poseSegment + 1 < sequence.length)
           TextButton(
             key: const Key('bench-skip-remaining'),
             onPressed: controller.skipRemainingPose,
@@ -326,7 +347,9 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         child: Text(
           poseSpec == null
               ? _startLabel(step, durations)
-              : 'Start ${durations.poseDuration(poseSpec.segment).inSeconds} s',
+              : 'Start '
+                    '${durations.poseRunDuration(poseSpec.segment, plan).inSeconds}'
+                    ' s',
         ),
       ),
       const SizedBox(height: 8),
@@ -335,7 +358,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         onPressed: controller.skipCurrent,
         child: Text(poseSpec == null ? 'Skip step' : 'Skip segment'),
       ),
-      if (poseSpec != null && state.poseSegment + 1 < benchPoseSequence.length)
+      if (poseSpec != null && state.poseSegment + 1 < sequence.length)
         TextButton(
           key: const Key('bench-skip-remaining'),
           onPressed: controller.skipRemainingPose,

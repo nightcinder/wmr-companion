@@ -245,12 +245,16 @@ List<PoseCaptureFile> poseCapturesFromRun(BenchBundleRun? run) {
       final name = segment['segment'];
       if (path is! String || runtime is! String) continue;
       if (hand is! String || name is! String) continue;
+      final run = segment['run'];
+      final rate = segment['anchor_rate_hz'];
       captures.add(
         PoseCaptureFile(
           path: path,
           runtime: runtime,
           hand: hand.toLowerCase(),
           segment: name,
+          run: run is int ? run : 1,
+          anchorRateHz: rate is num ? rate.toDouble() : null,
         ),
       );
     }

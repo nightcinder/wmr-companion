@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,7 @@ import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
 import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
+import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
 
 class _FakeSession implements BenchSession {
   _FakeSession({
@@ -67,6 +69,7 @@ class _FakeSession implements BenchSession {
     int hand,
     PoseSegment segment,
     Duration duration, {
+    int run = 1,
     Future<void>? cancel,
   }) async {
     if (holdPose) {
@@ -81,6 +84,7 @@ class _FakeSession implements BenchSession {
           'runtime': 'viture',
           'hand': hand == 0 ? 'LEFT' : 'RIGHT',
           'segment': segment.id,
+          'run': run,
         },
       );
     }
@@ -91,12 +95,13 @@ class _FakeSession implements BenchSession {
           'runtime': 'viture',
           'hand': hand == 0 ? 'LEFT' : 'RIGHT',
           'segment': segment.id,
+          'run': run,
         },
       );
     }
     return _outcome(
       BenchStep.poseCapture,
-      '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} saved',
+      '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} run $run saved',
     );
   }
 
@@ -125,10 +130,15 @@ void main() {
     ),
     BenchMode mode = BenchMode.threeDofOnly,
   }) async {
+    final documents = Directory.systemTemp.createTempSync('bench_screen_docs');
+    addTearDown(() => documents.deleteSync(recursive: true));
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => session),
         benchPoseAvailabilityProvider.overrideWithValue(pose),
+        poseRecordingStoreProvider.overrideWith(
+          (ref) async => PoseRecordingStore(documents),
+        ),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) async => bundle(),
         ),
@@ -412,14 +422,15 @@ void main() {
                 .data['segments']!
             as List;
     expect(segments, hasLength(benchPoseSequence.length));
-    // Both hands' still segments fail; every other segment is recorded.
+    // Every run of both hands' still class fails; the rest are recorded.
+    const stillRuns = 4 * 2;
     expect(
       segments.where((segment) => (segment as Map)['status'] == 'skipped'),
-      hasLength(2),
+      hasLength(stillRuns),
     );
     expect(
       segments.where((segment) => (segment as Map)['status'] == 'done'),
-      hasLength(benchPoseSequence.length - 2),
+      hasLength(benchPoseSequence.length - stillRuns),
     );
   });
 

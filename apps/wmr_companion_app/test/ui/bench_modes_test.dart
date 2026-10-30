@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +10,7 @@ import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 class _FakeSession implements BenchSession {
@@ -47,16 +50,20 @@ class _FakeSession implements BenchSession {
     int hand,
     PoseSegment segment,
     Duration duration, {
+    int run = 1,
     Future<void>? cancel,
   }) async {
     final name = hand == 0 ? 'left' : 'right';
     return BenchStepOutcome.done(
-      '$name ${segment.id}: 3 samples',
+      '$name ${segment.id} run $run: 3 samples',
       data: {
         'runtime': 'fake',
         'hand': name.toUpperCase(),
         'segment': segment.id,
-        'file': '/tmp/pose_capture_fake_${name}_${segment.id}.json',
+        'run': run,
+        'file':
+            '/tmp/pose_capture_fake_${name}_${segment.id}'
+            '${run > 1 ? '_run$run' : ''}.json',
         'samples': 3,
       },
     );
@@ -75,9 +82,14 @@ void main() {
     WidgetTester tester, {
     bool withHandJoints = false,
   }) async {
+    final documents = Directory.systemTemp.createTempSync('bench_modes_docs');
+    addTearDown(() => documents.deleteSync(recursive: true));
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => _FakeSession()),
+        poseRecordingStoreProvider.overrideWith(
+          (ref) async => PoseRecordingStore(documents),
+        ),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) async => bundle,
         ),
@@ -162,7 +174,7 @@ void main() {
     await tap(tester, 'bench-start');
     expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
     expect(find.byKey(const Key('bench-capture-prompt')), findsOneWidget);
-    expect(find.textContaining('Pose 1 of 10'), findsOneWidget);
+    expect(find.textContaining('Pose 1 of 42'), findsOneWidget);
 
     await tap(tester, 'bench-start');
     final segment = container.read(benchControllerProvider);

@@ -33,6 +33,7 @@ class BenchDurations {
     this.poseSlowPan = const Duration(seconds: 18),
     this.poseMediumPan = const Duration(seconds: 10),
     this.poseFastFlick = const Duration(seconds: 20),
+    this.poseOcclusion = const Duration(seconds: 30),
     this.handTimeout = const Duration(seconds: 5),
     this.firmwareTimeout = const Duration(seconds: 3),
   });
@@ -46,6 +47,7 @@ class BenchDurations {
   final Duration poseSlowPan;
   final Duration poseMediumPan;
   final Duration poseFastFlick;
+  final Duration poseOcclusion;
 
   Duration poseDuration(PoseSegment segment) => switch (segment) {
     PoseSegment.still => poseStill,
@@ -53,7 +55,13 @@ class BenchDurations {
     PoseSegment.slowPan => poseSlowPan,
     PoseSegment.mediumPan => poseMediumPan,
     PoseSegment.fastFlick => poseFastFlick,
+    PoseSegment.occlusion => poseOcclusion,
   };
+
+  /// One corpus run: the section 8 path repeated until the plan's minimum is
+  /// reached. The per-cycle durations stay injectable so tests can run short.
+  Duration poseRunDuration(PoseSegment segment, BenchPosePlan plan) =>
+      poseDuration(segment) * plan.cyclesFor(segment);
 
   /// How long to wait for the first frames of both hands.
   final Duration handTimeout;
@@ -221,9 +229,11 @@ enum BenchStep {
       'Reports the attached hand-tracking runtime and the joints and rate it '
           'offers. No bridge is needed for the 6DoF path.',
     BenchStep.poseCapture =>
-      'Records one pose recording per hand and segment while a VITURE, XREAL '
-          'or Android XR source is tracking hands. Each segment has its own '
-          'screen and can be skipped.',
+      'Records the filter-spec section 8 corpus: four runs of each of the five '
+          'motion classes per hand, then one occlusion diagnostic run per '
+          'hand. Every run is at least 30 s and is sampled at the anchor rate '
+          'with provenance. Each run has its own screen and can be skipped; an '
+          'interrupted run resumes where it stopped.',
     BenchStep.export =>
       'Writes the same zip as Export test bundle, with this run\'s step '
           'results in the manifest, then opens the share sheet.',
@@ -264,6 +274,7 @@ abstract class BenchSession {
     int hand,
     PoseSegment segment,
     Duration duration, {
+    int run = 1,
     Future<void>? cancel,
   });
   Future<BenchStepOutcome> capture();
@@ -469,6 +480,7 @@ class RealBenchSession implements BenchSession {
     int hand,
     PoseSegment segment,
     Duration duration, {
+    int run = 1,
     Future<void>? cancel,
   }) async {
     final recorder = poseRecorder;
@@ -479,6 +491,7 @@ class RealBenchSession implements BenchSession {
         data: {
           'hand': handLabel,
           'segment': segment.id,
+          'run': run,
           'app_commit': appCommit,
           'firmware_sha': firmwareSha,
         },
@@ -492,18 +505,23 @@ class RealBenchSession implements BenchSession {
         hand: hand,
         segment: segment,
         duration: duration,
+        run: run,
         cancel: cancel,
       );
       return BenchStepOutcome.done(
-        '$handLabel ${segment.title}: ${result.samples} samples; '
+        '$handLabel ${segment.title} run $run: ${result.samples} samples; '
         'saved ${result.path}',
         data: {
           'runtime': result.runtime,
           'hand': handLabel,
           'segment': segment.id,
+          'run': result.run,
           'file': result.path,
           'samples': result.samples,
           'seconds': result.seconds,
+          'anchor_rate_hz': result.anchorRateHz,
+          'provenance': result.provenance,
+          if (result.diagnostics.isNotEmpty) 'diagnostics': result.diagnostics,
           'app_commit': appCommit,
           'firmware_sha': firmwareSha,
         },
@@ -515,6 +533,7 @@ class RealBenchSession implements BenchSession {
           'runtime': recorder.runtime,
           'hand': handLabel,
           'segment': segment.id,
+          'run': run,
           'app_commit': appCommit,
           'firmware_sha': firmwareSha,
         },
@@ -699,11 +718,20 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
     final tracking = selection.attachment.value?.source;
     if (!connected && tracking == null) return null;
     final availability = ref.read(benchPoseAvailabilityProvider);
+    final appCommit = ref.read(appCommitProvider);
+    final firmwareSha = connected
+        ? firmwareShaFromVersions({
+            for (final id in service.deviceIds)
+              id: service.protocolFor(id)?.firmwareVersion,
+          })
+        : null;
     final poseRecorder = availability.available
         ? RealBenchPoseRecorder(
             ref: ref,
             store: await ref.read(poseRecordingStoreProvider.future),
             runtime: availability.runtime!,
+            appCommit: appCommit,
+            firmwareSha: firmwareSha,
           )
         : null;
     return RealBenchSession(
@@ -715,13 +743,8 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
       latencyStore: await ref.read(latencyStoreProvider.future),
       durations: ref.read(benchDurationsProvider),
       mtu: device.status.mtu,
-      appCommit: ref.read(appCommitProvider),
-      firmwareSha: connected
-          ? firmwareShaFromVersions({
-              for (final id in service.deviceIds)
-                id: service.protocolFor(id)?.firmwareVersion,
-            })
-          : null,
+      appCommit: appCommit,
+      firmwareSha: firmwareSha,
       applyMode: notifier.setStreamMode,
     );
   };
