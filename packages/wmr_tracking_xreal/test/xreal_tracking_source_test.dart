@@ -201,24 +201,81 @@ void main() {
     );
   });
 
-  test('an unreported or unknown glasses model maps to unsupported', () async {
-    const unknownCapabilities = <String, Object?>{
-      'unityAvailable': true,
-      'supported': false,
-      'handTracking': false,
-      'headTracking': false,
-      'handGestures': false,
-      'passthroughCamera': false,
-      'handJointCount': 0,
-      'glassesModel': 'Unknown',
-      'reason': 'XREAL hand tracking requires Air 2 Ultra (found Unknown)',
-      'permissions': <String, Object?>{'camera': 'granted'},
-    };
+  test(
+    'capabilities that report no support are refused as unsupported',
+    () async {
+      const unknownCapabilities = <String, Object?>{
+        'unityAvailable': true,
+        'supported': false,
+        'handTracking': false,
+        'headTracking': false,
+        'handGestures': false,
+        'passthroughCamera': false,
+        'handJointCount': 0,
+        'glassesModel': 'Unknown',
+        'reason': 'XREAL hand tracking requires Air 2 Ultra (found Unknown)',
+        'permissions': <String, Object?>{'camera': 'granted'},
+      };
+
+      await expectLater(
+        XrealAir2UltraTrackingSource.create(
+          enabled: true,
+          platform: _FakeXrealPlatform(capabilities: unknownCapabilities),
+        ),
+        throwsA(
+          isA<TrackingException>().having(
+            (error) => error.kind,
+            'kind',
+            TrackingExceptionKind.unsupported,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'an unreported model defers the check to the Unity start handshake',
+    () async {
+      const pendingCapabilities = <String, Object?>{
+        'unityAvailable': true,
+        'modelReported': false,
+        'supported': true,
+        'handTracking': true,
+        'headTracking': true,
+        'handGestures': true,
+        'passthroughCamera': true,
+        'handJointCount': 26,
+        'glassesModel': 'Unknown',
+        'reason': null,
+        'permissions': <String, Object?>{'camera': 'granted'},
+      };
+      final platform = _FakeXrealPlatform(capabilities: pendingCapabilities);
+
+      final source = await XrealAir2UltraTrackingSource.create(
+        enabled: true,
+        platform: platform,
+      );
+
+      expect(source, isNotNull);
+      expect(source!.glassesModel, XrealGlassesModel.unknown);
+      expect(source.capabilities.hasHead6Dof, isTrue);
+      expect(source.capabilities.hasHandTracking, isTrue);
+      expect(source.capabilities.handJointCount, 26);
+      await source.start();
+      expect(platform.startCalls, 1);
+      await source.dispose();
+    },
+  );
+
+  test('a reported Unknown model is still rejected', () async {
+    final capabilities = Map<String, Object?>.from(_supportedAir2Ultra)
+      ..['glassesModel'] = 'Unknown'
+      ..['modelReported'] = true;
 
     await expectLater(
       XrealAir2UltraTrackingSource.create(
         enabled: true,
-        platform: _FakeXrealPlatform(capabilities: unknownCapabilities),
+        platform: _FakeXrealPlatform(capabilities: capabilities),
       ),
       throwsA(
         isA<TrackingException>().having(
