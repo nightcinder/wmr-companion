@@ -15,6 +15,21 @@ inputs:
     description: Exact Flutter release to install
     required: false
     default: 3.47.7
+  sdk-cache:
+    description: >-
+      Restore the SDK from the cache. 'false' for macOS: that SDK entry is
+      2.2 GB and only the one iOS job reads it, so caching it would leave no
+      headroom for the 2.8 GB Android NDK entry under the 7 GB target.
+    required: false
+    default: 'true'
+
+outputs:
+  sdk-cache-hit:
+    description: "'true' when the SDK was served from the cache"
+    value: ${{ steps.sdk.outputs.cache-hit }}
+  pub-cache-hit:
+    description: "'true' when the pub cache was served from the cache"
+    value: ${{ steps.pub.outputs.cache-hit }}
 
 runs:
   using: composite
@@ -31,12 +46,14 @@ runs:
 
     - name: Restore the Flutter SDK
       id: sdk
+      if: ${{ inputs.sdk-cache == 'true' }}
       uses: actions/cache/restore@v6
       with:
         path: ${{ steps.key.outputs.CACHE-PATH }}
         key: ${{ steps.key.outputs.CACHE-KEY }}
 
     - name: Restore the pub cache
+      id: pub
       uses: actions/cache/restore@v6
       with:
         path: ${{ steps.key.outputs.PUB-CACHE-PATH }}

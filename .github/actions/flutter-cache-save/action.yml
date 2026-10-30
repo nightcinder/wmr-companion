@@ -14,6 +14,18 @@ inputs:
     description: Exact Flutter release the job installed
     required: false
     default: 3.47.7
+  save-sdk:
+    description: >-
+      Write the SDK entry. Pass 'false' when `flutter-setup` restored it: the
+      key already exists, and reserving it again fails. Once this flag reflects
+      the restore result, a save failure is a real failure (a wrong path or a
+      malformed key) rather than an expected duplicate.
+    required: false
+    default: 'true'
+  save-pub:
+    description: Write the pub cache. 'false' when `flutter-setup` restored it.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -26,18 +38,15 @@ runs:
         flutter-version: ${{ inputs.flutter-version }}
         dry-run: true
 
-    # An entry written by an earlier main run already satisfies the key; that
-    # reserve fails with a warning and changes nothing, so both saves tolerate
-    # it instead of turning a green build red.
     - name: Save the Flutter SDK
-      continue-on-error: true
+      if: ${{ inputs.save-sdk == 'true' }}
       uses: actions/cache/save@v6
       with:
         path: ${{ steps.key.outputs.CACHE-PATH }}
         key: ${{ steps.key.outputs.CACHE-KEY }}
 
     - name: Save the pub cache
-      continue-on-error: true
+      if: ${{ inputs.save-pub == 'true' }}
       uses: actions/cache/save@v6
       with:
         path: ${{ steps.key.outputs.PUB-CACHE-PATH }}

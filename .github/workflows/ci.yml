@@ -62,6 +62,7 @@ jobs:
           java-version: '17'
 
       - uses: ./.github/actions/flutter-setup
+        id: flutter
 
       # One resolution for the whole workspace; every member is resolved here.
       - run: flutter pub get
@@ -192,6 +193,9 @@ jobs:
       - name: Save the Flutter caches
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: ./.github/actions/flutter-cache-save
+        with:
+          save-sdk: ${{ steps.flutter.outputs.sdk-cache-hit != 'true' }}
+          save-pub: ${{ steps.flutter.outputs.pub-cache-hit != 'true' }}
 
   gate7-clock-replay:
     # Tag pushes build only the release job; these gates run on branches/PRs.
@@ -282,6 +286,11 @@ jobs:
     if: ${{ (needs.changes.outputs.android_flavors == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # `actions: read` lets the miss check below list the repository's cache
+    # entries with the job token.
+    permissions:
+      contents: read
+      actions: read
     env:
       # Pinned in the app's `ndkVersion`: package:jni (a path_provider_android
       # dependency) compiles C++ through CMake, so these downloads are real.
@@ -309,6 +318,25 @@ jobs:
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
           restore-keys: |
             android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+
+      # An expected miss downloads and, on main, saves; a miss while the exact
+      # key already exists means the entry is unreachable (evicted, or the
+      # path-derived version changed) and would silently stay that way. The
+      # first main run after this lands has no entry yet, so it passes here
+      # and seeds one.
+      - name: Check the Android NDK cache state
+        if: ${{ steps.android-tools.outputs.cache-hit != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
+        run: |
+          set -uo pipefail
+          echo "NDK/CMake cache miss on $GITHUB_REF: the build will download them."
+          keys=$(gh cache list --key "$CACHE_KEY" --limit 100 --json key --jq '.[].key' 2>/dev/null) || exit 0
+          if grep -qxF "$CACHE_KEY" <<<"$keys"; then
+            echo "::error::A cache entry for $CACHE_KEY exists but the restore missed; the entry is unreachable and the build re-downloads every run."
+            exit 1
+          fi
 
       - uses: gradle/actions/setup-gradle@v6
 
@@ -446,7 +474,13 @@ jobs:
         working-directory: tool/ios_probe
         run: swift build
 
+      # The macOS SDK entry is 2.2 GB and only this job reads it; keeping it
+      # would leave less than a gigabyte of the 7 GB target for the NDK entry,
+      # so the iOS job downloads the SDK instead. The pub cache is tiny and
+      # still restored.
       - uses: ./.github/actions/flutter-setup
+        with:
+          sdk-cache: 'false'
 
       - name: Validate Flutter iOS config
         working-directory: apps/wmr_companion_app
@@ -459,10 +493,6 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign
-
-      - name: Save the Flutter caches
-        if: ${{ github.ref == 'refs/heads/main' }}
-        uses: ./.github/actions/flutter-cache-save
 
   release-unified:
     # The unified flavor links one shared unityLibrary that carries both VITURE
