@@ -16,6 +16,7 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
+using UnityEngine.XR;
 #if WMR_UNITY_XR_HANDS
 using UnityEngine.SubsystemsImplementation;
 using UnityEngine.XR.Hands;
@@ -174,6 +175,30 @@ namespace OnyxLens.WmrTrackingViture
         private void StartTracking()
         {
             ReportGlassesModel();
+#if !UNITY_EDITOR
+            // VITURE hand tracking requires the VITURE XR loader to render in
+            // stereo 3D (SpaceWalker mode). A mono 2D player yields no joints,
+            // and HandTracking.Start() can stall the launch instead of failing.
+            // Fail closed with a typed error so the host can surface it.
+            if (!XRSettings.isDeviceActive)
+            {
+                ReportError(
+                    "unavailable",
+                    "VITURE hand tracking needs the VITURE XR loader rendering in " +
+                    "stereo 3D (SpaceWalker mode); this Unity player is running in 2D. " +
+                    "Enable VITURE XR Plug-in Management and Initialize XR on Startup."
+                );
+                return;
+            }
+            // The stereo mode is chosen by the VITURE loader when its display
+            // subsystem initialises (XR Plug-in Management); Unity exposes
+            // XRSettings.stereoRenderingMode read-only, so the bridge cannot
+            // switch a mono player to Single Pass Instanced at runtime.
+            if (Camera.main != null)
+            {
+                Camera.main.stereoTargetEye = StereoTargetEyeMask.Both;
+            }
+#endif
 #if WMR_VITURE_XR_SDK
             var model = VitureGlasses.GetGlassesModel().ToString();
             if (!string.Equals(model, "LumaUltra", StringComparison.OrdinalIgnoreCase))

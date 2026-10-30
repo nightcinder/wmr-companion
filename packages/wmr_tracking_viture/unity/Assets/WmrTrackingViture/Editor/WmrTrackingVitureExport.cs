@@ -46,6 +46,11 @@ namespace OnyxLens.WmrTrackingViture.Editor
             }
 
             ConfigurePlayer();
+            // Stereo 3D at launch, before the host sends `start`: VITURE hand
+            // tracking has no frames in a mono 2D player.
+#if WMR_VITURE_XR_SDK
+            ConfigureVitureXr.Configure();
+#endif
             EditorUserBuildSettings.buildAppBundle = false;
             EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
 

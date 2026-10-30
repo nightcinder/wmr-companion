@@ -53,23 +53,33 @@ class WmrTrackingViturePluginTest {
     }
 
     @Test
-    fun capabilitiesReportsUnsupportedWhenGlassesModelIsNull() {
+    fun capabilitiesDefersAnUnreportedGlassesModelToTheStartHandshake() {
         val bridge = FakeBridge(isUnityAvailable = true, model = null)
         val plugin = WmrTrackingViturePlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
-        assertEquals(false, caps["supported"])
-        assertEquals(false, caps["handTracking"])
-        assertEquals(false, caps["headTracking"])
-        assertEquals(false, caps["handGestures"])
-        assertEquals(false, caps["passthroughCamera"])
-        assertEquals(0, caps["handJointCount"])
+        assertEquals(false, caps["modelReported"])
+        assertEquals(true, caps["supported"])
+        assertEquals(true, caps["handTracking"])
+        assertEquals(true, caps["headTracking"])
+        assertEquals(true, caps["handGestures"])
+        assertEquals(true, caps["passthroughCamera"])
+        assertEquals(26, caps["handJointCount"])
         assertEquals("Unknown", caps["glassesModel"])
-        assertEquals(
-            "VITURE hand tracking requires LumaUltra on Pro Neckband (found Unknown)",
-            caps["reason"],
-        )
+        assertNull(caps["reason"])
+    }
+
+    @Test
+    fun capabilitiesTreatsTheSdkUnknownPlaceholderAsUnreported() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "Unknown")
+        val plugin = WmrTrackingViturePlugin(bridge)
+
+        val caps = plugin.capabilities()
+        assertEquals(false, caps["modelReported"])
+        assertEquals(true, caps["supported"])
+        assertEquals(26, caps["handJointCount"])
+        assertNull(caps["reason"])
     }
 
     @Test
@@ -79,6 +89,7 @@ class WmrTrackingViturePluginTest {
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
+        assertEquals(true, caps["modelReported"])
         assertEquals(false, caps["supported"])
         assertEquals(false, caps["handTracking"])
         assertEquals(false, caps["headTracking"])
@@ -91,12 +102,29 @@ class WmrTrackingViturePluginTest {
     }
 
     @Test
+    fun capabilitiesFailsClosedForAReportedModelItCannotClassify() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "LumaNext")
+        val plugin = WmrTrackingViturePlugin(bridge)
+
+        val caps = plugin.capabilities()
+        assertEquals(true, caps["modelReported"])
+        assertEquals(false, caps["supported"])
+        assertEquals(false, caps["handTracking"])
+        assertEquals("LumaNext", caps["glassesModel"])
+        assertEquals(
+            "VITURE hand tracking requires LumaUltra on Pro Neckband (found LumaNext)",
+            caps["reason"],
+        )
+    }
+
+    @Test
     fun capabilitiesReportsSupportedOnlyForLumaUltra() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "LumaUltra")
         val plugin = WmrTrackingViturePlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
+        assertEquals(true, caps["modelReported"])
         assertEquals(true, caps["supported"])
         assertEquals(true, caps["handTracking"])
         assertEquals(true, caps["headTracking"])
@@ -108,20 +136,17 @@ class WmrTrackingViturePluginTest {
     }
 
     @Test
-    fun startUnityRelayFailsWhenGlassesModelIsNull() {
+    fun startUnityRelayDefersAnUnreportedGlassesModelToUnity() {
         val bridge = FakeBridge(isUnityAvailable = true, model = null)
         val plugin = WmrTrackingViturePlugin(bridge)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
 
-        assertEquals(1, reply.errors.size)
-        assertEquals("unsupported", reply.errors[0].first)
-        assertEquals(
-            "VITURE hand tracking requires LumaUltra on Pro Neckband (found Unknown)",
-            reply.errors[0].second,
-        )
-        assertTrue(bridge.sentCommands.isEmpty())
+        assertTrue(reply.errors.isEmpty())
+        assertEquals(1, reply.successes.size)
+        assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
 
     @Test
@@ -136,6 +161,23 @@ class WmrTrackingViturePluginTest {
         assertEquals("unsupported", reply.errors[0].first)
         assertEquals(
             "VITURE hand tracking requires LumaUltra on Pro Neckband (found Luma)",
+            reply.errors[0].second,
+        )
+        assertTrue(bridge.sentCommands.isEmpty())
+    }
+
+    @Test
+    fun startUnityRelayRejectsAReportedModelItCannotClassify() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "LumaNext")
+        val plugin = WmrTrackingViturePlugin(bridge)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals("unsupported", reply.errors[0].first)
+        assertEquals(
+            "VITURE hand tracking requires LumaUltra on Pro Neckband (found LumaNext)",
             reply.errors[0].second,
         )
         assertTrue(bridge.sentCommands.isEmpty())
@@ -192,7 +234,7 @@ class WmrTrackingViturePluginTest {
     @Test
     fun unsupportedModelReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
-        val plugin = WmrTrackingViturePlugin(FakeBridge(model = null), runtime)
+        val plugin = WmrTrackingViturePlugin(FakeBridge(model = "Pro"), runtime)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)

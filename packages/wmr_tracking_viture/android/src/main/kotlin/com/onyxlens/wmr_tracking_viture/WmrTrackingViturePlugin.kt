@@ -195,21 +195,48 @@ class WmrTrackingViturePlugin internal constructor(
                 "permissions" to permissions,
             )
         }
-        val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
+        val reportedModel = bridge.queryGlassesModel()
+        val modelSpec = VitureGlassesModelSpec.fromSdkName(reportedModel)
+        if (!VitureGlassesModelSpec.isReported(reportedModel)) {
+            // The unified Unity scene keeps the VITURE backend inactive until
+            // `start`, so the model cannot be reported yet. Advertise the only
+            // hand-tracking model and let the Unity start handshake report any
+            // other model as `unsupported`.
+            val lumaUltra = VitureGlassesModelSpec.LUMA_ULTRA
+            return mapOf(
+                "unityAvailable" to true,
+                "modelReported" to false,
+                "supported" to true,
+                "handTracking" to true,
+                "headTracking" to true,
+                "handGestures" to true,
+                "passthroughCamera" to true,
+                "handJointCount" to lumaUltra.handJointCount,
+                "glassesModel" to modelSpec.sdkName,
+                "reason" to null,
+                "permissions" to permissions,
+            )
+        }
         val supported = modelSpec.head6Dof && modelSpec.handTracking
+        val modelName = if (modelSpec == VitureGlassesModelSpec.UNKNOWN) {
+            reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+        } else {
+            modelSpec.sdkName
+        }
         return mapOf(
             "unityAvailable" to true,
+            "modelReported" to true,
             "supported" to supported,
             "handTracking" to modelSpec.handTracking,
             "headTracking" to modelSpec.head6Dof,
             "handGestures" to modelSpec.handTracking,
             "passthroughCamera" to supported,
             "handJointCount" to modelSpec.handJointCount,
-            "glassesModel" to modelSpec.sdkName,
+            "glassesModel" to modelName,
             "reason" to if (supported) {
                 null
             } else {
-                "VITURE hand tracking requires LumaUltra on Pro Neckband (found ${modelSpec.sdkName})"
+                "VITURE hand tracking requires LumaUltra on Pro Neckband (found $modelName)"
             },
             "permissions" to permissions,
         )
@@ -289,12 +316,20 @@ class WmrTrackingViturePlugin internal constructor(
             reply.error(ERROR_UNAVAILABLE, "No shared UnityPlayer is linked into this build")
             return
         }
-        val modelSpec = VitureGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
-        if (!modelSpec.handTracking || !modelSpec.head6Dof) {
+        val reportedModel = bridge.queryGlassesModel()
+        val modelSpec = VitureGlassesModelSpec.fromSdkName(reportedModel)
+        if (VitureGlassesModelSpec.isReported(reportedModel) &&
+            (!modelSpec.handTracking || !modelSpec.head6Dof)
+        ) {
             runtime.release(GlassesVendor.VITURE)
+            val modelName = if (modelSpec == VitureGlassesModelSpec.UNKNOWN) {
+                reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+            } else {
+                modelSpec.sdkName
+            }
             reply.error(
                 ERROR_UNSUPPORTED,
-                "VITURE hand tracking requires LumaUltra on Pro Neckband (found ${modelSpec.sdkName})",
+                "VITURE hand tracking requires LumaUltra on Pro Neckband (found $modelName)",
             )
             return
         }

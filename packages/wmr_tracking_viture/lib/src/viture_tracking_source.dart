@@ -221,6 +221,12 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     }
 
     final glassesModel = VitureGlassesModel.fromSdkName(raw['glassesModel']);
+    // The unified Unity scene keeps the VITURE backend inactive until `start`,
+    // so the native layer cannot report a model before capabilities and marks
+    // it with `modelReported: false`. Defer the Luma Ultra check to the Unity
+    // start handshake in that case. Absent means reported, so an older native
+    // plugin keeps failing closed.
+    final modelReported = raw['modelReported'] != false;
     final supported = raw['supported'] == true;
     final handTracking = raw['handTracking'] == true;
     final headTracking = raw['headTracking'] == true;
@@ -229,8 +235,9 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     if (!supported ||
         !handTracking ||
         !headTracking ||
-        (glassesModel != VitureGlassesModel.unknown &&
-            !glassesModel.supportsHandTracking)) {
+        (modelReported &&
+            (glassesModel == VitureGlassesModel.unknown ||
+                !glassesModel.supportsHandTracking))) {
       throw TrackingException(
         TrackingExceptionKind.unsupported,
         reason is String && reason.isNotEmpty
