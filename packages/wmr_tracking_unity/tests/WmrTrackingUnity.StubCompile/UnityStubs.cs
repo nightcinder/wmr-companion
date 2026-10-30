@@ -22,6 +22,8 @@ namespace UnityEngine
             this.name = name;
         }
 
+        public Transform transform { get; } = new Transform();
+
         public void SetActive(bool value)
         {
         }
