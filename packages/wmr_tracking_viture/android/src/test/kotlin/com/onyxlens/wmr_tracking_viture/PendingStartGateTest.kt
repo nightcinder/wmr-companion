@@ -9,11 +9,11 @@ import kotlin.test.assertTrue
 
 class PendingStartGateTest {
     private class RecordingReply : StartReply {
-        val successes = mutableListOf<Unit>()
+        val successes = mutableListOf<Map<String, Any?>>()
         val errors = mutableListOf<Pair<String, String>>()
 
-        override fun success() {
-            successes += Unit
+        override fun success(report: Map<String, Any?>) {
+            successes += report
         }
 
         override fun error(code: String, message: String) {

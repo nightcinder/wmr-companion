@@ -259,7 +259,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun startUnityRelayFailsWhenTheSharedPlayerIsUnavailable() {
         val runtime = SharedUnityRuntime { false }
-        val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
+        val bridge = FakeBridge(isUnityAvailable = false, model = "Air2Ultra")
         val plugin = WmrTrackingXrealPlugin(bridge, runtime)
         val reply = RecordingReply()
 

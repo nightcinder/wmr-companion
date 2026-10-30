@@ -278,7 +278,7 @@ class WmrTrackingXrealPlugin internal constructor(
     }
 
     internal fun startUnityRelay(reply: StartReply) {
-        val claim = runtime.claim(GlassesVendor.XREAL)
+        val claim = runtime.claim(GlassesVendor.XREAL) { bridge.isUnityAvailable }
         if (!claim.granted) {
             reply.error(ERROR_UNAVAILABLE, "No shared UnityPlayer is linked into this build")
             return

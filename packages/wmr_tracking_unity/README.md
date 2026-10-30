@@ -120,6 +120,24 @@ Keeping them inactive prevents either vendor's `Awake` from running before the
 host selects it. A host that puts a vendor bridge on the relay object itself
 loses that guarantee.
 
+The scene is also the minimal VITURE stereo screen (ONY-612): the Main Camera
+carries `WmrStereoCameraRig`, keeps `stereoTargetEye = Both`, and builds three
+depth markers at 1.5/2.5/3.5 m so a tester can see whether both eyes get a
+coherent 3D image. The rig never switches a mono player into stereo; it reads
+the mode the VITURE loader chose and reports the startup stages to Kotlin
+through `WmrTrackingViturePlugin.onUnityStage(stage, stereoMode)`:
+
+| Stage | Meaning |
+| --- | --- |
+| `playerHosted` | The Android host created and attached the player; the scene is awake. |
+| `loaderStarted` | `XRSettings.isDeviceActive`; `stereoMode` is now `multiPass`, `singlePass` or `singlePassInstanced`. |
+| `firstFrame` | The first rendered frame was produced. |
+
+If no loader starts within 10 s, or no frame renders within 20 s, the rig sends
+a typed `onUnityError("unavailable", "stage=… stereo=… playerHosted=…")` instead
+of leaving a blank surface. The Android host shows `playerHosted`, `stereoMode`
+and the last stage in the VITURE `capabilities` map and in the `start` reply.
+
 The scene never starts tracking in a player build: `autoStart` is editor-only,
 matching the per-vendor harnesses. The Android host owns `start`/`stop`, so the
 vendor CAMERA-permission and default-off flow stays in the plugin.
