@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-29 (records the v0.2.2 unified APK release, which adds the FF16 firmware readout on the Debug screen; earlier updates were the M13.3 0.2 security posture and the ONY-202 headset-tracking research and framework). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-30 (records the v0.3.3 signed unified release APK: project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -26,20 +26,21 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ## Current state
 
-### Current release (v0.2.2, 2026-10-29)
+### Current release (v0.3.3, 2026-10-30)
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.2.2` (release tag) |
-| App version | `0.2.2+4` (`versionName 0.2.2`, `versionCode 4`); all twelve Dart packages are `0.2.2` |
-| Android artifact | `wmr-companion-0.2.2-unified-debug.apk`, 584,288,364 B, SHA-256 `2507626a981b060566d2e3c7da41a7aa24844435c0db6ea7fbd68d5ca222c755` |
-| GATT probe | `wmr-gatt-probe-0.2.2-debug.apk`, 5,961,348 B, SHA-256 `d0c076aeda16448720125df2fd913280bcf424a62458a0ecc802952c0e9e1b07` |
-| Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. This is the truly unified artifact, **not** the approved base fallback |
-| Signing | Android debug key. Not suitable for store distribution |
-| Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified |
+| Tag / commit | `v0.3.3` (release tag) at `95050437caa5378fe425473ff4bb6d947c62c807` |
+| App version | `0.3.3+8` (`versionName 0.3.3`, `versionCode 8`); the Dart packages remain at `0.2.2` |
+| Android artifact | `wmr-companion-0.3.3-unified-arm64-v8a.apk`, 428,355,373 B, SHA-256 `b2103dd39255ae8e6e309c82f1df1d210016733288268a721f8ae45ea19888ad` |
+| Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
+| Signing | Project release key (signed by CI on `v*` tags). Updates in place across release builds |
+| Install identity | Release APKs share `com.onyxlens.wmr_companion` and update in place. Debug builds carry the `.debug` suffix (`com.onyxlens.wmr_companion.debug`) since 0.3.3, so they no longer collide with the release APK. A phone holding a pre-0.3.3 debug or locally signed build must be uninstalled once first (`docs/RELEASE_SIGNING.md`) |
+| Launch-crash fixes (0.3.1–0.3.2) | XREAL display stub kept in the release dex; glasses model check deferred to the Unity start handshake; VITURE starts when the glasses model is not reported and requires stereo 3D; one launcher icon on Unity flavors |
+| Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified; the 0.3.3 signed APK has only passed CI/export checks |
 | Licence gate | The owner approved bundling both proprietary SDKs and exported the shared `unityLibrary` (ONY-354; export SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`) |
 
-Release notes: [`v0.2.2`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.2). This release adds the FF16 firmware string and FF11–FF16 feature bits to the Debug screen (GitHub #107) and bumps the app and all twelve Dart packages to `0.2.2`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
+Release notes: [`v0.3.3`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.3). This release is the signed (project-key) cut at commit `9505043`, with the debug-build `.debug` package and the install/uninstall recovery documented in `docs/RELEASE_SIGNING.md`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
 
 ### Milestones (see [PLAN.md](PLAN.md))
 
@@ -50,18 +51,20 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 | **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.2` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
 | **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
 | **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
-| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion `v0.2.1` unified debug APK published 2026-10-27 (tag `58b5c40`; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.2 (owner choice below). **Open:** M13.4 README rewrite around M12 results. |
+| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion signed release APKs on `v*` tags since 0.3.0; current cut `v0.3.3` (`wmr-companion-0.3.3-unified-arm64-v8a.apk`, project-key signed, debug builds on the `.debug` package; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.3)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.3 (LESC+bonding, matching firmware 0.3.0; see above). **Open:** M13.4 README rewrite around M12 results. |
 | **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
 | **M15 — PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
 
-### Security posture for 0.2 (M13.3, owner decision)
+### Security posture for 0.3
 
-The owner chose to keep the **unauthenticated test posture for 0.2** and record its limits rather than harden the bridges before the release (`WMR_Bridge` #64, option 2). This is an explicit temporary decision, not a claim that the bridge is secure.
+Firmware 0.3.0 requires **LE Secure Connections with bonding** on the BLE link (`WMR_Bridge` `docs/SECURITY.md`), and the companion now has to survive the Android pairing flow. The companion itself adds no new security mechanism; it relies on the bridge's link security and on the OS pairing UI. This is an explicit posture, not a claim that the bridge is hardened.
 
-- **BLE side:** the ESP32 GATT service requires no pairing, encryption or authentication. Any central in range can read FF11 and subscribe; only one phone is served at a time, and an unwanted central that connects first blocks the intended phone. Controllers are trusted by HID name, which is not authentication. Use the bridge only in a trusted environment and treat the stream as observable.
-- **Raspberry Pi side:** the daemon keeps the plaintext WebSocket and the shared bearer token. Loopback is the default, and a non-loopback bind requires a token. The token authorises clients but does not encrypt the stream, so terminate TLS externally (reverse proxy or SSH tunnel) or use a trusted WPA2/WPA3 LAN; the app shows this warning in the Wi-Fi connect panel.
-- **Platform security:** ESP32 flash encryption and secure boot remain off. **Raspberry Pi secure boot is out of scope for 0.2 and deferred to 0.3**; no companion feature or pairing flow depends on it.
-- **After 0.2:** require LE Secure Connections with a bonded phone, replace the experimental UUIDs, and enable flash encryption and secure boot, as listed in `WMR_Bridge` `docs/SECURITY.md` "Before wider use". These are post-0.2 work.
+- **BLE side:** every data characteristic except FF16 is `WRITE_ENCRYPTED` (the readable ones also `READ_ENCRYPTED`); CCC writes inherit the requirement, so notifications cannot be enabled on an unencrypted link. The bridge sends a Security Request on connect and disconnects a central that is not bonded within 30 s. Pairing is Just Works (no display/keypad on the ESP32), so the link is encrypted but not MITM-protected; pair in a private place and check the phone's paired-device entry afterwards. FF16 (firmware version) stays readable before pairing so a client can check compatibility. Only one phone is served at a time; a second central is disconnected on connect. Bonds live in the LE device DB in NVS. The FF10 UUIDs are still experimental and unchanged, so a 0.2 companion still discovers a 0.3 bridge.
+- **Residual BLE risks:** Just Works pairing is not MITM-protected; anyone in range can take the phone slot by pairing first; the device stays discoverable; there is no rate limiting or per-app authorization beyond the bond.
+- **Classic Bluetooth side (controllers):** unchanged. The bridge pages controllers by inquiry and is not Classic-discoverable; controllers are identified by HID name, which is not authentication and can be spoofed while a hand has no stored address. Secure Simple Pairing numeric comparison is accepted automatically (test convenience, no MITM protection); legacy PIN requests are rejected.
+- **Raspberry Pi side:** the daemon keeps the plaintext WebSocket and the shared bearer token. Loopback is the default, and a non-loopback bind requires a token. The token authorises clients but does not encrypt the stream, so terminate TLS externally (stunnel/nginx, `wss://`) or use a trusted WPA2/WPA3 LAN; the app shows this warning in the Wi-Fi connect panel. Upgrade and token authentication must each complete within 5 s.
+- **Platform security:** ESP32 flash encryption and secure boot remain **off** (irreversible eFuse burn, owner approval gate pending); Raspberry Pi secure boot is out of scope. Anyone with physical access can read keys and replace firmware. Treat a stolen board as burned.
+- **Before wider use (open):** cut over the UUIDs per `WMR_Bridge` `docs/BLE_MIGRATION.md`; terminate TLS on the Pi; enable flash encryption and secure boot through the approval gate; add rate limiting and per-central authorization if the bridge leaves the owner's environment.
 
 ### What has been checked on hardware (user-reported)
 
@@ -129,7 +132,7 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 | FF17 controller scan and control | Firmware merged (WMR_Bridge #70, tag `v0.1.1`): 1-2 byte commands (discover, connect, disconnect, forget addresses, forget bond) and a 20-byte status v2. App: parser, result-code handling, `ControllerControlClient`, fake-bridge support and a "Controller control" panel on the debug screen (per-hand state, scan, connect/disconnect, forget addresses/bond, scanning warning); unit and widget tested, **not yet run on hardware** ([PROTOCOL.md](PROTOCOL.md) "FF17 controller control in the app") |
 | Round trip: where the 40 ms goes (phone write and notification delivery, air, notification traffic). Needs an FF11/FF12 run and a run with no stream at the same position; the screen now has a no-stream latency mode and a stream selector (PR #28, built, **not yet run on hardware**) | [LATENCY.md](LATENCY.md) "First hardware run", "Run sheet" |
 | Controller discovery by name instead of compiled-in addresses (done; addresses are stored in the ESP32's NVS) | Firmware merged (WMR_Bridge #14); checks D1-D11 reported as passed by the project owner (user-reported, 2026-10-22, no output pasted) |
-| BLE pairing/encryption not required in 0.2 (owner decision: keep the unauthenticated test bridge) | [Security posture for 0.2](#security-posture-for-02-m133-owner-decision), `WMR_Bridge` #64 and `docs/SECURITY.md` |
+| BLE pairing/encryption (LESC+bonding) required in 0.3 (firmware 0.3.0) | [Security posture for 0.3](#security-posture-for-03), `WMR_Bridge` `docs/SECURITY.md` |
 | `universal_ble` gaps (PHY, connection interval readout) to raise upstream | [PROTOCOL.md](PROTOCOL.md) "universal_ble coverage" |
 | Remaining firmware bench checklists (FF12 5-7, 11, 12, 15-18; L1-L5; B4, B6-B11; C7; X-series done) | WMR_Bridge `docs/TESTING.md` |
 | Checks still not run, with commands and pass criteria | WMR_Bridge `docs/runs/sheets/closeout.md` |
@@ -161,10 +164,10 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
      - *Sitting B (two bridges):* multi-bridge A/B/A/B on two ESP32s — **parked**, no second Classic ESP32.
      - *Write-ups:* #18 disposition, M7 decision, M8 defaults, STATUS in both repos.
 4. **M13 — Release and distribution (Open)**:
-   - **Companion `v0.2.1` unified APK:** tagged and published 2026-10-27 at `58b5c40`, with the owner-approved VITURE+XREAL export, debug signing and no hardware validation (above).
+   - **Companion `v0.3.3` signed unified APK:** tagged and published 2026-10-30 at `9505043`, project-key signed, debug builds on the `.debug` package, install/uninstall recovery documented; launch-crash and flavor fixes in 0.3.1–0.3.2. No hardware validation on VITURE or XREAL.
    - `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12).
    - Compatibility matrix published in both repos keyed on FF16 (#59, `WMR_Bridge` #45 & #49, M13.2 done).
-   - **M13.3 bridge security decision:** recorded for 0.2 — keep the unauthenticated test bridge, keep the Pi bridge plaintext with a bearer token, and defer Raspberry Pi secure boot to 0.3 (`WMR_Bridge` #64; summary above and in `WMR_Bridge` `docs/SECURITY.md`).
+   - **M13.3 bridge security decision:** recorded for 0.3 — LESC+bonding on the BLE link (firmware 0.3.0), Pi bridge plaintext with a bearer token plus TLS externally, flash encryption and secure boot still off (summary above and in `WMR_Bridge` `docs/SECURITY.md`).
    - **Open:** M13.4 README rewrite in both repos around verified M12 hardware results.
 5. **M14 — Raspberry Pi Wi-Fi host bridge (In progress)**:
    - **M14.1 `packages/wmr_ws`:** WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged #61).
@@ -188,11 +191,12 @@ The honest current state is that the companion still ships 3DoF. Calling it 6DoF
 
 **Named 1.0 path (ONY-440, 2026-10-28): XREAL Air 2 Ultra**, hosted by an existing Beam Pro or Samsung S24-or-later phone; VITURE (Luma Ultra + Pro Neckband) is the fallback and needs two purchases. The `v0.2.1` unified APK was checked host-side: merged `CAMERA`/`HAND_TRACKING`/`HEAD_TRACKING` declarations, both vendor runtimes, and the shared-runtime session classes are present. Nothing was installed or started. Decision and open gaps: [tracking/PREFLIGHT.md](tracking/PREFLIGHT.md).
 
-## Not yet run on hardware (as of 2026-10-27)
+## Not yet run on hardware (as of 2026-10-30)
 
 Close-out checks reported by the project owner on 2026-10-22 (user-reported, one-line answers, no details): the Connect screen shows MTU 517; the gamepad checks in [GAMEPAD.md](GAMEPAD.md) "worked"; the gamepad settings were saved across an app restart; the flash of `main` worked. C7 (`WMR_CFG_FF13_READ=0`): a `STREAM` paste with both FF13 states 0, `other=0`, and RIGHT streaming at 181/s (`last5s` 10.7 %, one controller only; LEFT had no ACL link). That agrees with C7 for RIGHT, but the build hash was not stated and LEFT was not tested, so C7 is recorded as partly reported. Built and unit-tested only, until reported:
 
 - The **0.2.1 unified APK** on a VITURE or XREAL device: runtime vendor selection, the vendor tracking rate/permissions, and both SDKs coexisting in one process. The artifact passed export-level and host checks only; it is debug-signed.
+- The **0.3.3 signed unified APK** on a VITURE or XREAL device: project-key signing, the debug `.debug` package coexisting with the release package, runtime vendor selection, tracking rates, permissions, and both SDKs coexisting in one process. The artifact passed CI/export checks only; no hardware run.
 - Bluetooth HID output on a phone and a host (skipped).
 - FF14 checks B4 (phone-side sequence gaps) and B9, and B6-B8, B10, B11.
 - A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream (the screen now supports all four via PR #28 no-stream latency mode and stream selector; not yet run).
