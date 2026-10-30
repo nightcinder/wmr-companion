@@ -323,7 +323,10 @@ jobs:
       # exact key already exists means the entry is unreachable (evicted, or
       # the path-derived version changed) and would silently stay that way.
       # The first main run after this lands has no entry yet, so it passes here
-      # and seeds one. Pull requests only report the miss.
+      # and seeds one. Pull requests only report the miss. The lookup is scoped
+      # to `refs/heads/main` because that is the only ref a restore reads, and
+      # it fails closed: an unreadable cache list cannot tell a first seed from
+      # an evicted entry, so it must not pass silently.
       - name: Check the Android NDK cache state
         if: ${{ steps.android-tools.outputs.cache-hit != 'true' }}
         env:
@@ -334,11 +337,15 @@ jobs:
           set -uo pipefail
           echo "NDK/CMake cache miss on $GITHUB_REF: the build will download them."
           [ "$ON_MAIN" = "true" ] || exit 0
-          keys=$(gh cache list --key "$CACHE_KEY" --limit 100 --json key --jq '.[].key' 2>/dev/null) || exit 0
-          if grep -qxF "$CACHE_KEY" <<<"$keys"; then
-            echo "::error::A cache entry for $CACHE_KEY exists but the restore missed; the entry is unreachable and the build re-downloads every run."
+          if ! keys=$(gh cache list --ref refs/heads/main --key "$CACHE_KEY" --limit 100 --json key --jq '.[].key'); then
+            echo "::error::Could not list the cache entries for $CACHE_KEY; cannot tell a first seed from an evicted entry."
             exit 1
           fi
+          if grep -qxF "$CACHE_KEY" <<<"$keys"; then
+            echo "::error::A cache entry for $CACHE_KEY exists under refs/heads/main but the restore missed; the entry is unreachable and the build re-downloads every run."
+            exit 1
+          fi
+          echo "No entry for $CACHE_KEY under refs/heads/main yet: this run seeds it."
 
       - uses: gradle/actions/setup-gradle@v6
 
@@ -481,6 +488,7 @@ jobs:
       # so the iOS job downloads the SDK instead. The pub cache is tiny and
       # still restored.
       - uses: ./.github/actions/flutter-setup
+        id: flutter
         with:
           sdk-cache: 'false'
 
@@ -495,6 +503,17 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign
+
+      # This job is the only reader of the macOS pub key, so it is also the
+      # only writer: without this step a `pubspec.lock` change left the key
+      # missing on every run and the restore never converged. Only the pub
+      # cache is written; the 2.2 GB SDK entry stays uncached.
+      - name: Save the macOS pub cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: ./.github/actions/flutter-cache-save
+        with:
+          save-sdk: 'false'
+          save-pub: ${{ steps.flutter.outputs.pub-cache-hit != 'true' }}
 
   release-unified:
     # The unified flavor links one shared unityLibrary that carries both VITURE
