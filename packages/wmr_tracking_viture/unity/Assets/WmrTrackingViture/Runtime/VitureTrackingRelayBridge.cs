@@ -190,7 +190,10 @@ namespace OnyxLens.WmrTrackingViture
                 );
                 return;
             }
-            XRSettings.stereoRenderingMode = XRSettings.StereoRenderingMode.SinglePassInstanced;
+            // The stereo mode is chosen by the VITURE loader when its display
+            // subsystem initialises (XR Plug-in Management); Unity exposes
+            // XRSettings.stereoRenderingMode read-only, so the bridge cannot
+            // switch a mono player to Single Pass Instanced at runtime.
             if (Camera.main != null)
             {
                 Camera.main.stereoTargetEye = StereoTargetEyeMask.Both;

@@ -172,7 +172,8 @@ namespace UnityEngine.XR
 
         public static bool isDeviceActive { get; set; } = true;
 
-        public static StereoRenderingMode stereoRenderingMode { get; set; }
+        // Read-only in Unity 6000.0: a setter here would hide CS0200.
+        public static StereoRenderingMode stereoRenderingMode { get; }
     }
 }
 

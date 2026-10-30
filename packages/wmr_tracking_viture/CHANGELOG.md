@@ -6,7 +6,8 @@
   assigns the VITURE XR loader for Android and enables **Initialize XR on
   Startup** (`WMR > Configure VITURE XR`), and `start` fails closed with
   `unavailable` when the Unity player is still running in 2D instead of
-  letting `HandTracking.Start()` stall the launch.
+  letting `HandTracking.Start()` stall the launch. The stereo mode comes from
+  the loader at initialisation; the bridge does not set it at runtime.
 - Start tracking when the glasses model has not been reported yet: the unified
   Unity scene keeps the VITURE backend inactive until `start`, so capabilities
   now report `modelReported: false` with the Luma Ultra capability set and the

@@ -8,7 +8,11 @@ VITURE hand tracking is available only through the VITURE XR SDK for Unity
 glasses; the cross-platform C glasses SDK exposes head pose and cameras only.
 The VITURE XR loader must render the player in stereo 3D (SpaceWalker mode):
 the export assigns it and enables startup initialisation, and `start` reports
-`unavailable` from a mono 2D player instead of stalling.
+`unavailable` from a mono 2D player instead of stalling. The stereo mode is
+fixed by the loader when its display subsystem initialises; Unity exposes
+`XRSettings.stereoRenderingMode` read-only, so the player cannot switch modes at
+runtime. The 2D gate is covered by the on-device check only: the stub-compile
+project proves the bridge compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 
