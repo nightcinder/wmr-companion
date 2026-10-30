@@ -318,20 +318,37 @@ class WmrTrackingViturePluginTest {
         val runtime = SharedUnityRuntime { true }
         val host = FakePlayerHost()
         val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"), runtime, host)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+        val startReport = reply.reports.single()
+        assertEquals("playerHosted", startReport["stage"])
+        assertEquals("unknown", startReport["stereoMode"])
         runtime.dispatchStage(
             GlassesVendor.VITURE,
             "loaderStarted",
             "singlePassInstanced",
         )
-        val reply = RecordingReply()
-
-        plugin.startUnityRelay(reply)
 
         assertEquals(1, host.hostCalls)
-        val report = reply.reports.single()
+        val report = plugin.stageFields()
         assertEquals(true, report["playerHosted"])
         assertEquals("singlePassInstanced", report["stereoMode"])
         assertEquals("loaderStarted", report["stage"])
+    }
+
+    @Test
+    fun aNewStartClearsThePreviousSessionsStage() {
+        val runtime = SharedUnityRuntime { true }
+        val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"), runtime)
+        plugin.startUnityRelay(RecordingReply())
+        runtime.dispatchStage(GlassesVendor.VITURE, "firstFrame", "singlePassInstanced")
+
+        plugin.startUnityRelay(RecordingReply())
+
+        val caps = plugin.capabilities()
+        assertEquals("playerHosted", caps["stage"])
+        assertEquals("unknown", caps["stereoMode"])
     }
 
     @Test

@@ -302,7 +302,6 @@ namespace OnyxLens.WmrTrackingUnity.Dispatch.Tests
             Check(StereoMode.FromRenderingMode(9) == StereoMode.Unknown, "unknown mode value");
             Check(StereoMode.IsStereo(StereoMode.SinglePassInstanced), "singlePassInstanced is stereo");
             Check(StereoMode.IsStereo(StereoMode.MultiPass), "multiPass is stereo");
-            Check(!StereoMode.IsStereo(StereoMode.Mono), "mono is not stereo");
             Check(!StereoMode.IsStereo(StereoMode.Unknown), "unknown is not stereo");
 
             Check(

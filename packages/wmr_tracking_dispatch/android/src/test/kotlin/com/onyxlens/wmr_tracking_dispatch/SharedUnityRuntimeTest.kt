@@ -58,7 +58,7 @@ class SharedUnityRuntimeTest {
     }
 
     @Test
-    fun missingUnityRuntimeIsUnavailableAndIsNotRetried() {
+    fun aFailedCreationIsRetriedOnTheNextClaim() {
         var creations = 0
         val runtime = SharedUnityRuntime {
             creations += 1
@@ -71,7 +71,7 @@ class SharedUnityRuntimeTest {
         assertEquals(UnityClaimState.UNAVAILABLE, first.state)
         assertEquals(UnityClaimState.UNAVAILABLE, second.state)
         assertEquals(false, first.granted)
-        assertEquals(1, creations)
+        assertEquals(2, creations)
         assertNull(runtime.ownerVendor)
     }
 
@@ -183,13 +183,13 @@ class SharedUnityRuntimeTest {
         assertEquals(UnityClaimState.UNAVAILABLE, refused.state)
         assertEquals(1, hostCalls)
 
-        // The creation attempt is one-shot: a later claim does not retry.
+        // A failed attempt is not permanent: the next claim retries it.
         val retried = runtime.claim(GlassesVendor.VITURE) {
             hostCalls += 1
             true
         }
-        assertEquals(UnityClaimState.UNAVAILABLE, retried.state)
-        assertEquals(1, hostCalls)
+        assertEquals(UnityClaimState.OWNER, retried.state)
+        assertEquals(2, hostCalls)
     }
 
     @Test
@@ -213,10 +213,20 @@ class SharedUnityRuntimeTest {
     }
 
     @Test
+    fun clearStageDropsThePreviousSessionReport() {
+        val runtime = SharedUnityRuntime { true }
+        runtime.dispatchStage(GlassesVendor.VITURE, "firstFrame", "singlePassInstanced")
+
+        runtime.clearStage(GlassesVendor.VITURE)
+
+        assertNull(runtime.stage(GlassesVendor.VITURE))
+    }
+
+    @Test
     fun blankStageReportsAreIgnored() {
         val runtime = SharedUnityRuntime { true }
 
-        runtime.dispatchStage(GlassesVendor.VITURE, "   ", "mono")
+        runtime.dispatchStage(GlassesVendor.VITURE, "   ", "singlePass")
 
         assertNull(runtime.stage(GlassesVendor.VITURE))
     }

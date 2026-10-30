@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import java.lang.reflect.Proxy
 
 /** The outcome of asking the host to put the shared Unity player on screen. */
 data class PlayerHostResult(
@@ -177,8 +178,13 @@ class UnityPlayerHost internal constructor(
 }
 
 /**
- * Creates and drives `com.unity3d.player.UnityPlayer` by reflection so the
- * module compiles with no Unity export on the classpath.
+ * Creates and drives the Unity player by reflection so the module compiles
+ * with no Unity export on the classpath.
+ *
+ * Unity 6 moved the embeddable player to
+ * `com.unity3d.player.UnityPlayerForActivityOrService`, which takes a
+ * `Context` and is not itself a `View`; the older
+ * `com.unity3d.player.UnityPlayer` name is kept as a fallback.
  */
 internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
     private var playerClass: Class<*>? = null
@@ -190,10 +196,12 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
         get() {
             if (!linkChecked) {
                 linkChecked = true
-                playerClass = try {
-                    Class.forName("com.unity3d.player.UnityPlayer")
-                } catch (_: Throwable) {
-                    null
+                playerClass = PLAYER_CLASS_NAMES.firstNotNullOfOrNull { name ->
+                    try {
+                        Class.forName(name)
+                    } catch (_: Throwable) {
+                        null
+                    }
                 }
             }
             return playerClass != null
@@ -211,10 +219,8 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
             return true
         }
         val clazz = playerClass ?: return false
-        val instance = clazz.getConstructor(Activity::class.java).newInstance(activity)
-        val root = instance as? View
-            ?: clazz.getMethod("getView").invoke(instance) as? View
-            ?: return false
+        val instance = instantiate(clazz, activity) ?: return false
+        val root = viewOf(instance) ?: return false
         activity.addContentView(root, fullScreenParams())
         player = instance
         playerView = root
@@ -249,6 +255,47 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
         ViewGroup.LayoutParams.MATCH_PARENT,
     )
 
+    /**
+     * Unity 6 takes a `Context` (optionally with a lifecycle listener); the
+     * legacy player took the `Activity` directly. Only exact-parameter
+     * lookups miss the `Context` overloads, so pick a constructor by
+     * assignability instead.
+     */
+    private fun instantiate(clazz: Class<*>, activity: Activity): Any? {
+        val single = clazz.constructors.firstOrNull { constructor ->
+            constructor.parameterTypes.size == 1 &&
+                constructor.parameterTypes[0].isAssignableFrom(activity.javaClass)
+        }
+        if (single != null) {
+            return runCatching { single.newInstance(activity) }.getOrNull()
+        }
+        val withListener = clazz.constructors.firstOrNull { constructor ->
+            constructor.parameterTypes.size == 2 &&
+                constructor.parameterTypes[0].isAssignableFrom(activity.javaClass) &&
+                constructor.parameterTypes[1].isInterface
+        } ?: return null
+        val listenerType = withListener.parameterTypes[1]
+        val listener = Proxy.newProxyInstance(
+            listenerType.classLoader,
+            arrayOf(listenerType),
+        ) { _, _, _ -> null }
+        return runCatching { withListener.newInstance(activity, listener) }.getOrNull()
+    }
+
+    /** Unity 6 exposes `getFrameLayout()`; the legacy player was a `View`. */
+    private fun viewOf(instance: Any): View? {
+        if (instance is View) return instance
+        for (name in VIEW_GETTERS) {
+            try {
+                val value = instance.javaClass.getMethod(name).invoke(instance)
+                if (value is View) return value
+            } catch (_: Throwable) {
+                // Try the next accessor; a mismatched SDK version must not throw.
+            }
+        }
+        return null
+    }
+
     private fun call(name: String, vararg args: Any?) {
         val instance = player ?: return
         try {
@@ -260,5 +307,14 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
             // Lifecycle forwarding is best effort; a missing SDK member must
             // not crash the Flutter activity.
         }
+    }
+
+    private companion object {
+        const val UNITY_PLAYER_ACTIVITY_SERVICE =
+            "com.unity3d.player.UnityPlayerForActivityOrService"
+        const val UNITY_PLAYER = "com.unity3d.player.UnityPlayer"
+
+        val PLAYER_CLASS_NAMES = listOf(UNITY_PLAYER_ACTIVITY_SERVICE, UNITY_PLAYER)
+        val VIEW_GETTERS = listOf("getFrameLayout", "getView")
     }
 }

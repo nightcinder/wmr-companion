@@ -3,6 +3,7 @@
 // emulator and do not validate Unity API signatures.
 
 using System;
+using System.Collections;
 
 namespace UnityEngine
 {
@@ -75,6 +76,16 @@ namespace UnityEngine
 
         public T[] GetComponentsInChildren<T>(bool includeInactive) where T : class =>
             Array.Empty<T>();
+
+        public Coroutine StartCoroutine(IEnumerator routine) => new Coroutine();
+    }
+
+    public class Coroutine
+    {
+    }
+
+    public sealed class WaitForEndOfFrame
+    {
     }
 
     public class Behaviour : Object

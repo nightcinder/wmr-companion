@@ -23,7 +23,6 @@ namespace OnyxLens.WmrTrackingUnity.Stereo
     public static class StereoMode
     {
         public const string Unknown = "unknown";
-        public const string Mono = "mono";
         public const string MultiPass = "multiPass";
         public const string SinglePass = "singlePass";
         public const string SinglePassInstanced = "singlePassInstanced";

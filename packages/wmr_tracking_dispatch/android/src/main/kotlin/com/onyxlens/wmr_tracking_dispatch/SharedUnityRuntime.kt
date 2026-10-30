@@ -52,7 +52,6 @@ class SharedUnityRuntime(
         fun onStage(stage: String, stereoMode: String?) = Unit
     }
 
-    private var creationAttempted = false
     private var created = false
     private var owner: GlassesVendor? = null
     private val handlers = LinkedHashMap<GlassesVendor, Handler>()
@@ -66,15 +65,15 @@ class SharedUnityRuntime(
      * [create] runs once, on the first claim, when the caller needs to own the
      * real player creation (the VITURE plugin passes its [PlayerHost] result).
      * Without a factory the runtime fails closed instead of pretending a
-     * player exists.
+     * player exists. A failed creation is retried on the next claim instead of
+     * disabling the runtime for the rest of the process.
      */
     @Synchronized
     fun claim(vendor: GlassesVendor, create: (() -> Boolean)? = null): UnityClaim {
         if (vendor == GlassesVendor.NONE) {
             return UnityClaim(UnityClaimState.UNAVAILABLE, null)
         }
-        if (!creationAttempted) {
-            creationAttempted = true
+        if (!created) {
             created = (create ?: createPlayer)()
         }
         if (!created) {
@@ -140,6 +139,13 @@ class SharedUnityRuntime(
 
     @Synchronized
     fun stage(vendor: GlassesVendor): UnityStageReport? = stages[vendor]
+
+    /** Drops the stage a previous session reported so a new one starts clean. */
+    @Synchronized
+    fun clearStage(vendor: GlassesVendor) {
+        if (vendor == GlassesVendor.NONE) return
+        stages.remove(vendor)
+    }
 
     @Synchronized
     private fun handlerFor(vendor: GlassesVendor): Handler? =

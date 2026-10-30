@@ -130,7 +130,7 @@ through `WmrTrackingViturePlugin.onUnityStage(stage, stereoMode)`:
 | Stage | Meaning |
 | --- | --- |
 | `playerHosted` | The Android host created and attached the player; the scene is awake. |
-| `loaderStarted` | `XRSettings.isDeviceActive`; `stereoMode` is now `multiPass`, `singlePass`, `singlePassInstanced` or `mono`. |
+| `loaderStarted` | `XRSettings.isDeviceActive`; `stereoMode` is now `multiPass`, `singlePass` or `singlePassInstanced`. |
 | `firstFrame` | The first rendered frame was produced. |
 
 If no loader starts within 10 s, or no frame renders within 20 s, the rig sends

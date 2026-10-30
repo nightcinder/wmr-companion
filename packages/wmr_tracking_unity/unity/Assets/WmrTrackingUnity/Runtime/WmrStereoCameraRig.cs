@@ -10,6 +10,7 @@
 // reads it back. It never switches a mono player into stereo at runtime.
 
 using System;
+using System.Collections;
 using OnyxLens.WmrTrackingUnity.Stereo;
 using UnityEngine;
 using UnityEngine.XR;
@@ -101,6 +102,11 @@ namespace OnyxLens.WmrTrackingUnity
             marker.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
         }
 
+        private void Start()
+        {
+            StartCoroutine(ReportFirstFrameAfterLoader());
+        }
+
         private void Update()
         {
             float elapsed = Time.unscaledTime - _awakeAt;
@@ -144,20 +150,23 @@ namespace OnyxLens.WmrTrackingUnity
             }
         }
 
-        private void OnPostRender()
+        // End-of-frame is a pipeline-neutral signal: it fires for the Built-in
+        // pipeline and for URP alike, unlike OnPostRender. The boot frame is
+        // skipped because the loader has not been started yet; the report is
+        // the first frame produced in stereo, which is what a tester needs.
+        private IEnumerator ReportFirstFrameAfterLoader()
         {
-            if (_firstFrameReported) return;
-            _firstFrameReported = true;
-            if (!_loaderReported && XRSettings.isDeviceActive)
+            while (!_firstFrameReported && !_timeoutReported)
             {
-                _loaderReported = true;
-                _stereoMode = StereoMode.FromRenderingMode((int)XRSettings.stereoRenderingMode);
+                yield return new WaitForEndOfFrame();
+                if (_firstFrameReported || _timeoutReported || !_loaderReported) continue;
+                _firstFrameReported = true;
+                Report(StereoStage.FirstFrame, _stereoMode);
+                Debug.Log(
+                    "[WmrStereo] first frame: " +
+                    StereoDiagnostics.Format(StereoStage.FirstFrame, _stereoMode, true)
+                );
             }
-            Report(StereoStage.FirstFrame, _stereoMode);
-            Debug.Log(
-                "[WmrStereo] first frame: " +
-                StereoDiagnostics.Format(StereoStage.FirstFrame, _stereoMode, true)
-            );
         }
 
         private void Report(string stage, string stereoMode)

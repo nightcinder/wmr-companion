@@ -344,6 +344,8 @@ class WmrTrackingViturePlugin internal constructor(
     }
 
     internal fun startUnityRelay(reply: StartReply) {
+        // A new session must not report the previous session's stage.
+        runtime.clearStage(GlassesVendor.VITURE)
         // The player has to exist before UnitySendMessage can reach the scene.
         // Host it in the foreground activity and attach its view full-screen,
         // then let that result decide whether the runtime is usable.
@@ -414,6 +416,7 @@ class WmrTrackingViturePlugin internal constructor(
             bridge.sendCommand(VitureRelayCommandBuilder.stop())
         }
         runtime.release(GlassesVendor.VITURE)
+        runtime.clearStage(GlassesVendor.VITURE)
         // On stop the display goes back to Flutter; the player can stay in the
         // process and be hosted again by the next start.
         playerHost.release()
@@ -436,6 +439,7 @@ class WmrTrackingViturePlugin internal constructor(
         started = false
         pendingStartCommand = null
         runtime.release(GlassesVendor.VITURE)
+        runtime.clearStage(GlassesVendor.VITURE)
         playerHost.release()
         eventSink?.error(code, message, null)
     }
