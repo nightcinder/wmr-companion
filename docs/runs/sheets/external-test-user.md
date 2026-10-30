@@ -1,6 +1,6 @@
-# External tester quickstart — WMR Bridge v0.3.0 (unified APK)
+# External tester quickstart — WMR Companion v0.3.4 (unified APK)
 
-Three setups, 15–25 minutes depending on which one you are. Android 13+ phone.
+Three setups, 20–40 minutes depending on which one you are. Android 13+ phone.
 
 The WMR bridge instructions below are for the ESP32-based bridge. Raspberry Pi bridge instructions are still in development.
 
@@ -26,14 +26,17 @@ Say which one you ran in the intake block.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.0-test/wmr-companion-0.3.0-test-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.4/wmr-companion-0.3.4-unified-arm64-v8a.apk
+
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.4/SHA256SUMS
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
 ## 2. Install
 
-1. Open the link on the phone; allow "install unknown apps" when asked.
-2. Install. If Android blocks it, record the message and stop.
+1. Download the APK and SHA256SUMS. Check the download: `sha256sum -c SHA256SUMS`.
+2. Open the APK on the phone; allow "install unknown apps" when asked.
+3. Install. If Android blocks it, record the message and stop.
 
 ## 3. Connect to the bridge — setups A and C only
 
@@ -76,7 +79,7 @@ Pick **6DoF only**. The bridge steps are skipped, the run is shorter, and that i
 
 **Special note for 6DoF-only testers:** this path uses no bridge and no controllers. Do not attempt to pair controllers or connect to `WMR Bridge`. If your glasses do not report hand tracking, the **Capture 6DoF pose** step is unavailable and that is a valid result — record it as skipped. For deeper tracking observation (VITURE/XREAL hand-joint counts, recenter, etc.) see the WMR_Bridge internal runbook (https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) §7.4 and §7.5.
 
-**Capture 6DoF pose** appears only while your glasses report hand tracking. It asks for five short movements per hand — hold still, let it drift, slow pan, medium pan, fast flick — about two minutes per hand. Skipping it (whole or per segment) is fine and does not break the run. Its files are inside the bundle you send.
+**Capture 6DoF pose** appears only while your glasses report hand tracking. It records the full filter-spec rev 4 section 8 corpus: five motion classes (still, held drifting, slow pan, medium pan, fast flick), four runs per class per hand, each at least 30 s, plus one diagnostic occlusion run per hand. That is roughly 10 minutes per hand. Each run repeats a short movement until the timer ends: still 10 s, held drifting 10 s, slow pan 30 cm over 3 s, medium pan 50 cm in 1 s, fast flick 45 cm in 0.3 s, occlusion 30 s. Skipping a run (whole or per run) is fine and does not break the run; skipped runs are recorded as skipped. Its files are inside the bundle you send.
 
 ### 6C — PSVR2 Sense (experimental)
 
@@ -101,7 +104,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.0
-- App: 0.3.0 unified (signed release)
+- App: 0.3.4 unified (signed release)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
 - Result: PASS / PARTIAL / FAIL / BLOCKED
