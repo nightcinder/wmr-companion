@@ -30,6 +30,7 @@ void main() {
       ProviderScope(
         overrides: [
           realTransportProvider.overrideWithValue(transport),
+          appVersionProvider.overrideWith((ref) => '0.3.0+5'),
           if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -49,6 +50,7 @@ void main() {
     await open(tester);
     expect(find.text('Fake bridge'), findsNothing);
     expect(find.text('Real device'), findsNothing);
+    expect(find.text('Version 0.3.0+5'), findsOneWidget);
     expect(find.text('Scan'), findsOneWidget);
     await close(tester);
   });

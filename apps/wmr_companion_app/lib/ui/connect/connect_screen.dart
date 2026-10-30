@@ -20,11 +20,38 @@ class ConnectScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('WMR Companion')),
+      appBar: AppBar(title: const _AppTitle()),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: const [RealPanel()],
       ),
+    );
+  }
+}
+
+/// The app name with the running build's version below it, so testers can
+/// quote the exact build in a bug report.
+class _AppTitle extends ConsumerWidget {
+  const _AppTitle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final version = ref.watch(appVersionProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('WMR Companion'),
+        Text(
+          version.when(
+            data: (value) => 'Version $value',
+            loading: () => 'Version …',
+            error: (_, _) => 'Version unknown',
+          ),
+          key: const Key('app-version'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
     );
   }
 }
