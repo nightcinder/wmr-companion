@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
@@ -387,6 +389,44 @@ void main() {
     );
 
     expect(pose.position, _vector(0.1, 1, 0));
+  });
+
+  test('rotated grip calibration keeps the palm-to-controller rotation', () {
+    final fuser = SixDofFuser();
+    final palmRotation = Quaternion.axisAngle(Vector3(0, 1, 0), math.pi / 2);
+    final gripRotation = Quaternion.axisAngle(Vector3(0, 0, 1), math.pi / 2);
+    final palm = Pose(
+      translation: Vector3(0.2, 1.0, 0),
+      rotation: palmRotation,
+    );
+    final worldOffset = rotateVector(palmRotation, Vector3(0.1, 0, 0));
+    final controller = Pose(
+      translation: palm.translation + worldOffset,
+      rotation: palmRotation * gripRotation,
+    );
+    fuser.calibrateGrip(
+      hand: TrackedHand.right,
+      palm: palm,
+      controller: controller,
+    );
+    fuser.onTrackingFrame(
+      _frame(
+        1000,
+        right: _hand(
+          TrackedHand.right,
+          Pose(translation: Vector3(0, 2, 0), rotation: palmRotation),
+        ),
+      ),
+    );
+
+    final pose = fuser.update(
+      hand: TrackedHand.right,
+      orientation: controller.rotation,
+      hostTimeNs: 1000,
+    );
+
+    // The offset must follow the calibrated grip rotation, not just the palm.
+    expect(pose.position, _vector(0, 2, -0.1));
   });
 
   test('reset clears frames and learned offsets but keeps calibration', () {

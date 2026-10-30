@@ -124,6 +124,7 @@ class SixDofFusionConfig {
     this.lateTolerance = const Duration(milliseconds: 5),
     this.positionSmoothing = 0.5,
     this.maxFrames = 128,
+    this.poseFilter = const PoseFilterConfig(),
     this.defaultGripOffset,
     this.leftHeadLocalOffset,
     this.rightHeadLocalOffset,
@@ -146,6 +147,11 @@ class SixDofFusionConfig {
 
   /// Maximum number of buffered tracking frames.
   final int maxFrames;
+
+  /// One Euro tuning for hand-anchor positions. The grid tuner supplies a
+  /// replacement config once captures exist; the default stays at the
+  /// published values until then.
+  final PoseFilterConfig poseFilter;
 
   /// Controller pose relative to the palm, used when no calibration has run.
   /// The default places the controller centre 2 cm below and 6 cm forward of
@@ -188,8 +194,12 @@ class SixDofFusionConfig {
 /// 3. a head-relative offset learned from the last real position,
 /// 4. orientation only.
 ///
-/// Hand-anchor positions pass through a [OneEuroFilter] on the controller
-/// sample clock. Runtime controller poses keep [SixDofFusionConfig.positionSmoothing]
+/// Hand-anchor positions pass through a [OneEuroFilter] on the anchor sample
+/// clock, once per new anchor sample; between samples the filtered value is
+/// held. The filter sees the anchor joint itself; the grip offset is applied
+/// afterwards with the unfiltered IMU orientation, so rotation-induced lever
+/// motion is not low-passed. Runtime controller poses keep
+/// [SixDofFusionConfig.positionSmoothing]
 /// for compatibility, and the head-relative/orientation fallbacks are never
 /// smoothed. Crossing between sources resets the filter, so a fallback is not
 /// disguised as a tracked hand.
@@ -205,6 +215,10 @@ class SixDofFuser {
       _gripOffsets = {
         TrackedHand.left: config.gripOffset,
         TrackedHand.right: config.gripOffset,
+      },
+      _handFilters = {
+        TrackedHand.left: config.poseFilter.createFilter(),
+        TrackedHand.right: config.poseFilter.createFilter(),
       };
 
   final SixDofFusionConfig _config;
@@ -213,11 +227,10 @@ class SixDofFuser {
   final Map<TrackedHand, Vector3> _lastWorld = {};
   final Map<TrackedHand, Vector3> _headLocal = {};
   final Map<TrackedHand, Vector3> _lastOutput = {};
-  final Map<TrackedHand, OneEuroFilter> _handFilters = {
-    TrackedHand.left: OneEuroFilter(),
-    TrackedHand.right: OneEuroFilter(),
-  };
+  final Map<TrackedHand, OneEuroFilter> _handFilters;
   final Map<TrackedHand, ControllerPoseSource> _lastSource = {};
+  final Map<TrackedHand, int> _anchorFrameTimeNs = {};
+  final Map<TrackedHand, Vector3> _heldAnchor = {};
 
   SixDofFusionConfig get config => _config;
 
@@ -271,18 +284,27 @@ class SixDofFuser {
     final headPose = head != null && head.isTracked ? head.pose : null;
 
     Vector3? target;
+    Vector3? worldTarget;
     var source = ControllerPoseSource.orientationOnly;
     var confidence = TrackingConfidence.none;
 
     final runtime = frame.controller(hand);
     if (runtime != null && runtime.isTracked) {
       target = runtime.pose.translation;
+      worldTarget = target;
       source = ControllerPoseSource.runtimeController;
       confidence = runtime.confidence;
     } else {
       final anchor = frame.hand(hand)?.controllerAnchor;
       if (anchor != null && anchor.isTracked) {
-        target = (anchor.pose * _gripOffsets[hand]!).translation;
+        // filter-spec section 3: filter the anchor joint, then apply the grip
+        // offset with the unfiltered controller IMU orientation. Filtering the
+        // offset-applied position would low-pass rotation-induced lever motion.
+        final joint = anchor.pose.translation;
+        final offset = Vector3.copy(_gripOffsets[hand]!.translation)
+          ..applyQuaternion(orientation);
+        target = joint;
+        worldTarget = joint + offset;
         source = ControllerPoseSource.handAnchor;
         confidence = anchor.confidence;
       } else if (headPose != null) {
@@ -306,30 +328,64 @@ class SixDofFuser {
       confidence = TrackingConfidence.none;
     }
 
+    if (worldTarget != null && !_isFinite(worldTarget)) {
+      // The grip offset is added after the joint guard; a malformed
+      // calibration must not leak NaN into the transform chain either.
+      worldTarget = null;
+      target = null;
+      source = ControllerPoseSource.orientationOnly;
+      confidence = TrackingConfidence.none;
+    }
+
     final previousSource = _lastSource[hand];
     if (source == ControllerPoseSource.handAnchor &&
         previousSource != ControllerPoseSource.handAnchor) {
       _handFilters[hand]!.reset();
+      _clearAnchorState(hand);
     } else if (source == ControllerPoseSource.runtimeController &&
         previousSource != ControllerPoseSource.runtimeController) {
       _lastOutput.remove(hand);
+      _clearAnchorState(hand);
     } else if (source == ControllerPoseSource.headRelative) {
       // Never smooth a guess into a tracked anchor, or the other way round.
       _handFilters[hand]!.reset();
       _lastOutput.remove(hand);
+      _clearAnchorState(hand);
     }
 
     if (target != null && source != ControllerPoseSource.headRelative) {
       // Learn the head-local offset from the raw anchor, not the lagging
       // filtered position.
-      _lastWorld[hand] = Vector3.copy(target);
+      final world = worldTarget ?? target;
+      _lastWorld[hand] = Vector3.copy(world);
       if (headPose != null) {
-        _headLocal[hand] = headPose.inverse().transformPoint(target);
+        _headLocal[hand] = headPose.inverse().transformPoint(world);
       }
     }
 
     if (target != null && source == ControllerPoseSource.handAnchor) {
-      target = _handFilters[hand]!.filter(target, hostTimeNs);
+      // Filter on the anchor sample's own clock, once per new sample. The
+      // controller runs faster than the anchor, so feeding the display tick
+      // would shrink dt, inflate the speed estimate and pump the cutoff.
+      final anchorTimeNs = frame.fusionTimeNs;
+      final lastFrameTime = _anchorFrameTimeNs[hand];
+      if (lastFrameTime == null || anchorTimeNs > lastFrameTime) {
+        _heldAnchor[hand] = _handFilters[hand]!.filter(target, anchorTimeNs);
+        _anchorFrameTimeNs[hand] = anchorTimeNs;
+      }
+      final joint = _heldAnchor[hand] ?? target;
+      target =
+          joint +
+          (Vector3.copy(_gripOffsets[hand]!.translation)
+            ..applyQuaternion(orientation));
+      if (!_isFinite(target)) {
+        // Re-check after the offset is applied; the guard above only covers
+        // the anchor joint.
+        target = null;
+        source = ControllerPoseSource.orientationOnly;
+        confidence = TrackingConfidence.none;
+        _clearAnchorState(hand);
+      }
     } else if (target != null &&
         source == ControllerPoseSource.runtimeController &&
         _config.positionSmoothing < 1) {
@@ -364,7 +420,15 @@ class SixDofFuser {
     required Pose palm,
     required Pose controller,
   }) {
-    _gripOffsets[hand] = palm.inverse() * controller;
+    // The offset is applied with the live controller IMU orientation, so its
+    // translation is stored in the controller/IMU frame. Storing the palm
+    // frame translation (palm.inverse() * controller) drops the calibrated
+    // palm-to-controller rotation and bends the lever arm.
+    final worldOffset = controller.translation - palm.translation;
+    _gripOffsets[hand] = Pose(
+      translation: rotateVector(controller.rotation.conjugated(), worldOffset),
+      rotation: palm.rotation.conjugated() * controller.rotation,
+    );
   }
 
   /// Clears buffered frames, learned offsets and filter state. Per-hand
@@ -377,6 +441,8 @@ class SixDofFuser {
     _headLocal.clear();
     _lastOutput.clear();
     _lastSource.clear();
+    _anchorFrameTimeNs.clear();
+    _heldAnchor.clear();
     for (final filter in _handFilters.values) {
       filter.reset();
     }
@@ -389,6 +455,12 @@ class SixDofFuser {
   void _resetHand(TrackedHand hand) {
     _handFilters[hand]!.reset();
     _lastSource.remove(hand);
+    _clearAnchorState(hand);
+  }
+
+  void _clearAnchorState(TrackedHand hand) {
+    _anchorFrameTimeNs.remove(hand);
+    _heldAnchor.remove(hand);
   }
 
   static bool _isFinite(Vector3 value) =>
