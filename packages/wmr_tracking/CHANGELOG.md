@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- ONY-614: `TrackingException` gains an optional `stage`, the platform boundary
+  that failed (for example `sessionCreate`), and its `toString` names it. No
+  breaking change for existing constructors or handlers.
 - ONY-581: adds `tool/pose_capture_prepare.dart`, which converts a tester
   bundle (via its `diagnostics.json` labels) or a directory of `PoseRecording`
   JSON into the `wmr-pose-capture` v1 corpus the tuner replays, split as

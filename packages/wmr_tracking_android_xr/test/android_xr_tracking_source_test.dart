@@ -13,6 +13,8 @@ const _supported = <String, Object?>{
   'headTracking': true,
   'handJointCount': 26,
   'permissions': <String, Object?>{
+    'camera': 'granted',
+    'sceneUnderstanding': 'granted',
     'handTracking': 'granted',
     'headTracking': 'granted',
   },
@@ -124,6 +126,8 @@ void main() {
       source.capabilities.supports(TrackingFeature.controllerPose),
       isFalse,
     );
+    expect(source.permissions['camera'], 'granted');
+    expect(source.permissions['sceneUnderstanding'], 'granted');
     expect(source.permissions['handTracking'], 'granted');
   });
 
@@ -177,6 +181,37 @@ void main() {
     );
     expect(source.started, isFalse);
     expect(platform.stopCalls, 0);
+  });
+
+  test('a staged platform error keeps the failing boundary', () async {
+    final platform = _FakePlatform()
+      ..startError = PlatformException(
+        code: 'unavailable',
+        message: 'Session.create failed',
+        details: const {'stage': 'sessionCreate'},
+      );
+    final source = (await AndroidXrTrackingSource.create(
+      enabled: true,
+      platform: platform,
+    ))!;
+
+    await expectLater(
+      source.start(),
+      throwsA(
+        isA<TrackingException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TrackingExceptionKind.unavailable,
+            )
+            .having((error) => error.stage, 'stage', 'sessionCreate')
+            .having(
+              (error) => error.toString(),
+              'toString',
+              contains('stage: sessionCreate'),
+            ),
+      ),
+    );
   });
 
   test('a refused SPATIAL mode from the fixture maps to unsupported', () async {
