@@ -136,6 +136,17 @@ class BenchBundleRun {
   };
 }
 
+/// Zip name for one corpus file. Run 1 keeps the short name; later runs get a
+/// `_runN` suffix so four runs of the same hand/class cannot overwrite.
+String poseCaptureFileName({
+  required String runtime,
+  required String hand,
+  required String segment,
+  int run = 1,
+}) =>
+    'pose_capture_${runtime}_${hand.toLowerCase()}_$segment'
+    '${run > 1 ? '_run$run' : ''}.json';
+
 /// One recorded 6DoF pose file and the labels its zip name uses.
 class PoseCaptureFile {
   const PoseCaptureFile({
@@ -143,6 +154,8 @@ class PoseCaptureFile {
     required this.runtime,
     required this.hand,
     required this.segment,
+    this.run = 1,
+    this.anchorRateHz,
   });
 
   final String path;
@@ -156,6 +169,12 @@ class PoseCaptureFile {
   /// [PoseSegment.id] from the guided bench.
   final String segment;
 
+  /// Run index within this hand/class, starting at 1.
+  final int run;
+
+  /// Measured anchor rate recorded in the pose file's provenance block.
+  final double? anchorRateHz;
+
   String get fileName => path.split(RegExp(r'[\\/]')).last;
 
   Map<String, Object?> toJson() => {
@@ -163,6 +182,8 @@ class PoseCaptureFile {
     'runtime': runtime,
     'hand': hand,
     'segment': segment,
+    'run': run,
+    if (anchorRateHz != null) 'anchor_rate_hz': anchorRateHz,
   };
 }
 
@@ -419,8 +440,12 @@ Future<List<int>?> _read(String path) async {
 String _baseName(String path) => path.split(RegExp(r'[\\/]')).last;
 
 /// The archive name the task fixes for one pose capture.
-String poseCaptureName(PoseCaptureFile pose) =>
-    'pose_capture_${pose.runtime}_${pose.hand}_${pose.segment}.json';
+String poseCaptureName(PoseCaptureFile pose) => poseCaptureFileName(
+  runtime: pose.runtime,
+  hand: pose.hand,
+  segment: pose.segment,
+  run: pose.run,
+);
 
 String _two(int value) => value.toString().padLeft(2, '0');
 
@@ -502,6 +527,8 @@ String _manifest(TestBundleInput input) {
   final poseSegments = _poseSegments(bench);
   if (poseSegments.isNotEmpty) {
     final first = poseSegments.first;
+    final poseData = _poseStepData(bench);
+    final plan = poseData?['plan'];
     buffer
       ..writeln('## 6DoF pose captures')
       ..writeln()
@@ -510,17 +537,31 @@ String _manifest(TestBundleInput input) {
       ..writeln(
         '- Firmware SHA: ${first['firmware_sha'] ?? 'none (no bridge)'}',
       )
+      ..writeln(
+        '- Corpus plan: ${plan ?? '4 runs per motion class per hand, '
+                'each run >= 30 s, sampled at the anchor rate'}',
+      )
+      ..writeln(
+        '- Occlusion runs are diagnostic only: filter-spec rev 4 section 8 '
+        'has no acceptance bar for that class.',
+      )
       ..writeln()
-      ..writeln('| File | Hand | Segment | Status | Samples | Reason |')
-      ..writeln('|---|---|---|---|---:|---|');
+      ..writeln(
+        '| File | Hand | Segment | Run | Status | Samples '
+        '| Anchor Hz | Reason |',
+      )
+      ..writeln('|---|---|---|---|---:|---:|---:|---|');
     for (final segment in poseSegments) {
       final file = segment['file'] as String?;
+      final rate = segment['anchor_rate_hz'];
       buffer.writeln(
         '| ${file == null ? '—' : _baseName(file)} '
         '| ${segment['hand'] ?? '—'} '
         '| ${segment['segment'] ?? '—'} '
+        '| ${segment['run'] ?? 1} '
         '| ${segment['status'] ?? '—'} '
         '| ${segment['samples'] ?? '—'} '
+        '| ${rate is num ? rate.toStringAsFixed(1) : '—'} '
         '| ${segment['reason'] ?? '—'} |',
       );
     }
@@ -535,18 +576,23 @@ String _manifest(TestBundleInput input) {
 
 /// Segment rows from a pose step, or an empty list when the run had none.
 List<Map<String, Object?>> _poseSegments(BenchBundleRun? bench) {
-  if (bench == null) return const [];
+  final segments = _poseStepData(bench)?['segments'];
+  if (segments is! List) return const [];
+  return [
+    for (final segment in segments)
+      if (segment is Map)
+        {for (final entry in segment.entries) '${entry.key}': entry.value},
+  ];
+}
+
+/// Data of the pose step, which also carries the corpus plan.
+Map<String, Object?>? _poseStepData(BenchBundleRun? bench) {
+  if (bench == null) return null;
   for (final step in bench.steps) {
     if (step.id != 'pose_capture') continue;
-    final segments = step.data['segments'];
-    if (segments is! List) return const [];
-    return [
-      for (final segment in segments)
-        if (segment is Map)
-          {for (final entry in segment.entries) '${entry.key}': entry.value},
-    ];
+    return step.data;
   }
-  return const [];
+  return null;
 }
 
 String _readme(

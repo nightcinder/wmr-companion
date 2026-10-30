@@ -130,28 +130,60 @@ no bar for that class.
 
 For every file record the runtime (`androidXr`, `viture`, `xreal`), the app
 commit, the firmware short SHA, the anchor rate and the run index in the
-`provenance` block. Use the debug screen's pose recorder, pull the JSON, and
-convert it with `PoseCapture.fromRecording` or add the conversion to the
-recorder export.
+`provenance` block. The guided bench below does this automatically; a
+debug-screen recording made by hand needs the same fields added before it can
+count as corpus data.
 
-### Why the ONY-491 guided bench is not enough
+### The guided bench writes the section 8 corpus
 
-The tuner replays a `PoseRecording`: per viewer tick, the fused controller pose
-plus the `TrackingFrame` that positioned it. It only needs the position and
-timestamp of each new **anchor** sample, where the anchor is a runtime-tracked
-controller pose or a hand palm/grip anchor from the XR runtime.
+The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) now emits this corpus
+directly. It is no longer the old still/slow-only wizard described in earlier
+revisions.
 
-The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) records 60 s of the
-FF11 raw controller stream, a still hold and a slow move per hand, and exports
-a test bundle. It has no pose-recorder step, so it writes no `TrackingFrame`s,
-and it has no held-drift, medium, fast or occlusion class. Its files cannot feed
-the tuner.
+1. Attach a hand-tracking runtime on the Debug screen, then open **Guided bench
+   run** from Connect.
+2. Choose **6DoF only** (no bridge) or **Combined**. The pose step records four
+   runs of each of the five scored motion classes for each hand, in this order:
+   LEFT still x4, LEFT drifting x4, LEFT slow x4, LEFT medium x4, LEFT fast x4,
+   then one LEFT occlusion diagnostic; then the same corpus and diagnostic for
+   RIGHT. That is **40 corpus files plus 2 diagnostic files**.
+3. Each run repeats the section 8 path until it is at least 30 s: still 30 s,
+   held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s. The
+   occlusion run is 30 s and diagnostic only.
+4. Recordings are sampled once per new anchor frame, not per 30 Hz viewer tick.
+   Each `PoseRecording` carries a `provenance` block with `runtime`,
+   `app_commit`, `firmware_sha`, `anchor_rate_hz`, `run_index`, `hand`,
+   `motion` and `seconds`. Occlusion files also carry
+   `diagnostics.occlusion_gaps`, `diagnostics.occluded_samples` and
+   `diagnostics.max_occlusion_ms`.
+5. Progress is saved after every run in `bench_pose_progress.json` (runtime,
+   app commit and plan signature). If the app is interrupted, re-entering the
+   pose step skips every run whose file is still on disk. A completed corpus
+   starts fresh on the next run.
+6. Finish the wizard and export the test bundle. Zip names and the manifest
+   table use `pose_capture_<runtime>_<hand>_<segment>.json` for run 1 and
+   `..._runN.json` for runs 2-4, and the manifest lists each run's anchor rate.
 
-Controller-only recordings do not close the gap either: with no runtime anchor
-the fuser falls back to the head-relative offset or orientation only
+To tune, extract `pose_capture_*.json` from the bundle and convert each
+recording into a capture before pointing the tuner at the directory:
+
+```dart
+final recording = PoseRecording.decode(file.readAsStringSync());
+final capture = PoseCapture.fromRecording(
+  recording,
+  runtime: TrackingVendor.viture,
+  motion: PoseMotion.still,
+  run: 2,
+  hand: TrackedHand.left,
+);
+```
+
+`motion` and `run` come from the file's provenance block. Controller-only
+recordings still do not close the gap: with no runtime anchor the fuser falls
+back to the head-relative offset or orientation only
 (`SixDofFuser.update`), and those paths are never filtered, so they say nothing
 about One Euro. A capture needs a runtime that tracks controllers or hands
-(Android XR, VITURE or XREAL) attached while the debug screen records.
+(Android XR, VITURE or XREAL) attached while the bench records.
 
 ## Reproduce
 

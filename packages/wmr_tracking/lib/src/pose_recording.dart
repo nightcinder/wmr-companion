@@ -98,8 +98,11 @@ class PoseRecordingSample {
 /// }
 /// ```
 class PoseRecording {
-  PoseRecording({required List<PoseRecordingSample> samples})
-    : samples = List.unmodifiable(samples);
+  PoseRecording({
+    required List<PoseRecordingSample> samples,
+    Map<String, Object?> provenance = const {},
+  }) : samples = List.unmodifiable(samples),
+       provenance = Map.unmodifiable(provenance);
 
   /// The format tag written to and required from every document.
   static const String format = 'wmr-pose-recording';
@@ -108,6 +111,13 @@ class PoseRecording {
   static const int currentVersion = 1;
 
   final List<PoseRecordingSample> samples;
+
+  /// Where this recording came from: runtime, app commit, firmware SHA,
+  /// measured anchor rate and the run index for a guided-bench corpus file.
+  ///
+  /// Optional so debug-screen recordings, which are not part of a corpus, stay
+  /// byte-identical to the version 1 shape.
+  final Map<String, Object?> provenance;
 
   bool get isEmpty => samples.isEmpty;
 
@@ -145,6 +155,7 @@ class PoseRecording {
   Map<String, Object?> toJson() => {
     'format': format,
     'version': currentVersion,
+    if (provenance.isNotEmpty) 'provenance': _stable(provenance),
     'samples': [for (final sample in samples) _stable(sample.toJson())],
   };
 
@@ -200,6 +211,20 @@ class PoseRecording {
       );
     }
 
+    var provenance = const <String, Object?>{};
+    final rawProvenance = json['provenance'];
+    if (rawProvenance != null) {
+      if (rawProvenance is! Map) {
+        throw const PoseRecordingException(
+          PoseRecordingError.invalidDocument,
+          'provenance must be an object',
+        );
+      }
+      provenance = {
+        for (final entry in rawProvenance.entries) '${entry.key}': entry.value,
+      };
+    }
+
     final samples = <PoseRecordingSample>[];
     for (var index = 0; index < rawSamples.length; index++) {
       final sample = _sample(rawSamples[index], index);
@@ -211,7 +236,7 @@ class PoseRecording {
       }
       samples.add(sample);
     }
-    return PoseRecording(samples: samples);
+    return PoseRecording(samples: samples, provenance: provenance);
   }
 
   static PoseRecordingSample _sample(Object? json, int index) {
@@ -279,6 +304,14 @@ class PoseRecordingBuilder {
 
   int get length => _samples.length;
 
+  /// Time between the first and last accepted sample.
+  Duration get span => _samples.length < 2
+      ? Duration.zero
+      : Duration(
+          microseconds:
+              (_samples.last.hostTimeNs - _samples.first.hostTimeNs) ~/ 1000,
+        );
+
   /// Returns whether the sample was kept.
   bool add({
     required int hostTimeNs,
@@ -300,7 +333,8 @@ class PoseRecordingBuilder {
     return true;
   }
 
-  PoseRecording build() => PoseRecording(samples: _samples);
+  PoseRecording build({Map<String, Object?> provenance = const {}}) =>
+      PoseRecording(samples: _samples, provenance: provenance);
 }
 
 /// Rounds doubles in a JSON-shaped value so re-encoding is byte stable.
