@@ -37,6 +37,7 @@ jobs:
           filters: |
             android_flavors:
               - 'apps/**'
+              - '.github/actions/**'
               - 'packages/**'
               - 'example/**'
               - 'tool/fetch_wmr_config_key.dart'
@@ -60,11 +61,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.7
-          cache: true
+      - uses: ./.github/actions/flutter-setup
 
       # One resolution for the whole workspace; every member is resolved here.
       - run: flutter pub get
@@ -192,6 +189,10 @@ jobs:
           flutter analyze
           flutter test
 
+      - name: Save the Flutter caches
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: ./.github/actions/flutter-cache-save
+
   gate7-clock-replay:
     # Tag pushes build only the release job; these gates run on branches/PRs.
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -200,11 +201,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.7
-          cache: true
+      - uses: ./.github/actions/flutter-setup
 
       - run: flutter pub get
 
@@ -232,11 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.7
-          cache: true
+      - uses: ./.github/actions/flutter-setup
 
       - run: flutter pub get
 
@@ -289,8 +282,9 @@ jobs:
     if: ${{ (needs.changes.outputs.android_flavors == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    # `ndkVersion = flutter.ndkVersion` for Flutter 3.47.7: NDK r28c.
     env:
+      # Pinned in the app's `ndkVersion`: package:jni (a path_provider_android
+      # dependency) compiles C++ through CMake, so these downloads are real.
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
     steps:
@@ -301,23 +295,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # The ubuntu-latest image installs the SDK at a fixed path, outside the
-      # workflow's env context; the NDK and CMake are what every run downloads.
-      - name: Cache Android NDK and CMake
-        uses: actions/cache@v6
+      # Only the pinned NDK/CMake versions are cached, and only a push to main
+      # writes the entry (ONY-540): the old cache saved per ref, so a pull
+      # request or a tag stored a second 2.7 GB copy that evicted this one
+      # between runs.
+      - name: Restore the Android NDK and CMake
+        id: android-tools
+        uses: actions/cache/restore@v6
         with:
           path: |
-            /usr/local/lib/android/sdk/ndk
-            /usr/local/lib/android/sdk/cmake
+            /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+            /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
+          restore-keys: |
+            android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.7
-          cache: true
+      - uses: ./.github/actions/flutter-setup
 
       - run: flutter pub get
 
@@ -365,6 +360,16 @@ jobs:
           name: wmr-companion-debug-apks
           path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-*-debug.apk
           retention-days: 14
+
+      # Written only from main, after the build proved the download works.
+      - name: Save the Android NDK and CMake
+        if: ${{ github.ref == 'refs/heads/main' && steps.android-tools.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+            /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
+          key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
 
   gatt-probe:
     # Required context. Same contract as android-flavors: green only when the
@@ -441,11 +446,7 @@ jobs:
         working-directory: tool/ios_probe
         run: swift build
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.7
-          cache: true
+      - uses: ./.github/actions/flutter-setup
 
       - name: Validate Flutter iOS config
         working-directory: apps/wmr_companion_app
@@ -458,6 +459,10 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --config-only --no-codesign
+
+      - name: Save the Flutter caches
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: ./.github/actions/flutter-cache-save
 
   release-unified:
     # The unified flavor links one shared unityLibrary that carries both VITURE
@@ -475,7 +480,7 @@ jobs:
     env:
       VERSION: ${{ github.ref_name }}
       UNITY_EXPORT_TAG: unity-export-1.0
-      # `ndkVersion = flutter.ndkVersion` for Flutter 3.47.7: NDK r28c.
+      # `install_unity_export.sh` pins the export's `ndkVersion` at this value.
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
       # ONY-354's approved export. A different digest is not the artifact the
@@ -502,23 +507,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # The ubuntu-latest image installs the SDK at a fixed path, outside the
-      # workflow's env context; the NDK and CMake are what every run downloads.
-      - name: Cache Android NDK and CMake
-        uses: actions/cache@v6
+      # Only the pinned NDK/CMake versions are cached, and only a push to main
+      # writes the entry (ONY-540): the old cache saved per ref, so a pull
+      # request or a tag stored a second 2.7 GB copy that evicted this one
+      # between runs.
+      - name: Restore the Android NDK and CMake
+        id: android-tools
+        uses: actions/cache/restore@v6
         with:
           path: |
-            /usr/local/lib/android/sdk/ndk
-            /usr/local/lib/android/sdk/cmake
+            /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+            /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
+          restore-keys: |
+            android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: 3.47.7
-          cache: true
+      - uses: ./.github/actions/flutter-setup
 
       - run: flutter pub get
 

@@ -1,0 +1,50 @@
+name: Set up Flutter from a main-scoped cache
+description: >-
+  Installs the pinned Flutter SDK and restores the Dart pub cache from caches
+  that only a push to main writes (ONY-540). `subosito/flutter-action`'s own
+  `cache: true` saves under the run's ref, so every pull request stored another
+  ~1.5-2 GB copy of the SDK under `refs/pull/<n>/merge`; those copies pushed the
+  repository towards its 10 GB cache budget and evicted the Android cache.
+
+inputs:
+  channel:
+    description: Flutter release channel
+    required: false
+    default: stable
+  flutter-version:
+    description: Exact Flutter release to install
+    required: false
+    default: 3.47.7
+
+runs:
+  using: composite
+  steps:
+    # `dry-run` only resolves the release manifest, so CACHE-KEY/CACHE-PATH name
+    # the same SDK archive on every ref (the manifest hash, not the git ref).
+    - name: Resolve the Flutter cache keys
+      id: key
+      uses: subosito/flutter-action@v2
+      with:
+        channel: ${{ inputs.channel }}
+        flutter-version: ${{ inputs.flutter-version }}
+        dry-run: true
+
+    - name: Restore the Flutter SDK
+      id: sdk
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.key.outputs.CACHE-PATH }}
+        key: ${{ steps.key.outputs.CACHE-KEY }}
+
+    - name: Restore the pub cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.key.outputs.PUB-CACHE-PATH }}
+        key: ${{ steps.key.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+
+    # setup.sh reuses a restored SDK (`bin/flutter` exists) and only downloads
+    # the archive when the cache missed.
+    - uses: subosito/flutter-action@v2
+      with:
+        channel: ${{ inputs.channel }}
+        flutter-version: ${{ inputs.flutter-version }}
