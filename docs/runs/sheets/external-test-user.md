@@ -1,6 +1,6 @@
 # External tester quickstart — WMR Bridge v0.3.0 (unified APK)
 
-Three setups, 15–25 minutes depending on which one you are. Android 14+ phone.
+Three setups, 15–25 minutes depending on which one you are. Android 13+ phone.
 
 The WMR bridge instructions below are for the ESP32-based bridge. Raspberry Pi bridge instructions are still in development.
 
@@ -14,7 +14,7 @@ Say which one you ran in the intake block.
 
 ## Prerequisites
 
-- Android 14 or newer. Android 13 and below is not supported.
+- Android 13 or newer (minSdk 33 for the unified flavor).
 - For setups A and C, the board must be flashed to v0.3.0. Flasher: https://nightcinder.github.io/WMR_Bridge/. A pre-flashed board is fine; say so in the intake block. If you are unsure of the version, reflash — flashing erases stored pairings (expected), so the first pairing after a flash is normal.
 
 ### LED legend
@@ -74,17 +74,17 @@ Pick **3DoF only** for the controller-only path, or **Combined** if you have bot
 
 Pick **6DoF only**. The bridge steps are skipped, the run is shorter, and that is expected — it is not a broken install. You need glasses with hand tracking active; there are no controllers to pair.
 
-**Special note for 6DoF-only testers:** this path uses no bridge and no controllers. Do not attempt to pair controllers or connect to `WMR Bridge`. If your glasses do not report hand tracking, the **Capture 6DoF pose** step is unavailable and that is a valid result — record it as skipped. For deeper tracking observation (VITURE/XREAL hand-joint counts, recenter, etc.) see the internal runbook `docs/runs/sheets/internal-runbook.md` §7.4 and §7.5.
+**Special note for 6DoF-only testers:** this path uses no bridge and no controllers. Do not attempt to pair controllers or connect to `WMR Bridge`. If your glasses do not report hand tracking, the **Capture 6DoF pose** step is unavailable and that is a valid result — record it as skipped. For deeper tracking observation (VITURE/XREAL hand-joint counts, recenter, etc.) see the WMR_Bridge internal runbook (https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) §7.4 and §7.5.
 
 **Capture 6DoF pose** appears only while your glasses report hand tracking. It asks for five short movements per hand — hold still, let it drift, slow pan, medium pan, fast flick — about two minutes per hand. Skipping it (whole or per segment) is fine and does not break the run. Its files are inside the bundle you send.
 
 ### 6C — PSVR2 Sense (experimental)
 
-PSVR2 support is compiled into firmware 0.2 and later, but it has **never been run on a controller**. Treat everything here as data collection, not as pass/fail.
+PSVR2 Sense support is on by default and compiled into every v0.3.0 image (WMR_Bridge docs/PSVR2.md §1), but it has **never been run on a controller**. Treat everything here as data collection, not as pass/fail.
 
 - Use the same pairing steps as section 4, with the pairing method you would use with a PC. The app should label the controller `PSVR2`; if it says `WMR`, that is a result worth reporting.
 - PSVR2 is **raw-only** in this build: FF11 carries `0xA1 0x31` frames (up to 79 bytes). There is no PSVR2 decoder for FF12/FF14, FF13 is not read for a PSVR2 hand, and the 3D debug view may show nothing — that is expected. Use FF11 raw and the serial log.
-- Capture the serial log during pairing (see `docs/runs/sheets/internal-runbook.md` §6.1 and §7.7) and record the `model PSVR2` line, the wake line, and the first report's `frame_len`.
+- Capture the serial log during pairing (see the WMR_Bridge internal runbook §6.1 and §7.7: https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) and record the `model PSVR2` line, the wake line, and the first report's `frame_len`.
 - Expect the run to work or to fail; either is useful. Do not spend more than one retry on it.
 - In the intake block, note `Controllers: PSVR2` and anything that looked wrong — LED colours, dropped hand, wrong model label.
 
