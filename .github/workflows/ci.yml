@@ -523,7 +523,7 @@ jobs:
     #
     # Only a `v*` tag whose commit is already on main publishes.
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, liesa, android]
     # The export is 272 MB and the arm64-v8a release APK is hundreds of MB.
     timeout-minutes: 120
     permissions:
