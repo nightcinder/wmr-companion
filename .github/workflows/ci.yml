@@ -561,7 +561,10 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          for tool in gh python3 git base64 sha256sum; do
+          # `unzip` is what `tool/install_unity_export.sh` uses to read the
+          # 272 MB export, so it has to be named here too: without it the
+          # preflight would pass and the job would die right after the download.
+          for tool in gh python3 git base64 sha256sum unzip; do
             command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
