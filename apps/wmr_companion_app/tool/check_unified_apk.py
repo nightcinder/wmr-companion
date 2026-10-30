@@ -210,6 +210,22 @@ def main(argv: list[str]) -> int:
         )
         print(f"INFO dex (release may rename): {optional}")
 
+        # XREAL's glasses AAR bundles android.hardware.display.DisplayManager
+        # as a stub. R8 must keep it: when it is shrunk, R8 rewrites the SDK's
+        # `(DisplayManager) getSystemService("display")` cast into an
+        # unconditional ClassCastException and GlassesInitProvider kills the
+        # process before the launcher activity runs (ONY-557). A shrunk stub
+        # leaves no type string in the dex.
+        display_stub = "android/hardware/display/DisplayManager"
+        if display_stub.encode() not in dex:
+            fail(
+                "XREAL display stub is missing from the dex; "
+                "GlassesInitProvider will crash on launch (ONY-557)"
+            )
+            failures += 1
+        else:
+            print("PASS dex: XREAL display stub kept for GlassesInitProvider")
+
         for path, (plugin_name, version_expected) in UNITY_SUBSYSTEMS.items():
             if path not in names:
                 fail(f"missing Unity subsystem: {path}")
