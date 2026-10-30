@@ -111,13 +111,20 @@ def _manifest_elements(camera_required: str | None) -> list[tuple[str, dict[str,
     ]
 
 
-def build_apk(directory: Path, camera_required: str | None) -> Path:
+def build_apk(
+    directory: Path, camera_required: str | None, display_stub: bool = True
+) -> Path:
     path = directory / "unified.apk"
+    classes = list(checker.REQUIRED_DEX_CLASSES)
+    if display_stub:
+        # XREAL's GlassesDisplayPlugEvent AAR ships this as a program class;
+        # the release build must keep it (ONY-557).
+        classes.append("android/hardware/display/DisplayManager")
     with zipfile.ZipFile(path, "w") as apk:
         apk.writestr("AndroidManifest.xml", build_manifest(_manifest_elements(camera_required)))
         apk.writestr(
             "classes.dex",
-            b"\x00".join(name.encode() for name in checker.REQUIRED_DEX_CLASSES),
+            b"\x00".join(name.encode() for name in classes),
         )
         for lib in checker.REQUIRED_LIBS:
             apk.writestr(lib, b"\x7fELF")
@@ -171,6 +178,12 @@ class MainTest(unittest.TestCase):
             "SharedUnityRuntime=renamed/inlined",
             output,
         )
+
+    def test_missing_xreal_display_stub_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", display_stub=False))
+        self.assertEqual(code, 1, output)
+        self.assertIn("XREAL display stub is missing", output)
 
     def test_camera_required_by_default_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

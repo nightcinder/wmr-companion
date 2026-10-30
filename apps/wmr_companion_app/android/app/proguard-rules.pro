@@ -14,3 +14,14 @@
 -dontwarn com.android.extensions.xr.splitengine.RequestCallback
 -dontwarn com.android.extensions.xr.splitengine.SystemRendererConnection
 -dontwarn com.android.extensions.xr.subspace.Subspace
+
+# XREAL's GlassesDisplayPlugEvent AAR bundles stub classes in the android.*
+# namespace (android.hardware.display.DisplayManager and its listener types)
+# because the Nebula firmware extends them. R8 shrinks those unreferenced
+# shadow classes and rewrites the SDK's
+# `(DisplayManager) getSystemService("display")` checkcast into an
+# unconditional ClassCastException, so GlassesInitProvider crashes the process
+# before the launcher activity runs (ONY-557). Keep the stubs: the platform
+# class still wins at runtime, the cast succeeds, and the SDK's display
+# listener attaches as on any other phone.
+-keep class android.hardware.display.** { *; }
