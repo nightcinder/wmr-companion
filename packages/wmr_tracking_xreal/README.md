@@ -38,7 +38,10 @@ Failures are typed `TrackingException`s:
 - `unsupported`: the reported glasses model is not an Air 2 Ultra (`One`,
   `OnePro`, `Air`, `Air2`, `Air2Pro`, `Light`, or an unclassifiable name). An
   unreported model is not an error: `create()` succeeds and the Unity `start`
-  handshake reports the real model.
+  handshake reports the real model. That handshake result is not surfaced back
+  to Dart (`glassesModel` is the pre-start snapshot), so on the deferred path a
+  successful `start` is the Air 2 Ultra confirmation; any other model fails
+  `unsupported (found <model>)`.
 - `permissionDenied`: `android.permission.CAMERA` was denied. The permission is
   declared in the plugin manifest (with `android.hardware.camera` optional)
   and is inert while `WMR_XREAL_TRACKING` is false.

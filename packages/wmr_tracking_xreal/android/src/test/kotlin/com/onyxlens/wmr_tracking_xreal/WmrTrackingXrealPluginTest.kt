@@ -116,6 +116,22 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
+    fun capabilitiesFailsClosedForAReportedModelItCannotClassify() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "Air3")
+        val plugin = WmrTrackingXrealPlugin(bridge)
+
+        val caps = plugin.capabilities()
+        assertEquals(true, caps["modelReported"])
+        assertEquals(false, caps["supported"])
+        assertEquals(false, caps["handTracking"])
+        assertEquals("Air3", caps["glassesModel"])
+        assertEquals(
+            "XREAL hand tracking requires Air 2 Ultra (found Air3)",
+            caps["reason"],
+        )
+    }
+
+    @Test
     fun capabilitiesReportsSupportedOnlyForAir2Ultra() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
         val plugin = WmrTrackingXrealPlugin(bridge)
@@ -161,8 +177,7 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
-    fun startUnityRelayFailsForOneSeries() {
-        val bridge = FakeBridge(isUnityAvailable = true, model = "One")
+    fun startUnityRelayFailsForOneSeries() {        val bridge = FakeBridge(isUnityAvailable = true, model = "One")
         val plugin = WmrTrackingXrealPlugin(bridge)
         val reply = RecordingReply()
 
@@ -172,6 +187,23 @@ class WmrTrackingXrealPluginTest {
         assertEquals("unsupported", reply.errors[0].first)
         assertEquals(
             "XREAL hand tracking requires Air 2 Ultra (found One)",
+            reply.errors[0].second,
+        )
+        assertTrue(bridge.sentCommands.isEmpty())
+    }
+
+    @Test
+    fun startUnityRelayRejectsAReportedModelItCannotClassify() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "Air3")
+        val plugin = WmrTrackingXrealPlugin(bridge)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals("unsupported", reply.errors[0].first)
+        assertEquals(
+            "XREAL hand tracking requires Air 2 Ultra (found Air3)",
             reply.errors[0].second,
         )
         assertTrue(bridge.sentCommands.isEmpty())

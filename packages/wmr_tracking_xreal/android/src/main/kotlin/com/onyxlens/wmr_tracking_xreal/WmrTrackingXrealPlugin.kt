@@ -187,6 +187,11 @@ class WmrTrackingXrealPlugin internal constructor(
             )
         }
         val supported = modelSpec.head6Dof && modelSpec.handTracking
+        val modelName = if (modelSpec == XrealGlassesModelSpec.UNKNOWN) {
+            reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+        } else {
+            modelSpec.sdkName
+        }
         return mapOf(
             "unityAvailable" to true,
             "modelReported" to true,
@@ -196,11 +201,11 @@ class WmrTrackingXrealPlugin internal constructor(
             "handGestures" to modelSpec.handTracking,
             "passthroughCamera" to supported,
             "handJointCount" to modelSpec.handJointCount,
-            "glassesModel" to modelSpec.sdkName,
+            "glassesModel" to modelName,
             "reason" to if (supported) {
                 null
             } else {
-                "XREAL hand tracking requires Air 2 Ultra (found ${modelSpec.sdkName})"
+                "XREAL hand tracking requires Air 2 Ultra (found $modelName)"
             },
             "permissions" to permissions,
         )
@@ -284,9 +289,14 @@ class WmrTrackingXrealPlugin internal constructor(
             (!modelSpec.handTracking || !modelSpec.head6Dof)
         ) {
             runtime.release(GlassesVendor.XREAL)
+            val modelName = if (modelSpec == XrealGlassesModelSpec.UNKNOWN) {
+                reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+            } else {
+                modelSpec.sdkName
+            }
             reply.error(
                 ERROR_UNSUPPORTED,
-                "XREAL hand tracking requires Air 2 Ultra (found ${modelSpec.sdkName})",
+                "XREAL hand tracking requires Air 2 Ultra (found $modelName)",
             )
             return
         }
