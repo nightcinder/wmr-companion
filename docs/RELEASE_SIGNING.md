@@ -7,8 +7,10 @@ certificate instead of `CN=Android Debug`.
 The ONY-492 key was regenerated in ONY-493 before any tester build was
 distributed: its store and key passwords were not recoverable, so every release
 build failed at signing. The current key uses a random store password and a
-separate key password, both kept in Paperclip secrets. No
-installed app uses a different certificate, so in-place updates are unaffected.
+separate key password, both kept in Paperclip secrets. Two release APKs from
+this key install over each other; any build signed with another key (a debug
+APK, or a release APK from a throwaway keystore) must be uninstalled once, as
+described in [Installing a release APK](#installing-a-release-apk).
 
 ## Key facts
 
@@ -75,6 +77,33 @@ Signer #1 certificate SHA-256 digest: bdaa32b51ad3afd267d0f80f28a473b85319f8c37e
 ```
 
 A release APK signed by the debug key (`CN=Android Debug`) is a regression.
+
+## Installing a release APK
+
+Android replaces an installed app only when the new APK is signed with the same
+key. Otherwise the package installer stops with the generic **"Something went
+wrong"** dialog and `adb` reports:
+
+```text
+INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package
+com.onyxlens.wmr_companion signatures do not match newer version; ignoring!
+```
+
+That is not a broken download: `SHA256SUMS` still matches. A phone that ever
+installed a debug build (`flutter run`, a CI `wmr-companion-debug-apks`
+artifact, or a locally signed release) holds the other key, so uninstall it
+once and install the release:
+
+```sh
+adb uninstall com.onyxlens.wmr_companion
+adb uninstall --user 10 com.onyxlens.wmr_companion   # work profile, if present
+adb install wmr-companion-X.Y.Z-unified-arm64-v8a.apk
+```
+
+Since 0.3.3 debug builds use the `com.onyxlens.wmr_companion.debug` package
+(`applicationIdSuffix` in `android/app/build.gradle.kts`), so a debug build no
+longer has to be removed before the release APK installs, and both can stay
+installed side by side. Release APKs share one key and update in place.
 
 ## CI release: tag to downloadable APK (ONY-493, ONY-508, ONY-520)
 
