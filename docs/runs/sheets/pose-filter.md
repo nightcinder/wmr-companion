@@ -194,9 +194,12 @@ covers S, D, slow, M, F and occlusion per runtime and hand.
 It refuses an incomplete corpus with exit 1 and names every missing cell, for
 example `viture/right/mediumPan: 3 of 4 runs`, and writes nothing in that case.
 A run shorter than the section 8 30 s minimum also counts as missing and is
-named (`viture/right/mediumPan: run 2 is 5.0 s, needs 30 s`). A complete corpus
-is four runs of each scored class and one occlusion run, for both hands of each
-runtime present in the bundle.
+named (`viture/right/mediumPan: run 2 is 5.0 s, needs 30 s`). The check uses the
+sample span and allows one second of truncation, because the bench stops on a
+wall-clock timer and stamps each sample when the frame arrives; the occlusion
+diagnostic has no duration bar, so a short occlusion recording still counts. A
+complete corpus is four runs of each scored class and one occlusion run, for
+both hands of each runtime present in the bundle.
 
 Controller-only
 recordings still do not close the gap: with no runtime anchor the fuser falls

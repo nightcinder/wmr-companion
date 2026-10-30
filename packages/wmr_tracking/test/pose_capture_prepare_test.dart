@@ -27,11 +27,11 @@ PoseRecording _recording({
   required String segment,
   int run = 1,
   int samples = 5,
-  int spanSeconds = 30,
+  Duration span = const Duration(seconds: 30),
   bool withProvenance = true,
 }) {
   final frames = <TrackingFrame>[];
-  final stepNs = samples > 1 ? (spanSeconds * 1000000000) ~/ (samples - 1) : 0;
+  final stepNs = samples > 1 ? span.inMicroseconds * 1000 ~/ (samples - 1) : 0;
   for (var index = 0; index < samples; index++) {
     final time = 1000000000 + index * stepNs;
     final pose = TrackedPose(
@@ -68,7 +68,7 @@ PoseRecording _recording({
             'app_commit': 'abc1234',
             'firmware_sha': 'def5678',
             'anchor_rate_hz': 90.0,
-            'seconds': 30,
+            'seconds': span.inSeconds,
           }
         : const {},
   );
@@ -213,7 +213,7 @@ void main() {
               hand: TrackedHand.right,
               segment: 'medium_pan',
               run: 2,
-              spanSeconds: 5,
+              span: const Duration(seconds: 5),
             ),
           )
         else
@@ -232,6 +232,50 @@ void main() {
       contains('viture/right/mediumPan: run 2 is 5.0 s, needs 30 s'),
     );
     expect(corpus.coverage.toMarkdown(), contains('3/4 **missing**'));
+  });
+
+  test('accepts a run a frame short of 30 s and does not time occlusion', () {
+    final inputs = [
+      for (final input in _corpus())
+        if (input.fileName ==
+            'pose_capture_viture_right_medium_pan_run2.json')
+          RecordingInput(
+            fileName: input.fileName,
+            recording: _recording(
+              runtime: TrackingVendor.viture,
+              hand: TrackedHand.right,
+              segment: 'medium_pan',
+              run: 2,
+              span: const Duration(milliseconds: 29900),
+            ),
+          )
+        else if (input.fileName ==
+            'pose_capture_viture_left_occlusion.json')
+          RecordingInput(
+            fileName: input.fileName,
+            recording: _recording(
+              runtime: TrackingVendor.viture,
+              hand: TrackedHand.left,
+              segment: 'occlusion',
+              span: const Duration(seconds: 5),
+            ),
+          )
+        else
+          input,
+    ];
+
+    final corpus = prepareCorpus(inputs);
+
+    expect(corpus.isComplete, isTrue);
+    expect(corpus.missingCells, isEmpty);
+    expect(
+      corpus.coverage.runs(
+        TrackingVendor.viture,
+        TrackedHand.right,
+        PoseMotion.mediumPan,
+      ),
+      4,
+    );
   });
 
   test('refuses a file name that asks for run 0', () {

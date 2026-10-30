@@ -66,6 +66,11 @@ class PoseCorpusPlan {
 
   Duration get minimumRun => Duration(seconds: minimumRunSeconds);
 
+  /// Section 8 sets no duration bar for the occlusion diagnostic, so a short
+  /// occlusion recording is still the one run that cell needs.
+  Duration minimumRunFor(PoseMotion motion) =>
+      motion == PoseMotion.occlusion ? Duration.zero : minimumRun;
+
   Map<String, Object?> toJson() => {
     'runs_per_class': runsPerClass,
     'occlusion_runs': occlusionRuns,
@@ -133,6 +138,16 @@ class PreparedCapture {
     microseconds:
         (capture.samples.last.timeNs - capture.samples.first.timeNs) ~/ 1000,
   );
+
+  /// The guided bench stops on a wall-clock timer and stamps each sample when
+  /// the frame arrives, so a 30 s run ends a frame or more before the timer
+  /// fires. One second of truncation is accepted; a seconds-long recording is
+  /// still short.
+  static const Duration spanTolerance = Duration(seconds: 1);
+
+  /// Whether this run covers [minimum] of recorded samples.
+  bool covers(Duration minimum) =>
+      minimum == Duration.zero || span + spanTolerance >= minimum;
 }
 
 /// A run whose samples cover less than the section 8 minimum.
@@ -418,15 +433,18 @@ PreparedCorpus prepareCorpus(
     );
   }
 
-  final minimum = plan.minimumRun;
   final shortRuns =
       byCell.values
-          .where((prepared) => prepared.span < minimum)
+          .where(
+            (prepared) => !prepared.covers(
+              plan.minimumRunFor(prepared.labels.motion),
+            ),
+          )
           .map(
             (prepared) => ShortRun(
               labels: prepared.labels,
               span: prepared.span,
-              minimum: minimum,
+              minimum: plan.minimumRunFor(prepared.labels.motion),
             ),
           )
           .toList()
@@ -445,7 +463,7 @@ PreparedCorpus prepareCorpus(
                   prepared.labels.runtime == runtime &&
                   prepared.labels.hand == hand &&
                   prepared.labels.motion == motion &&
-                  prepared.span >= minimum,
+                  prepared.covers(plan.minimumRunFor(motion)),
             )
             .length;
         cells.add(
