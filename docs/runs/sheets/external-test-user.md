@@ -34,7 +34,7 @@ This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR C
 
 ## 2. Install
 
-1. Download the APK and SHA256SUMS. Check the download: `sha256sum -c SHA256SUMS`.
+1. Download the APK and SHA256SUMS. Verify before installing — on a computer run `sha256sum -c SHA256SUMS` (or in Termux on the phone); otherwise compare the APK's SHA-256 to the value in SHA256SUMS.
 2. Open the APK on the phone; allow "install unknown apps" when asked.
 3. Install. If Android blocks it, record the message and stop.
 
@@ -79,7 +79,7 @@ Pick **6DoF only**. The bridge steps are skipped, the run is shorter, and that i
 
 **Special note for 6DoF-only testers:** this path uses no bridge and no controllers. Do not attempt to pair controllers or connect to `WMR Bridge`. If your glasses do not report hand tracking, the **Capture 6DoF pose** step is unavailable and that is a valid result — record it as skipped. For deeper tracking observation (VITURE/XREAL hand-joint counts, recenter, etc.) see the WMR_Bridge internal runbook (https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) §7.4 and §7.5.
 
-**Capture 6DoF pose** appears only while your glasses report hand tracking. It records the full filter-spec rev 4 section 8 corpus: five motion classes (still, held drifting, slow pan, medium pan, fast flick), four runs per class per hand, each at least 30 s, plus one diagnostic occlusion run per hand. That is roughly 10 minutes per hand. Each run repeats a short movement until the timer ends: still 10 s, held drifting 10 s, slow pan 30 cm over 3 s, medium pan 50 cm in 1 s, fast flick 45 cm in 0.3 s, occlusion 30 s. Skipping a run (whole or per run) is fine and does not break the run; skipped runs are recorded as skipped. Its files are inside the bundle you send.
+**Capture 6DoF pose** appears only while your glasses report hand tracking. It records the full filter-spec rev 4 section 8 corpus: five motion classes (still, held drifting, slow pan, medium pan, fast flick), four runs per class per hand, each at least 30 s, plus one diagnostic occlusion run per hand. That is roughly 10 minutes per hand. Each run repeats its path until the timer ends, at the bench durations: still 30 s, held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s, occlusion 30 s. Paths: still (rest, arm braced), held drifting (aim and let it wander), slow pan 30 cm over 3 s back and forth, medium pan 50 cm in 1 s, fast flick 45 cm in 0.3 s. Skipping a run (whole or per run) is fine and does not break the run; skipped runs are recorded as skipped. Its files are inside the bundle you send.
 
 ### 6C — PSVR2 Sense (experimental)
 
