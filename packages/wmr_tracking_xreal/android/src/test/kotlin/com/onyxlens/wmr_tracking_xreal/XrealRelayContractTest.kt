@@ -93,6 +93,15 @@ class XrealRelayContractTest {
     }
 
     @Test
+    fun isReportedTreatsOnlyNullOrUnknownAsUnreported() {
+        assertFalse(XrealGlassesModelSpec.isReported(null))
+        assertFalse(XrealGlassesModelSpec.isReported("  "))
+        assertFalse(XrealGlassesModelSpec.isReported("Unknown"))
+        assertTrue(XrealGlassesModelSpec.isReported("Air2Ultra"))
+        assertTrue(XrealGlassesModelSpec.isReported("Air3"))
+    }
+
+    @Test
     fun nullOrUnreportedGlassesModelDefaultsToUnknownSpec() {
         val nullSpec = XrealGlassesModelSpec.fromSdkName(null)
         assertEquals(XrealGlassesModelSpec.UNKNOWN, nullSpec)
