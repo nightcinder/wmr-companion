@@ -76,6 +76,13 @@ android {
             // Local debug runs and `tool/test_flavor_wiring.sh` keep using the
             // throwaway Android debug key (ONY-492).
             signingConfig = signingConfigs.getByName("debug")
+            // A debug APK is signed with the Android debug key, which never
+            // matches the project release key. Under one applicationId the
+            // package manager then refuses the release APK while any debug
+            // build is installed, and Android only says "Something went
+            // wrong" (ONY-572). The suffix gives debug builds their own
+            // package, so `flutter run` and the GitHub release APK coexist.
+            applicationIdSuffix = ".debug"
         }
         release {
             // Null when key.properties/env is missing; the task-graph check

@@ -706,7 +706,7 @@ jobs:
             gh release create "$VERSION" \
               "${prerelease_args[@]}" \
               --title "$VERSION" \
-              --notes "Signed WMR Companion tester APK for VITURE and XREAL glasses, built by CI from ${GITHUB_SHA}. SHA256SUMS lists its digest." \
+              --notes "Signed WMR Companion tester APK for VITURE and XREAL glasses, built by CI from ${GITHUB_SHA}. SHA256SUMS lists its digest. If the phone still has a build made before 0.3.3 (debug or locally signed), uninstall com.onyxlens.wmr_companion once first; Android otherwise stops with \"Something went wrong\"." \
               || gh release view "$VERSION" >/dev/null
           fi
           gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/*.apk --clobber
