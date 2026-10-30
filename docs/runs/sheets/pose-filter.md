@@ -181,9 +181,11 @@ dart run tool/pose_filter_tune.dart \
 
 For a directory of `PoseRecording` JSON (for example the phone's documents
 folder) pass `--captures path/to/recordings` instead of `--bundle`; `--out`
-changes the default `build/pose_corpus`. The tool reads the runtime, hand,
-segment and run from the bundle's `diagnostics.json`, then the recording's
-`provenance` block, then the file name
+changes the default `build/pose_corpus`. A debug-screen recording
+(`pose-<timestamp>.json`) has no provenance and cannot be placed in a cell, so
+the tool warns and skips it instead of failing the run. The tool reads the
+runtime, hand, segment and run from the bundle's `diagnostics.json`, then the
+recording's `provenance` block, then the file name
 (`pose_capture_<runtime>_<hand>_<segment>[_runN].json`), converts each file with
 `PoseCapture.fromRecording`, and writes
 `<runtime>/<hand>/<motion>/run<N>.json` plus `coverage.md`. The printed matrix
@@ -191,8 +193,10 @@ covers S, D, slow, M, F and occlusion per runtime and hand.
 
 It refuses an incomplete corpus with exit 1 and names every missing cell, for
 example `viture/right/mediumPan: 3 of 4 runs`, and writes nothing in that case.
-A complete corpus is four runs of each scored class and one occlusion run, for
-both hands of each runtime present in the bundle.
+A run shorter than the section 8 30 s minimum also counts as missing and is
+named (`viture/right/mediumPan: run 2 is 5.0 s, needs 30 s`). A complete corpus
+is four runs of each scored class and one occlusion run, for both hands of each
+runtime present in the bundle.
 
 Controller-only
 recordings still do not close the gap: with no runtime anchor the fuser falls

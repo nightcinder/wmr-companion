@@ -25,13 +25,21 @@ import 'pose_filter_tuning.dart';
 /// `filter-spec` rev 4 section 8 corpus: five scored classes and one
 /// diagnostic class, four runs per scored class per hand and per runtime.
 class PoseCorpusPlan {
-  const PoseCorpusPlan({this.runsPerClass = 4, this.occlusionRuns = 1});
+  const PoseCorpusPlan({
+    this.runsPerClass = 4,
+    this.occlusionRuns = 1,
+    this.minimumRunSeconds = 30,
+  });
 
   /// Section 8: "at least four runs per motion class per runtime".
   final int runsPerClass;
 
   /// Section 8 gives occlusion no bar, and the app records one run per hand.
   final int occlusionRuns;
+
+  /// Section 8: every run is "at least 30 s" of anchor samples. A shorter file
+  /// is a named deficiency, never a run that satisfies a cell.
+  final int minimumRunSeconds;
 
   static const List<PoseMotion> scored = [
     PoseMotion.still,
@@ -56,9 +64,12 @@ class PoseCorpusPlan {
   int requiredFor(PoseMotion motion) =>
       motion == PoseMotion.occlusion ? occlusionRuns : runsPerClass;
 
+  Duration get minimumRun => Duration(seconds: minimumRunSeconds);
+
   Map<String, Object?> toJson() => {
     'runs_per_class': runsPerClass,
     'occlusion_runs': occlusionRuns,
+    'minimum_run_seconds': minimumRunSeconds,
   };
 }
 
@@ -115,6 +126,31 @@ class PreparedCapture {
 
   /// The cell this capture was placed in.
   final CaptureLabels labels;
+
+  /// Wall time covered by the trace: last sample minus first sample. Section 8
+  /// asks for at least 30 s, so a file count alone does not prove coverage.
+  Duration get span => Duration(
+    microseconds:
+        (capture.samples.last.timeNs - capture.samples.first.timeNs) ~/ 1000,
+  );
+}
+
+/// A run whose samples cover less than the section 8 minimum.
+class ShortRun {
+  const ShortRun({
+    required this.labels,
+    required this.span,
+    required this.minimum,
+  });
+
+  final CaptureLabels labels;
+  final Duration span;
+  final Duration minimum;
+
+  String get description =>
+      '${labels.cell}: run ${labels.run} is '
+      '${(span.inMilliseconds / 1000).toStringAsFixed(1)} s, needs '
+      '${minimum.inSeconds} s';
 }
 
 /// How many runs one `(runtime, hand, motion)` cell has.
@@ -142,20 +178,28 @@ class CoverageCell {
 
 /// The section 8 coverage matrix for one corpus.
 class CorpusCoverage {
-  const CorpusCoverage({required this.plan, required this.cells});
+  const CorpusCoverage({
+    required this.plan,
+    required this.cells,
+    this.shortRuns = const [],
+  });
 
   final PoseCorpusPlan plan;
 
   /// One entry per `(runtime, hand, motion)`, sorted for stable output.
   final List<CoverageCell> cells;
 
+  /// Runs that exist but cover less than the section 8 minimum duration.
+  final List<ShortRun> shortRuns;
+
   Iterable<CoverageCell> get incomplete =>
       cells.where((cell) => !cell.complete);
 
-  bool get isComplete => incomplete.isEmpty;
+  bool get isComplete => incomplete.isEmpty && shortRuns.isEmpty;
 
   List<String> get missingCells => [
     for (final cell in incomplete) cell.description,
+    for (final run in shortRuns) run.description,
   ];
 
   /// Every runtime present in the corpus, in name order.
@@ -274,12 +318,14 @@ CaptureLabels? labelsFromFileName(String fileName) {
   if (match == null) return null;
   final segment = poseMotionBySegment[match.group(3)];
   final runtime = _vendorNamed(match.group(1)!);
-  if (segment == null || runtime == null) return null;
+  final run = int.tryParse(match.group(4) ?? '1') ?? 1;
+  // `run0` would decode to a capture the tuner rejects (`run < 1`).
+  if (segment == null || runtime == null || run < 1) return null;
   return CaptureLabels(
     runtime: runtime,
     hand: TrackedHand.values.firstWhere((hand) => hand.name == match.group(2)),
     motion: segment,
-    run: int.tryParse(match.group(4) ?? '1') ?? 1,
+    run: run,
     source: 'file name',
   );
 }
@@ -372,6 +418,20 @@ PreparedCorpus prepareCorpus(
     );
   }
 
+  final minimum = plan.minimumRun;
+  final shortRuns =
+      byCell.values
+          .where((prepared) => prepared.span < minimum)
+          .map(
+            (prepared) => ShortRun(
+              labels: prepared.labels,
+              span: prepared.span,
+              minimum: minimum,
+            ),
+          )
+          .toList()
+        ..sort((a, b) => a.description.compareTo(b.description));
+
   final cells = <CoverageCell>[];
   final runtimes = {
     for (final prepared in byCell.values) prepared.capture.runtime,
@@ -384,7 +444,8 @@ PreparedCorpus prepareCorpus(
               (prepared) =>
                   prepared.labels.runtime == runtime &&
                   prepared.labels.hand == hand &&
-                  prepared.labels.motion == motion,
+                  prepared.labels.motion == motion &&
+                  prepared.span >= minimum,
             )
             .length;
         cells.add(
@@ -405,12 +466,20 @@ PreparedCorpus prepareCorpus(
   return PreparedCorpus(
     plan: plan,
     captures: captures,
-    coverage: CorpusCoverage(plan: plan, cells: cells),
+    coverage: CorpusCoverage(plan: plan, cells: cells, shortRuns: shortRuns),
   );
 }
 
-/// Reads every `PoseRecording` in [directory].
-List<RecordingInput> readRecordingDirectory(Directory directory) {
+/// Reads every placeable `PoseRecording` in [directory].
+///
+/// A folder can also hold debug-screen recordings (`pose-<timestamp>.json`)
+/// that carry no provenance and do not follow the corpus file-name convention.
+/// Those are reported through [onSkip] and left out instead of failing the
+/// whole conversion.
+List<RecordingInput> readRecordingDirectory(
+  Directory directory, {
+  void Function(String fileName)? onSkip,
+}) {
   if (!directory.existsSync()) {
     throw PosePrepareException('no such directory: ${directory.path}');
   }
@@ -435,6 +504,11 @@ List<RecordingInput> readRecordingDirectory(Directory directory) {
         continue;
       }
       throw PosePrepareException('$name: ${error.message}', error);
+    }
+    if (labelsFromProvenance(recording) == null &&
+        labelsFromFileName(name) == null) {
+      onSkip?.call(name);
+      continue;
     }
     inputs.add(RecordingInput(fileName: name, recording: recording));
   }

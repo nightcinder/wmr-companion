@@ -27,11 +27,13 @@ PoseRecording _recording({
   required String segment,
   int run = 1,
   int samples = 5,
+  int spanSeconds = 30,
   bool withProvenance = true,
 }) {
   final frames = <TrackingFrame>[];
+  final stepNs = samples > 1 ? (spanSeconds * 1000000000) ~/ (samples - 1) : 0;
   for (var index = 0; index < samples; index++) {
-    final time = 1000000000 + index * 11111111;
+    final time = 1000000000 + index * stepNs;
     final pose = TrackedPose(
       pose: Pose(
         translation: Vector3(0.2 + index * 0.001, -0.25, -0.35),
@@ -198,6 +200,71 @@ void main() {
         ? out.listSync(recursive: true).whereType<File>()
         : const <File>[];
     expect(written, isEmpty);
+  });
+
+  test('refuses a complete cell whose run is shorter than 30 s', () {
+    final inputs = [
+      for (final input in _corpus())
+        if (input.fileName == 'pose_capture_viture_right_medium_pan_run2.json')
+          RecordingInput(
+            fileName: input.fileName,
+            recording: _recording(
+              runtime: TrackingVendor.viture,
+              hand: TrackedHand.right,
+              segment: 'medium_pan',
+              run: 2,
+              spanSeconds: 5,
+            ),
+          )
+        else
+          input,
+    ];
+
+    final corpus = prepareCorpus(inputs);
+
+    expect(corpus.isComplete, isFalse);
+    expect(
+      corpus.missingCells,
+      contains('viture/right/mediumPan: 3 of 4 runs'),
+    );
+    expect(
+      corpus.missingCells,
+      contains('viture/right/mediumPan: run 2 is 5.0 s, needs 30 s'),
+    );
+    expect(corpus.coverage.toMarkdown(), contains('3/4 **missing**'));
+  });
+
+  test('refuses a file name that asks for run 0', () {
+    expect(
+      labelsFromFileName('pose_capture_viture_right_still_run0.json'),
+      isNull,
+    );
+    expect(labelsFromFileName('pose_capture_viture_right_still.json')?.run, 1);
+  });
+
+  test('skips debug-screen recordings that cannot be placed in a cell', () {
+    final directory = Directory('${temp.path}/phone')..createSync();
+    final placeable = _input(
+      runtime: TrackingVendor.viture,
+      hand: TrackedHand.right,
+      segment: 'fast_flick',
+    );
+    File('${directory.path}/${placeable.fileName}')
+        .writeAsStringSync(placeable.recording.encode());
+    File('${directory.path}/pose-20261030T120000.json').writeAsStringSync(
+      _recording(
+        runtime: TrackingVendor.viture,
+        hand: TrackedHand.right,
+        segment: 'still',
+        withProvenance: false,
+      ).encode(),
+    );
+
+    final skipped = <String>[];
+    final inputs = readRecordingDirectory(directory, onSkip: skipped.add);
+
+    expect(inputs, hasLength(1));
+    expect(skipped, ['pose-20261030T120000.json']);
   });
 
   test('reads a tester bundle and trusts its diagnostics labels', () {

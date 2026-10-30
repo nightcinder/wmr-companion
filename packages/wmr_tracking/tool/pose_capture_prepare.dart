@@ -7,9 +7,9 @@
 //
 // It writes <out>/<runtime>/<hand>/<motion>/run<N>.json and <out>/coverage.md,
 // prints the `filter-spec` rev 4 section 8 coverage matrix, and refuses a
-// corpus that does not cover every runtime/hand/class cell. Exit 0 means the
-// corpus is complete and written, 1 means it was refused as incomplete, 2
-// means bad arguments or unreadable input.
+// corpus that does not cover every runtime/hand/class cell with runs of at
+// least 30 s. Exit 0 means the corpus is complete and written, 1 means it was
+// refused as incomplete, 2 means bad arguments or unreadable input.
 import 'dart:convert';
 import 'dart:io';
 
@@ -55,7 +55,13 @@ void main(List<String> args) {
   try {
     final inputs = bundle != null
         ? readTesterBundle(File(bundle))
-        : readRecordingDirectory(Directory(captures!));
+        : readRecordingDirectory(
+            Directory(captures!),
+            onSkip: (name) => stderr.writeln(
+              'warning: skipped $name; no provenance and not '
+              'pose_capture_<runtime>_<hand>_<segment>[_runN].json',
+            ),
+          );
     corpus = prepareCorpus(inputs);
   } on PosePrepareException catch (error) {
     _fail(error.message, 2);
