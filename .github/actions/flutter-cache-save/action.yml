@@ -1,0 +1,53 @@
+name: Save the Flutter SDK and pub cache
+description: >-
+  Writes the caches `flutter-setup` restores, as the last step of a main-branch
+  job so the entry holds a warmed SDK and a populated pub cache (ONY-540). A
+  pull request or tag run never writes either, which is what kept several
+  gigabyte-sized copies of the same SDK in the repository's cache budget.
+
+inputs:
+  channel:
+    description: Flutter release channel
+    required: false
+    default: stable
+  flutter-version:
+    description: Exact Flutter release the job installed
+    required: false
+    default: 3.47.7
+  save-sdk:
+    description: >-
+      Write the SDK entry. Pass 'false' when `flutter-setup` restored it: the
+      key already exists, and reserving it again fails. Once this flag reflects
+      the restore result, a save failure is a real failure (a wrong path or a
+      malformed key) rather than an expected duplicate.
+    required: false
+    default: 'true'
+  save-pub:
+    description: Write the pub cache. 'false' when `flutter-setup` restored it.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the Flutter cache keys
+      id: key
+      uses: subosito/flutter-action@v2
+      with:
+        channel: ${{ inputs.channel }}
+        flutter-version: ${{ inputs.flutter-version }}
+        dry-run: true
+
+    - name: Save the Flutter SDK
+      if: ${{ inputs.save-sdk == 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.key.outputs.CACHE-PATH }}
+        key: ${{ steps.key.outputs.CACHE-KEY }}
+
+    - name: Save the pub cache
+      if: ${{ inputs.save-pub == 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.key.outputs.PUB-CACHE-PATH }}
+        key: ${{ steps.key.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
