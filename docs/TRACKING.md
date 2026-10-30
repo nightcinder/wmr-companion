@@ -22,5 +22,6 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access.
 - [GATES.md](tracking/GATES.md) — hardware gates and open questions.
 - [PREFLIGHT.md](tracking/PREFLIGHT.md) — named 1.0 path (XREAL), current unified APK, and the desk-only export/permission check.
 - Run sheets: [Android XR](runs/sheets/pose-androidxr.md), [VITURE](runs/sheets/pose-viture.md), [XREAL](runs/sheets/pose-xreal.md).
+- Filter tuning: [pose-filter.md](runs/sheets/pose-filter.md) (ONY-502; synthetic first pass, hardware replay still open).
 
 No 6DoF claim: no vendor adapter has run on hardware.
