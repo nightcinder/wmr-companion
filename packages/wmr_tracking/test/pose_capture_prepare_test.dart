@@ -237,8 +237,7 @@ void main() {
   test('accepts a run a frame short of 30 s and does not time occlusion', () {
     final inputs = [
       for (final input in _corpus())
-        if (input.fileName ==
-            'pose_capture_viture_right_medium_pan_run2.json')
+        if (input.fileName == 'pose_capture_viture_right_medium_pan_run2.json')
           RecordingInput(
             fileName: input.fileName,
             recording: _recording(
@@ -249,8 +248,7 @@ void main() {
               span: const Duration(milliseconds: 29900),
             ),
           )
-        else if (input.fileName ==
-            'pose_capture_viture_left_occlusion.json')
+        else if (input.fileName == 'pose_capture_viture_left_occlusion.json')
           RecordingInput(
             fileName: input.fileName,
             recording: _recording(

@@ -436,9 +436,8 @@ PreparedCorpus prepareCorpus(
   final shortRuns =
       byCell.values
           .where(
-            (prepared) => !prepared.covers(
-              plan.minimumRunFor(prepared.labels.motion),
-            ),
+            (prepared) =>
+                !prepared.covers(plan.minimumRunFor(prepared.labels.motion)),
           )
           .map(
             (prepared) => ShortRun(
