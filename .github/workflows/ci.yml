@@ -76,6 +76,11 @@ jobs:
       - name: APK checker tests
         working-directory: apps/wmr_companion_app
         run: python3 -m unittest -v tool/test_check_unified_apk.py
+      # Same for the export checker: synthetic unityLibrary zips, no 272 MB
+      # artifact and no Unity install.
+      - name: Unity export checker tests
+        working-directory: apps/wmr_companion_app
+        run: python3 -m unittest -v tool/test_check_unity_export.py
       # Each package's own test suite includes export_boundary_test.dart, which
       # asserts that its lib/ imports no Riverpod, file plugin or higher layer.
       - name: wmr_core package
@@ -530,13 +535,16 @@ jobs:
       contents: write
     env:
       VERSION: ${{ github.ref_name }}
-      UNITY_EXPORT_TAG: unity-export-1.0
+      # ONY-613's replacement export, built from the ONY-612 merge commit
+      # 71e4c815. It is a prerelease on purpose: the export is not an app
+      # release and must never take the repository's "Latest release" flag.
+      UNITY_EXPORT_TAG: unity-export-1.1
       # `install_unity_export.sh` pins the export's `ndkVersion` at this value.
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
-      # ONY-354's approved export. A different digest is not the artifact the
+      # ONY-613's approved export. A different digest is not the artifact the
       # owner approved, so the job refuses to build from it.
-      UNITY_EXPORT_SHA256: 945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5
+      UNITY_EXPORT_SHA256: 29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072
     steps:
       # The ancestry guard below compares the tagged commit with origin/main;
       # the default depth-1 checkout has no history to compare against.
@@ -674,6 +682,15 @@ jobs:
             --dir "$RUNNER_TEMP/unity-export"
           echo "$UNITY_EXPORT_SHA256  $RUNNER_TEMP/unity-export/unityLibrary.zip" \
             | sha256sum --check --strict
+
+      # The digest only proves the bytes match the pin. This proves the content
+      # is the ONY-613 export: both vendor runtimes, and the ONY-612 stereo rig
+      # with playerHosted/loaderStarted/firstFrame and no `mono` mode. A stale
+      # unity-export-1.0 or a mono export fails here, before the 120-minute
+      # build rather than in the published APK.
+      - name: Check the export carries both vendors and the VITURE stereo path
+        working-directory: apps/wmr_companion_app
+        run: python3 tool/check_unity_export.py "$RUNNER_TEMP/unity-export/unityLibrary.zip"
 
       - name: Install the export as the unified unityLibrary
         working-directory: apps/wmr_companion_app

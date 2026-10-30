@@ -129,6 +129,7 @@ def build_apk(
     camera_required: str | None,
     display_stub: bool = True,
     extra_launcher: bool = False,
+    stereo_stages: bool = True,
 ) -> Path:
     path = directory / "unified.apk"
     classes = list(checker.REQUIRED_DEX_CLASSES)
@@ -149,6 +150,11 @@ def build_apk(
             apk.writestr(lib, b"\x7fELF")
         for asset, (name, version) in checker.UNITY_SUBSYSTEMS.items():
             apk.writestr(asset, json.dumps({"name": name, "version": version}))
+        stages = checker.REQUIRED_STEREO_LITERALS if stereo_stages else ("playerHosted",)
+        apk.writestr(
+            checker.UNITY_METADATA,
+            b"\x00".join(stage.encode() for stage in stages),
+        )
     return path
 
 
@@ -197,6 +203,13 @@ class MainTest(unittest.TestCase):
             "SharedUnityRuntime=renamed/inlined",
             output,
         )
+
+    def test_stale_unity_metadata_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", stereo_stages=False))
+        self.assertEqual(code, 1, output)
+        self.assertIn("pre-ONY-612 export", output)
+        self.assertIn("loaderStarted", output)
 
     def test_missing_xreal_display_stub_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
