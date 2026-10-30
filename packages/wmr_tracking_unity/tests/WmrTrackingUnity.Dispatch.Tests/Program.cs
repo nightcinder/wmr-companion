@@ -1,5 +1,6 @@
 using System;
 using OnyxLens.WmrTrackingUnity.Dispatch;
+using OnyxLens.WmrTrackingUnity.Stereo;
 
 namespace OnyxLens.WmrTrackingUnity.Dispatch.Tests
 {
@@ -21,6 +22,7 @@ namespace OnyxLens.WmrTrackingUnity.Dispatch.Tests
             RecenterRequiresARunningVendor();
             UnknownCommandAndVendorAreRejected();
             StartFailureKeepsSelectionButNotRunning();
+            StereoModeNamesMatchTheUnityEnum();
 
             Console.WriteLine(
                 _failures == 0
@@ -286,6 +288,32 @@ namespace OnyxLens.WmrTrackingUnity.Dispatch.Tests
             Check(
                 dispatch.Decide("start", null).Target == VendorBackend.Xreal,
                 "retry without vendor targets xreal"
+            );
+        }
+
+        private static void StereoModeNamesMatchTheUnityEnum()
+        {
+            Check(StereoMode.FromRenderingMode(0) == StereoMode.MultiPass, "mode 0 is multiPass");
+            Check(StereoMode.FromRenderingMode(1) == StereoMode.SinglePass, "mode 1 is singlePass");
+            Check(
+                StereoMode.FromRenderingMode(2) == StereoMode.SinglePassInstanced,
+                "mode 2 is singlePassInstanced"
+            );
+            Check(StereoMode.FromRenderingMode(9) == StereoMode.Unknown, "unknown mode value");
+            Check(StereoMode.IsStereo(StereoMode.SinglePassInstanced), "singlePassInstanced is stereo");
+            Check(StereoMode.IsStereo(StereoMode.MultiPass), "multiPass is stereo");
+            Check(!StereoMode.IsStereo(StereoMode.Mono), "mono is not stereo");
+            Check(!StereoMode.IsStereo(StereoMode.Unknown), "unknown is not stereo");
+
+            Check(
+                StereoDiagnostics.Format(StereoStage.LoaderStarted, StereoMode.SinglePassInstanced, true) ==
+                "stage=loaderStarted stereo=singlePassInstanced playerHosted=true",
+                "stage diagnostic line"
+            );
+            Check(
+                StereoDiagnostics.Format(null, null, false) ==
+                "stage=unknown stereo=unknown playerHosted=false",
+                "stage diagnostic falls back honestly"
             );
         }
 

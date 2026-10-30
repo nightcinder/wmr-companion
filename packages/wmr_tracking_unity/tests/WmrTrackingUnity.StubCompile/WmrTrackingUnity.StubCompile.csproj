@@ -18,6 +18,7 @@
   <ItemGroup>
     <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/Dispatch/*.cs" />
     <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/*.cs" />
+    <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/Stereo/*.cs" />
     <!-- The real vendor bridges copied into the unified project, not stubs:
          this is what proves the unified asmdef namespaces and call sites. -->
     <Compile Include="../../unity/Assets/WmrTrackingViture/Runtime/*.cs" />

@@ -159,4 +159,79 @@ class SharedUnityRuntimeTest {
         assertTrue(first.frames.isEmpty())
         assertEquals(listOf("frame"), second.frames)
     }
+
+    @Test
+    fun aRuntimeWithNoPlayerFactoryFailsClosed() {
+        val runtime = SharedUnityRuntime()
+
+        val claim = runtime.claim(GlassesVendor.VITURE)
+
+        assertEquals(UnityClaimState.UNAVAILABLE, claim.state)
+        assertEquals(false, claim.granted)
+        assertNull(runtime.ownerVendor)
+    }
+
+    @Test
+    fun theFirstClaimCanSupplyTheRealPlayerCreationResult() {
+        var hostCalls = 0
+        val runtime = SharedUnityRuntime()
+        val refused = runtime.claim(GlassesVendor.VITURE) {
+            hostCalls += 1
+            false
+        }
+
+        assertEquals(UnityClaimState.UNAVAILABLE, refused.state)
+        assertEquals(1, hostCalls)
+
+        // The creation attempt is one-shot: a later claim does not retry.
+        val retried = runtime.claim(GlassesVendor.VITURE) {
+            hostCalls += 1
+            true
+        }
+        assertEquals(UnityClaimState.UNAVAILABLE, retried.state)
+        assertEquals(1, hostCalls)
+    }
+
+    @Test
+    fun stageReportsAreKeptPerVendorAndReachTheHandler() {
+        val runtime = SharedUnityRuntime { true }
+        val handler = RecordingHandler()
+        runtime.register(GlassesVendor.VITURE, handler)
+
+        runtime.dispatchStage(GlassesVendor.VITURE, "loaderStarted", "singlePassInstanced")
+
+        assertEquals("loaderStarted", runtime.stage(GlassesVendor.VITURE)?.stage)
+        assertEquals(
+            "singlePassInstanced",
+            runtime.stage(GlassesVendor.VITURE)?.stereoMode,
+        )
+        assertEquals(
+            listOf<Pair<String, String?>>("loaderStarted" to "singlePassInstanced"),
+            handler.stages,
+        )
+        assertNull(runtime.stage(GlassesVendor.XREAL))
+    }
+
+    @Test
+    fun blankStageReportsAreIgnored() {
+        val runtime = SharedUnityRuntime { true }
+
+        runtime.dispatchStage(GlassesVendor.VITURE, "   ", "mono")
+
+        assertNull(runtime.stage(GlassesVendor.VITURE))
+    }
+
+    private class RecordingHandler : SharedUnityRuntime.Handler {
+        val stages = mutableListOf<Pair<String, String?>>()
+
+        override fun onFrame(frameJson: String) = Unit
+
+        override fun onError(code: String, message: String) = Unit
+
+        override fun onGlassesModel(modelName: String?) = Unit
+
+        override fun onStage(stage: String, stereoMode: String?) {
+            stages += stage to stereoMode
+        }
+    }
 }

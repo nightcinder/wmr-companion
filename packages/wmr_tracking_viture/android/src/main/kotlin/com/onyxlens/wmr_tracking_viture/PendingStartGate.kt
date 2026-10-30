@@ -8,7 +8,8 @@ package com.onyxlens.wmr_tracking_viture
  * dependency.
  */
 internal interface StartReply {
-    fun success()
+    /** Completes `start` with the hosting/display report the tester reads. */
+    fun success(report: Map<String, Any?>)
 
     fun error(code: String, message: String)
 }

@@ -16,6 +16,14 @@ project proves the bridge compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 
+0. On `start` the plugin hosts the shared Unity player in the foreground
+   activity: `UnityPlayerHost` constructs `com.unity3d.player.UnityPlayer` by
+   reflection, attaches its view full-screen over the Flutter view, and reports
+   `playerHosted`. `stop` (or a detach/error) removes the view and gives the
+   display back to Flutter; the activity forwards pause/resume/config/focus to
+   the player. The `start` reply and `capabilities` carry `playerHosted`,
+   `stereoMode` and the last scene `stage` (`playerHosted`, `loaderStarted`,
+   `firstFrame`).
 1. Kotlin sends `UnityRelayCommand` JSON (`start`, `stop`, `dispose`,
    `recenter`, `configure`) via `UnityPlayer.UnitySendMessage("WmrTrackingRelay", "OnCommand", json)`.
    `recenter` delegates to `Viture.XR.VitureXR.HeadTracking.SetWorldOrigin()`.

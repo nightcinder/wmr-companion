@@ -8,10 +8,20 @@ namespace UnityEngine
 {
     public class Object
     {
+        public string name { get; set; }
     }
 
     public class GameObject : Object
     {
+        public GameObject()
+        {
+        }
+
+        public GameObject(string name)
+        {
+            this.name = name;
+        }
+
         public void SetActive(bool value)
         {
         }
@@ -19,6 +29,20 @@ namespace UnityEngine
         public void SendMessage(string methodName, object value, SendMessageOptions options)
         {
         }
+
+        public static GameObject CreatePrimitive(PrimitiveType type) => new GameObject();
+
+        public T AddComponent<T>() where T : class, new() => new T();
+    }
+
+    public enum PrimitiveType
+    {
+        Sphere = 0,
+        Capsule = 1,
+        Cylinder = 2,
+        Cube = 3,
+        Plane = 4,
+        Quad = 5,
     }
 
     public enum SendMessageOptions
@@ -51,18 +75,76 @@ namespace UnityEngine
             Array.Empty<T>();
     }
 
-    public class Camera : Object
+    public class Behaviour : Object
+    {
+        public bool enabled { get; set; } = true;
+
+        public GameObject gameObject { get; } = new GameObject();
+    }
+
+    public class Light : Behaviour
+    {
+        public LightType type { get; set; }
+
+        public float intensity { get; set; } = 1f;
+    }
+
+    public enum LightType
+    {
+        Spot = 0,
+        Directional = 1,
+        Point = 2,
+        Area = 3,
+    }
+
+    public sealed class Camera : Object
     {
         public static Camera main { get; set; }
 
         public StereoTargetEyeMask stereoTargetEye { get; set; }
 
+        public CameraClearFlags clearFlags { get; set; }
+
+        public Color backgroundColor { get; set; }
+
         public Transform transform { get; } = new Transform();
+    }
+
+    public enum CameraClearFlags
+    {
+        Skybox = 1,
+        Color = 2,
+        SolidColor = 2,
+        Depth = 3,
+        Nothing = 4,
+    }
+
+    public struct Color
+    {
+        public float r;
+        public float g;
+        public float b;
+        public float a;
+
+        public Color(float r, float g, float b, float a)
+        {
+            this.r = r;
+            this.g = g;
+            this.b = b;
+            this.a = a;
+        }
+    }
+
+    public static class Time
+    {
+        public static float unscaledTime { get; set; }
     }
 
     public class Transform : Object
     {
         public Vector3 position { get; set; }
+
+        public Vector3 localScale { get; set; }
 
         public Quaternion rotation { get; set; }
     }
@@ -95,6 +177,9 @@ namespace UnityEngine
             this.z = z;
             this.w = w;
         }
+
+        public static Quaternion Euler(float x, float y, float z) =>
+            new Quaternion(0f, 0f, 0f, 1f);
     }
 
     public static class Debug

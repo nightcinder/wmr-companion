@@ -12,6 +12,9 @@ enum class UnityClaimState(val wireName: String) {
     UNAVAILABLE("unavailable"),
 }
 
+/** The latest stage and display report the hosted player sent for a vendor. */
+data class UnityStageReport(val stage: String, val stereoMode: String?)
+
 /** The result of [SharedUnityRuntime.claim]. */
 data class UnityClaim(val state: UnityClaimState, val owner: GlassesVendor?) {
     val granted: Boolean = state != UnityClaimState.UNAVAILABLE
@@ -35,7 +38,7 @@ data class UnityClaim(val state: UnityClaimState, val owner: GlassesVendor?) {
  * Android XR does not use Unity and never claims.
  */
 class SharedUnityRuntime(
-    private val createPlayer: () -> Boolean = { true },
+    private val createPlayer: () -> Boolean = { false },
 ) {
     /** Implemented by each vendor plugin to receive the shared callbacks. */
     interface Handler {
@@ -44,6 +47,9 @@ class SharedUnityRuntime(
         fun onError(code: String, message: String)
 
         fun onGlassesModel(modelName: String?)
+
+        /** Optional: stage/display reports from the hosted scene. */
+        fun onStage(stage: String, stereoMode: String?) = Unit
     }
 
     private var creationAttempted = false
@@ -51,18 +57,25 @@ class SharedUnityRuntime(
     private var owner: GlassesVendor? = null
     private val handlers = LinkedHashMap<GlassesVendor, Handler>()
     private val glassesModels = mutableMapOf<GlassesVendor, String?>()
+    private val stages = mutableMapOf<GlassesVendor, UnityStageReport>()
 
     val ownerVendor: GlassesVendor?
         @Synchronized get() = owner
 
+    /**
+     * [create] runs once, on the first claim, when the caller needs to own the
+     * real player creation (the VITURE plugin passes its [PlayerHost] result).
+     * Without a factory the runtime fails closed instead of pretending a
+     * player exists.
+     */
     @Synchronized
-    fun claim(vendor: GlassesVendor): UnityClaim {
+    fun claim(vendor: GlassesVendor, create: (() -> Boolean)? = null): UnityClaim {
         if (vendor == GlassesVendor.NONE) {
             return UnityClaim(UnityClaimState.UNAVAILABLE, null)
         }
         if (!creationAttempted) {
             creationAttempted = true
-            created = createPlayer()
+            created = (create ?: createPlayer)()
         }
         if (!created) {
             return UnityClaim(UnityClaimState.UNAVAILABLE, null)
@@ -113,6 +126,20 @@ class SharedUnityRuntime(
 
     @Synchronized
     fun glassesModel(vendor: GlassesVendor): String? = glassesModels[vendor]
+
+    /**
+     * Records a stage/display report from the hosted scene. The stage is kept
+     * per vendor so `capabilities` can answer `playerHosted`, `stereoMode` and
+     * the last reached startup stage after the fact.
+     */
+    fun dispatchStage(vendor: GlassesVendor, stage: String, stereoMode: String?) {
+        if (vendor == GlassesVendor.NONE || stage.isBlank()) return
+        synchronized(this) { stages[vendor] = UnityStageReport(stage, stereoMode) }
+        handlerFor(vendor)?.onStage(stage, stereoMode)
+    }
+
+    @Synchronized
+    fun stage(vendor: GlassesVendor): UnityStageReport? = stages[vendor]
 
     @Synchronized
     private fun handlerFor(vendor: GlassesVendor): Handler? =
