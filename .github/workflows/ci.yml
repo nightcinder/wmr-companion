@@ -523,7 +523,7 @@ jobs:
     #
     # Only a `v*` tag whose commit is already on main publishes.
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, liesa, android]
     # The export is 272 MB and the arm64-v8a release APK is hundreds of MB.
     timeout-minutes: 120
     permissions:
@@ -553,25 +553,79 @@ jobs:
             exit 1
           fi
 
+      # `liesa` is a plain host, not the GitHub-hosted image: it exports no
+      # ANDROID_HOME and carries only the tools its owner installed. Fail here,
+      # before the 120-minute build, naming exactly what is missing instead of
+      # letting a later step crash halfway through.
+      - name: Preflight the self-hosted runner
+        run: |
+          set -euo pipefail
+          missing=()
+          # `unzip` is what `tool/install_unity_export.sh` uses to read the
+          # 272 MB export, so it has to be named here too: without it the
+          # preflight would pass and the job would die right after the download.
+          for tool in gh python3 git base64 sha256sum unzip; do
+            command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::liesa is missing ${missing[*]}; add them to the runner image. This job does not apt-install."
+            exit 1
+          fi
+
+      - name: Locate the Android SDK
+        id: android-sdk
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
+            for candidate in "$HOME/Android/Sdk" /usr/local/lib/android/sdk /opt/android-sdk /opt/android/sdk; do
+              if [ -d "$candidate" ]; then sdk="$candidate"; break; fi
+            done
+          fi
+          if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
+            echo "::error::No Android SDK on liesa: ANDROID_HOME/ANDROID_SDK_ROOT are unset and no SDK sits in the usual places. Install one on the runner image."
+            exit 1
+          fi
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "sdk=$sdk" >> "$GITHUB_OUTPUT"
+          echo "Android SDK: $sdk"
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
-      # Only the pinned NDK/CMake versions are cached, and only a push to main
-      # writes the entry (ONY-540): the old cache saved per ref, so a pull
-      # request or a tag stored a second 2.7 GB copy that evicted this one
-      # between runs.
-      - name: Restore the Android NDK and CMake
-        id: android-tools
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
-            /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
-          key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
-          restore-keys: |
-            android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+      # The declared pins are installed explicitly: this runner does not carry
+      # the GitHub-hosted image, and the Actions cache is no substitute — it
+      # archives absolute paths, so an entry saved on a hosted runner would not
+      # land in this host's SDK. A matching preinstalled NDK/CMake is reused,
+      # and the first tag run pays the download once (it persists on the host).
+      - name: Install the pinned NDK and CMake
+        run: |
+          # Not `pipefail`: `yes` exits with SIGPIPE once sdkmanager stops
+          # reading its licence prompts, which is not a failure here.
+          set -eu
+          ndk="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          cmake="$ANDROID_HOME/cmake/$ANDROID_CMAKE_VERSION"
+          if [ ! -d "$ndk" ] || [ ! -d "$cmake" ]; then
+            sdkmanager="$(command -v sdkmanager || true)"
+            if [ -z "$sdkmanager" ]; then
+              sdkmanager="$(find "$ANDROID_HOME" -maxdepth 5 -type f -name sdkmanager | head -n 1 || true)"
+            fi
+            if [ -z "$sdkmanager" ]; then
+              echo "::error::sdkmanager not found under $ANDROID_HOME; cannot install ndk;$ANDROID_NDK_VERSION and cmake;$ANDROID_CMAKE_VERSION."
+              exit 1
+            fi
+            [ -d "$ndk" ] || yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION"
+            [ -d "$cmake" ] || yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" "cmake;$ANDROID_CMAKE_VERSION"
+          fi
+          test -d "$ndk"
+          test -d "$cmake"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ndk" >> "$GITHUB_ENV"
+          echo "NDK: $ndk"
+          echo "CMake: $cmake"
 
       - uses: gradle/actions/setup-gradle@v6
 
@@ -648,8 +702,9 @@ jobs:
           set -euo pipefail
           apk=build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
           python3 tool/check_unified_apk.py "$apk"
-          unzip -l "$apk" > "$RUNNER_TEMP/unified-apk-contents.txt"
-          grep -q 'assets/monado/wmr_config_key.bin' "$RUNNER_TEMP/unified-apk-contents.txt"
+          # python3 already runs this step; do not also require `unzip` on the
+          # self-hosted runner just to list the archive.
+          python3 -c 'import sys, zipfile; sys.exit(0 if "assets/monado/wmr_config_key.bin" in zipfile.ZipFile(sys.argv[1]).namelist() else "Monado key missing from APK")' "$apk"
 
       - name: Verify every APK is signed with the project key
         working-directory: apps/wmr_companion_app
