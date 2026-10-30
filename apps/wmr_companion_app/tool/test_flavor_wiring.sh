@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Prove the ONY-355 unified Unity include path: a unified export is linked into
 # the unified APK, and a unified build with no export still succeeds without a
-# Unity runtime (ONY-520). Creates a throwaway `unityLibrary` stub in the
-# gitignored location, builds the flavor, then removes it. Needs an Android SDK
-# with aapt; no Unity or vendor SDK is required.
+# Unity runtime (ONY-520). Also proves the ONY-565 retired per-vendor guard
+# fails configuration instead of ignoring a stale export. Creates throwaway
+# stubs in the gitignored locations, builds the flavor, then removes them.
+# Needs an Android SDK with aapt; no Unity or vendor SDK is required.
 #
 #   tool/test_flavor_wiring.sh
 set -euo pipefail
@@ -30,10 +31,14 @@ fi
 # remove a directory this script created itself.
 backup_root=""
 created_stub=0
+created_vendor_stub=0
 
 cleanup() {
   if [ "$created_stub" -eq 1 ]; then
     rm -rf "$unity_root/unified"
+  fi
+  if [ "$created_vendor_stub" -eq 1 ]; then
+    rm -rf "$unity_root/viture"
   fi
   if [ -n "$backup_root" ]; then
     for saved in "$backup_root"/*; do
@@ -127,5 +132,29 @@ if has_permission "$(apk_path)" "$unified_permission"; then
   exit 1
 fi
 echo "PASS: unified built without a Unity export"
+
+echo "==> a leftover per-vendor export must fail configuration"
+# ONY-565 retired android/unity/viture and android/unity/xreal. The guard runs
+# at configuration time, so an empty directory is enough to trigger it.
+if [ -e "$unity_root/viture" ] || [ -L "$unity_root/viture" ]; then
+  [ -n "$backup_root" ] ||
+    backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
+  echo "==> preserving existing $unity_root/viture (restored on exit)"
+  mv "$unity_root/viture" "$backup_root/viture"
+fi
+created_vendor_stub=1
+mkdir -p "$unity_root/viture/unityLibrary"
+if build_output="$(build 2>&1)"; then
+  echo "FAIL: a retired per-vendor export built instead of failing" >&2
+  exit 1
+fi
+if ! grep -q "retired per-vendor Unity export" <<<"$build_output"; then
+  echo "FAIL: expected the retired per-vendor export guard, got:" >&2
+  echo "$build_output" >&2
+  exit 1
+fi
+rm -rf "$unity_root/viture"
+created_vendor_stub=0
+echo "PASS: retired per-vendor export rejected"
 
 echo "All flavor wiring checks passed."
