@@ -164,21 +164,44 @@ revisions.
    table use `pose_capture_<runtime>_<hand>_<segment>.json` for run 1 and
    `..._runN.json` for runs 2-4, and the manifest lists each run's anchor rate.
 
-To tune, extract `pose_capture_*.json` from the bundle and convert each
-recording into a capture before pointing the tuner at the directory:
+### One command from bundle to tuning run
 
-```dart
-final recording = PoseRecording.decode(file.readAsStringSync());
-final capture = PoseCapture.fromRecording(
-  recording,
-  runtime: TrackingVendor.viture,
-  motion: PoseMotion.still,
-  run: 2,
-  hand: TrackedHand.left,
-);
+`packages/wmr_tracking/tool/pose_capture_prepare.dart` converts the recordings
+and checks section 8 coverage. From `packages/wmr_tracking`:
+
+```bash
+# 1. convert the tester bundle into tuner captures
+dart run tool/pose_capture_prepare.dart --bundle wmr-ext-20261030.zip
+
+# 2. tune each runtime on the converted corpus
+dart run tool/pose_filter_tune.dart \
+  --captures build/pose_corpus/viture \
+  --markdown build/pose_corpus/viture-grid.md
 ```
 
-`motion` and `run` come from the file's provenance block. Controller-only
+For a directory of `PoseRecording` JSON (for example the phone's documents
+folder) pass `--captures path/to/recordings` instead of `--bundle`; `--out`
+changes the default `build/pose_corpus`. A debug-screen recording
+(`pose-<timestamp>.json`) has no provenance and cannot be placed in a cell, so
+the tool warns and skips it instead of failing the run. The tool reads the
+runtime, hand, segment and run from the bundle's `diagnostics.json`, then the
+recording's `provenance` block, then the file name
+(`pose_capture_<runtime>_<hand>_<segment>[_runN].json`), converts each file with
+`PoseCapture.fromRecording`, and writes
+`<runtime>/<hand>/<motion>/run<N>.json` plus `coverage.md`. The printed matrix
+covers S, D, slow, M, F and occlusion per runtime and hand.
+
+It refuses an incomplete corpus with exit 1 and names every missing cell, for
+example `viture/right/mediumPan: 3 of 4 runs`, and writes nothing in that case.
+A run shorter than the section 8 30 s minimum also counts as missing and is
+named (`viture/right/mediumPan: run 2 is 5.0 s, needs 30 s`). The check uses the
+sample span and allows one second of truncation, because the bench stops on a
+wall-clock timer and stamps each sample when the frame arrives; the occlusion
+diagnostic has no duration bar, so a short occlusion recording still counts. A
+complete corpus is four runs of each scored class and one occlusion run, for
+both hands of each runtime present in the bundle.
+
+Controller-only
 recordings still do not close the gap: with no runtime anchor the fuser falls
 back to the head-relative offset or orientation only
 (`SixDofFuser.update`), and those paths are never filtered, so they say nothing
@@ -193,12 +216,14 @@ From `packages/wmr_tracking`:
 # harness smoke test on the synthetic vectors (not a tuning result)
 dart run tool/pose_filter_tune.dart --markdown build/pose-filter-grid.md
 
-# hardware captures, once recorded
+# hardware captures: tester bundle -> corpus -> grid
+dart run tool/pose_capture_prepare.dart --bundle path/to/wmr-ext.zip
 dart run tool/pose_filter_tune.dart \
-  --captures path/to/hardware-captures \
+  --captures build/pose_corpus/viture \
   --markdown ../../docs/runs/sheets/pose-filter-grid.md
 
-dart test test/pose_filter_tuning_test.dart test/filter_test.dart
+dart test test/pose_filter_tuning_test.dart test/filter_test.dart \
+  test/pose_capture_prepare_test.dart
 ```
 
 After the hardware run, fill the table, copy the chosen constants into

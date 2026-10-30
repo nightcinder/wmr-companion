@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- ONY-581: adds `tool/pose_capture_prepare.dart`, which converts a tester
+  bundle (via its `diagnostics.json` labels) or a directory of `PoseRecording`
+  JSON into the `wmr-pose-capture` v1 corpus the tuner replays, split as
+  `<runtime>/<hand>/<motion>/run<N>.json`. It prints the `filter-spec` rev 4
+  section 8 coverage matrix and refuses an incomplete corpus with exit 1,
+  naming every missing cell. `pose_filter_tune.dart` reads the split tree.
 - ONY-502: the hand-anchor `OneEuroFilter` now runs on the anchor sample's own
   clock, once per new anchor sample, and the fuser holds the filtered value
   between samples. `minDt` follows the anchor rate (11 ms) instead of the
