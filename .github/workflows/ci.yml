@@ -319,19 +319,21 @@ jobs:
           restore-keys: |
             android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
 
-      # An expected miss downloads and, on main, saves; a miss while the exact
-      # key already exists means the entry is unreachable (evicted, or the
-      # path-derived version changed) and would silently stay that way. The
-      # first main run after this lands has no entry yet, so it passes here
-      # and seeds one.
+      # An expected miss downloads and, on main, saves; on main a miss while the
+      # exact key already exists means the entry is unreachable (evicted, or
+      # the path-derived version changed) and would silently stay that way.
+      # The first main run after this lands has no entry yet, so it passes here
+      # and seeds one. Pull requests only report the miss.
       - name: Check the Android NDK cache state
         if: ${{ steps.android-tools.outputs.cache-hit != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           CACHE_KEY: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
+          ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
         run: |
           set -uo pipefail
           echo "NDK/CMake cache miss on $GITHUB_REF: the build will download them."
+          [ "$ON_MAIN" = "true" ] || exit 0
           keys=$(gh cache list --key "$CACHE_KEY" --limit 100 --json key --jq '.[].key' 2>/dev/null) || exit 0
           if grep -qxF "$CACHE_KEY" <<<"$keys"; then
             echo "::error::A cache entry for $CACHE_KEY exists but the restore missed; the entry is unreachable and the build re-downloads every run."
