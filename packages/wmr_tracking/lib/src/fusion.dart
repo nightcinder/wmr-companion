@@ -328,6 +328,15 @@ class SixDofFuser {
       confidence = TrackingConfidence.none;
     }
 
+    if (worldTarget != null && !_isFinite(worldTarget)) {
+      // The grip offset is added after the joint guard; a malformed
+      // calibration must not leak NaN into the transform chain either.
+      worldTarget = null;
+      target = null;
+      source = ControllerPoseSource.orientationOnly;
+      confidence = TrackingConfidence.none;
+    }
+
     final previousSource = _lastSource[hand];
     if (source == ControllerPoseSource.handAnchor &&
         previousSource != ControllerPoseSource.handAnchor) {
@@ -369,6 +378,14 @@ class SixDofFuser {
           joint +
           (Vector3.copy(_gripOffsets[hand]!.translation)
             ..applyQuaternion(orientation));
+      if (!_isFinite(target)) {
+        // Re-check after the offset is applied; the guard above only covers
+        // the anchor joint.
+        target = null;
+        source = ControllerPoseSource.orientationOnly;
+        confidence = TrackingConfidence.none;
+        _clearAnchorState(hand);
+      }
     } else if (target != null &&
         source == ControllerPoseSource.runtimeController &&
         _config.positionSmoothing < 1) {
@@ -403,7 +420,15 @@ class SixDofFuser {
     required Pose palm,
     required Pose controller,
   }) {
-    _gripOffsets[hand] = palm.inverse() * controller;
+    // The offset is applied with the live controller IMU orientation, so its
+    // translation is stored in the controller/IMU frame. Storing the palm
+    // frame translation (palm.inverse() * controller) drops the calibrated
+    // palm-to-controller rotation and bends the lever arm.
+    final worldOffset = controller.translation - palm.translation;
+    _gripOffsets[hand] = Pose(
+      translation: rotateVector(controller.rotation.conjugated(), worldOffset),
+      rotation: palm.rotation.conjugated() * controller.rotation,
+    );
   }
 
   /// Clears buffered frames, learned offsets and filter state. Per-hand

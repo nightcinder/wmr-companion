@@ -95,6 +95,49 @@ void main() {
       expect(capture.appCommit, 'abc1234');
       expect(capture.firmwareSha, 'def5678');
     });
+
+    test('a recording accepts a runtime-tracked controller pose', () {
+      final frame = TrackingFrame(
+        timeNs: 1000,
+        hostTimeNs: 1000,
+        rightHand: HandPose(
+          hand: TrackedHand.right,
+          palm: TrackedPose(
+            pose: Pose(
+              translation: Vector3(0.1, -0.2, -0.3),
+              rotation: Quaternion.identity(),
+            ),
+          ),
+        ),
+        controllers: {
+          TrackedHand.right: TrackedPose(
+            pose: Pose(
+              translation: Vector3(0.4, 1.0, -0.5),
+              rotation: Quaternion.identity(),
+            ),
+          ),
+        },
+      );
+      final recording = PoseRecording(
+        samples: [
+          PoseRecordingSample(hostTimeNs: 1000, tracking: frame),
+          PoseRecordingSample(
+            hostTimeNs: 2000,
+            tracking: frame.withHostTime(2000),
+          ),
+        ],
+      );
+
+      final capture = PoseCapture.fromRecording(
+        recording,
+        runtime: TrackingVendor.androidXr,
+        motion: PoseMotion.still,
+      );
+
+      expect(capture.samples, hasLength(2));
+      // A runtime-tracked controller is the position the filter sees.
+      expect(capture.samples.first.position, Vector3(0.4, 1.0, -0.5));
+    });
   });
 
   group('filter-spec rev 4 grid', () {
@@ -158,13 +201,28 @@ void main() {
       );
       expect(chosen.lagMedianMs, lessThanOrEqualTo(poseFilterLagLimitMs));
       expect(
-        chosen.lagSlowMedianMs,
-        lessThanOrEqualTo(poseFilterSlowLagLimitMs),
+        chosen.slowLagRegressionOk,
+        isTrue,
+        reason: 'the synthetic fixtures still meet the slow-sweep bound',
       );
       final lowerDrift = report.rows.where(
         (row) => row.passes && row.jitterDriftMm < chosen.jitterDriftMm,
       );
       expect(lowerDrift, isEmpty);
+    });
+
+    test('the slow-sweep bound is a regression metric, not a grid gate', () {
+      const row = TuningRow(
+        point: TuningPoint(minCutoffHz: 2.0, beta: 0.2, dCutoffHz: 2.0),
+        jitterMm: 0.1,
+        jitterDriftMm: 0.1,
+        lagSlowMedianMs: 200,
+        lagMedianMs: 5,
+        step90Ms: 10,
+      );
+
+      expect(row.passes, isTrue);
+      expect(row.slowLagRegressionOk, isFalse);
     });
 
     test('the command writes the whole grid and its evidence', () async {

@@ -171,9 +171,10 @@ class PoseCapture {
   /// Derives an anchor trace from an ONY-249 recording.
   ///
   /// Repeated copies of the same tracking frame are collapsed: the recorder
-  /// samples the viewer, and the filter must see one input per anchor sample.
-  /// The trace is the **raw anchor joint position**, not the controller
-  /// position: `filter-spec` section 3 filters the joint and applies
+  /// samples the viewer, and the filter must see one input per tracking
+  /// sample. A runtime-tracked controller pose is used when present; otherwise
+  /// the trace is the **raw anchor joint position**, not the controller
+  /// position. `filter-spec` section 3 filters the joint and applies
   /// `R_imu * offset` afterwards, so the harness measures the quantity the
   /// filter actually sees and does not need a grip offset.
   factory PoseCapture.fromRecording(
@@ -189,12 +190,20 @@ class PoseCapture {
     for (final sample in recording.samples) {
       final frame = sample.tracking;
       if (frame == null) continue;
+      final controller = frame.controller(hand);
       final anchor = frame.hand(hand)?.controllerAnchor;
-      if (anchor == null || !anchor.isTracked) continue;
+      final Vector3? position;
+      if (controller != null && controller.isTracked) {
+        position = controller.pose.translation;
+      } else if (anchor != null && anchor.isTracked) {
+        position = anchor.pose.translation;
+      } else {
+        position = null;
+      }
+      if (position == null) continue;
       final time = frame.fusionTimeNs;
       if (lastFrameTime == time) continue;
       lastFrameTime = time;
-      final position = anchor.pose.translation;
       if (!_finite(position)) continue;
       samples.add(
         PoseCaptureSample(timeNs: time, position: Vector3.copy(position)),
@@ -202,7 +211,7 @@ class PoseCapture {
     }
     if (samples.length < 2) {
       throw const PoseCaptureException(
-        'recording contains fewer than two hand-anchor samples',
+        'recording contains fewer than two controller samples',
       );
     }
     return PoseCapture(
@@ -492,8 +501,12 @@ class TuningRow {
   bool get passes =>
       jitterMm <= poseFilterJitterLimitMm &&
       jitterDriftMm <= poseFilterDriftJitterLimitMm &&
-      lagMedianMs <= poseFilterLagLimitMs &&
-      lagSlowMedianMs <= poseFilterSlowLagLimitMs;
+      lagMedianMs <= poseFilterLagLimitMs;
+
+  /// The slow-sweep lag is a regression check, not a grid gate: a point that
+  /// meets the hard jitter and lag bars can still pass with a slow-sweep lag
+  /// over the bound.
+  bool get slowLagRegressionOk => lagSlowMedianMs <= poseFilterSlowLagLimitMs;
 
   Map<String, Object?> toJson() => {
     ...point.toJson(),
@@ -503,6 +516,7 @@ class TuningRow {
     'lag_median_ms': _round(lagMedianMs),
     'step90_ms': _round(step90Ms),
     'passes': passes,
+    'slow_lag_regression_ok': slowLagRegressionOk,
   };
 }
 
@@ -510,6 +524,9 @@ class TuningRow {
 const double poseFilterJitterLimitMm = 0.5;
 const double poseFilterDriftJitterLimitMm = 0.75;
 const double poseFilterLagLimitMs = 20.0;
+
+/// The ONY-501 regression bound for slow sweeps (`filter-spec` rev 4 section
+/// 1). Reported per row; it is not a grid gate.
 const double poseFilterSlowLagLimitMs = 160.0;
 
 /// A rerun after a winner touched a grid boundary.
