@@ -37,6 +37,7 @@ namespace OnyxLens.WmrTrackingUnity
         private bool _loaderReported;
         private bool _firstFrameReported;
         private bool _timeoutReported;
+        private bool _sessionBegun;
         private float _awakeAt;
         private string _stereoMode = StereoMode.Unknown;
 
@@ -56,7 +57,6 @@ namespace OnyxLens.WmrTrackingUnity
             _awakeAt = Time.unscaledTime;
             ConfigureCamera();
             BuildMinimalScene();
-            Report(StereoStage.PlayerHosted, StereoMode.Unknown);
             Debug.Log(
                 "[WmrStereo] player hosted; camera=" +
                 (_camera != null ? _camera.stereoTargetEye.ToString() : "missing")
@@ -104,6 +104,35 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void Start()
         {
+            BeginSession();
+            _sessionBegun = true;
+        }
+
+        // A Unity player is constructed once per process; `stop` only detaches
+        // its view and a later `start` re-attaches and resumes the same player.
+        // Unity reports that resume as OnApplicationPause(false), so it is the
+        // session boundary: every start re-reports the stage ladder instead of
+        // leaving the host with the first session's evidence. The staged scene
+        // is already built, so a new session only has to re-arm the reports.
+        private void OnApplicationPause(bool paused)
+        {
+            if (paused || !_sessionBegun) return;
+            BeginSession();
+        }
+
+        private void BeginSession()
+        {
+            _loaderReported = false;
+            _firstFrameReported = false;
+            _timeoutReported = false;
+            _stereoMode = StereoMode.Unknown;
+            _awakeAt = Time.unscaledTime;
+            if (_camera == null)
+            {
+                _camera = GetComponent<Camera>();
+            }
+            ConfigureCamera();
+            Report(StereoStage.PlayerHosted, StereoMode.Unknown);
             StartCoroutine(ReportFirstFrameAfterLoader());
         }
 
