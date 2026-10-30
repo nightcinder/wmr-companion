@@ -77,7 +77,7 @@ App (`apps/wmr_companion_app`; run these from that directory):
   - `cd packages/wmr_companion_ui && flutter test`
   - `cd packages/WMRCompanionKit && swift test`
 - Example app: `cd example && flutter pub get && flutter test && flutter build apk --debug`
-- Build debug APK: `cd apps/wmr_companion_app && tool/build_flavor.sh base` (flavors: `base`, `viture`, `xreal`, `unified`; CI does all four; BLE needs a physical phone)
+- Build debug APK: `cd apps/wmr_companion_app && tool/build_flavor.sh base` (flavors: `base`, `unified`; CI builds the unified flavor; BLE needs a physical phone)
 - Build the unified debug APK: `tool/install_unity_export.sh unified path/to/unityLibrary.zip`, then `tool/build_flavor.sh unified --debug` (the export needs both vendor SDKs and owner-approved redistribution; see `apps/wmr_companion_app/android/unity/README.md`)
 - iOS config validation: `flutter build ios --config-only --no-codesign` (and in `example/`)
 

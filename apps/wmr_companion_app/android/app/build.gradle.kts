@@ -88,27 +88,20 @@ android {
         }
     }
 
-    // One APK can carry the Dart flags for every vendor, but only one Unity
-    // runtime. `base` links no Unity at all (Android XR, emulator, BLE/3DoF);
-    // `viture` and `xreal` link a locally exported per-vendor unityLibrary;
-    // `unified` links the shared unityLibrary exported from
-    // packages/wmr_tracking_unity and selects a vendor at runtime.
+    // Only the unified APK ships. `base` remains for emulator and BLE/3DoF
+    // development and links no Unity at all; `unified` links the shared
+    // unityLibrary exported from packages/wmr_tracking_unity and selects a
+    // vendor at runtime. The retired per-vendor flavors are gone (ONY-565).
     flavorDimensions += "vendor"
     productFlavors {
         create("base") {
             dimension = "vendor"
         }
-        create("viture") {
-            dimension = "vendor"
-        }
-        create("xreal") {
-            dimension = "vendor"
-        }
         create("unified") {
             dimension = "vendor"
             // VITURE 0.9.0's VitureUnityXR.aar declares minSdk 33, and the
-            // unified export links it alongside XREAL. Keep the other flavors
-            // on Flutter's default (ONY-388).
+            // unified export links it alongside XREAL. `base` stays on
+            // Flutter's default (ONY-388).
             minSdk = 33
         }
     }
@@ -141,24 +134,10 @@ gradle.taskGraph.whenReady {
 }
 
 dependencies {
-    // Only the matching flavor gets the module, so base can never carry Unity
-    // and two runtimes can never be linked together. settings.gradle.kts
-    // already fails when incompatible exports exist.
-    findProject(":unityLibraryViture")?.let {
-        "vitureImplementation"(project(":unityLibraryViture"))
-    }
-    findProject(":unityLibraryXreal")?.let {
-        "xrealImplementation"(project(":unityLibraryXreal"))
-    }
+    // Only the unified flavor gets the module, so base can never carry Unity.
+    // settings.gradle.kts includes the module only when its export exists.
     findProject(":unityLibraryUnified")?.let {
         "unifiedImplementation"(project(":unityLibraryUnified"))
-    }
-    val linkedUnityModules =
-        listOf("unityLibraryViture", "unityLibraryXreal", "unityLibraryUnified")
-            .filter { findProject(":$it") != null }
-    check(linkedUnityModules.size <= 1) {
-        "Cannot link multiple unityLibrary modules into one APK: " +
-            linkedUnityModules.joinToString() + "."
     }
 }
 

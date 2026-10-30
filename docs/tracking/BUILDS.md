@@ -42,29 +42,27 @@ versionCode bump are documented in [RELEASE_SIGNING.md](../RELEASE_SIGNING.md).
 | Flavor | `--dart-define` | Unity export linked | What it ships |
 |---|---|---|---|
 | `base` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | none | Android XR, emulator, BLE/3DoF; every Dart adapter exists, but VITURE/XREAL `start()` reports typed `unavailable` with no Unity runtime linked |
-| `viture` | `WMR_ANDROID_XR_TRACKING=false`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=false` | `android/unity/viture/unityLibrary` (optional) | VITURE Pro Neckband Unity UaaL head + 26-joint hand relay |
-| `xreal` | `WMR_ANDROID_XR_TRACKING=false`, `WMR_VITURE_TRACKING=false`, `WMR_XREAL_TRACKING=true` | `android/unity/xreal/unityLibrary` (optional) | XREAL Air 2 Ultra Unity UaaL head + 26-joint hand relay |
 | `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (required for a real unified APK) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, both report typed `unavailable` |
+
+The per-vendor `viture` and `xreal` flavors are retired (ONY-565); only the
+unified APK ships and there is no per-vendor flavor to build.
 
 `unified` requires Android 13 (API 33) when the VITURE runtime is linked, because
 `VitureUnityXR.aar` in the export declares `minSdk 33`.
 
-## Why the Unity exports cannot be mixed
+## Why there is only one Unity export
 
 - Only one `UnityPlayer` may run in a process (Unity as a Library restriction).
-- The Gradle build links at most one `unityLibrary` module per flavor; `settings.gradle.kts`
-  throws if both `android/unity/viture/unityLibrary` and `android/unity/xreal/unityLibrary`
-  exist at the same time.
-- It also throws when `android/unity/unified/unityLibrary` exists alongside either
-  per-vendor export ("The unified unityLibrary cannot be combined with per-vendor Unity
-  exports"). The unified export carries both SDKs, so a per-vendor export would be a
-  second runtime.
-- `app/build.gradle.kts` also asserts that multiple modules are never linked together
-  (`Cannot link multiple unityLibrary modules into one APK`).
+- The Gradle build links at most one `unityLibrary`, and only the `unified`
+  flavor depends on it (`settings.gradle.kts` includes the module only when
+  `android/unity/unified/unityLibrary` exists).
+- A leftover per-vendor export under `android/unity/viture` or
+  `android/unity/xreal` fails configuration with "retired per-vendor Unity
+  export"; delete it (ONY-565).
 - Each vendor SDK contributes its own native libraries, XR loader and manifest
   entries; the supported way to get both vendors into one APK is the unified export.
 
-A missing Unity export is not an error: `viture`, `xreal` and `unified` still build and
+A missing Unity export is not an error: `unified` still builds and
 the Dart sources report `unavailable` when asked to start.
 
 ## Unified Unity library (ONY-273, ONY-355, ONY-388)
@@ -110,8 +108,6 @@ VITURE/XREAL sources report `unavailable`. The 0.2.1 release installed the owner
 cd apps/wmr_companion_app
 tool/install_unity_export.sh unified path/to/unityLibrary.zip
 tool/build_flavor.sh base
-tool/build_flavor.sh viture
-tool/build_flavor.sh xreal
 tool/build_flavor.sh unified
 ```
 
@@ -125,4 +121,4 @@ Extra arguments pass through to `flutter build apk` (e.g. `--release`). APKs lan
 - Vendor head/hand update rates are unpublished (`maxHeadRateHz: 0`, `maxHandRateHz: 0`).
 - Android permissions the VITURE/XREAL Unity runtimes need beyond `android.permission.CAMERA`
   are not documented.
-- No per-vendor flavor has been run on its target hardware either.
+- No per-vendor flavor remains to run on target hardware.

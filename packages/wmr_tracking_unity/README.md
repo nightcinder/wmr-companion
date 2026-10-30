@@ -9,8 +9,8 @@ folders are copied into this project and kept byte-identical by a sync check.
 
 The `v0.2.1` release shipped a real export from this project and the `unified`
 Android APK built from it (ONY-354 owner export, ONY-388 build); there has still
-been no device run. The per-vendor ONY-271 flavors remain available as the
-fallback path.
+been no device run. The per-vendor ONY-271 flavors were retired in ONY-565;
+`base` is the no-Unity fallback.
 
 No proprietary SDK, no Unity install and no hardware are used by this
 repository. Neither vendor's native code is vendored. Nothing here is a
@@ -256,4 +256,5 @@ both SDKs coexist in one build.
     base.
 
 If any of items 1–4 is shown impossible on paper or by a real export, record it
-here and stop: the ONY-271 per-vendor flavors remain the supported answer.
+here and stop: `base` remains the no-Unity fallback and the per-vendor
+ONY-271 flavors are retired (ONY-565).

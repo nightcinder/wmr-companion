@@ -28,46 +28,31 @@ plugins {
 
 include(":app")
 
-// Optional Unity-as-a-Library modules (ONY-271, ONY-355). Export `unityLibrary`
-// from `packages/wmr_tracking_<vendor>/unity` (or the shared
-// `packages/wmr_tracking_unity/unity`) and copy it to the gitignored
-// `android/unity/<flavor>/unityLibrary` path. A missing export is not an error:
-// the flavor still builds and the Dart source reports `unavailable` when asked
-// to start. Only one Unity runtime can run in a process, so more than one export
-// fails the build instead of silently linking one.
-val unityLibraries: Map<String, File> =
-    mapOf(
-        "viture" to file("unity/viture/unityLibrary"),
-        "xreal" to file("unity/xreal/unityLibrary"),
-        "unified" to file("unity/unified/unityLibrary"),
-    )
-val presentUnityLibraries = unityLibraries.filterValues { it.isDirectory }
-
-if (presentUnityLibraries.size > 1) {
-    if ("unified" in presentUnityLibraries) {
-        throw GradleException(
-            "The unified unityLibrary cannot be combined with per-vendor Unity exports. Remove " +
-                (presentUnityLibraries.keys - "unified")
-                    .joinToString(" and ") { "android/unity/$it/unityLibrary" } +
-                ", then rebuild the unified flavor.",
-        )
+// Optional Unity-as-a-Library module (ONY-271, ONY-355). Export `unityLibrary`
+// from `packages/wmr_tracking_unity/unity` and copy it to the gitignored
+// `android/unity/unified/unityLibrary` path. A missing export is not an error:
+// the flavor still builds and the Dart sources report `unavailable`.
+//
+// The per-vendor exports and flavors are retired (ONY-565); only the unified
+// APK ships. A leftover export from the old layout fails configuration so a
+// stale checkout cannot silently keep it around.
+listOf("viture", "xreal").forEach { vendor ->
+    check(!file("unity/$vendor").exists()) {
+        "android/unity/$vendor is a retired per-vendor Unity export (ONY-565). " +
+            "Remove it; the unified APK links android/unity/unified/unityLibrary."
     }
-    throw GradleException(
-        "Cannot link both Unity libraries into one APK. Remove " +
-            presentUnityLibraries.keys.joinToString(" and ") { "android/unity/$it/unityLibrary" } +
-            ", then rebuild the flavor that needs the remaining one.",
-    )
 }
 
-presentUnityLibraries.forEach { (vendor, directory) ->
-    val module = ":unityLibrary${vendor.replaceFirstChar { it.uppercase() }}"
+val unifiedUnityLibrary = file("unity/unified/unityLibrary")
+if (unifiedUnityLibrary.isDirectory) {
+    val module = ":unityLibraryUnified"
     include(module)
-    project(module).projectDir = directory
+    project(module).projectDir = unifiedUnityLibrary
     // Unity's Android export can carry a nested XR manifest library. The export
     // references it as `:unityLibrary:xrmanifest.androidlib`, which
     // tool/install_unity_export.sh remaps to this module. Include it when
     // present so the manifest still merges into the app (ONY-388).
-    val xrManifestLibrary = File(directory, "xrmanifest.androidlib")
+    val xrManifestLibrary = File(unifiedUnityLibrary, "xrmanifest.androidlib")
     if (xrManifestLibrary.isDirectory) {
         include("$module:xrmanifest.androidlib")
         project("$module:xrmanifest.androidlib").projectDir = xrManifestLibrary

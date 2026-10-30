@@ -83,9 +83,9 @@ build is needed. It decodes the keystore, checks the APK with `apksigner`, and
 attaches the assets to that tag's GitHub Release. `release-checksums` then
 writes one `SHA256SUMS` covering the published APKs.
 
-CI publishes only the `unified` flavor. `base`, `viture` and `xreal` remain
-buildable locally with `tool/build_flavor.sh`, but they have no release path
-(ONY-520).
+CI publishes only the `unified` flavor. `base` remains buildable locally with
+`tool/build_flavor.sh`, but it has no release path (ONY-520). The per-vendor
+`viture`/`xreal` flavors are retired (ONY-565).
 
 | Job | Flavor | Build |
 |---|---|---|

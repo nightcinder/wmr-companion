@@ -11,29 +11,26 @@ void main() {
   final buildFlavor = File('tool/build_flavor.sh').readAsStringSync();
 
   group('Android build flavors', () {
-    test(
-      'declares base, viture, xreal and unified in one vendor dimension',
-      () {
-        expect(appBuild, contains('flavorDimensions += "vendor"'));
-        for (final flavor in ['base', 'viture', 'xreal', 'unified']) {
-          expect(
-            appBuild,
-            contains('create("$flavor")'),
-            reason: 'missing $flavor product flavor',
-          );
-        }
-      },
-    );
+    test('declares only base and unified in one vendor dimension', () {
+      expect(appBuild, contains('flavorDimensions += "vendor"'));
+      for (final flavor in ['base', 'unified']) {
+        expect(
+          appBuild,
+          contains('create("$flavor")'),
+          reason: 'missing $flavor product flavor',
+        );
+      }
+      // The per-vendor flavors are retired (ONY-565); only unified ships.
+      for (final retired in ['viture', 'xreal']) {
+        expect(
+          appBuild,
+          isNot(contains('create("$retired")')),
+          reason: 'retired $retired flavor is still declared',
+        );
+      }
+    });
 
-    test('links each Unity module only from its own flavor', () {
-      expect(
-        appBuild,
-        contains('"vitureImplementation"(project(":unityLibraryViture"))'),
-      );
-      expect(
-        appBuild,
-        contains('"xrealImplementation"(project(":unityLibraryXreal"))'),
-      );
+    test('links the unified Unity module only from the unified flavor', () {
       expect(
         appBuild,
         contains('"unifiedImplementation"(project(":unityLibraryUnified"))'),
@@ -46,24 +43,28 @@ void main() {
         ).hasMatch(appBuild),
         isFalse,
       );
+      for (final retired in ['unityLibraryViture', 'unityLibraryXreal']) {
+        expect(appBuild, isNot(contains(retired)));
+      }
     });
 
-    test('includes a Unity module only when its export is present', () {
-      expect(settings, contains('unity/viture/unityLibrary'));
-      expect(settings, contains('unity/xreal/unityLibrary'));
-      expect(settings, contains('unity/unified/unityLibrary'));
-      expect(settings, contains('filterValues { it.isDirectory }'));
-      expect(settings, contains('include(module)'));
-    });
+    test(
+      'includes the unified Unity module only when its export is present',
+      () {
+        expect(settings, contains('unity/unified/unityLibrary'));
+        expect(settings, contains('unifiedUnityLibrary.isDirectory'));
+        expect(settings, contains('include(module)'));
+        for (final retired in ['unity/viture', 'unity/xreal']) {
+          expect(settings, isNot(contains('file("$retired/unityLibrary")')));
+        }
+      },
+    );
 
-    test('rejects incompatible Unity exports with a clear message', () {
-      expect(settings, contains('presentUnityLibraries.size > 1'));
-      expect(settings, contains('Cannot link both Unity libraries'));
-      expect(
-        settings,
-        contains('cannot be combined with per-vendor Unity exports'),
-      );
-      expect(appBuild, contains('Cannot link multiple unityLibrary modules'));
+    test('rejects a leftover per-vendor export', () {
+      // ONY-565 retired the per-vendor exports; a stale one must fail loudly
+      // instead of sitting unused in the gitignored unity directory.
+      expect(settings, contains('retired per-vendor Unity export'));
+      expect(settings, contains('listOf("viture", "xreal")'));
     });
 
     test('includes the nested XR manifest library Unity exports', () {
@@ -101,6 +102,8 @@ void main() {
       expect(buildFlavor, contains(r'--flavor "$flavor"'));
       expect(buildFlavor, contains('--dart-define=WMR_VITURE_TRACKING=true'));
       expect(buildFlavor, contains('--dart-define=WMR_XREAL_TRACKING=true'));
+      // Only base and unified survive (ONY-565).
+      expect(buildFlavor, contains(r'{base|unified}'));
     });
 
     test('unified compiles every vendor adapter for runtime selection', () {

@@ -22,7 +22,7 @@ The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_trac
 
 ### One `unityLibrary` for both vendors
 
-`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, ONY-271 flavors stay the answer.
+`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, record the limitation and stop: the per-vendor ONY-271 flavors were retired in ONY-565, so `base` is the only no-Unity fallback.
 
 
 ## The framework
@@ -203,7 +203,7 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_viture && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && tool/build_flavor.sh viture
+cd apps/wmr_companion_app && tool/build_flavor.sh unified
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_viture:testDebugUnitTest
 ```
 
@@ -238,7 +238,7 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_xreal && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && tool/build_flavor.sh xreal
+cd apps/wmr_companion_app && tool/build_flavor.sh unified
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_xreal:testDebugUnitTest
 ```
 

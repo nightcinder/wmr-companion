@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Prove the ONY-355 unified Unity include path: a unified export is linked into
 # the unified APK, and a unified build with no export still succeeds without a
-# Unity runtime (ONY-520). Creates a throwaway `unityLibrary` stub in the
-# gitignored location, builds the flavor, then removes it. Needs an Android SDK
-# with aapt; no Unity or vendor SDK is required.
+# Unity runtime (ONY-520). Also proves the ONY-565 retired per-vendor guard
+# fails configuration instead of ignoring a stale export. Creates throwaway
+# stubs in the gitignored locations, builds the flavor, then removes them.
+# Needs an Android SDK with aapt; no Unity or vendor SDK is required.
 #
-# Also proves ONY-561: every Unity flavor keeps exactly one home-screen icon
-# when the linked export declares standalone MAIN/LAUNCHER activities.
+# Also proves ONY-561: the unified APK keeps exactly one home-screen icon when
+# the linked export declares standalone MAIN/LAUNCHER activities.
 #
 #   tool/test_flavor_wiring.sh
 set -euo pipefail
@@ -131,75 +132,6 @@ EOF
 EOF
 }
 
-# A per-vendor stub: the viture flavor links only Unity's player activity, the
-# xreal flavor also carries the XREAL SDK's NRXRActivity. Both declare the
-# launcher filters each vendor's export ships (ONY-561).
-create_vendor_stub() {
-  local vendor="$1"
-  local dir="$unity_root/$vendor/unityLibrary"
-  created_flavors+=("$vendor")
-  mkdir -p "$dir/src/main"
-  cat >"$dir/build.gradle" <<EOF
-// Throwaway stand-in for a Unity UaaL export, used by tool/test_flavor_wiring.sh.
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:9.1.0'
-    }
-}
-apply plugin: 'com.android.library'
-
-android {
-    namespace = 'com.onyxlens.wmr.unitystub.$vendor'
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = 24
-    }
-}
-EOF
-  local permission="com.onyxlens.wmr.UNITY_STUB_$vendor"
-  {
-    cat <<EOF
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="$permission" />
-    <application>
-EOF
-    cat <<'EOF'
-
-        <activity
-            android:name="com.unity3d.player.UnityPlayerActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-EOF
-    if [ "$vendor" = "xreal" ]; then
-      cat <<'EOF'
-        <activity
-            android:name="ai.nreal.activitylife.NRXRActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
-EOF
-    fi
-    cat <<'EOF'
-    </application>
-</manifest>
-EOF
-  } >"$dir/src/main/AndroidManifest.xml"
-}
-
 apk_path() {
   local flavor="${1:-unified}"
   echo "$build_root/app/outputs/flutter-apk/app-$flavor-debug.apk"
@@ -258,25 +190,6 @@ echo "PASS: unified linked the unified unityLibrary"
 
 assert_one_launcher unified
 
-echo "==> unified plus a per-vendor export must fail at configuration"
-# settings.gradle.kts rejects a unified export next to a per-vendor one; an
-# empty directory is enough because the guard runs before any module builds.
-backup_export viture
-created_flavors+=(viture)
-mkdir -p "$unity_root/viture/unityLibrary"
-if build_output="$(build 2>&1)"; then
-  echo "FAIL: unified plus a per-vendor export built instead of failing" >&2
-  exit 1
-fi
-if ! grep -q "cannot be combined with per-vendor" <<<"$build_output"; then
-  echo "FAIL: expected the unified/per-vendor guard, got:" >&2
-  echo "$build_output" >&2
-  exit 1
-fi
-rm -rf "$unity_root/viture"
-drop_created viture
-echo "PASS: unified refused a per-vendor export"
-
 echo "==> unified with no export must still build"
 rm -rf "$unity_root/unified"
 drop_created unified
@@ -288,20 +201,23 @@ if has_permission "$(apk_path)" "$unified_permission"; then
 fi
 echo "PASS: unified built without a Unity export"
 
-# The xreal and viture flavor manifests are separate from unified's; merge each
-# with a launcher-bearing stub so the ONY-561 removal is proven for all three.
-for vendor in viture xreal; do
-  echo "==> $vendor stub must keep one launcher inside the $vendor APK"
-  create_vendor_stub "$vendor"
-  rm -rf "$(apk_path "$vendor")"
-  build "$vendor"
-  if ! has_permission "$(apk_path "$vendor")" "com.onyxlens.wmr.UNITY_STUB_$vendor"; then
-    echo "FAIL: $vendor APK did not contain the $vendor unityLibrary manifest" >&2
-    exit 1
-  fi
-  assert_one_launcher "$vendor"
-  rm -rf "$unity_root/$vendor"
-  drop_created "$vendor"
-done
+echo "==> a leftover per-vendor export must fail configuration"
+# ONY-565 retired android/unity/viture and android/unity/xreal. The guard runs
+# at configuration time, so an empty directory is enough to trigger it.
+backup_export viture
+created_flavors+=(viture)
+mkdir -p "$unity_root/viture/unityLibrary"
+if build_output="$(build 2>&1)"; then
+  echo "FAIL: a retired per-vendor export built instead of failing" >&2
+  exit 1
+fi
+if ! grep -q "retired per-vendor Unity export" <<<"$build_output"; then
+  echo "FAIL: expected the retired per-vendor export guard, got:" >&2
+  echo "$build_output" >&2
+  exit 1
+fi
+rm -rf "$unity_root/viture"
+drop_created viture
+echo "PASS: retired per-vendor export rejected"
 
 echo "All flavor wiring checks passed."
