@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Start tracking when the glasses model has not been reported yet: the unified
+  Unity scene keeps the XREAL backend inactive until `start`, so capabilities
+  now report `modelReported: false` with the Air 2 Ultra capability set and the
+  model check moves to the Unity start handshake. A reported non-Air-2-Ultra
+  model still fails closed as `unsupported`.
 - Migrate the Android plugin to AGP 9 built-in Kotlin: drop the Kotlin Gradle Plugin classpath and `org.jetbrains.kotlin.android`, and require Flutter 3.44 or later.
 
 ## 0.2.2

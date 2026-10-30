@@ -52,23 +52,33 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
-    fun capabilitiesReportsUnsupportedWhenGlassesModelIsNull() {
+    fun capabilitiesDefersAnUnreportedGlassesModelToTheStartHandshake() {
         val bridge = FakeBridge(isUnityAvailable = true, model = null)
         val plugin = WmrTrackingXrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
-        assertEquals(false, caps["supported"])
-        assertEquals(false, caps["handTracking"])
-        assertEquals(false, caps["headTracking"])
-        assertEquals(false, caps["handGestures"])
-        assertEquals(false, caps["passthroughCamera"])
-        assertEquals(0, caps["handJointCount"])
+        assertEquals(false, caps["modelReported"])
+        assertEquals(true, caps["supported"])
+        assertEquals(true, caps["handTracking"])
+        assertEquals(true, caps["headTracking"])
+        assertEquals(true, caps["handGestures"])
+        assertEquals(true, caps["passthroughCamera"])
+        assertEquals(26, caps["handJointCount"])
         assertEquals("Unknown", caps["glassesModel"])
-        assertEquals(
-            "XREAL hand tracking requires Air 2 Ultra (found Unknown)",
-            caps["reason"],
-        )
+        assertNull(caps["reason"])
+    }
+
+    @Test
+    fun capabilitiesTreatsTheSdkUnknownPlaceholderAsUnreported() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "Unknown")
+        val plugin = WmrTrackingXrealPlugin(bridge)
+
+        val caps = plugin.capabilities()
+        assertEquals(false, caps["modelReported"])
+        assertEquals(true, caps["supported"])
+        assertEquals(26, caps["handJointCount"])
+        assertNull(caps["reason"])
     }
 
     @Test
@@ -78,6 +88,7 @@ class WmrTrackingXrealPluginTest {
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
+        assertEquals(true, caps["modelReported"])
         assertEquals(false, caps["supported"])
         assertEquals(false, caps["handTracking"])
         assertEquals(true, caps["headTracking"])
@@ -96,6 +107,7 @@ class WmrTrackingXrealPluginTest {
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
+        assertEquals(true, caps["modelReported"])
         assertEquals(false, caps["supported"])
         assertEquals(false, caps["handTracking"])
         assertEquals(false, caps["headTracking"])
@@ -110,6 +122,7 @@ class WmrTrackingXrealPluginTest {
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
+        assertEquals(true, caps["modelReported"])
         assertEquals(true, caps["supported"])
         assertEquals(true, caps["handTracking"])
         assertEquals(true, caps["headTracking"])
@@ -134,20 +147,17 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
-    fun startUnityRelayFailsWhenGlassesModelIsNull() {
+    fun startUnityRelayDefersAnUnreportedGlassesModelToUnity() {
         val bridge = FakeBridge(isUnityAvailable = true, model = null)
         val plugin = WmrTrackingXrealPlugin(bridge)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
 
-        assertEquals(1, reply.errors.size)
-        assertEquals("unsupported", reply.errors[0].first)
-        assertEquals(
-            "XREAL hand tracking requires Air 2 Ultra (found Unknown)",
-            reply.errors[0].second,
-        )
-        assertTrue(bridge.sentCommands.isEmpty())
+        assertTrue(reply.errors.isEmpty())
+        assertEquals(1, reply.successes.size)
+        assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
 
     @Test
@@ -231,7 +241,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun unsupportedModelReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
-        val plugin = WmrTrackingXrealPlugin(FakeBridge(model = null), runtime)
+        val plugin = WmrTrackingXrealPlugin(FakeBridge(model = "One"), runtime)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
