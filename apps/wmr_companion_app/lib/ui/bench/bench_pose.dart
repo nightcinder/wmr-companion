@@ -261,6 +261,11 @@ abstract interface class BenchPoseRecorder {
 
 /// Records the tracking source's own frames, one sample per new anchor, so a
 /// corpus file is sampled at the anchor rate rather than the 30 Hz viewer tick.
+///
+/// The vendor relays carry only their own `time_ns`, so every sample is
+/// stamped on the host clock with a [SourceClockAligner], exactly as the debug
+/// viewer does. Without that the file would sit on the vendor epoch and
+/// `PoseCapture.fromRecording` would inherit the wrong clock.
 class RealBenchPoseRecorder implements BenchPoseRecorder {
   RealBenchPoseRecorder({
     required this.ref,
@@ -268,6 +273,7 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
     required this.runtime,
     this.appCommit = 'unknown',
     this.firmwareSha,
+    this.hostClock,
   });
 
   final Ref ref;
@@ -281,6 +287,10 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
 
   /// The firmware short SHA, when a bridge was attached.
   final String? firmwareSha;
+
+  /// Arrival clock for the [SourceClockAligner]; tests inject a fixed one.
+  /// Defaults to a [Stopwatch] started when a segment begins.
+  final HostClock? hostClock;
 
   @override
   Future<PoseCaptureResult> record({
@@ -297,7 +307,13 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
     }
 
     final builder = PoseRecordingBuilder();
-    var lastNs = -1;
+    final clock = Stopwatch()..start();
+    final hostNowNs = hostClock ?? () => clock.elapsed.inMicroseconds * 1000;
+    final aligner = SourceClockAligner();
+    var lastSourceNs = -1;
+    int? firstPresentNs;
+    var lastPresentNs = 0;
+    var presentSamples = 0;
     bool? wasPresent;
     int? absentSinceUs;
     var gapCount = 0;
@@ -305,15 +321,27 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
     var maxGapUs = 0;
 
     void capture(TrackingFrame frame) {
-      final time = frame.fusionTimeNs;
-      if (time <= lastNs) return;
-      lastNs = time;
+      final sourceNs = frame.timeNs;
+      if (sourceNs <= lastSourceNs) return;
+      lastSourceNs = sourceNs;
+      final time = aligner.align(
+        sourceTimeNs: sourceNs,
+        hostTimeNs: hostNowNs(),
+      );
+      if (!builder.add(hostTimeNs: time, tracking: frame.withHostTime(time))) {
+        return;
+      }
 
       // Occlusion diagnostics: a gap starts when a previously tracked anchor
       // disappears and ends when it comes back. Section 8 has no bar for it.
       final present = _anchorPresent(frame, hand);
       final timeUs = time ~/ 1000;
       if (present) {
+        // The anchor rate counts anchor-present samples only; absent frames
+        // are still written so the occlusion gap stays measurable.
+        presentSamples++;
+        firstPresentNs ??= time;
+        lastPresentNs = time;
         if (wasPresent == false && absentSinceUs != null) {
           gapCount++;
           final gapUs = timeUs - absentSinceUs!;
@@ -326,8 +354,6 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
         if (wasPresent == true) absentSinceUs = timeUs;
         wasPresent = false;
       }
-
-      builder.add(hostTimeNs: time, tracking: frame);
     }
 
     final sub = source.frames.listen(capture);
@@ -351,10 +377,10 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
       );
     }
 
-    final spanUs = builder.span.inMicroseconds;
-    final rate = samples < 2 || spanUs <= 0
+    final spanNs = presentSamples < 2 ? 0 : lastPresentNs - firstPresentNs!;
+    final rate = presentSamples < 2 || spanNs <= 0
         ? null
-        : (samples - 1) * Duration.microsecondsPerSecond / spanUs;
+        : (presentSamples - 1) * 1000000000 / spanNs;
     final diagnostics = <String, Object?>{
       'occlusion_gaps': gapCount,
       'occluded_samples': occludedSamples,

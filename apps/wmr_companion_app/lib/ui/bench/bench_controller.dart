@@ -351,6 +351,16 @@ class BenchController extends Notifier<BenchRunState> {
       while (next < sequence.length && keys.contains(sequence[next].key)) {
         next++;
       }
+      // Entries at or after the first missing run are stale: re-recording from
+      // [next] replaces them, so keeping them would duplicate every row.
+      final keep = <String>{
+        for (var index = 0; index < next; index++) sequence[index].key,
+      };
+      _poseEntries.removeWhere((entry) {
+        final hand = entry['hand'];
+        final handIndex = hand == 'LEFT' ? 0 : 1;
+        return !keep.contains('$handIndex:${entry['segment']}:${entry['run']}');
+      });
       state = state.copyWith(poseSegment: next);
       _publishPoseProgress();
     } catch (_) {

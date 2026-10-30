@@ -28,7 +28,9 @@ Uint8List _configBlob(int seed) =>
 
 /// Writes a valid pose file with the guided bench's fixed name.
 class _FakePoseRecorder implements BenchPoseRecorder {
-  _FakePoseRecorder(this.dir);
+  _FakePoseRecorder(this.dir) {
+    dir.createSync(recursive: true);
+  }
 
   final Directory dir;
   final List<String> recorded = [];
@@ -66,6 +68,52 @@ class _FakePoseRecorder implements BenchPoseRecorder {
       provenance: const {'runtime': 'viture', 'run_index': 1},
     );
   }
+}
+
+/// A short corpus session used by the resume tests.
+RealBenchSession _resumeSession(Directory dir, BenchPoseRecorder recorder) =>
+    RealBenchSession(
+      poseRecorder: recorder,
+      clock: MonotonicClock(),
+      captureStore: CaptureStore(Directory('${dir.path}/captures')),
+      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+      durations: const BenchDurations(
+        poseStill: Duration(milliseconds: 10),
+        poseDrifting: Duration(milliseconds: 10),
+        poseSlowPan: Duration(milliseconds: 10),
+        poseMediumPan: Duration(milliseconds: 10),
+        poseFastFlick: Duration(milliseconds: 10),
+        poseOcclusion: Duration(milliseconds: 10),
+      ),
+      appCommit: 'abc1234',
+      firmwareSha: 'deadbee',
+    );
+
+ProviderContainer _openResumeContainer(
+  Directory dir,
+  PoseRecordingStore progress,
+  BenchSession session,
+) {
+  final container = ProviderContainer(
+    overrides: [
+      benchSessionProvider.overrideWithValue(() async => session),
+      benchPoseAvailabilityProvider.overrideWithValue(
+        const BenchPoseAvailability.available('viture'),
+      ),
+      poseRecordingStoreProvider.overrideWith((ref) async => progress),
+    ],
+  );
+  addTearDown(container.dispose);
+  return container;
+}
+
+Future<BenchController> _startResumeCorpus(ProviderContainer container) async {
+  final sub = container.listen(benchControllerProvider, (_, _) {});
+  addTearDown(sub.close);
+  final controller = container.read(benchControllerProvider.notifier);
+  controller.selectMode(BenchMode.sixDofOnly);
+  controller.skipCurrent(); // capability summary is not part of the corpus
+  return controller;
 }
 
 void main() {
@@ -352,48 +400,12 @@ void main() {
     final first = _FakePoseRecorder(Directory('${dir.path}/runs'));
     final second = _FakePoseRecorder(Directory('${dir.path}/runs'));
 
-    RealBenchSession session(BenchPoseRecorder recorder) => RealBenchSession(
-      poseRecorder: recorder,
-      clock: MonotonicClock(),
-      captureStore: CaptureStore(Directory('${dir.path}/captures')),
-      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
-      durations: const BenchDurations(
-        poseStill: Duration(milliseconds: 10),
-        poseDrifting: Duration(milliseconds: 10),
-        poseSlowPan: Duration(milliseconds: 10),
-        poseMediumPan: Duration(milliseconds: 10),
-        poseFastFlick: Duration(milliseconds: 10),
-        poseOcclusion: Duration(milliseconds: 10),
-      ),
-      appCommit: 'abc1234',
-      firmwareSha: 'deadbee',
+    final firstContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, first),
     );
-
-    ProviderContainer open(BenchSession session) {
-      final container = ProviderContainer(
-        overrides: [
-          benchSessionProvider.overrideWithValue(() async => session),
-          benchPoseAvailabilityProvider.overrideWithValue(
-            const BenchPoseAvailability.available('viture'),
-          ),
-          poseRecordingStoreProvider.overrideWith((ref) async => progress),
-        ],
-      );
-      addTearDown(container.dispose);
-      return container;
-    }
-
-    Future<BenchController> start(ProviderContainer container) async {
-      final sub = container.listen(benchControllerProvider, (_, _) {});
-      addTearDown(sub.close);
-      final controller = container.read(benchControllerProvider.notifier);
-      controller.selectMode(BenchMode.sixDofOnly);
-      controller.skipCurrent(); // capability summary is not part of the corpus
-      return controller;
-    }
-
-    final firstContainer = open(session(first));
-    final firstController = await start(firstContainer);
+    final firstController = await _startResumeCorpus(firstContainer);
     for (var i = 0; i < 5; i++) {
       await firstController.runCurrent();
     }
@@ -402,8 +414,12 @@ void main() {
     await firstController.poseProgressWritten;
     firstContainer.dispose();
 
-    final secondContainer = open(session(second));
-    final secondController = await start(secondContainer);
+    final secondContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, second),
+    );
+    final secondController = await _startResumeCorpus(secondContainer);
     await secondController.runCurrent();
     expect(second.recorded, hasLength(1), reason: 'only the next run records');
     expect(second.recorded.single, '0:drifting:2');
@@ -422,6 +438,64 @@ void main() {
         '${segment['hand']}:${segment['segment']}:${segment['run']}',
     ];
     expect(keys.toSet(), hasLength(benchPoseSequence.length));
+  });
+
+  test('resume drops saved runs after a mid-corpus missing file', () async {
+    final progress = PoseRecordingStore(Directory('${dir.path}/documents'));
+    final first = _FakePoseRecorder(Directory('${dir.path}/runs'));
+    final second = _FakePoseRecorder(Directory('${dir.path}/runs'));
+
+    final firstContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, first),
+    );
+    final firstController = await _startResumeCorpus(firstContainer);
+    for (var i = 0; i < 8; i++) {
+      await firstController.runCurrent();
+    }
+    expect(first.recorded, hasLength(8));
+    await firstController.poseProgressWritten;
+    firstContainer.dispose();
+
+    // LEFT still run 4 (sequence index 3) is gone; the later runs are on disk.
+    final missing = File(
+      '${dir.path}/runs/'
+      '${poseCaptureFileName(runtime: 'viture', hand: 'left', segment: 'still', run: 4)}',
+    );
+    expect(missing.existsSync(), isTrue);
+    missing.deleteSync();
+
+    final secondContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, second),
+    );
+    final secondController = await _startResumeCorpus(secondContainer);
+    await secondController.runCurrent();
+    expect(
+      second.recorded,
+      hasLength(1),
+      reason: 'resume restarts at the missing run, not the first recorded one',
+    );
+    expect(second.recorded.single, '0:still:4');
+    expect(secondContainer.read(benchControllerProvider).poseSegment, 4);
+
+    for (var i = 4; i < benchPoseSequence.length; i++) {
+      await secondController.runCurrent();
+    }
+    final state = secondContainer.read(benchControllerProvider);
+    expect(state.step, BenchStep.export);
+    final segments =
+        state.resultFor(BenchStep.poseCapture).data['segments']! as List;
+    expect(segments, hasLength(benchPoseSequence.length));
+    final keys = [
+      for (final segment in segments.cast<Map>())
+        '${segment['hand']}:${segment['segment']}:${segment['run']}',
+    ];
+    expect(keys.toSet(), hasLength(benchPoseSequence.length));
+    expect(second.recorded, hasLength(benchPoseSequence.length - 3));
+    expect(second.recorded.first, '0:still:4');
   });
 
   group('firmware SHA', () {
