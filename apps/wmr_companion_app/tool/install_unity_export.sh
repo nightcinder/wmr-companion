@@ -20,7 +20,6 @@
 # replaces any previous export for the flavor.
 #
 #   tool/install_unity_export.sh unified path/to/unityLibrary.zip
-#   tool/install_unity_export.sh viture path/to/unityLibrary
 #
 # Options (after the two positional arguments):
 #   --ndk-version <version>  NDK to record in unityLibrary/build.gradle.
@@ -35,7 +34,7 @@ app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 android_dir="$app_dir/android"
 
 usage() {
-  echo "usage: $0 {viture|xreal|unified} <unityLibrary.zip|unityLibrary dir> [--ndk-version <v>] [--target-root <dir>]" >&2
+  echo "usage: $0 unified <unityLibrary.zip|unityLibrary dir> [--ndk-version <v>] [--target-root <dir>]" >&2
   exit 64
 }
 
@@ -66,13 +65,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$flavor" in
-  viture | xreal | unified) ;;
-  *) usage ;;
-esac
-case "$flavor" in
-  viture) module="unityLibraryViture" ;;
-  xreal) module="unityLibraryXreal" ;;
   unified) module="unityLibraryUnified" ;;
+  *)
+    echo "FAIL: only the unified export is supported (ONY-565); the per-vendor flavors are retired." >&2
+    usage
+    ;;
 esac
 
 if [ -z "$ndk_version" ]; then

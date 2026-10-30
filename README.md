@@ -55,7 +55,7 @@ flutter pub get
 dart format --set-exit-if-changed .
 flutter analyze
 flutter test
-tool/build_flavor.sh base          # flavors: base, viture, xreal, unified
+tool/build_flavor.sh base          # flavors: base, unified; only unified ships
 flutter run --flavor base -d <device>   # BLE needs a physical phone
 
 # Unified APK: install the owner's unityLibrary export, then build
