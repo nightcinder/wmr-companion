@@ -53,6 +53,12 @@ UNITY_SUBSYSTEMS = {
     "assets/bin/Data/UnitySubsystems/VitureUnityXR/UnitySubsystemsManifest.json": ("VITURE XR Plugin", "0.9.0"),
     "assets/bin/Data/UnitySubsystems/XREALXRPlugin/UnitySubsystemsManifest.json": ("XREAL XR Plugin", "3.1.0"),
 }
+# ONY-612's WmrStereoCameraRig reports these stage names through
+# WmrTrackingViturePlugin.onUnityStage. An APK built from the pre-ONY-612
+# export carries none of them, so their absence proves the release artifact
+# does not hold the current bridge.
+REQUIRED_STEREO_LITERALS = ("playerHosted", "loaderStarted", "firstFrame")
+UNITY_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 
 
 class Axml:
@@ -234,6 +240,18 @@ def main(argv: list[str]) -> int:
             print(f"PASS native: {sorted(REQUIRED_LIBS)}")
         abis = sorted({name.split("/")[1] for name in names if name.startswith("lib/") and name.count("/") == 2})
         print(f"INFO ABIs: {abis}")
+
+        if UNITY_METADATA not in names:
+            fail(f"missing IL2CPP metadata: {UNITY_METADATA}")
+            failures += 1
+        else:
+            metadata = apk.read(UNITY_METADATA)
+            missing_stages = [name for name in REQUIRED_STEREO_LITERALS if name.encode() not in metadata]
+            if missing_stages:
+                fail(f"IL2CPP metadata is from the pre-ONY-612 export, missing stereo stages: {missing_stages}")
+                failures += 1
+            else:
+                print(f"PASS stereo stages: {list(REQUIRED_STEREO_LITERALS)}")
 
         dex = b"".join(apk.read(name) for name in names if name.startswith("classes") and name.endswith(".dex"))
         missing_classes = {name for name in REQUIRED_DEX_CLASSES if name.encode() not in dex}

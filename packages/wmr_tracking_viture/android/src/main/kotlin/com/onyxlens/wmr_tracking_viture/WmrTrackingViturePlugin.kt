@@ -496,8 +496,9 @@ class WmrTrackingViturePlugin internal constructor(
 
         /**
          * Called by C# `WmrStereoCameraRig` when the hosted scene reaches a
-         * startup stage. The stereo mode is `mono`, `multiPass`,
-         * `singlePass`, `singlePassInstanced` or `unknown`.
+         * startup stage. The stereo mode is `multiPass`, `singlePass`,
+         * `singlePassInstanced` or `unknown`; a mono player is reported as
+         * `unknown` because the VITURE loader never presents mono as stereo.
          */
         @JvmStatic
         fun onUnityStage(stage: String, stereoMode: String?) {
