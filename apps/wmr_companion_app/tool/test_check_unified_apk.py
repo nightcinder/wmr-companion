@@ -89,11 +89,13 @@ def build_manifest(elements: list[tuple[str, dict[str, str]]], utf8: bool = Fals
     )
 
 
-def _manifest_elements(camera_required: str | None) -> list[tuple[str, dict[str, str]]]:
+def _manifest_elements(
+    camera_required: str | None, extra_launcher: bool = False
+) -> list[tuple[str, dict[str, str]]]:
     camera = {"name": "android.hardware.camera"}
     if camera_required is not None:
         camera["required"] = camera_required
-    return [
+    elements = [
         ("manifest", {"package": "com.onyxlens.wmr_companion", "versionName": "0.2.1"}),
         ("uses-permission", {"name": "android.permission.CAMERA"}),
         ("uses-permission", {"name": "android.permission.BLUETOOTH_SCAN"}),
@@ -106,13 +108,27 @@ def _manifest_elements(camera_required: str | None) -> list[tuple[str, dict[str,
         ("meta-data", {"name": "com.viture.xr.dof", "value": "6dof"}),
         ("meta-data", {"name": "com.nreal.supportDevices", "value": "1|XrealLight|2|XrealAir"}),
         ("activity", {"name": "com.onyxlens.wmr_companion.MainActivity"}),
+        ("intent-filter", {}),
+        ("action", {"name": "android.intent.action.MAIN"}),
+        ("category", {"name": "android.intent.category.LAUNCHER"}),
         ("activity", {"name": "com.unity3d.player.UnityPlayerActivity"}),
         ("activity", {"name": "ai.nreal.activitylife.NRXRActivity"}),
     ]
+    if extra_launcher:
+        elements += [
+            ("intent-filter", {}),
+            ("action", {"name": "android.intent.action.MAIN"}),
+            ("category", {"name": "android.intent.category.LAUNCHER"}),
+            ("category", {"name": "android.intent.category.LEANBACK_LAUNCHER"}),
+        ]
+    return elements
 
 
 def build_apk(
-    directory: Path, camera_required: str | None, display_stub: bool = True
+    directory: Path,
+    camera_required: str | None,
+    display_stub: bool = True,
+    extra_launcher: bool = False,
 ) -> Path:
     path = directory / "unified.apk"
     classes = list(checker.REQUIRED_DEX_CLASSES)
@@ -121,7 +137,10 @@ def build_apk(
         # the release build must keep it (ONY-557).
         classes.append("android/hardware/display/DisplayManager")
     with zipfile.ZipFile(path, "w") as apk:
-        apk.writestr("AndroidManifest.xml", build_manifest(_manifest_elements(camera_required)))
+        apk.writestr(
+            "AndroidManifest.xml",
+            build_manifest(_manifest_elements(camera_required, extra_launcher)),
+        )
         apk.writestr(
             "classes.dex",
             b"\x00".join(name.encode() for name in classes),
@@ -196,6 +215,13 @@ class MainTest(unittest.TestCase):
             code, output = run_checker(build_apk(Path(tmp), "true"))
         self.assertEqual(code, 1, output)
         self.assertIn("android.hardware.camera is required", output)
+
+    def test_second_launcher_activity_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", extra_launcher=True))
+        self.assertEqual(code, 1, output)
+        self.assertIn("launcher activities:", output)
+        self.assertIn("ai.nreal.activitylife.NRXRActivity", output)
 
 
 if __name__ == "__main__":

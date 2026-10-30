@@ -6,6 +6,9 @@
 # stubs in the gitignored locations, builds the flavor, then removes them.
 # Needs an Android SDK with aapt; no Unity or vendor SDK is required.
 #
+# Also proves ONY-561: the unified APK keeps exactly one home-screen icon when
+# the linked export declares standalone MAIN/LAUNCHER activities.
+#
 #   tool/test_flavor_wiring.sh
 set -euo pipefail
 
@@ -26,40 +29,56 @@ if [ -z "$aapt" ]; then
   exit 1
 fi
 
-# A developer may have a real (proprietary, gitignored) unified export at this
-# path. Move it aside before writing the stub and put it back on exit; only
-# remove a directory this script created itself.
+# A developer may have a real (proprietary, gitignored) export at these paths.
+# Move it aside before writing a stub and put it back on exit; only remove a
+# directory this script created itself.
 backup_root=""
-created_stub=0
-created_vendor_stub=0
+created_flavors=()
 
 cleanup() {
-  if [ "$created_stub" -eq 1 ]; then
-    rm -rf "$unity_root/unified"
-  fi
-  if [ "$created_vendor_stub" -eq 1 ]; then
-    rm -rf "$unity_root/viture"
-  fi
+  local flavor
+  for flavor in "${created_flavors[@]+"${created_flavors[@]}"}"; do
+    rm -rf "$unity_root/$flavor"
+  done
   if [ -n "$backup_root" ]; then
     for saved in "$backup_root"/*; do
       if [ -e "$saved" ]; then
         mv "$saved" "$unity_root/"
       fi
     done
-    rmdir "$backup_root"
+    rmdir "$backup_root" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
 
-if [ -e "$unity_root/unified" ] || [ -L "$unity_root/unified" ]; then
-  backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
-  echo "==> preserving existing $unity_root/unified (restored on exit)"
-  mv "$unity_root/unified" "$backup_root/unified"
-fi
+drop_created() {
+  local keep=() flavor
+  for flavor in "${created_flavors[@]+"${created_flavors[@]}"}"; do
+    if [ "$flavor" != "$1" ]; then
+      keep+=("$flavor")
+    fi
+  done
+  created_flavors=("${keep[@]+"${keep[@]}"}")
+}
+
+backup_export() {
+  local flavor="$1"
+  if [ -e "$unity_root/$flavor" ] || [ -L "$unity_root/$flavor" ]; then
+    if [ -z "$backup_root" ]; then
+      backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
+    fi
+    echo "==> preserving existing $unity_root/$flavor (restored on exit)"
+    mv "$unity_root/$flavor" "$backup_root/$flavor"
+  fi
+}
+
+for flavor in unified viture xreal; do
+  backup_export "$flavor"
+done
 
 create_stub() {
   local dir="$unity_root/unified/unityLibrary"
-  created_stub=1
+  created_flavors+=(unified)
   mkdir -p "$dir/src/main"
   cat >"$dir/build.gradle" <<EOF
 // Throwaway stand-in for a Unity UaaL export, used by tool/test_flavor_wiring.sh.
@@ -86,17 +105,63 @@ EOF
   cat >"$dir/src/main/AndroidManifest.xml" <<EOF
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="$unified_permission" />
+    <!-- Mimic the XREAL/Unity export: both activities carry a standalone
+         launcher filter. The app flavor manifest must remove them so the APK
+         installs one icon (ONY-561). -->
+    <application>
+        <activity
+            android:name="ai.nreal.activitylife.NRXRActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.unity3d.player.UnityPlayerActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>
 EOF
 }
 
 apk_path() {
-  echo "$build_root/app/outputs/flutter-apk/app-unified-debug.apk"
+  local flavor="${1:-unified}"
+  echo "$build_root/app/outputs/flutter-apk/app-$flavor-debug.apk"
 }
 
 has_permission() {
   local apk="$1" permission="$2"
   "$aapt" dump permissions "$apk" | grep -q "$permission"
+}
+
+launcher_activities() {
+  "$aapt" dump badging "$1" |
+    sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p"
+}
+
+assert_one_launcher() {
+  local flavor="$1"
+  local apk launchers
+  apk="$(apk_path "$flavor")"
+  launchers="$(launcher_activities "$apk")"
+  if [ "$launchers" != "com.onyxlens.wmr_companion.MainActivity" ]; then
+    echo "FAIL: $flavor APK launcher activities: ${launchers:-none}" >&2
+    echo "      expected only com.onyxlens.wmr_companion.MainActivity" >&2
+    exit 1
+  fi
+  if "$aapt" dump badging "$apk" | grep -q '^leanback-launchable-activity'; then
+    echo "FAIL: $flavor APK still exposes a leanback launcher activity" >&2
+    exit 1
+  fi
+  echo "PASS: $flavor APK has one launcher icon"
 }
 
 # settings.gradle.kts probes the export directories at configuration time, which
@@ -108,8 +173,9 @@ reset_configuration_cache() {
 }
 
 build() {
+  local flavor="${1:-unified}"
   reset_configuration_cache
-  (cd "$app_dir" && tool/build_flavor.sh unified)
+  (cd "$app_dir" && tool/build_flavor.sh "$flavor")
 }
 
 echo "==> a unified stub must link the unified unityLibrary"
@@ -122,9 +188,11 @@ if ! has_permission "$(apk_path)" "$unified_permission"; then
 fi
 echo "PASS: unified linked the unified unityLibrary"
 
+assert_one_launcher unified
+
 echo "==> unified with no export must still build"
 rm -rf "$unity_root/unified"
-created_stub=0
+drop_created unified
 rm -rf "$(apk_path)"
 build
 if has_permission "$(apk_path)" "$unified_permission"; then
@@ -136,13 +204,8 @@ echo "PASS: unified built without a Unity export"
 echo "==> a leftover per-vendor export must fail configuration"
 # ONY-565 retired android/unity/viture and android/unity/xreal. The guard runs
 # at configuration time, so an empty directory is enough to trigger it.
-if [ -e "$unity_root/viture" ] || [ -L "$unity_root/viture" ]; then
-  [ -n "$backup_root" ] ||
-    backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
-  echo "==> preserving existing $unity_root/viture (restored on exit)"
-  mv "$unity_root/viture" "$backup_root/viture"
-fi
-created_vendor_stub=1
+backup_export viture
+created_flavors+=(viture)
 mkdir -p "$unity_root/viture/unityLibrary"
 if build_output="$(build 2>&1)"; then
   echo "FAIL: a retired per-vendor export built instead of failing" >&2
@@ -154,7 +217,7 @@ if ! grep -q "retired per-vendor Unity export" <<<"$build_output"; then
   exit 1
 fi
 rm -rf "$unity_root/viture"
-created_vendor_stub=0
+drop_created viture
 echo "PASS: retired per-vendor export rejected"
 
 echo "All flavor wiring checks passed."

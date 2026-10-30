@@ -86,6 +86,16 @@ class VitureRelayContractTest {
     }
 
     @Test
+    fun isReportedDistinguishesAnUnreportedModelFromAClassifiedOne() {
+        assertFalse(VitureGlassesModelSpec.isReported(null))
+        assertFalse(VitureGlassesModelSpec.isReported("  "))
+        assertFalse(VitureGlassesModelSpec.isReported("Unknown"))
+        assertTrue(VitureGlassesModelSpec.isReported("LumaUltra"))
+        assertTrue(VitureGlassesModelSpec.isReported("Pro"))
+        assertTrue(VitureGlassesModelSpec.isReported("LumaNext"))
+    }
+
+    @Test
     fun relayCommandsFormatValidJsonEnvelopes() {
         assertEquals(
             """{"v":1,"cmd":"start","vendor":"viture","options":{"filter_mode":"responsive","aim_sensitivity":"high"}}""",

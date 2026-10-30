@@ -100,8 +100,8 @@ android {
         create("unified") {
             dimension = "vendor"
             // VITURE 0.9.0's VitureUnityXR.aar declares minSdk 33, and the
-            // unified export links it alongside XREAL. Keep the other flavors
-            // on Flutter's default (ONY-388).
+            // unified export links it alongside XREAL. `base` stays on
+            // Flutter's default (ONY-388).
             minSdk = 33
         }
     }
