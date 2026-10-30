@@ -145,8 +145,8 @@ revisions.
 2. Choose **6DoF only** (no bridge) or **Combined**. The pose step records four
    runs of each of the five scored motion classes for each hand, in this order:
    LEFT still x4, LEFT drifting x4, LEFT slow x4, LEFT medium x4, LEFT fast x4,
-   the same for RIGHT, then one occlusion diagnostic run per hand. That is
-   **40 corpus files plus 2 diagnostic files**.
+   then one LEFT occlusion diagnostic; then the same corpus and diagnostic for
+   RIGHT. That is **40 corpus files plus 2 diagnostic files**.
 3. Each run repeats the section 8 path until it is at least 30 s: still 30 s,
    held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s. The
    occlusion run is 30 s and diagnostic only.
@@ -184,6 +184,28 @@ back to the head-relative offset or orientation only
 (`SixDofFuser.update`), and those paths are never filtered, so they say nothing
 about One Euro. A capture needs a runtime that tracks controllers or hands
 (Android XR, VITURE or XREAL) attached while the bench records.
+`provenance` block. Use the debug screen's pose recorder, pull the JSON, and
+convert it with `PoseCapture.fromRecording` or add the conversion to the
+recorder export.
+
+### Why the ONY-491 guided bench is not enough
+
+The tuner replays a `PoseRecording`: per viewer tick, the fused controller pose
+plus the `TrackingFrame` that positioned it. It only needs the position and
+timestamp of each new **anchor** sample, where the anchor is a runtime-tracked
+controller pose or a hand palm/grip anchor from the XR runtime.
+
+The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) records 60 s of the
+FF11 raw controller stream, a still hold and a slow move per hand, and exports
+a test bundle. It has no pose-recorder step, so it writes no `TrackingFrame`s,
+and it has no held-drift, medium, fast or occlusion class. Its files cannot feed
+the tuner.
+
+Controller-only recordings do not close the gap either: with no runtime anchor
+the fuser falls back to the head-relative offset or orientation only
+(`SixDofFuser.update`), and those paths are never filtered, so they say nothing
+about One Euro. A capture needs a runtime that tracks controllers or hands
+(Android XR, VITURE or XREAL) attached while the debug screen records.
 
 ## Reproduce
 
