@@ -205,9 +205,11 @@ class XrealAir2UltraTrackingSource implements TrackingSource {
   ///
   /// Returns null when [enabled] (or [XrealTracking.enabled]) is false without
   /// calling the platform. Throws [TrackingException] when the Unity UaaL
-  /// runtime is absent (`unavailable`), the connected glasses do not support
+  /// runtime is absent (`unavailable`), the reported glasses do not support
   /// 6DoF + hand tracking (`unsupported`), or the capability handshake is
-  /// malformed (`protocol`).
+  /// malformed (`protocol`). An unreported model is not an error: the check
+  /// moves to [start], where the Unity relay reports any model other than the
+  /// Air 2 Ultra as `unsupported`.
   static Future<XrealAir2UltraTrackingSource?> create({
     bool? enabled,
     XrealTrackingPlatform platform = const XrealTrackingPlatform(),
@@ -233,6 +235,12 @@ class XrealAir2UltraTrackingSource implements TrackingSource {
     }
 
     final glassesModel = XrealGlassesModel.fromSdkName(raw['glassesModel']);
+    // The unified Unity scene keeps the XREAL backend inactive until `start`,
+    // so the native layer cannot report a model before capabilities and marks
+    // it with `modelReported: false`. Defer the Air 2 Ultra check to the Unity
+    // start handshake in that case. Absent means reported, so an older native
+    // plugin keeps failing closed.
+    final modelReported = raw['modelReported'] != false;
     final supported = raw['supported'] == true;
     final handTracking = raw['handTracking'] == true;
     final headTracking = raw['headTracking'] == true;
@@ -241,8 +249,7 @@ class XrealAir2UltraTrackingSource implements TrackingSource {
     if (!supported ||
         !handTracking ||
         !headTracking ||
-        glassesModel == XrealGlassesModel.unknown ||
-        !glassesModel.supportsHandTracking) {
+        (modelReported && !glassesModel.supportsHandTracking)) {
       throw TrackingException(
         TrackingExceptionKind.unsupported,
         reason is String && reason.isNotEmpty

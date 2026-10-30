@@ -61,7 +61,10 @@ Confirm the flag is live: the debug overlay shows "XREAL tracking: available" wh
 2. Put the bridge in its usual place, controllers on taped marks ~0.5 m from it. Photo the setup.
 3. Start the serial monitor (bridge) and a logcat capture (host).
 4. Connect the app to the bridge, select **Batched FF14**, confirm `STREAM` shows `stream=batched`, `sub=1`, live `rate_rx`. Confirm `bridge_hands=0`.
-5. Confirm the app reports the glasses model as `Air2Ultra` before gate 5; any other model makes gate 5 fail with `unsupported`.
+5. Start tracking: the Unity `start` handshake is the model confirmation. A
+   successful start means `Air2Ultra`; any other model fails gate 5 with
+   `unsupported (found <model>)`. The handshake model is not re-reported to the
+   app, so do not expect a pre-start `Air2Ultra` read.
 
 ## 2.1 Pre-flight (desk-only, done 2026-10-28)
 
@@ -127,7 +130,7 @@ Record:
 
 Procedure:
 
-1. Confirm glasses model is `Air2Ultra` (gate fails with `unsupported` otherwise).
+1. Start tracking: the Unity `start` handshake fails with `unsupported` unless the glasses are an Air 2 Ultra (the model it reports is not re-surfaced to the app).
 2. Start tracking. With the hand empty and visible, log for 60 s.
 3. Record joint count and rate, and the raw `GetDeviceType()` name.
 4. Repeat with the hand gripping a WMR controller (controller awake, not streaming). Record whether joints still arrive.

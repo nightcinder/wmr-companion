@@ -164,21 +164,48 @@ class WmrTrackingXrealPlugin internal constructor(
                 "permissions" to permissions,
             )
         }
-        val modelSpec = XrealGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
+        val reportedModel = bridge.queryGlassesModel()
+        val modelSpec = XrealGlassesModelSpec.fromSdkName(reportedModel)
+        if (!XrealGlassesModelSpec.isReported(reportedModel)) {
+            // The unified Unity scene keeps the XREAL backend inactive until
+            // `start`, so the model cannot be reported yet. Advertise the only
+            // hand-tracking model and let the Unity start handshake report any
+            // other model as `unsupported`.
+            val air2Ultra = XrealGlassesModelSpec.AIR_2_ULTRA
+            return mapOf(
+                "unityAvailable" to true,
+                "modelReported" to false,
+                "supported" to true,
+                "handTracking" to true,
+                "headTracking" to true,
+                "handGestures" to true,
+                "passthroughCamera" to true,
+                "handJointCount" to air2Ultra.handJointCount,
+                "glassesModel" to modelSpec.sdkName,
+                "reason" to null,
+                "permissions" to permissions,
+            )
+        }
         val supported = modelSpec.head6Dof && modelSpec.handTracking
+        val modelName = if (modelSpec == XrealGlassesModelSpec.UNKNOWN) {
+            reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+        } else {
+            modelSpec.sdkName
+        }
         return mapOf(
             "unityAvailable" to true,
+            "modelReported" to true,
             "supported" to supported,
             "handTracking" to modelSpec.handTracking,
             "headTracking" to modelSpec.head6Dof,
             "handGestures" to modelSpec.handTracking,
             "passthroughCamera" to supported,
             "handJointCount" to modelSpec.handJointCount,
-            "glassesModel" to modelSpec.sdkName,
+            "glassesModel" to modelName,
             "reason" to if (supported) {
                 null
             } else {
-                "XREAL hand tracking requires Air 2 Ultra (found ${modelSpec.sdkName})"
+                "XREAL hand tracking requires Air 2 Ultra (found $modelName)"
             },
             "permissions" to permissions,
         )
@@ -256,12 +283,20 @@ class WmrTrackingXrealPlugin internal constructor(
             reply.error(ERROR_UNAVAILABLE, "No shared UnityPlayer is linked into this build")
             return
         }
-        val modelSpec = XrealGlassesModelSpec.fromSdkName(bridge.queryGlassesModel())
-        if (!modelSpec.handTracking || !modelSpec.head6Dof) {
+        val reportedModel = bridge.queryGlassesModel()
+        val modelSpec = XrealGlassesModelSpec.fromSdkName(reportedModel)
+        if (XrealGlassesModelSpec.isReported(reportedModel) &&
+            (!modelSpec.handTracking || !modelSpec.head6Dof)
+        ) {
             runtime.release(GlassesVendor.XREAL)
+            val modelName = if (modelSpec == XrealGlassesModelSpec.UNKNOWN) {
+                reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
+            } else {
+                modelSpec.sdkName
+            }
             reply.error(
                 ERROR_UNSUPPORTED,
-                "XREAL hand tracking requires Air 2 Ultra (found ${modelSpec.sdkName})",
+                "XREAL hand tracking requires Air 2 Ultra (found $modelName)",
             )
             return
         }
