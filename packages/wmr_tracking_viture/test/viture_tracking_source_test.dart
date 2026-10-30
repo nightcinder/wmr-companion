@@ -184,24 +184,81 @@ void main() {
     },
   );
 
-  test('an unreported or unknown glasses model maps to TrackingExceptionKind.unsupported', () async {
-    const unknownCapabilities = <String, Object?>{
-      'unityAvailable': true,
-      'supported': false,
-      'handTracking': false,
-      'headTracking': false,
-      'handGestures': false,
-      'passthroughCamera': false,
-      'handJointCount': 0,
-      'glassesModel': 'Unknown',
-      'reason': 'VITURE hand tracking requires LumaUltra on Pro Neckband (found Unknown)',
-      'permissions': <String, Object?>{'camera': 'granted'},
-    };
+  test(
+    'capabilities that report no support are refused as unsupported',
+    () async {
+      const unknownCapabilities = <String, Object?>{
+        'unityAvailable': true,
+        'supported': false,
+        'handTracking': false,
+        'headTracking': false,
+        'handGestures': false,
+        'passthroughCamera': false,
+        'handJointCount': 0,
+        'glassesModel': 'Unknown',
+        'reason':
+            'VITURE hand tracking requires LumaUltra on Pro Neckband '
+            '(found Unknown)',
+        'permissions': <String, Object?>{'camera': 'granted'},
+      };
+
+      await expectLater(
+        VitureNeckbandTrackingSource.create(
+          enabled: true,
+          platform: _FakeViturePlatform(capabilities: unknownCapabilities),
+        ),
+        throwsA(
+          isA<TrackingException>().having(
+            (error) => error.kind,
+            'kind',
+            TrackingExceptionKind.unsupported,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'an unreported model defers the check to the Unity start handshake',
+    () async {
+      const pendingCapabilities = <String, Object?>{
+        'unityAvailable': true,
+        'modelReported': false,
+        'supported': true,
+        'handTracking': true,
+        'headTracking': true,
+        'handGestures': true,
+        'passthroughCamera': true,
+        'handJointCount': 26,
+        'glassesModel': 'Unknown',
+        'reason': null,
+        'permissions': <String, Object?>{'camera': 'granted'},
+      };
+      final platform = _FakeViturePlatform(capabilities: pendingCapabilities);
+
+      final source = await VitureNeckbandTrackingSource.create(
+        enabled: true,
+        platform: platform,
+      );
+
+      expect(source, isNotNull);
+      expect(source!.glassesModel, VitureGlassesModel.lumaUltra);
+      expect(source.capabilities.handJointCount, 26);
+      await source.start();
+      expect(platform.startCalls, 1);
+      await source.dispose();
+    },
+  );
+
+  test('a reported Unknown model is still rejected', () async {
+    final capabilities = Map<String, Object?>.from(_supportedLumaUltra)
+      ..['glassesModel'] = 'Unknown'
+      ..['modelReported'] = true;
 
     await expectLater(
       VitureNeckbandTrackingSource.create(
         enabled: true,
-        platform: _FakeViturePlatform(capabilities: unknownCapabilities),
+        platform: _FakeViturePlatform(capabilities: capabilities),
       ),
       throwsA(
         isA<TrackingException>().having(

@@ -27,6 +27,14 @@ namespace UnityEngine
         DontRequireReceiver = 1,
     }
 
+    public enum StereoTargetEyeMask
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+        Both = 3,
+    }
+
     public class MonoBehaviour : Object
     {
         public GameObject gameObject { get; } = new GameObject();
@@ -46,6 +54,8 @@ namespace UnityEngine
     public class Camera : Object
     {
         public static Camera main { get; set; }
+
+        public StereoTargetEyeMask stereoTargetEye { get; set; }
 
         public Transform transform { get; } = new Transform();
     }
@@ -146,6 +156,23 @@ namespace UnityEngine
         public MinAttribute(float min)
         {
         }
+    }
+}
+
+namespace UnityEngine.XR
+{
+    public static class XRSettings
+    {
+        public enum StereoRenderingMode
+        {
+            MultiPass = 0,
+            SinglePass = 1,
+            SinglePassInstanced = 2,
+        }
+
+        public static bool isDeviceActive { get; set; } = true;
+
+        public static StereoRenderingMode stereoRenderingMode { get; set; }
     }
 }
 

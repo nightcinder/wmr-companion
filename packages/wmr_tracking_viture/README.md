@@ -6,6 +6,9 @@ Default-off VITURE Pro Neckband head and 26-joint hand tracking relay source for
 VITURE hand tracking is available only through the VITURE XR SDK for Unity
 (v0.9.0, Unity 6000.0+) running on the VITURE Pro Neckband with Luma Ultra
 glasses; the cross-platform C glasses SDK exposes head pose and cameras only.
+The VITURE XR loader must render the player in stereo 3D (SpaceWalker mode):
+the export assigns it and enables startup initialisation, and `start` reports
+`unavailable` from a mono 2D player instead of stalling.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 
@@ -36,11 +39,14 @@ controller IMU and 3DoF output are unchanged.
 
 Failures are typed `TrackingException`s:
 - `unavailable`: the Unity UaaL runtime (`com.unity3d.player.UnityPlayer`) or
-  VITURE XR SDK bridge is not linked, or the host activity is detached.
-- `unsupported`: the glasses model is unreported / unknown, the connected glasses
-  are a 3DoF-only model (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`,
-  `LumaCyber`, `Beast`) rather than `LumaUltra`, or the host is not a VITURE
-  Pro Neckband.
+  VITURE XR SDK bridge is not linked, the host activity is detached, or `start`
+  runs while the VITURE XR loader is not rendering in stereo 3D (SpaceWalker
+  mode) — a 2D player cannot deliver hand joints.
+- `unsupported`: the reported glasses model is not a `LumaUltra` (`One`,
+  `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`, or an
+  unclassifiable name), or the host is not a VITURE Pro Neckband. An unreported
+  model is not an error: `create()` succeeds and the Unity `start` handshake
+  reports the real model.
 - `permissionDenied`: `android.permission.CAMERA` was denied. The permission is
   declared in the plugin manifest (with `android.hardware.camera` optional)
   and is inert while `WMR_VITURE_TRACKING` is false. Host apps not using the

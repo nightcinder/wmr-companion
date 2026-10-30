@@ -26,9 +26,13 @@ missing.
 3. Confirm the runtime assembly picked up the defines: select
    `Assets/WmrTrackingViture/Runtime/WmrTrackingViture.Runtime.asmdef` and check
    **Version Defines** for `WMR_UNITY_XR_HANDS` and `WMR_VITURE_XR_SDK`.
-4. **Project Settings > XR Plug-in Management > Android**: enable the VITURE
-   plug-in. **Player > Android**: minimum API 24, ARM64, IL2CPP (the export
-   script also applies these).
+4. **Player > Android**: minimum API 24, ARM64, IL2CPP (the export script also
+   applies these). The export then configures **XR Plug-in Management > Android**
+   through `WMR > Configure VITURE XR`: the VITURE loader is assigned and
+   **Initialize XR on Startup** is on, so the exported player renders in stereo
+   3D from launch. VITURE hand tracking only produces frames in stereo
+   (SpaceWalker) mode; a mono 2D player reports `unavailable` from `start`
+   instead of stalling. Run the menu item manually after changing XR settings.
 5. Open `Assets/Scenes/WmrTrackingSmoke.unity` and enter Play mode to see the
    relay's local logs. Without a Luma Ultra the bridge reports `unsupported`
    through `onUnityError`; that is the expected fail-closed result.
@@ -91,4 +95,7 @@ keep generated Gradle changes.
 The Unity compile/export requires the proprietary VITURE SDK and Android build
 support and is a documented external gate. CI only runs the Dart/Kotlin tests;
 the C# bridge and smoke harness are statically reviewed against the relay
-contract. No Neckband or Luma Ultra run has happened.
+contract. No Neckband or Luma Ultra run has happened, so the stereo 3D handoff
+(loader assigned at startup, `XRSettings.isDeviceActive` true on device) is
+unverified; if it reports false the host must switch the glasses to 3D /
+SpaceWalker before starting tracking.

@@ -2,7 +2,10 @@
   "name": "WmrTrackingViture.Editor",
   "rootNamespace": "OnyxLens.WmrTrackingViture.Editor",
   "references": [
-    "WmrTrackingViture.Runtime"
+    "WmrTrackingViture.Runtime",
+    "Unity.XR.Management",
+    "Unity.XR.Management.Editor",
+    "Viture.XR"
   ],
   "includePlatforms": [
     "Editor"
