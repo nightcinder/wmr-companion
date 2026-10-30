@@ -27,6 +27,7 @@ Exit codes: 0 = all checks pass, 1 = a required check failed, 64 = bad usage.
 from __future__ import annotations
 
 import json
+import struct
 import sys
 import zipfile
 from pathlib import Path
@@ -60,9 +61,13 @@ REQUIRED_METADATA = (
     "singlePass",
     "singlePassInstanced",
 )
-# IL2CPP stores C# string literals length-prefixed in global-metadata.dat: the
-# 7-bit length 4 followed by `mono`. The ONY-612 source has no such literal.
-MONO_LITERAL = b"\x04mono"
+# IL2CPP keeps C# string literals in a delimiter-free `stringLiteralData` blob,
+# indexed by an `Il2CppStringLiteral` table of (length, dataIndex) pairs. The
+# ONY-612 source has no `mono` literal; an export built from the mono StereoMode
+# source still carries it, so reject any literal whose bytes are exactly `mono`.
+METADATA_SANITY = 0xFAB11BAF
+STRING_LITERAL_ENTRY = 8  # uint32 length + uint32 dataIndex
+MONO_LITERAL = b"mono"
 
 
 def fail(message: str) -> None:
@@ -86,6 +91,36 @@ def check_subsystems(archive: zipfile.ZipFile, names: set[str]) -> int:
     return failures
 
 
+def string_literals(metadata: bytes) -> set[bytes]:
+    """Return the C# string literals recorded in global-metadata.dat.
+
+    The header starts with sanity/version, then byte offset/size pairs; the
+    first pair is the `Il2CppStringLiteral` table, the second its data blob.
+    """
+    if len(metadata) < 24:
+        raise ValueError("metadata is too short for a global-metadata header")
+    sanity, version = struct.unpack_from("<II", metadata, 0)
+    if sanity != METADATA_SANITY:
+        raise ValueError(f"bad metadata magic 0x{sanity:08x} (version {version})")
+    offset, size, data_offset, data_size = struct.unpack_from("<IIII", metadata, 8)
+    if offset + size > len(metadata) or data_offset + data_size > len(metadata):
+        raise ValueError("the string literal table is outside the metadata")
+    if size % STRING_LITERAL_ENTRY:
+        raise ValueError(
+            f"string literal table size {size} is not a multiple of {STRING_LITERAL_ENTRY}"
+        )
+    literals: set[bytes] = set()
+    for index in range(size // STRING_LITERAL_ENTRY):
+        length, data_index = struct.unpack_from(
+            "<II", metadata, offset + index * STRING_LITERAL_ENTRY
+        )
+        end = data_index + length
+        if end > data_size:
+            raise ValueError("a string literal points outside the literal data")
+        literals.add(metadata[data_offset + data_index : data_offset + end])
+    return literals
+
+
 def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
     if METADATA_PATH not in names:
         fail(f"missing IL2CPP metadata: {METADATA_PATH}")
@@ -99,7 +134,12 @@ def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
         "PASS stereo path: WmrStereoCameraRig, StereoStage/StereoMode, "
         + ", ".join(REQUIRED_METADATA[3:])
     )
-    if MONO_LITERAL in metadata:
+    try:
+        literals = string_literals(metadata)
+    except ValueError as exc:
+        fail(f"cannot read the IL2CPP string literal table: {exc}")
+        return 1
+    if MONO_LITERAL in literals:
         fail("IL2CPP metadata still emits the `mono` stereo mode")
         return 1
     print("PASS mono: no `mono` stereo mode literal")
