@@ -30,13 +30,19 @@ class OneEuroFilter {
   }) : assert(minCutoffHz > 0),
        assert(beta >= 0),
        assert(dCutoffHz > 0),
-       assert(minDt > Duration.zero),
-       assert(maxDt >= minDt);
+       assert(minDt.inMicroseconds > 0),
+       assert(maxDt.inMicroseconds >= minDt.inMicroseconds);
 
+  // ONY-502 keeps the published One Euro tuning until a hardware capture
+  // exists. The grid tuner (`tool/pose_filter_tune.dart`) chooses minCutoff,
+  // beta and dCutoff from recordings; they are not chosen by reasoning here.
+  // `minDt` is structural: it follows the anchor rate (about 11 ms at 90 Hz),
+  // not the 240 Hz IMU, so a faster controller tick cannot inflate the speed
+  // estimate.
   static const double defaultMinCutoffHz = 1.0;
   static const double defaultBeta = 0.02;
   static const double defaultDCutoffHz = 1.0;
-  static const Duration defaultMinDt = Duration(microseconds: 4167);
+  static const Duration defaultMinDt = Duration(milliseconds: 11);
   static const Duration defaultMaxDt = Duration(milliseconds: 100);
 
   /// Cutoff at zero speed, in hertz.
@@ -143,4 +149,51 @@ class OneEuroFilter {
 
   static bool _isFinite(Vector3 value) =>
       value.x.isFinite && value.y.isFinite && value.z.isFinite;
+}
+
+/// Tuning for the hand-anchor [OneEuroFilter], selectable per runtime.
+///
+/// [SixDofFusionConfig.poseFilter] carries one of these into the fuser. The
+/// no-argument values are the published defaults; the ONY-502 tuner replaces
+/// them per runtime once hardware captures exist. They are deliberately not
+/// chosen by reasoning.
+class PoseFilterConfig {
+  const PoseFilterConfig({
+    this.minCutoffHz = OneEuroFilter.defaultMinCutoffHz,
+    this.beta = OneEuroFilter.defaultBeta,
+    this.dCutoffHz = OneEuroFilter.defaultDCutoffHz,
+    this.minDt = OneEuroFilter.defaultMinDt,
+    this.maxDt = OneEuroFilter.defaultMaxDt,
+  }) : assert(minCutoffHz > 0),
+       assert(beta >= 0),
+       assert(dCutoffHz > 0);
+
+  /// Cutoff at zero speed, in hertz.
+  final double minCutoffHz;
+
+  /// Speed coefficient, in hertz per centimetre per second.
+  final double beta;
+
+  /// Cutoff for the speed estimate, in hertz.
+  final double dCutoffHz;
+
+  /// Clamp for the anchor sample interval.
+  final Duration minDt;
+  final Duration maxDt;
+
+  OneEuroFilter createFilter() => OneEuroFilter(
+    minCutoffHz: minCutoffHz,
+    beta: beta,
+    dCutoffHz: dCutoffHz,
+    minDt: minDt,
+    maxDt: maxDt,
+  );
+
+  Map<String, Object?> toJson() => {
+    'min_cutoff_hz': minCutoffHz,
+    'beta': beta,
+    'd_cutoff_hz': dCutoffHz,
+    'min_dt_us': minDt.inMicroseconds,
+    'max_dt_us': maxDt.inMicroseconds,
+  };
 }
