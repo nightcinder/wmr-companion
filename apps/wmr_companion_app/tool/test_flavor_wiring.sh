@@ -85,6 +85,29 @@ EOF
   cat >"$dir/src/main/AndroidManifest.xml" <<EOF
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="$unified_permission" />
+    <!-- Mimic the XREAL/Unity export: both activities carry a standalone
+         launcher filter. The app flavor manifest must remove them so the APK
+         installs one icon (ONY-561). -->
+    <application>
+        <activity
+            android:name="ai.nreal.activitylife.NRXRActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.unity3d.player.UnityPlayerActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>
 EOF
 }
@@ -96,6 +119,11 @@ apk_path() {
 has_permission() {
   local apk="$1" permission="$2"
   "$aapt" dump permissions "$apk" | grep -q "$permission"
+}
+
+launcher_activities() {
+  "$aapt" dump badging "$1" |
+    sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p"
 }
 
 # settings.gradle.kts probes the export directories at configuration time, which
@@ -120,6 +148,18 @@ if ! has_permission "$(apk_path)" "$unified_permission"; then
   exit 1
 fi
 echo "PASS: unified linked the unified unityLibrary"
+
+launchers="$(launcher_activities "$(apk_path)")"
+if [ "$launchers" != "com.onyxlens.wmr_companion.MainActivity" ]; then
+  echo "FAIL: unified APK launcher activities: ${launchers:-none}" >&2
+  echo "      expected only com.onyxlens.wmr_companion.MainActivity" >&2
+  exit 1
+fi
+if "$aapt" dump badging "$(apk_path)" | grep -q '^leanback-launchable-activity'; then
+  echo "FAIL: unified APK still exposes a leanback launcher activity" >&2
+  exit 1
+fi
+echo "PASS: unified APK has one launcher icon"
 
 echo "==> unified plus a per-vendor export must fail at configuration"
 # settings.gradle.kts rejects a unified export next to a per-vendor one; an

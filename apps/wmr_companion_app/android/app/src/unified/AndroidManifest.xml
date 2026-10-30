@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- An embedded Unity library is started by the Flutter app, never from the
+         home screen. The XREAL SDK's NRXRActivity still declares MAIN/LAUNCHER
+         (and LEANBACK_LAUNCHER) for standalone Unity apps, which gives the
+         unified APK a second launcher icon; tapping it opens the Unity scene
+         and shows a black screen after the splash (ONY-561). -->
+    <application>
+        <activity android:name="ai.nreal.activitylife.NRXRActivity">
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- Unity's standalone manifest can also mark its player activity as
+             the launcher; the Flutter MainActivity is the only entry point. -->
+        <activity android:name="com.unity3d.player.UnityPlayerActivity">
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

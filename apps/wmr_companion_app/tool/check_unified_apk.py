@@ -129,6 +129,44 @@ class Axml:
         found = self.of(element)
         return found[0] if found else {}
 
+    def launcher_activities(self) -> list[str]:
+        """Activities with a MAIN + LAUNCHER/LEANBACK intent filter.
+
+        The Android binary XML reader keeps a flat element list, so this walks
+        it in document order and treats each component element as the owner of
+        the intent filters that follow it until the next component.
+        """
+        launcher_categories = {
+            "android.intent.category.LAUNCHER",
+            "android.intent.category.LEANBACK_LAUNCHER",
+        }
+        found: list[str] = []
+        current: str | None = None
+        has_main = False
+        has_launcher = False
+        for name, attrs in self.elements:
+            if name in (
+                "activity",
+                "activity-alias",
+                "receiver",
+                "service",
+                "provider",
+            ):
+                if current is not None and has_main and has_launcher:
+                    found.append(current)
+                current = attrs.get("name") if name in ("activity", "activity-alias") else None
+                has_main = False
+                has_launcher = False
+            elif current is not None and name == "action":
+                if attrs.get("name") == "android.intent.action.MAIN":
+                    has_main = True
+            elif current is not None and name == "category":
+                if attrs.get("name") in launcher_categories:
+                    has_launcher = True
+        if current is not None and has_main and has_launcher:
+            found.append(current)
+        return found
+
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
@@ -268,6 +306,18 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             print("PASS sessions: Flutter MainActivity + UnityPlayerActivity + XREAL NREAL activities")
+
+        # Only the Flutter activity may appear on the home screen. XREAL's
+        # NRXRActivity ships a launcher filter for standalone Unity apps; if it
+        # survives merging, the APK installs two icons and the extra one opens
+        # a black Unity scene (ONY-561).
+        launchers = manifest.launcher_activities()
+        expected_launcher = "com.onyxlens.wmr_companion.MainActivity"
+        if launchers != [expected_launcher]:
+            fail(f"launcher activities: {launchers}; expected only {expected_launcher}")
+            failures += 1
+        else:
+            print(f"PASS launcher: only {expected_launcher}")
 
         if not application.get("name"):
             fail("application element has no name")
