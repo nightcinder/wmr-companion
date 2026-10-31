@@ -5,7 +5,8 @@ on:
     branches: [main]
     # A `v*` tag publishes the signed tester APKs: `release-unified` builds the
     # both-vendors `unified` flavor (ONY-508, ONY-520) and
-    # `release-checksums` writes one SHA256SUMS for it.
+    # `release-checksums` writes one SHA256SUMS for it. A `v*-dryrun` tag only
+    # renders the release body (`release-notes-dryrun`); it publishes nothing.
     tags: ['v*']
   pull_request:
 
@@ -76,6 +77,10 @@ jobs:
       - name: APK checker tests
         working-directory: apps/wmr_companion_app
         run: python3 -m unittest -v tool/test_check_unified_apk.py
+      # Pure-stdlib tests for the release-body generator: synthetic history and
+      # assets, no network and no release.
+      - name: Release-notes generator tests
+        run: python3 -m unittest -v tool/test_release_notes.py
       # Same for the export checker: synthetic unityLibrary zips, no 272 MB
       # artifact and no Unity install.
       - name: Unity export checker tests
@@ -520,14 +525,51 @@ jobs:
           save-sdk: 'false'
           save-pub: ${{ steps.flutter.outputs.pub-cache-hit != 'true' }}
 
+  release-notes-dryrun:
+    # A tag such as `v0.3.6-dryrun` renders the body the next release would
+    # publish, prints it to the run summary and uploads it as an artifact. It
+    # never creates or edits a release, and the publish jobs skip these tags.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-dryrun') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Generate the release body
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          version="${version%-dryrun}"
+          python3 tool/release_notes.py \
+            --tag "$GITHUB_REF_NAME" \
+            --release-tag "v${version}" \
+            --version "$version" \
+            --asset "wmr-companion-${version}-unified-arm64-v8a.apk" \
+            --asset SHA256SUMS \
+            --output release-notes.md
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 14
+
   release-unified:
     # The unified flavor links one shared unityLibrary that carries both VITURE
     # 0.9.0 and XREAL 3.1.0, selected at runtime (ONY-508). Unity only produces
     # that export once, on a workstation; CI downloads the approved zip and
     # builds the APKs with Gradle like any other flavor.
     #
-    # Only a `v*` tag whose commit is already on main publishes.
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    # Only a `v*` tag whose commit is already on main publishes. A dry-run tag
+    # (`v0.3.6-dryrun`) is handled by `release-notes-dryrun` and must never
+    # build or publish.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dryrun') }}
     runs-on: [self-hosted, liesa, android]
     # The export is 272 MB and the arm64-v8a release APK is hundreds of MB.
     timeout-minutes: 120
@@ -775,6 +817,19 @@ jobs:
           done
           ls -l "$out"
 
+      # The body comes from first-parent history: one bullet per pull request
+      # merged since the previous tag, plus the assets this tag publishes. A
+      # re-run refreshes it instead of leaving stale notes.
+      - name: Generate the release body
+        run: |
+          set -euo pipefail
+          python3 tool/release_notes.py \
+            --tag "$VERSION" \
+            --asset "wmr-companion-${VERSION#v}-unified-arm64-v8a.apk" \
+            --asset SHA256SUMS \
+            --output "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+
       # SHA256SUMS is recomputed by `release-checksums` after this job uploads
       # its APKs.
       - name: Publish the release assets
@@ -787,11 +842,13 @@ jobs:
             prerelease_args+=(--prerelease)
             echo "$VERSION is not vX.Y.Z; publishing as a prerelease."
           fi
-          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
             gh release create "$VERSION" \
               "${prerelease_args[@]}" \
               --title "$VERSION" \
-              --notes "Signed WMR Companion tester APK for VITURE and XREAL glasses, built by CI from ${GITHUB_SHA}. SHA256SUMS lists its digest. If the phone still has a build made before 0.3.3 (debug or locally signed), uninstall com.onyxlens.wmr_companion once first; Android otherwise stops with \"Something went wrong\"." \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
               || gh release view "$VERSION" >/dev/null
           fi
           gh release upload "$VERSION" "$RUNNER_TEMP"/release-assets/*.apk --clobber
@@ -806,7 +863,7 @@ jobs:
     # one SHA256SUMS file that covers every APK on the release. The build job
     # writes no digest of its own.
     needs: [release-unified]
-    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs['release-unified'].result == 'success' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dryrun') && needs['release-unified'].result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
