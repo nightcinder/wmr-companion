@@ -382,9 +382,62 @@ void main() {
       await pump();
 
       expect(results.single.deviceId, 'aa');
-      expect(adapter.calls.single, contains(wmrBridgeServiceUuid));
-      expect(adapter.calls.single, contains(wmrBridgeDeviceName));
+      final start = adapter.calls.singleWhere((c) => c.startsWith('startScan'));
+      expect(start, contains(wmrBridgeServiceUuid));
+      expect(start, contains(wmrBridgeDeviceName));
       expect(t.status.phase, BleLinkPhase.scanning);
+      await sub.cancel();
+    });
+
+    test(
+      'lists a bridge the system already connected and does not time out',
+      () async {
+        adapter.systemDeviceResults = const [
+          BleScanResult(deviceId: 'aa', name: 'WMR Bridge', rssi: null),
+        ];
+        final results = <BleScanResult>[];
+        final errors = <Object>[];
+        final done = Completer<void>();
+        t.scan().listen(
+          results.add,
+          onError: errors.add,
+          onDone: done.complete,
+        );
+        await done.future;
+
+        expect(results.single.deviceId, 'aa');
+        expect(
+          adapter.calls.where((c) => c.startsWith('systemDevices')),
+          hasLength(1),
+        );
+        expect(errors, isEmpty);
+      },
+    );
+
+    test('a system-device failure leaves the ordinary scan running', () async {
+      adapter.systemDevicesError = StateError('unsupported');
+      final sub = t.scan().listen((_) {}, onError: (_) {});
+      await pump();
+      await pump();
+
+      expect(t.status.phase, BleLinkPhase.scanning);
+      expect(
+        adapter.calls.where((c) => c.startsWith('startScan')),
+        hasLength(1),
+      );
+      await sub.cancel();
+    });
+
+    test('does not list an unrelated system device', () async {
+      adapter.systemDeviceResults = const [
+        BleScanResult(deviceId: 'bb', name: 'Headphones', rssi: null),
+      ];
+      final results = <BleScanResult>[];
+      final sub = t.scan().listen(results.add, onError: (_) {});
+      await pump();
+      await pump();
+
+      expect(results, isEmpty);
       await sub.cancel();
     });
 

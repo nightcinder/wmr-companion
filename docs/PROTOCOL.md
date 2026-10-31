@@ -86,7 +86,10 @@ scan filter, permission prompts, reconnects and the interval callback.
   while the phone is away.
 - Scan matches the name `WMR Bridge` or service FF10 (the package ORs the
   filter conditions) and times out after 15 s with `scanTimeout` if nothing
-  matched.
+  matched. Devices the platform already connected (for example a bridge the
+  phone holds as a HID gamepad) no longer advertise, so the scan also lists
+  `getSystemDevices()` results filtered by the same service; a failure there
+  does not fail the scan.
 - The FF11 status read is `readBridgeStatus`, on demand only.
 - Failure states exposed to the UI: `bluetoothOff`, `bluetoothUnavailable`,
   `permissionDenied`, `scanTimeout`, `connectFailed`, `serviceNotFound`,

@@ -101,6 +101,22 @@ class FakeBleAdapter implements BleAdapter {
   @override
   Future<void> stopScan() async => calls.add('stopScan');
 
+  /// Devices the platform reports as already connected. They are returned by
+  /// [systemDevices] instead of [scanResults], like a system-held HID link.
+  List<BleScanResult> systemDeviceResults = [];
+
+  /// When set, [systemDevices] throws it.
+  Object? systemDevicesError;
+
+  @override
+  Future<List<BleScanResult>> systemDevices({
+    required List<String> withServices,
+  }) async {
+    calls.add('systemDevices $withServices');
+    if (systemDevicesError != null) throw systemDevicesError!;
+    return systemDeviceResults;
+  }
+
   @override
   Future<void> connect(String deviceId) async {
     calls.add('connect');
