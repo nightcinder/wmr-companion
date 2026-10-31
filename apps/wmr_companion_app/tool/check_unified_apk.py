@@ -3,10 +3,11 @@
 
 Validates what can be proved without a device: the binary Android manifest is
 merged from the app and both vendor SDK manifests, both Unity XR runtimes are
-present with their hand-tracking libraries, the Dart/Kotlin plugin entry classes
-are in the dex, and the permission/session contract the run sheet relies on is
-declared. It does not prove that a vendor runtime starts, that permissions are
-granted, or that hands are tracked; those stay on the hardware gates.
+present with their hand-tracking libraries, the Monado config key is packaged,
+the Dart/Kotlin plugin entry classes are in the dex, and the permission/session
+contract the run sheet relies on is declared. It does not prove that a vendor
+runtime starts, that permissions are granted, or that hands are tracked; those
+stay on the hardware gates.
 
     python3 tool/check_unified_apk.py path/to/wmr-companion-0.2.1-unified-debug.apk
 
@@ -38,6 +39,12 @@ REQUIRED_LIBS = {
     "lib/arm64-v8a/libVitureUnityXR.so",
     "lib/arm64-v8a/libXREALXRPlugin.so",
 }
+# Flutter packages every declared pubspec asset under assets/flutter_assets/,
+# so `assets/monado/` lands at assets/flutter_assets/assets/monado/. The bare
+# pubspec path is not an APK entry. The key is fetched by CI before the build
+# and is exactly 1024 bytes (see tool/monado_key.dart).
+MONADO_KEY_ASSET = "assets/flutter_assets/assets/monado/wmr_config_key.bin"
+MONADO_KEY_SIZE = 1024
 REQUIRED_DEX_CLASSES = {
     "WmrTrackingXrealPlugin",
     "WmrTrackingViturePlugin",
@@ -240,6 +247,17 @@ def main(argv: list[str]) -> int:
             print(f"PASS native: {sorted(REQUIRED_LIBS)}")
         abis = sorted({name.split("/")[1] for name in names if name.startswith("lib/") and name.count("/") == 2})
         print(f"INFO ABIs: {abis}")
+
+        if MONADO_KEY_ASSET not in names:
+            monado = sorted(name for name in names if "monado" in name.lower())
+            fail(f"missing Monado config key: {MONADO_KEY_ASSET}; APK monado entries: {monado}")
+            failures += 1
+        elif apk.getinfo(MONADO_KEY_ASSET).file_size != MONADO_KEY_SIZE:
+            size = apk.getinfo(MONADO_KEY_ASSET).file_size
+            fail(f"Monado config key is {size} bytes, expected {MONADO_KEY_SIZE}: {MONADO_KEY_ASSET}")
+            failures += 1
+        else:
+            print(f"PASS Monado key: {MONADO_KEY_ASSET} ({MONADO_KEY_SIZE} bytes)")
 
         if UNITY_METADATA not in names:
             fail(f"missing IL2CPP metadata: {UNITY_METADATA}")
