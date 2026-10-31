@@ -16,7 +16,7 @@ tests, fresh-app check in CI). `packages/wmr_tracking` provides the
 head/hand tracking seam and 6DoF controller fusion; it is publishable but no
 vendor adapter has been run on hardware (see [TRACKING.md](TRACKING.md)). Note: `BleTransport` is currently GATT-shaped, but its name is settled for `0.1.0`; the owner decided on ONY-146 to keep it as-is.
 
-**Release status (owner, 2026-10-23 on ONY-41).** `0.1.0` is **not published**
+**Release status (owner, 2026-10-23 on ONY-41).** `0.2.2` is **not published**
 to pub.dev: publication is on hold. The iOS 18 device gate (phase 5) is
 **waived for this release line**, so this release ships without iOS hardware
 evidence. That waives the gate, not the fact: **nothing here has been run on
@@ -418,9 +418,9 @@ the directory move changed paths, not imports.
      FF16), `protocol: 1`, and `streams: ["raw", "decoded", "batched"]` (synthesized as FF10
      GATT services FF11, FF12, FF14, FF15, FF16; no FF13 config block). Wi-Fi link is
      host-tested/loopback-only until the Pi hardware sitting (P6).
-  All eleven packages at `0.1.0` in source speak to every era. Two critical statuses
+  All eleven packages at `0.2.2` in source speak to every era. Two critical statuses
   must be stated, not implied:
-  - **The library is not published:** All eleven packages are at `0.1.0` in source/git
+  - **The library is not published:** All eleven packages are at `0.2.2` in source/git
     only; publication to pub.dev is on hold by owner decision (2026-10-23, ONY-41;
     see [PUBLISHING.md](PUBLISHING.md) §5). Nothing is available on pub.dev.
   - **The firmware release is a prerelease:** `v0.1.0-rc1` is flagged prerelease
@@ -429,7 +429,7 @@ the directory move changed paths, not imports.
   Unknown fields or characteristics are ignored, so a newer bridge does not crash
   an older client.
 - **Publish on pub.dev** after the API freeze. The eleven packages no longer carry
-  `publish_to: none` and their dry-runs are clean (#49/#54/#61); the actual `0.1.0`
+  `publish_to: none` and their dry-runs are clean (#49/#54/#61); the actual `0.2.2`
   upload is on hold by owner decision (2026-10-23), see [PUBLISHING.md](PUBLISHING.md) §5.
   Keep the app's and `example/`'s `publish_to: none`.
 - **License:** MIT for the Dart packages and app. The Monado XOR key table is
@@ -530,7 +530,7 @@ Sequencing notes:
    `wmr_companion_hid_android`) the names to freeze, and is publishing to
    pub.dev intended, or private/path-only for now? : **settled: `wmr_fusion`,
    `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
-   `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` is held.**
+   `wmr_companion_hid_android`, and pub.dev is the target; `0.2.2` is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
    straight to the ONY-38 `WMRCompanionKit` transport on iOS? : **settled that
    `universal_ble` is the v1 transport on both platforms. It is still
@@ -547,7 +547,7 @@ Sequencing notes:
 
 Settled: **iOS 18 is the minimum** (owner, ONY-38). **Android and iOS are both
 in v1 scope** (owner, 2026-10-23 on ONY-41). **Publication to pub.dev is the
-release target and `0.1.0` is held for now** (owner, ONY-50 and ONY-41,
+release target and `0.2.2` is held for now** (owner, ONY-50 and ONY-41,
 2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
 2026-10-23 on ONY-41).
 
@@ -555,7 +555,7 @@ release target and `0.1.0` is held for now** (owner, ONY-50 and ONY-41,
 
 - Phases 1–4, 7 and the packaging half of phase 8 are implemented. The iOS
   device run (phase 5) was waived for this release rather than passed, and
-  `0.1.0` is not published.
+  `0.2.2` is not published.
 - It is not an iOS virtual gamepad and cannot make one appear.
 - It does not promise iOS background operation, MTU, or connection interval.
 - It does not fix the upstream controller-to-ESP32 report loss
