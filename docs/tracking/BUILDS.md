@@ -11,7 +11,7 @@ hardware; these are compile/packaging facts only.
 | Item | Value |
 |---|---|
 | Tag / commit | `v0.3.5` (release tag) at `6648ffd` |
-| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 10`) |
+| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 2010` for `arm64-v8a`) |
 | Artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk`, 428,243,881 B, SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` |
 | Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |

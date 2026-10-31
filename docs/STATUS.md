@@ -31,7 +31,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | Item | Value |
 |---|---|
 | Tag / commit | `v0.3.5` (release tag) at `6648ffd28fd56992f3bc73c09285c9ebcc984617` |
-| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 10`); the Dart packages remain at `0.2.2` |
+| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 2010` for `arm64-v8a`); the Dart packages remain at `0.2.2` |
 | Android artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk`, size 428,243,881 B, SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` (verified against the published release asset) |
 | Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
 | Signing | Project release key (signed by CI on `v*` tags). Updates in place across release builds |
