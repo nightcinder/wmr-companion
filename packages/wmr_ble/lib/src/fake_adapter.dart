@@ -108,12 +108,21 @@ class FakeBleAdapter implements BleAdapter {
   /// When set, [systemDevices] throws it.
   Object? systemDevicesError;
 
+  /// Each [systemDevices] call waits for the first completer here and returns
+  /// its value, so a test can hold one enumeration open while a scan is
+  /// cancelled or a new one starts.
+  final List<Completer<List<BleScanResult>>> systemDevicesPending = [];
+
   @override
   Future<List<BleScanResult>> systemDevices({
     required List<String> withServices,
   }) async {
     calls.add('systemDevices $withServices');
     if (systemDevicesError != null) throw systemDevicesError!;
+    final pending = systemDevicesPending.isEmpty
+        ? null
+        : systemDevicesPending.removeAt(0);
+    if (pending != null) return pending.future;
     return systemDeviceResults;
   }
 

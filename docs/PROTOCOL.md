@@ -89,7 +89,9 @@ scan filter, permission prompts, reconnects and the interval callback.
   matched. Devices the platform already connected (for example a bridge the
   phone holds as a HID gamepad) no longer advertise, so the scan also lists
   `getSystemDevices()` results filtered by the same service; a failure there
-  does not fail the scan.
+  does not fail the scan. That enumeration runs before the 15 s timeout window
+  starts, because Android opens a GATT link per system device to check the
+  service and can take longer than the window with several connected devices.
 - The FF11 status read is `readBridgeStatus`, on demand only.
 - Failure states exposed to the UI: `bluetoothOff`, `bluetoothUnavailable`,
   `permissionDenied`, `scanTimeout`, `connectFailed`, `serviceNotFound`,

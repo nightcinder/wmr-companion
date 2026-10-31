@@ -441,6 +441,64 @@ void main() {
       await sub.cancel();
     });
 
+    test(
+      'system enumeration does not time out the scan while it runs',
+      () async {
+        final pending = Completer<List<BleScanResult>>();
+        adapter.systemDevicesPending.add(pending);
+        final results = <BleScanResult>[];
+        final errors = <Object>[];
+        final done = Completer<void>();
+        t.scan().listen(
+          results.add,
+          onError: errors.add,
+          onDone: done.complete,
+        );
+        await pump();
+        await pump();
+
+        // The enumeration takes longer than scanTimeout (30 ms): the deadline
+        // must start only after it settles, or the scan would close first.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        expect(done.isCompleted, isFalse);
+        expect(errors, isEmpty);
+
+        pending.complete(const [
+          BleScanResult(deviceId: 'aa', name: 'WMR Bridge', rssi: null),
+        ]);
+        await done.future;
+
+        expect(results.single.deviceId, 'aa');
+        expect(errors, isEmpty);
+      },
+    );
+
+    test(
+      'a late result from a cancelled scan does not suppress the new timeout',
+      () async {
+        final stale = Completer<List<BleScanResult>>();
+        adapter.systemDevicesPending.add(stale);
+        final first = t.scan().listen((_) {}, onError: (_) {});
+        await pump();
+        await pump();
+        await first.cancel();
+
+        final errors = <Object>[];
+        final done = Completer<void>();
+        t.scan().listen((_) {}, onError: errors.add, onDone: done.complete);
+        await pump();
+        stale.complete(const [
+          BleScanResult(deviceId: 'aa', name: 'WMR Bridge', rssi: null),
+        ]);
+        await done.future;
+
+        expect(
+          (errors.single as BleTransportException).phase,
+          BleLinkPhase.scanTimeout,
+        );
+      },
+    );
+
     test('times out when nothing is found', () async {
       final errors = <Object>[];
       final done = Completer<void>();
