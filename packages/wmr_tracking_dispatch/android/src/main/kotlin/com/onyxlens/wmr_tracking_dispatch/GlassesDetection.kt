@@ -20,7 +20,6 @@ enum class GlassesHost(val wireName: String) {
 object GlassesDetectionReason {
     const val NO_MATCH = "noMatch"
     const val USB_AMBIGUOUS = "usbAmbiguous"
-    const val USB_PERMISSION_DENIED = "usbPermissionDenied"
 }
 
 /** A USB device as seen by [VendorDetector]; Android-free for JVM tests. */
@@ -54,7 +53,10 @@ fun glassesEnvironment(
     manufacturer = manufacturer,
     model = model,
     isAndroidXrHost = isAndroidXrHost,
-    usbPermissionGranted = usbHostAvailable && usbDevices.all { it.permissionGranted },
+    // Same "at least one relevant device is openable" rule the detector uses
+    // for a matched vendor; `all` would let one unrelated denied device mask a
+    // granted glasses device in the host/no-match fallback paths.
+    usbPermissionGranted = usbHostAvailable && usbDevices.any { it.permissionGranted },
     usbDevices = usbDevices.map {
         UsbDeviceId(it.vendorId, it.productId, it.permissionGranted)
     },

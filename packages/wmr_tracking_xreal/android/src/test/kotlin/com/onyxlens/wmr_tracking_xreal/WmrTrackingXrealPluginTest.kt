@@ -6,11 +6,39 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.PlayerHost
+import com.onyxlens.wmr_tracking_dispatch.PlayerHostResult
 import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+import com.onyxlens.wmr_tracking_dispatch.TrackingStartStage
+import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class WmrTrackingXrealPluginTest {
+    private class FakePlayerHost(
+        override val isHosted: Boolean = true,
+        private val detail: String? = null,
+        private val throwOnHost: Boolean = false,
+    ) : PlayerHost {
+        var hostCalls = 0
+        var releases = 0
+
+        override fun host(activity: android.app.Activity?): PlayerHostResult {
+            hostCalls += 1
+            if (throwOnHost) throw IllegalStateException("host exploded")
+            return if (isHosted) {
+                PlayerHostResult(true, UnityPlayerHost.STAGE_PLAYER_HOSTED)
+            } else {
+                PlayerHostResult(false, UnityPlayerHost.STAGE_UNAVAILABLE, detail ?: "no player")
+            }
+        }
+
+        override fun release() {
+            releases += 1
+        }
+    }
+
     private class FakeBridge(
         override val isUnityAvailable: Boolean = true,
         var model: String? = null,
@@ -26,35 +54,78 @@ class WmrTrackingXrealPluginTest {
         }
     }
 
+    private class ThrowingBridge(
+        private val throwOnModel: Boolean = true,
+        private val throwOnSend: Boolean = false,
+    ) : XrealUnityBridge {
+        override val isUnityAvailable: Boolean = true
+
+        override fun queryGlassesModel(): String? {
+            if (throwOnModel) throw IllegalStateException("model query failed")
+            return "Air2Ultra"
+        }
+
+        override fun sendCommand(payloadJson: String, gameObject: String, method: String): Boolean {
+            if (throwOnSend) throw IllegalStateException("host command failed")
+            return true
+        }
+    }
+
     private class RecordingResult : MethodChannel.Result {
         var completed = false
+        var errorCode: String? = null
+        var errorDetails: Any? = null
 
         override fun success(result: Any?) {
             completed = true
         }
 
-        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) = Unit
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            this.errorCode = errorCode
+            this.errorDetails = errorDetails
+        }
 
         override fun notImplemented() = Unit
     }
 
     private class RecordingReply : StartReply {
-        val successes = mutableListOf<Unit>()
-        val errors = mutableListOf<Pair<String, String>>()
+        val reports = mutableListOf<Map<String, Any?>>()
+        val errors = mutableListOf<Triple<String, String, String?>>()
 
-        override fun success() {
-            successes += Unit
+        override fun success(report: Map<String, Any?>) {
+            reports += report
         }
 
-        override fun error(code: String, message: String) {
-            errors += code to message
+        override fun error(code: String, message: String, stage: String?) {
+            errors += Triple(code, message, stage)
         }
     }
+
+    private class RecordingSink : EventChannel.EventSink {
+        val events = mutableListOf<Any?>()
+        val errors = mutableListOf<Triple<String, String?, Any?>>()
+
+        override fun success(event: Any?) {
+            events += event
+        }
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            errors += Triple(errorCode, errorMessage, errorDetails)
+        }
+
+        override fun endOfStream() = Unit
+    }
+
+    private fun xrealPlugin(
+        bridge: XrealUnityBridge,
+        runtime: SharedUnityRuntime = SharedUnityRuntime { true },
+        host: PlayerHost = FakePlayerHost(),
+    ) = WmrTrackingXrealPlugin(bridge, runtime, host)
 
     @Test
     fun capabilitiesDefersAnUnreportedGlassesModelToTheStartHandshake() {
         val bridge = FakeBridge(isUnityAvailable = true, model = null)
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
@@ -72,7 +143,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun capabilitiesTreatsTheSdkUnknownPlaceholderAsUnreported() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Unknown")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(false, caps["modelReported"])
@@ -84,7 +155,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun capabilitiesReportsHeadOnlyForOneSeries() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "One")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
@@ -103,7 +174,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun capabilitiesReportsUnsupportedFor3DofGlassesModel() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Pro")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
@@ -118,7 +189,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun capabilitiesFailsClosedForAReportedModelItCannotClassify() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air3")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["modelReported"])
@@ -134,7 +205,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun capabilitiesReportsSupportedOnlyForAir2Ultra() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
 
         val caps = plugin.capabilities()
         assertEquals(true, caps["unityAvailable"])
@@ -152,7 +223,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun capabilitiesReportsUnavailableWhenUnityIsNotLinked() {
         val bridge = FakeBridge(isUnityAvailable = false, model = "Air2Ultra")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge, host = FakePlayerHost(isHosted = false))
 
         val caps = plugin.capabilities()
         assertEquals(false, caps["unityAvailable"])
@@ -160,25 +231,29 @@ class WmrTrackingXrealPluginTest {
         assertEquals(0, caps["handJointCount"])
         assertEquals("Unknown", caps["glassesModel"])
         assertTrue((caps["reason"] as String).contains("not linked"))
+        assertEquals(false, caps["playerHosted"])
+        assertEquals("notHosted", caps["stage"])
+        assertEquals("unknown", caps["stereoMode"])
     }
 
     @Test
     fun startUnityRelayDefersAnUnreportedGlassesModelToUnity() {
         val bridge = FakeBridge(isUnityAvailable = true, model = null)
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
 
         assertTrue(reply.errors.isEmpty())
-        assertEquals(1, reply.successes.size)
+        assertEquals(1, reply.reports.size)
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
 
     @Test
-    fun startUnityRelayFailsForOneSeries() {        val bridge = FakeBridge(isUnityAvailable = true, model = "One")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+    fun startUnityRelayFailsForOneSeries() {
+        val bridge = FakeBridge(isUnityAvailable = true, model = "One")
+        val plugin = xrealPlugin(bridge)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
@@ -189,13 +264,14 @@ class WmrTrackingXrealPluginTest {
             "XREAL hand tracking requires Air 2 Ultra (found One)",
             reply.errors[0].second,
         )
+        assertEquals(TrackingStartStage.MODEL, reply.errors[0].third)
         assertTrue(bridge.sentCommands.isEmpty())
     }
 
     @Test
     fun startUnityRelayRejectsAReportedModelItCannotClassify() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air3")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
@@ -210,9 +286,11 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
-    fun deliverUnityErrorSendsStopToUnityRelay() {
+    fun deliverUnityErrorSendsStopAndReportsTheRuntimeStage() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
+        val sink = RecordingSink()
+        plugin.onListen(null, sink)
         plugin.startUnityRelay(RecordingReply())
         bridge.sentCommands.clear()
 
@@ -220,24 +298,27 @@ class WmrTrackingXrealPluginTest {
 
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"stop\""))
+        assertEquals("protocol", sink.errors.single().first)
+        val details = sink.errors.single().third as Map<*, *>
+        assertEquals(TrackingStartStage.RUNTIME, details["stage"])
     }
 
     @Test
     fun startUnityRelaySucceedsForAir2Ultra() {
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
-        val plugin = WmrTrackingXrealPlugin(bridge)
+        val plugin = xrealPlugin(bridge)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
 
         assertTrue(reply.errors.isEmpty())
-        assertEquals(1, reply.successes.size)
+        assertEquals(1, reply.reports.size)
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
 
     @Test
-    fun startUnityRelayReusesThePlayerOwnedByViture() {
+    fun startReusesThePlayerOwnedByViture() {
         var creations = 0
         val runtime = SharedUnityRuntime {
             creations += 1
@@ -245,35 +326,109 @@ class WmrTrackingXrealPluginTest {
         }
         runtime.claim(GlassesVendor.VITURE)
         val bridge = FakeBridge(isUnityAvailable = true, model = "Air2Ultra")
-        val plugin = WmrTrackingXrealPlugin(bridge, runtime)
+        val plugin = xrealPlugin(bridge, runtime)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
 
         assertTrue(reply.errors.isEmpty())
-        assertEquals(1, reply.successes.size)
+        assertEquals(1, reply.reports.size)
         assertEquals(GlassesVendor.VITURE, runtime.ownerVendor)
         assertEquals(1, creations)
     }
 
     @Test
-    fun startUnityRelayFailsWhenTheSharedPlayerIsUnavailable() {
+    fun xrealFirstHostsThePlayerBeforeClaimingTheRuntime() {
+        // A factory that refuses proves the claim is granted by the attach
+        // result, not by the linked class or the previous factory default.
         val runtime = SharedUnityRuntime { false }
-        val bridge = FakeBridge(isUnityAvailable = false, model = "Air2Ultra")
-        val plugin = WmrTrackingXrealPlugin(bridge, runtime)
+        val host = FakePlayerHost()
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"), runtime, host)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertTrue(reply.errors.isEmpty())
+        assertEquals(1, host.hostCalls)
+        assertEquals(GlassesVendor.XREAL, runtime.ownerVendor)
+        assertEquals(true, reply.reports.single()["playerHosted"])
+        assertEquals(UnityPlayerHost.STAGE_PLAYER_HOSTED, reply.reports.single()["stage"])
+    }
+
+    @Test
+    fun startFailsWithTheHostStageWhenNoPlayerCanBeHosted() {
+        val runtime = SharedUnityRuntime { false }
+        val host = FakePlayerHost(
+            isHosted = false,
+            detail = "com.unity3d.player.UnityPlayer is not linked into this build",
+        )
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val plugin = xrealPlugin(bridge, runtime, host)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
 
         assertEquals(1, reply.errors.size)
-        assertEquals("unavailable", reply.errors[0].first)
+        assertEquals("unavailable", reply.errors.single().first)
+        assertEquals(UnityPlayerHost.STAGE_UNAVAILABLE, reply.errors.single().third)
+        assertTrue(reply.errors.single().second.contains("not linked"))
         assertTrue(bridge.sentCommands.isEmpty())
+        assertNull(runtime.ownerVendor)
+    }
+
+    @Test
+    fun aThrowingHostFailsTheStartWithoutClaimingTheRuntime() {
+        val runtime = SharedUnityRuntime { true }
+        val host = FakePlayerHost(throwOnHost = true)
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"), runtime, host)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals(TrackingStartStage.START_FAILED, reply.errors.single().third)
+        assertNull(runtime.ownerVendor)
+        assertEquals(1, host.releases)
+    }
+
+    @Test
+    fun aThrowingBridgeFailsTheStartExactlyOnceAndReleasesThePlayer() {
+        val runtime = SharedUnityRuntime { true }
+        val host = FakePlayerHost()
+        val plugin = xrealPlugin(ThrowingBridge(), runtime, host)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals(TrackingStartStage.START_FAILED, reply.errors.single().third)
+        assertNull(runtime.ownerVendor)
+        assertEquals(1, host.releases)
+    }
+
+    @Test
+    fun aThrowingStartCommandFailsTheStartAndReleasesTheClaim() {
+        val runtime = SharedUnityRuntime { true }
+        val host = FakePlayerHost()
+        val plugin = xrealPlugin(
+            ThrowingBridge(throwOnModel = false, throwOnSend = true),
+            runtime,
+            host,
+        )
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals(TrackingStartStage.START_FAILED, reply.errors.single().third)
+        assertNull(runtime.ownerVendor)
+        assertEquals(1, host.releases)
     }
 
     @Test
     fun unsupportedModelReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
-        val plugin = WmrTrackingXrealPlugin(FakeBridge(model = "One"), runtime)
+        val plugin = xrealPlugin(FakeBridge(model = "One"), runtime)
         val reply = RecordingReply()
 
         plugin.startUnityRelay(reply)
@@ -285,7 +440,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun failedStartCommandReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
-        val plugin = WmrTrackingXrealPlugin(
+        val plugin = xrealPlugin(
             FakeBridge(model = "Air2Ultra", sendSucceeds = false),
             runtime,
         )
@@ -294,13 +449,14 @@ class WmrTrackingXrealPluginTest {
         plugin.startUnityRelay(reply)
 
         assertEquals(1, reply.errors.size)
+        assertEquals(TrackingStartStage.COMMAND, reply.errors.single().third)
         assertNull(runtime.ownerVendor)
     }
 
     @Test
     fun stopAndUnityErrorReleaseTheClaim() {
         val runtime = SharedUnityRuntime { true }
-        val plugin = WmrTrackingXrealPlugin(FakeBridge(model = "Air2Ultra"), runtime)
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"), runtime)
         val reply = RecordingReply()
         plugin.startUnityRelay(reply)
         assertEquals(GlassesVendor.XREAL, runtime.ownerVendor)
@@ -315,5 +471,104 @@ class WmrTrackingXrealPluginTest {
         plugin.deliverUnityError("protocol", "bad frame")
 
         assertNull(runtime.ownerVendor)
+    }
+
+    @Test
+    fun aNewStartClearsThePreviousSessionsStage() {
+        val runtime = SharedUnityRuntime { true }
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"), runtime)
+        plugin.startUnityRelay(RecordingReply())
+        runtime.dispatchStage(GlassesVendor.XREAL, "firstFrame", "singlePassInstanced")
+
+        plugin.startUnityRelay(RecordingReply())
+
+        assertEquals("playerHosted", plugin.capabilities()["stage"])
+        assertEquals("unknown", plugin.capabilities()["stereoMode"])
+    }
+
+    @Test
+    fun capabilitiesReportHostingAndTheLastStage() {
+        val runtime = SharedUnityRuntime { true }
+        val host = FakePlayerHost()
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"), runtime, host)
+        plugin.startUnityRelay(RecordingReply())
+        runtime.dispatchStage(GlassesVendor.XREAL, "firstFrame", "singlePassInstanced")
+
+        val caps = plugin.capabilities()
+
+        assertEquals(true, caps["playerHosted"])
+        assertEquals("singlePassInstanced", caps["stereoMode"])
+        assertEquals("firstFrame", caps["stage"])
+    }
+
+    @Test
+    fun theStartCommandIsReplayedWhenTheSceneBecomesReady() {
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val plugin = xrealPlugin(bridge)
+        plugin.startUnityRelay(RecordingReply())
+        assertEquals(1, bridge.sentCommands.size)
+
+        plugin.flushPendingStart()
+
+        assertEquals(2, bridge.sentCommands.size)
+        assertEquals(bridge.sentCommands[0], bridge.sentCommands[1])
+        assertTrue(bridge.sentCommands[1].contains("\"cmd\":\"start\""))
+
+        plugin.flushPendingStart()
+        assertEquals(2, bridge.sentCommands.size)
+    }
+
+    @Test
+    fun aStoppedSourceDoesNotReplayTheStart() {
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val plugin = xrealPlugin(bridge)
+        plugin.startUnityRelay(RecordingReply())
+
+        plugin.onMethodCall(MethodCall("stop", null), RecordingResult())
+        val sentAfterStop = bridge.sentCommands.size
+        plugin.flushPendingStart()
+
+        assertEquals(sentAfterStop, bridge.sentCommands.size)
+    }
+
+    @Test
+    fun aDeniedPermissionFailsTheHeldStartWithThePermissionStage() {
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"))
+        val reply = RecordingReply()
+        assertTrue(plugin.pendingStart.hold(reply))
+
+        val handled = plugin.onRequestPermissionsResult(
+            WmrTrackingXrealPlugin.PERMISSION_REQUEST_CODE,
+            arrayOf(WmrTrackingXrealPlugin.PERMISSION_CAMERA),
+            intArrayOf(android.content.pm.PackageManager.PERMISSION_DENIED),
+        )
+
+        assertTrue(handled)
+        assertEquals("permissionDenied", reply.errors.single().first)
+        assertEquals(TrackingStartStage.PERMISSION, reply.errors.single().third)
+    }
+
+    @Test
+    fun stopWhilePermissionIsPendingFailsTheHeldStartWithThePendingStage() {
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"))
+        val reply = RecordingReply()
+        assertTrue(plugin.pendingStart.hold(reply))
+
+        plugin.onMethodCall(MethodCall("stop", null), RecordingResult())
+
+        assertEquals("unavailable", reply.errors.single().first)
+        assertEquals(TrackingStartStage.PENDING, reply.errors.single().third)
+    }
+
+    @Test
+    fun aStartWithoutAnActivityCarriesTheActivityStageInTheDetailMap() {
+        val plugin = xrealPlugin(FakeBridge(model = "Air2Ultra"))
+        val result = RecordingResult()
+
+        plugin.onMethodCall(MethodCall("start", null), result)
+
+        assertEquals("unavailable", result.errorCode)
+        val details = result.errorDetails as Map<*, *>
+        assertEquals(TrackingStartStage.ACTIVITY, details["stage"])
     }
 }

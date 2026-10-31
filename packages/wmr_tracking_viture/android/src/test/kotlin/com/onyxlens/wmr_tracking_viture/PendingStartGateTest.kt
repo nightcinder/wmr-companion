@@ -11,13 +11,15 @@ class PendingStartGateTest {
     private class RecordingReply : StartReply {
         val successes = mutableListOf<Map<String, Any?>>()
         val errors = mutableListOf<Pair<String, String>>()
+        val stages = mutableListOf<String?>()
 
         override fun success(report: Map<String, Any?>) {
             successes += report
         }
 
-        override fun error(code: String, message: String) {
+        override fun error(code: String, message: String, stage: String?) {
             errors += code to message
+            stages += stage
         }
     }
 
@@ -60,6 +62,18 @@ class PendingStartGateTest {
         assertNull(gate.resolve())
         assertEquals(1, reply.errors.size)
         assertTrue(reply.successes.isEmpty())
+    }
+
+    @Test
+    fun aSecondHoldIsRefusedSoTheFirstStartKeepsItsReply() {
+        val gate = PendingStartGate()
+        val first = RecordingReply()
+        val second = RecordingReply()
+        assertTrue(gate.hold(first))
+
+        assertFalse(gate.hold(second))
+        assertSame(first, gate.resolve())
+        assertTrue(second.errors.isEmpty())
     }
 
     @Test
