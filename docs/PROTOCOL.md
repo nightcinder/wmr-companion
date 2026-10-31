@@ -41,7 +41,7 @@ the exact notifications the ESP32 sends.
   subscribing sets the baseline and is not counted as a gap.
 - **Requested MTU** 517 (`wmrRequestedMtu`), on every connect. The app must
   use the negotiated value it gets back. Not verified on hardware: Android 14+
-  drives the MTU itself, so the result may differ from the request.
+  drives the MTU itself, so the result can differ from the request.
 - **Reconnects.** `ControllerService.start()` must run again after every
   reconnect (the bridge forgets subscription, MTU and priority).
 - **Frame payload.** FF11 frames stay undecoded and feed the Capture screen
@@ -142,7 +142,7 @@ a hand above 1.
 ### Subscription
 
 - FF11 and FF12 are **mutually exclusive**. While one CCC is enabled, a write
-  that would enable the other fails with ATT application error `0x80`. To
+  that will enable the other fails with ATT application error `0x80`. To
   switch, write `0x0000` to the active CCC first, then enable the other.
 - CCC state is per connection and resets on disconnect, so after every
   reconnect the app enables the wanted stream from scratch.
@@ -285,7 +285,7 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
 - Failures arrive as `BleStreamException` on the stream returned by
   `subscribe` and become `ModeFault`s on the service, shown as a red banner
   (connect screen and debug screen): `otherStreamActive` (ATT `0x80`),
-  `disableFailed` (the previous stream could not be turned off, so the new
+  `disableFailed` (the previous stream cannot be turned off, so the new
   one was not tried), `enableFailed`, `mtuTooSmall` (negotiated MTU below 59).
   A refused `0x80` keeps the link `ready`; other enable failures still set the
   link to `connectFailed` as before.
@@ -396,7 +396,7 @@ version 1 records (oldest first, both hands mixed), length exactly
   reported as for FF12.
 - **MTU.** FF14 needs at least 61 (FF12 needs 59), so `mtuTooSmall` fires at
   59 and 60 on FF14 only. The app requests MTU 517, which allows up to 9
-  records per batch (247 would allow 4). The 2026-10-22 round-trip run recorded MTU 517 (user-reported).
+  records per batch (247 will allow 4). The 2026-10-22 round-trip run recorded MTU 517 (user-reported).
 - **Stats.** `DecodedStats` adds `batches`, `batchRecords`, `batchMean`,
   `batchMax` and `batchErrors`; the debug panel shows them as
   `FF14 batches  mean  max  rejected` while FF14 is active.
@@ -425,7 +425,7 @@ so the same mapping is used here; this was not re-derived, and the captures
 themselves are not in this repo. The sign of the **vertical axis** (view Y =
 + sensor X) is the one the twist test left unverified; the gravity check (a
 stationary controller held upright reads + 1 g on view Y) is the other thing
-that would settle it. It is a proper rotation (determinant + 1).
+that will settle it. It is a proper rotation (determinant + 1).
 
 Toggles (debug settings panel, applied from the next sample, no rebuild):
 
@@ -451,8 +451,8 @@ The filter works in a z-up frame; `viewToFilter` maps view (X, Y, Z) to
 4. **Gyro scale** (`1e-5` rad/s per count) is unconfirmed in a real rotation.
 5. **How `universal_ble` reports ATT `0x80`** (see above).
 6. **The `CALIBRATED` flag.** Always 0 in version 1. If a later version sets
-   it the values may be in a different frame; the app only counts such
-   records (`calibratedFlagged`) and still applies the axis table, which would
+   it the values can be in a different frame; the app only counts such
+   records (`calibratedFlagged`) and still applies the axis table, which will
    be wrong then.
 7. **Bandwidth.** Both hands at about 360 notifications/s on one connection is
    a firmware bench item; the app will show whatever arrives (`rate`).
@@ -479,7 +479,7 @@ Code: `packages/wmr_core/lib/protocol/echo.dart` (pure Dart, golden bytes from t
   covers the three streams.
 - **Detection.** The client looks for FF15 in service discovery before it
   subscribes, so an older bridge never gets a CCC write for a characteristic
-  it does not have (a failed enable would mark the link failed).
+  it does not have (a failed enable will mark the link failed).
 - **One ping at a time**, as the firmware allows (a second is `busy`). No
   answer within 1 s is a timeout. A late answer is counted as stale.
 - **Times.** `t1` is stamped just before the write is handed to the transport
@@ -514,7 +514,7 @@ and the debug screen's "Controller control" panel.
   shows "does not expose FF17 (firmware before v0.1.1)" and disables the
   buttons rather than writing to a missing characteristic.
 - **Radio contention.** While discovery is active the panel shows "Scanning
-  (round N)... the controller stream may stutter". There is no interlock; the
+  (round N)... the controller stream can stutter". There is no interlock; the
   firmware bounds discovery and only runs it for hands without an address.
 - **Guards stay in the firmware.** The panel disables forget while a hand is
   connected or connecting, but the bridge refuses it anyway.

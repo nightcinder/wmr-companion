@@ -1,7 +1,7 @@
 # wmr_ws
 
 WebSocket (Wi-Fi) transport for the [WMR Bridge](https://github.com/nightcinder/WMR_Bridge)
-Linux/Raspberry Pi daemon, behind the existing `BleTransport` seam from
+Linux/Raspberry Pi daemon, behind the `BleTransport` seam from
 `wmr_core`.
 
 The daemon ([WMR_Bridge PR #47](https://github.com/nightcinder/WMR_Bridge/pull/47))

@@ -16,11 +16,11 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access.
 
 ## Index
 
-- [RESEARCH.md](tracking/RESEARCH.md) — vendor research and sources.
-- [FRAMEWORK.md](tracking/FRAMEWORK.md) — seam, filter, vectors, adapter recipes, vertical slices.
-- [BUILDS.md](tracking/BUILDS.md) — build matrix, flavors, `--dart-define`, Unity exports.
-- [GATES.md](tracking/GATES.md) — hardware gates and open questions.
-- [PREFLIGHT.md](tracking/PREFLIGHT.md) — named 1.0 path (XREAL), current unified APK, and the desk-only export/permission check.
+- [RESEARCH.md](tracking/RESEARCH.md): vendor research and sources.
+- [FRAMEWORK.md](tracking/FRAMEWORK.md): seam, filter, vectors, adapter recipes, vertical slices.
+- [BUILDS.md](tracking/BUILDS.md): build matrix, flavors, `--dart-define`, Unity exports.
+- [GATES.md](tracking/GATES.md): hardware gates and open questions.
+- [PREFLIGHT.md](tracking/PREFLIGHT.md): named 1.0 path (XREAL), current unified APK, and the desk-only export/permission check.
 - Run sheets: [Android XR](runs/sheets/pose-androidxr.md), [VITURE](runs/sheets/pose-viture.md), [XREAL](runs/sheets/pose-xreal.md).
 - Filter tuning: [pose-filter.md](runs/sheets/pose-filter.md) (ONY-502; synthetic first pass, hardware replay still open).
 

@@ -2,10 +2,10 @@
 
 ## Built-in Kotlin (ONY-521)
 
-The five Android plugins — `wmr_companion_hid_android`,
+The five Android plugins (`wmr_companion_hid_android`,
 `wmr_tracking_android_xr`, `wmr_tracking_dispatch`, `wmr_tracking_viture` and
-`wmr_tracking_xreal` — no longer apply the Kotlin Gradle Plugin (KGP). Their
-Gradle modules compile Kotlin through AGP 9's built-in Kotlin, and their
+`wmr_tracking_xreal`) no longer apply the Kotlin Gradle Plugin (KGP). Their
+Gradle modules compile Kotlin through AGP 9's built-in Kotlin. Their
 `pubspec.yaml` files require Flutter 3.44 or later.
 
 `apps/wmr_companion_app/android/gradle.properties` and

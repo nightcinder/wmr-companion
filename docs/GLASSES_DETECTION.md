@@ -1,6 +1,6 @@
 # Native glasses detection and vendor dispatch
 
-Status: desk research plus host-tested Kotlin/Dart. **Nothing here was run on a
+Status: desk research plus host-tested Kotlin/Dart. **Nothing here ran on a
 Neckband, Beam Pro, phone, glasses or Android XR headset.**
 
 ## Why detection runs before Unity

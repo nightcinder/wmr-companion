@@ -31,7 +31,7 @@ With "Measure round trip" on (the default) and a bridge that has FF15 (WMR_Bridg
 | `rtt` (min/p50/p90/p95/p99/max) | `(t4 - t1) - turnaround_us`: the spec's round trip without the time the answer waited on the ESP32. Includes the app, the plugin and its platform channel, both Bluetooth stacks and the air |
 | `end_to_end` | `t4 - t1`: write call to the notification reaching the app |
 | `turnaround` | Time the answer waited on the ESP32, from its reply |
-| `max_queue_depth` | Largest stream backlog the answers skipped. An rtt that grows with it would mean the answer priority is not working |
+| `max_queue_depth` | Largest stream backlog the answers skipped. An rtt that grows with it means the answer priority is not working |
 | answered / timeouts / failed writes | Pings sent = answered + timeouts + failed writes. Late or duplicate answers, bad answers and pings skipped (one still waiting) are in `counters` |
 
 `t1` is the phone time just before the write is handed to the transport, which serializes GATT operations; `t4` is the transport's timestamp of the notification. So `rtt` includes any wait behind other GATT work and the plugin's own delay, which is what an app sees. The spec's priority does not bypass notifications already handed to BTstack and the controller, so at stream load the rtt includes waiting for those.
@@ -114,7 +114,7 @@ No incomplete frames, reassembly errors or parse errors. The tick loss figures a
 - The FF15 path works on hardware end to end: the layout, the write without response, the answers, and the app's matching. Nothing was lost on it.
 - The ESP32 is not where the time goes: the answer left the ESP32 within 0.43 ms of the request at the median and within 7.5 ms at worst.
 - The round trip has a floor of about 22 ms and a median of about 41 ms with a long tail. Even the fastest ping took longer than the 15 ms connection interval, so a ping and its answer spanned more than one connection event.
-- The rtt does not grow with the ESP32 stream backlog the answer skipped (flat from depth 0 to 10), which is what the priority rule should give. It does not show that the priority works: notifications already handed to the controller still go ahead of an answer, and the depth is a count of queued frames, not of notifications in flight.
+- The rtt does not grow with the ESP32 stream backlog the answer skipped (flat from depth 0 to 10), which is what the priority rule gives. It does not show that the priority works: notifications already handed to the controller still go ahead of an answer, and the depth is a count of queued frames, not of notifications in flight.
 
 **What this does not show:**
 - Where the 41 ms is spent. The rtt includes the app's write call (median 11 ms), the plugin and platform channel in both directions, the phone's and the ESP32's Bluetooth stacks, and the air. It is not a controller-to-screen latency, and not the latency of the stream records.
@@ -183,8 +183,8 @@ Status: **one pass run on hardware, 2026-10-24, on WMR_Bridge `v0.1.1` with this
 
 | Stream | rtt p50 / p99 / max (ms) | min rtt | Pings over 50 ms | Tick loss LEFT / RIGHT | RSSI start → end |
 |---|---|---|---|---|---|
-| none | 61.6 / 106.4 / 151.8 | 45.0 | 438 / 479 | — (no stream) | −80 → −80 dBm |
-| FF11 raw | 44.8 / 119.9 / 150.0 | 18.0 | 191 / 479 | — (no decoded ticks) | −84 → −86 dBm |
+| none | 61.6 / 106.4 / 151.8 | 45.0 | 438 / 479 | (no stream) | −80 → −80 dBm |
+| FF11 raw | 44.8 / 119.9 / 150.0 | 18.0 | 191 / 479 | (no decoded ticks) | −84 → −86 dBm |
 | FF12 decoded | 44.3 / 124.7 / 195.3 | 15.3 | 194 / 479 | 30.7 % / 17.6 % | −88 → −87 dBm |
 | FF14 batched | 40.5 / 102.5 / 125.3 | 18.6 | 121 / 479 | 21.0 % / 15.2 % | −86 → −81 dBm |
 
@@ -192,8 +192,8 @@ The FF14 run is 18:43:35; the other three are 20:11:49–20:16:56. All answered 
 [`docs/runs/roundtrip/`](https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/roundtrip/README.md).
 
 - **No stream is the slowest case, not the fastest.** 61.6 ms p50 and a 45.0 ms floor against 40.5–44.8 ms and 15.3–18.6 ms with any stream; 438 of 479 pings over 50 ms against 121–194. With FF11/FF12/FF14 off the bridge has nothing to send, so the phone is likely granting slave latency and the ESP32 skips connection events. That is the same direction as the older ~59 ms no-stream run and a reason not to treat "no stream" as the low-latency baseline.
-- **FF11 and FF12 are not shown to be faster or slower than FF14.** They sit 3.8–4.3 ms above FF14, but the runs were sequential, not interleaved, and the eight RSSI samples span 8 dB. RSSI is two point reads per run (start, stop) at 1 dB resolution, so that spread does not show the rig moved either. The repeats are what would separate a stream effect from session drift.
-- **FF11's RIGHT side is short.** Its RIGHT records only start 35.1 s into the run, so its RIGHT stalls and gaps cover 85 s; LEFT is complete. Raw frames carry no device ticks, so FF11 has no tick-loss figure — its sequence gaps (18 LEFT, 26 RIGHT) are the available loss signal.
+- **FF11 and FF12 are not shown to be faster or slower than FF14.** They sit 3.8–4.3 ms above FF14, but the runs were sequential, not interleaved, and the eight RSSI samples span 8 dB. RSSI is two point reads per run (start, stop) at 1 dB resolution, so that spread does not show the rig moved either. The repeats are what separate a stream effect from session drift.
+- **FF11's RIGHT side is short.** Its RIGHT records only start 35.1 s into the run, so its RIGHT stalls and gaps cover 85 s; LEFT is complete. Raw frames carry no device ticks, so FF11 has no tick-loss figure : its sequence gaps (18 LEFT, 26 RIGHT) are the available loss signal.
 
 **Setup, once per session**
 
@@ -221,10 +221,10 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 - Firmware hash, app commit, phone model/Android version, MTU, connection interval and high-priority result from the report, and RSSI at start/end.
 - Any mode fault shown on screen, and anything that moved during the session.
 
-**What the runs show** (2026-10-24 pass; the repeats would strengthen each)
+**What the runs show** (2026-10-24 pass; the repeats strengthen each)
 
 - `rtt` with no stream against each stream: no-stream is slower, so the ~40 ms is not stream load. Its 45.0 ms floor points at connection-event timing (slave latency), not queueing.
-- Whether `rtt` changes with the notification count (FF12 against FF14) at the same position: not separable from this pass — 3.9 ms apart, sequential, 8 dB RSSI spread.
+- Whether `rtt` changes with the notification count (FF12 against FF14) at the same position: not separable from this pass : 3.9 ms apart, sequential, 8 dB RSSI spread.
 - The optional 50 ms and 1000 ms ping intervals, if run, whether `rtt` is quantised to the connection interval. They are not part of the six runs above.
 
 Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
@@ -236,7 +236,7 @@ Six runs is one position, one phone, one session; the 2026-10-24 pass covers the
 The library package split is merged through phase 4. Phase 5 is the first real
 iOS evidence and needs a device; it is not a CI-only result.
 
-**Status: not run — waived by the owner on 2026-10-23 (ONY-41) for the `0.1.0`
+**Status: not run : waived by the owner on 2026-10-23 (ONY-41) for the `0.1.0`
 release line.** The steps below stay the sheet for any release that claims iOS
 support; this release does not have that evidence.
 
@@ -263,4 +263,4 @@ CI-config-validated, not a hardware claim.
 
 - Percentiles are nearest-rank over the whole run.
 - A mode switch during a run sets `mode_changed`; the figures then mix two streams.
-- Arrival times are stamped by the transport when the plugin delivers the notification, so they include plugin and platform-channel delay; a bare-Kotlin baseline would separate that (PLAN.md).
+- Arrival times are stamped by the transport when the plugin delivers the notification, so they include plugin and platform-channel delay; a bare-Kotlin baseline separates that (PLAN.md).
