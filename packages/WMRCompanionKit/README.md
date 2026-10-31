@@ -1,6 +1,6 @@
 # WMRCompanionKit
 
-A pure Swift framework for building iOS, macOS, and visionOS companion applications that connect to the [WMR_Bridge](https://github.com/nightcinder/WMR_Bridge) ESP32 firmware over BLE GATT.
+A Swift framework for building iOS, macOS, and visionOS companion applications that connect to the [WMR_Bridge](https://github.com/nightcinder/WMR_Bridge) ESP32 firmware over BLE GATT.
 
 `WMRCompanionKit` provides the core transport, protocol decoding, and orientation fusion pipelines for Windows Mixed Reality motion controllers without requiring Flutter or third-party dependencies.
 

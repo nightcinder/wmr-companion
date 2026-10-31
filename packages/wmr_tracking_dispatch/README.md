@@ -1,6 +1,6 @@
 # wmr_tracking_dispatch
 
-Native glasses vendor detection and a single-owner UnityPlayer for the
+Native glasses vendor detection and one UnityPlayer owner for the
 default-off VITURE and XREAL tracking plugins, plus the Dart
 `TrackingSourceSelector`.
 

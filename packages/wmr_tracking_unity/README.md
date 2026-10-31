@@ -229,7 +229,7 @@ both SDKs coexist in one build.
    `activeLoader`; `InitializeLoaderSync()` initialises the first assigned
    loader that succeeds. The gate caches the full assigned list, reorders the
    selected vendor first and keeps the other assigned, but whether both vendor
-   loaders may be assigned together, whether their loader type names are
+   loaders can be assigned together, whether their loader type names are
    recognisable by `viture`/`xreal`, and whether XREAL tolerates
    deinitialise-then-reinitialise are untested.
 2. **Deferred loader init.** The design requires **Initialize XR on Startup**
@@ -237,26 +237,26 @@ both SDKs coexist in one build.
    or XREAL can initialise that late (camera/JNI/session assumptions, Android
    lifecycle timing) is unknown and needs a device. If one SDK must own startup,
    the unified project is not viable as designed.
-3. **Duplicate native libraries.** Both SDKs may ship same-named `.so` files
+3. **Duplicate native libraries.** Both SDKs can ship same-named `.so` files
    (for example an ONNX/OpenXR helper). Unity flattens native plugins by ABI,
-   so the same basename in the same ABI directory would overwrite. The export
+   so the same basename in the same ABI directory will overwrite. The export
    script detects that case and fails, but the check cannot run until both
    SDKs are present.
-4. **Duplicate manifest entries.** Both SDKs may contribute permissions,
+4. **Duplicate manifest entries.** Both SDKs can contribute permissions,
    `<uses-feature>`, providers, activities, queries, Gradle dependencies,
    ProGuard rules or `res` assets. The Android manifest merger usually
    deduplicates identical entries but not conflicting provider authorities,
    feature versions or package names. None of this is inspected by the export
    script.
 5. **SDK licence terms.** Redistributing both proprietary SDKs inside one
-   `unityLibrary`/APK may be restricted by each vendor's terms. This repository
+   `unityLibrary`/APK can be restricted by each vendor's terms. This repository
    only points at the vendor packages; it does not grant redistribution
    rights. The project owner approved bundling both runtimes for the 0.2.1 APK
    (ONY-354); the SDKs remain under their vendors' licences, so that approval
    does not extend to other redistributors.
 6. **Both vendors' static initialisers.** Even if only one XR loader is
    active, content providers, `JNI_OnLoad` hooks and static initialisers from
-   the other SDK may still run when its Kotlin classes or native libraries are
+   the other SDK can still run when its Kotlin classes or native libraries are
    packaged. Whether that is harmless is unknown.
 7. **Kotlin dispatch.** This project only dispatches inside Unity. The host
    still needs both vendor Flutter plugin Kotlin classes in one app and an

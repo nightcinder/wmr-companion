@@ -1,6 +1,6 @@
 # wmr_tracking_android_xr
 
-Default-off Android XR head and 26-joint hand tracking source for
+Off by default: Android XR head and 26-joint hand tracking source for
 [`wmr_tracking`](../wmr_tracking).
 
 The Kotlin plugin owns an ARCore for Jetpack XR `Session`. Before creating it

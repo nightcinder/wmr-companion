@@ -1,8 +1,8 @@
-# Headset hand and head tracking — framework
+# Headset hand and head tracking : framework
 
 ## Packaging: Kotlin and Unity inside a Flutter plugin
 
-**Yes, both can ship in a Flutter library.** They belong in separate platform packages, because `wmr_tracking` is pure Dart and should stay that way.
+**Yes, both can ship in a Flutter library.** They belong in separate platform packages, because `wmr_tracking` is pure Dart and must stay that way.
 
 ### Kotlin plugin (Android XR)
 
@@ -12,10 +12,10 @@
 
 ### Unity as a Library (UnitySendMessage)
 
-- Unity exports an Android Gradle project with a `unityLibrary` module. Add it to the Flutter plugin's `android/` Gradle project (or publish it as an `.aar` plus the Unity assets) and the plugin can start/stop the Unity player. Unity's own docs restrict UaaL to **full-screen rendering**, **one Unity runtime instance per process**, and warn that native/managed plugins may need adaptation.
+- Unity exports an Android Gradle project with a `unityLibrary` module. Add it to the Flutter plugin's `android/` Gradle project (or publish it as an `.aar` plus the Unity assets) and the plugin can start/stop the Unity player. Unity's own docs restrict UaaL to **full-screen rendering**, **one Unity runtime instance per process**, and warn that native/managed plugins can need adaptation.
 - **`UnitySendMessage` is one-way, Java/Kotlin → C#, string-only, with a one-frame delay.** Use it for commands such as `start`, `stop`, `recenter` or `setFilterMode`. It is not a way to get poses out of Unity.
 - **Poses travel the other way.** C# either calls a Kotlin object through `AndroidJavaObject`/`AndroidJavaProxy`, or writes into a JNI callback the plugin exposed. The plugin forwards the JSON on an event channel; Dart decodes it with `TrackingFrameCodec`. A `Stream<Object?>` of those messages plugs straight into `RelayTrackingSource`.
-- Practical costs: a Unity build adds the whole player and its assets, needs its own Gradle/NDK setup, and must be licensed and versioned per Unity 6. The player is a second render loop competing with Flutter for the same GPU, so a tracking-only scene should stay minimal or render nothing when hidden.
+- Practical costs: a Unity build adds the whole player and its assets, needs its own Gradle/NDK setup, and must be licensed and versioned per Unity 6. The player is a second render loop competing with Flutter for the same GPU, so a tracking-only scene must stay minimal or render nothing when hidden.
 - **Recommended shape:** a sibling package such as `wmr_tracking_viture` that depends on `wmr_tracking` and owns the Unity relay channels, permissions and C# bridge script, while sharing `UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints` and `unityToOpenXrPose` in `wmr_tracking`. The pure-Dart fusion package remains hardware-free, and apps that do not need Unity pay nothing.
 
 The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_tracking_viture`) are implemented and host-tested; exporting the Unity 6000.0.27f1 `unityLibrary` AAR with the proprietary VITURE XR SDK (`com.viture.xr` v0.9.0, `Viture.XR.VitureXR`) and running on a physical Pro Neckband remain external SDK/hardware gates.
@@ -127,7 +127,7 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 2. Export with Unity as a Library and add the `unityLibrary` module to the Flutter plugin's Gradle build. One Unity runtime per process, full-screen only.
 3. Kotlin starts/stops the player and sends commands with `UnityPlayer.UnitySendMessage(go, "OnCommand", json)`; C# receives `void OnCommand(string)`.
 4. C# sends poses back through a Kotlin callback (JNI/`AndroidJavaProxy`) as one `TrackingFrameCodec` JSON string per sample. The plugin forwards it on an event channel.
-5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor: ...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction — it is string-only, one-way, one frame late.
+5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor: ...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction : it is string-only, one-way, one frame late.
 6. Keep the Unity scene tracking-only. It must not own BLE or the gamepad mapping; that stays in Dart.
 
 **VITURE C SDK (head pose only, no Neckband).**

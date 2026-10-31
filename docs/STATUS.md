@@ -33,7 +33,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | Tag / commit | `v0.3.5` (release tag) at `6648ffd28fd56992f3bc73c09285c9ebcc984617` |
 | App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 2010` for `arm64-v8a`); the Dart packages remain at `0.2.2` |
 | Android artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk`, size 428,243,881 B, SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` (verified against the published release asset) |
-| Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
+| Flavor | `unified` : one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
 | Signing | Project release key (signed by CI on `v*` tags). Updates in place across release builds |
 | Install identity | Release APKs share `com.onyxlens.wmr_companion` and update in place. Debug builds carry the `.debug` suffix (`com.onyxlens.wmr_companion.debug`) since 0.3.3, so they no longer collide with the release APK. A phone holding a pre-0.3.3 debug or locally signed build must be uninstalled once first (`docs/RELEASE_SIGNING.md`) |
 | Launch-crash fixes (0.3.1–0.3.2) | XREAL display stub kept in the release dex; glasses model check deferred to the Unity start handshake; VITURE starts when the glasses model is not reported and requires stereo 3D; one launcher icon on Unity flavors |
@@ -48,12 +48,12 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 
 | Milestone | Scope | State |
 |---|---|---|
-| **M10 — Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.2` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` — iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
-| **M11 — Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
-| **M12 — The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges — parked, no second Classic ESP32). |
-| **M13 — Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion signed release APKs on `v*` tags since 0.3.0; current cut `v0.3.5` (`wmr-companion-0.3.5-unified-arm64-v8a.apk`, project-key signed, debug builds on the `.debug` package; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.5)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.3 (LESC+bonding, matching firmware 0.3.0; see above). **Open:** M13.4 README rewrite around M12 results. |
-| **M14 — Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
-| **M15 — PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
+| **M10: Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.2` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` : iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
+| **M11: Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
+| **M12: The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges : parked, no second Classic ESP32). |
+| **M13: Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion signed release APKs on `v*` tags since 0.3.0; current cut `v0.3.5` (`wmr-companion-0.3.5-unified-arm64-v8a.apk`, project-key signed, debug builds on the `.debug` package; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.5)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.3 (LESC+bonding, matching firmware 0.3.0; see above). **Open:** M13.4 README rewrite around M12 results. |
+| **M14: Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
+| **M15: PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
 
 ### Security posture for 0.3
 
@@ -141,19 +141,19 @@ Details and the raw numbers: WMR_Bridge `docs/DECODING.md` ("Investigation notes
 
 The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-plan`; see [../HANDOFF.md](../HANDOFF.md) §7 and [PLAN.md](PLAN.md)). The sequence of work:
 
-1. **M10 — Library v1 & API freeze**:
+1. **M10: Library v1 & API freeze**:
    - Seven published Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted and tested. ONY-202 added the `wmr_tracking` package (publishable; no vendor adapter run).
    - FF16 bridge firmware version reading landed in #46 (`WmrProtocolVersion`).
    - Reference app moved to `apps/wmr_companion_app` in #53 (M10.5).
    - Dart pub workspace, export-boundary checks, and strict publish dry-run landed in #54 (`docs/PUBLISHING.md`).
    - **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6).
-2. **M11 — Two bridges as a product**:
+2. **M11: Two bridges as a product**:
    - Multi-bridge support in `ControllerService` landed (#34).
    - Per-bridge attribution on records, stats, links, and latency CSV export landed in #51 (ONY-70).
    - Firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`).
    - Per-bridge auto-reconnect and HID resume merged (#60 / ONY-101).
    - Complete as engineering; hardware bench verification (Sitting B′ / Sitting B) remains open.
-3. **M12 — The verification campaign (Open)**:
+3. **M12: The verification campaign (Open)**:
    - Turn run sheets into empirical hardware answers across campaign index (`WMR_Bridge` `docs/runs/README.md`, #42):
      - *Sitting A (one bridge, no reflash):* latency v2 (app vs probe) and tracking quality.
      - *Sitting P (Pi bridge):* Pi bridge hardware verification (Pi being bought).
@@ -161,20 +161,20 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
      - *Sitting B′ (one board):* one board `--variant left`.
      - *Sitting C:* robustness soak and gamepad HID checklist on a PC.
      - *Close-out:* remaining not-yet-run checks.
-     - *Sitting B (two bridges):* multi-bridge A/B/A/B on two ESP32s — **parked**, no second Classic ESP32.
+     - *Sitting B (two bridges):* multi-bridge A/B/A/B on two ESP32s : **parked**, no second Classic ESP32.
      - *Write-ups:* #18 disposition, M7 decision, M8 defaults, STATUS in both repos.
-4. **M13 — Release and distribution (Open)**:
+4. **M13: Release and distribution (Open)**:
    - **Companion `v0.3.3` signed unified APK:** tagged and published 2026-10-30 at `9505043`, project-key signed, debug builds on the `.debug` package, install/uninstall recovery documented; launch-crash and flavor fixes in 0.3.1–0.3.2. No hardware validation on VITURE or XREAL.
    - `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12).
    - Compatibility matrix published in both repos keyed on FF16 (#59, `WMR_Bridge` #45 & #49, M13.2 done).
-   - **M13.3 bridge security decision:** recorded for 0.3 — LESC+bonding on the BLE link (firmware 0.3.0), Pi bridge plaintext with a bearer token plus TLS externally, flash encryption and secure boot still off (summary above and in `WMR_Bridge` `docs/SECURITY.md`).
+   - **M13.3 bridge security decision:** recorded for 0.3 : LESC+bonding on the BLE link (firmware 0.3.0), Pi bridge plaintext with a bearer token plus TLS externally, flash encryption and secure boot still off (summary above and in `WMR_Bridge` `docs/SECURITY.md`).
    - **Open:** M13.4 README rewrite in both repos around verified M12 hardware results.
-5. **M14 — Raspberry Pi Wi-Fi host bridge (In progress)**:
+5. **M14: Raspberry Pi Wi-Fi host bridge (In progress)**:
    - **M14.1 `packages/wmr_ws`:** WebSocket transport implementing `BleTransport` seam over `ws://<host>:8765/wmr` (merged #61).
    - **M14.3 App Wi-Fi bridge entry:** host:port connection UI, optional token authentication, TLS switch, loopback checks (merged #62).
    - **M14.5 Companion docs and publish order:** Update docs (`README.md`, `STATUS.md`, `PLAN.md`, `LIBRARY.md`, `PUBLISHING.md`) and publish waves for the seventh package `wmr_ws`; record that `BleTransport` is GATT-shaped, and that its name is settled for `0.1.0` (owner decision on ONY-146).
    - **Open:** Empirical P-campaign verification on physical Raspberry Pi hardware (P1–P10). Wi-Fi link is host-tested/loopback-only until the Pi sitting.
-6. **M15 — PSVR2 Sense controller framework**:
+6. **M15: PSVR2 Sense controller framework**:
    - PSVR2 Sense firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom).
    - M15.2–15.4 parked (owner has no PSVR2 controllers).
 

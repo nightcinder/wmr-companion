@@ -17,7 +17,7 @@ described in [Installing a release APK](#installing-a-release-apk).
 | Item | Value |
 |---|---|
 | Keystore | `apps/wmr_companion_app/android/wmr-release.keystore` (gitignored, never committed) |
-| Format | JKS (keeps a distinct key password; PKCS#12 would reuse the store password) |
+| Format | JKS (keeps a distinct key password; PKCS#12 will reuse the store password) |
 | Alias | `wmr-companion` |
 | Algorithm | RSA 4096-bit |
 | Validity | 10,000 days (2026-10-29 to 2054-03-16) |

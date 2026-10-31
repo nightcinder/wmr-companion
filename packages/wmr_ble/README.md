@@ -53,7 +53,7 @@ final listener = AppLifecycleListener(
 
 An inactive/paused/detached host stops scanning; a resumed host restarts the
 scan with the same filters. Connections are left alone, because a short
-background period usually keeps the link and dropping it would turn a resume
+background period usually keeps the link and dropping it will turn a resume
 into a reconnect.
 
 ## Permissions and adapter state
@@ -65,12 +65,12 @@ user-facing permission rationale and the `Info.plist` / manifest declarations.
   `BLUETOOTH_CONNECT`; legacy `ACCESS_FINE_LOCATION` with `maxSdkVersion="30"`.
   The transport asks for runtime permissions before scanning or connecting.
   MTU 517 and high connection priority are requested after every connect and
-  are best effort: Android 14+ may ignore the MTU, and the reported value is
+  are best effort: Android 14+ can ignore the MTU, and the reported value is
   whatever the stack returns.
 - **iOS:** `NSBluetoothAlwaysUsageDescription` in the host's `Info.plist` (and
   the older peripheral key if the host targets it). `bluetooth-central`
   background mode only if the host claims background operation. iOS chooses
-  MTU and connection interval; both may be null in `BleLinkStatus`.
+  MTU and connection interval; both can be null in `BleLinkStatus`.
 - **visionOS:** the same CoreBluetooth path where the OS permits it; not
   verified.
 - **Adapter state:** `BleAvailability` is surfaced through the scan/connect

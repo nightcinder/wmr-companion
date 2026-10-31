@@ -2,7 +2,7 @@
 
 Only the unified APK ships. The app has two product flavors under the `vendor`
 dimension: `unified`, which links one shared `unityLibrary` carrying both
-VITURE and XREAL and picks the vendor at runtime, and `base`, the emulator and
+VITURE and XREAL and selects the vendor at runtime, and `base`, the emulator and
 BLE/3DoF fallback with no Unity code. The per-vendor `viture` and `xreal`
 flavors and their exports are retired (ONY-565).
 
