@@ -23,7 +23,7 @@ Gates covered: **1** (capture one frame), **3** (Unity-in-Flutter smoke test), *
 | Item | Required |
 |---|---|
 | Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) are rejected by the adapter for hand tracking and must not be used for gate 4. An unreported model is not an error: `create()` succeeds and the Unity `start` handshake reports the real model. |
-| Host | **VITURE Pro Neckband** (Android, wireless ADB) for gates 3/4/7/8/9 stereo checks. The app runs on the Neckband, not on a paired phone. Gate 9 (optional C path) needs an Android phone with USB host instead. |
+| Host | **VITURE Pro Neckband** (Android, wireless ADB) for gates 3/4/7/8 stereo checks. The app runs on the Neckband, not on a paired phone. Gate 9 (optional C path) needs an Android phone with USB host instead. |
 | Unity | Unity 6000.0+ with Android build support, `com.unity.xr.hands`, VITURE XR SDK for Unity v0.7.0 (`com.viture.xr`). External SDK gate; not redistributable. |
 | App build | Debug APK from wmr-companion `main` after ONY-612/ONY-617, built with `--dart-define=WMR_VITURE_TRACKING=true`, with the `unityLibrary` AAR linked (export pinned by CI). The VITURE slice requests `android.permission.CAMERA` only. Record app commit and export SHA. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |

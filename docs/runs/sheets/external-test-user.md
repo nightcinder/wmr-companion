@@ -1,6 +1,6 @@
 # External tester quickstart — WMR Companion v0.3.5 (unified APK)
 
-Three setups, 20–40 minutes depending on which one you are. Android 13+ phone.
+Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
 The WMR bridge instructions below are for the ESP32-based bridge. Raspberry Pi bridge instructions are still in development.
 
@@ -50,7 +50,7 @@ This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR C
 ## 2. Install
 
 1. Download the APK and SHA256SUMS. Verify before installing — on a computer run `sha256sum -c SHA256SUMS` (or in Termux on the phone); otherwise compare the APK's SHA-256 to the value in SHA256SUMS.
-2. Open the APK on the phone; allow "install unknown apps" when asked.
+2. Open the APK on the host device (Neckband for VITURE, headset for Android XR, phone otherwise); allow "install unknown apps" when asked.
 3. Install. If Android blocks it, record the message and stop.
 
 ## 3. Connect to the bridge — setups A and C only
@@ -140,6 +140,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Date/timezone:
 - Firmware: 0.3.0
 - App: 0.3.5 unified (signed release)
+- Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
 - Result: PASS / PARTIAL / FAIL / BLOCKED
