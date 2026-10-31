@@ -6,7 +6,7 @@
 
 ### Kotlin plugin (Android XR)
 
-- A standard Flutter plugin's `android/` module can hold Kotlin code, a manifest with `HAND_TRACKING`/`HEAD_TRACKING`, and a `MethodChannel`/`EventChannel`. Dart registers a `TrackingSource` that listens to the event channel and passes each map to `TrackingFrameCodec`/`RelayTrackingSource`.
+- A standard Flutter plugin's `android/` module can hold Kotlin code, a manifest with `CAMERA`/`SCENE_UNDERSTANDING_COARSE`/`HAND_TRACKING`/`HEAD_TRACKING` (but not `SCENE_UNDERSTANDING_FINE`), and a `MethodChannel`/`EventChannel`. Dart registers a `TrackingSource` that listens to the event channel and passes each map to `TrackingFrameCodec`/`RelayTrackingSource`.
 - Android XR tracking is a Kotlin API and does not require Flutter to render XR. A tracking-only plugin can own the XR session and forward poses; if the app also wants XR content, that content is a Jetpack XR/Compose view and needs a platform view or a native activity. The tracking seam is the same either way.
 - Permissions and the session lifecycle stay in the plugin. A refused `SPATIAL` mode or a missing hand must surface as `TrackingExceptionKind.unsupported`, not an empty stream.
 
@@ -117,7 +117,7 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 
 **Android XR (implemented first target).**
 1. `packages/wmr_tracking_android_xr` is the Kotlin plugin; the debug screen's tracking-source selector starts it when `WMR_ANDROID_XR_TRACKING` is on.
-2. The plugin requests `HAND_TRACKING` and `HEAD_TRACKING`, then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
+2. The plugin requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING` — never `SCENE_UNDERSTANDING_FINE` — then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
 3. It reads `ArDevice.getInstance(session).state` and `Hand.left/right(session).state`, maps all 26 `HandJointType`s to the OpenXR `HandJoint` names, and sends `TrackingFrameCodec` JSON over an event channel.
 4. Frames use `System.nanoTime()`; the facade's aligner maps them to the BLE clock. No wall-clock comparison is made.
 5. `AndroidXrTrackingSource.create()` returns null when the flag is off and throws `unsupported`/`permissionDenied`/`unavailable` when the device cannot deliver the slice.

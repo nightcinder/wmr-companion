@@ -1,6 +1,6 @@
 # Publishing `wmr-companion` Packages to pub.dev
 
-This document defines the publication process for the `wmr-companion` multi-package repository, the dependency constraints and publication order, the local-development mechanism, and the exact steps required for the initial `0.1.0` release.
+This document defines the publication process for the `wmr-companion` multi-package repository, the dependency constraints and publication order, the local-development mechanism, and the exact steps required for a `0.2.2` release.
 
 ---
 
@@ -18,10 +18,11 @@ The repository contains modular Dart and Flutter packages that are intended to b
 - `wmr_companion_ui` (optional Flutter UI widgets, landed in PR #45)
 - `wmr_companion_hid_android` (optional Android BLE HID output plugin, landed in PR #48)
 - `wmr_tracking_android_xr` (optional Android XR head/hand tracking plugin, ONY-212)
+- `wmr_tracking_dispatch` (pure-Dart vendor detection and `TrackingSource` selection, ONY-568)
 - `wmr_tracking_viture` (optional VITURE Pro Neckband Unity UaaL head/hand tracking relay plugin, ONY-213)
 - `wmr_tracking_xreal` (optional XREAL Air 2 Ultra Unity UaaL head/hand tracking relay plugin, ONY-214)
 
-All eleven package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146); no rename is made here.
+All twelve package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.2.2` (owner decision on ONY-146); no rename is made here.
 
 The root application (`wmr_companion_app`) and `example/` (`wmr_companion_example`) remain application hosts and retain `publish_to: none`.
 
@@ -29,28 +30,20 @@ The root application (`wmr_companion_app`) and `example/` (`wmr_companion_exampl
 
 ## 2. Dependency Graph & Publication Order
 
-pub.dev strictly forbids packages from having `path:` dependencies upon publication. Every inter-package dependency is therefore a hosted version constraint (e.g. `wmr_core: ^0.1.0`); the root pub workspace resolves those constraints to the local source while developing (see §3).
+pub.dev strictly forbids packages from having `path:` dependencies upon publication. Every inter-package dependency is therefore a hosted version constraint (e.g. `wmr_core: ^0.2.2`); the root pub workspace resolves those constraints to the local source while developing (see §3).
 
-Because a published package cannot depend on a package version that does not yet exist on pub.dev, the dependency DAG dictates a strict sequential publication order across three distinct waves:
+Because a published package cannot depend on a package version that does not yet exist on pub.dev, the dependency DAG dictates a strict sequential publication order across four distinct waves:
 
 ```text
-[wmr_fusion] (pure Dart)          [wmr_tracking] (pure Dart, vector_math only)
-     ▲                                   ▲
-     │                                   │
-[wmr_core] (pure Dart, depends on wmr_fusion)
-     ▲
-     ├──────────────────────────┬──────────────────────────┐
-     │                          │                          │
-[wmr_companion] (facade)    [wmr_ble] (Flutter BLE)    [wmr_ws] (pure-Dart WebSocket)
-     ▲
-     ├──────────────────────────┐
-     │                          │
-[wmr_companion_ui]          [wmr_companion_hid_android]
-     ▲
-     ├──────────────────────────┐
-     │                          │
-[wmr_companion_ui]          [wmr_companion_hid_android]
-(Flutter UI widgets)        (Android BLE HID output plugin)
+[wmr_fusion] ──▶ [wmr_core] ──┬──▶ [wmr_ble]
+                             ├──▶ [wmr_ws]
+                             └──▶ [wmr_companion] ──┬──▶ [wmr_companion_ui]
+                                                    └──▶ [wmr_companion_hid_android]
+
+[wmr_tracking] ──┬──▶ [wmr_companion]
+                 ├──▶ [wmr_tracking_android_xr]
+                 └──▶ [wmr_tracking_dispatch] ──┬──▶ [wmr_tracking_viture]
+                                                └──▶ [wmr_tracking_xreal]
 ```
 
 ### Publication Waves
@@ -61,43 +54,57 @@ Because a published package cannot depend on a package version that does not yet
      - Must be published first to pub.dev.
    - **Step 1b: `packages/wmr_tracking`**
      - Has no internal dependencies (only `vector_math`).
-     - Can be published independently of `wmr_core`, but `wmr_companion 0.1.0` needs both.
+     - Can be published independently of `wmr_core`, but `wmr_companion 0.2.2` needs both.
    - **Step 1c: `packages/wmr_core`**
-     - Already declares `wmr_fusion: ^0.1.0`.
-     - Publish once `wmr_fusion 0.1.0` is published and indexed on pub.dev.
+     - Already declares `wmr_fusion: ^0.2.2`.
+     - Publish once `wmr_fusion 0.2.2` is published and indexed on pub.dev.
 
 2. **Wave 2: Public Facade**
    - **Step 2: `packages/wmr_companion`**
-     - Already declares `wmr_core: ^0.1.0` and `wmr_tracking: ^0.1.0`.
+     - Already declares `wmr_core: ^0.2.2` and `wmr_tracking: ^0.2.2`.
      - Publish once both are published and indexed on pub.dev.
 
 3. **Wave 3: Platform Transports & Optional Add-ons**
    - **Step 3a: `packages/wmr_ble`**
-     - Already declares `wmr_core: ^0.1.0` and depends on the Flutter SDK.
-     - Publish once `wmr_core 0.1.0` is indexed.
+     - Already declares `wmr_core: ^0.2.2` and depends on the Flutter SDK.
+     - Publish once `wmr_core 0.2.2` is indexed.
    - **Step 3b: `packages/wmr_ws`**
-     - Pure Dart package. Already declares `wmr_core: ^0.1.0`.
-     - Publish once `wmr_core 0.1.0` is indexed.
+     - Pure Dart package. Already declares `wmr_core: ^0.2.2`.
+     - Publish once `wmr_core 0.2.2` is indexed.
    - **Step 3c: `packages/wmr_companion_ui`**
-     - Already declares `wmr_companion: ^0.1.0` and depends on the Flutter SDK.
-     - Publish once `wmr_companion 0.1.0` is indexed.
+     - Already declares `wmr_companion: ^0.2.2` and depends on the Flutter SDK.
+     - Publish once `wmr_companion 0.2.2` is indexed.
    - **Step 3d: `packages/wmr_companion_hid_android`**
-     - Already declares `wmr_companion: ^0.1.0` and is an Android Flutter plugin.
-     - Publish once `wmr_companion 0.1.0` is indexed.
+     - Already declares `wmr_companion: ^0.2.2` and `wmr_core: ^0.2.2`; it is an Android Flutter plugin.
+     - Publish once `wmr_companion 0.2.2` is indexed.
+   - **Step 3e: `packages/wmr_tracking_android_xr`**
+     - Already declares `wmr_tracking: ^0.2.2` and is an Android Flutter plugin.
+     - Publish once `wmr_tracking 0.2.2` is indexed.
+   - **Step 3f: `packages/wmr_tracking_dispatch`**
+     - Already declares `wmr_tracking: ^0.2.2` and is an Android Flutter plugin.
+     - Publish once `wmr_tracking 0.2.2` is indexed. The Unity relay packages in Wave 4 depend on it.
 
-*(Note: Steps 3a, 3b, 3c, and 3d are mutually independent and can be published in parallel once Wave 1 and Wave 2 are indexed on pub.dev.)*
+4. **Wave 4: Unity Relay Plugins**
+   - **Step 4a: `packages/wmr_tracking_viture`**
+     - Already declares `wmr_tracking: ^0.2.2` and `wmr_tracking_dispatch: ^0.2.2`.
+     - Publish once both are indexed.
+   - **Step 4b: `packages/wmr_tracking_xreal`**
+     - Already declares `wmr_tracking: ^0.2.2` and `wmr_tracking_dispatch: ^0.2.2`.
+     - Publish once both are indexed.
+
+*(Note: the steps within Wave 3 are mutually independent and can be published in parallel once Wave 1 and Wave 2 are indexed on pub.dev; Step 4a and 4b are independent of each other once Step 3f is indexed.)*
 
 ---
 
 ## 3. Local Development Mechanism: Pub Workspace
 
-When inter-package dependencies became hosted constraints (`^0.1.0`), repository development still had to link to local source code rather than download released artifacts from pub.dev. Two mechanisms exist in the Dart ecosystem: `dependency_overrides` and `pub workspace`.
+When inter-package dependencies became hosted constraints (`^0.2.2`), repository development still had to link to local source code rather than download released artifacts from pub.dev. Two mechanisms exist in the Dart ecosystem: `dependency_overrides` and `pub workspace`.
 
 ### Evaluation: `dependency_overrides`
 
 ```yaml
 dependencies:
-  wmr_core: ^0.1.0
+  wmr_core: ^0.2.2
 
 dependency_overrides:
   wmr_core:
@@ -123,9 +130,14 @@ workspace:
   - apps/wmr_companion_app
   - packages/wmr_fusion
   - packages/wmr_tracking
+  - packages/wmr_tracking_dispatch
+  - packages/wmr_tracking_android_xr
+  - packages/wmr_tracking_viture
+  - packages/wmr_tracking_xreal
   - packages/wmr_core
   - packages/wmr_companion
   - packages/wmr_ble
+  - packages/wmr_ws
   - packages/wmr_companion_ui
   - packages/wmr_companion_hid_android
   - example
@@ -139,12 +151,12 @@ name: wmr_core
 resolution: workspace
 
 dependencies:
-  wmr_fusion: ^0.1.0
+  wmr_fusion: ^0.2.2
 ```
 
 **Benefits, as realised here:**
-1. **Workspace-native resolution:** A hosted constraint such as `wmr_fusion: ^0.1.0` resolves to the local workspace member directory. No `dependency_overrides` or path juggling is needed.
-2. **Seamless transitive resolution:** Every package, both app hosts and all eleven packages resolve the whole internal graph locally.
+1. **Workspace-native resolution:** A hosted constraint such as `wmr_fusion: ^0.2.2` resolves to the local workspace member directory. No `dependency_overrides` or path juggling is needed.
+2. **Seamless transitive resolution:** Every package, both app hosts and all twelve packages resolve the whole internal graph locally.
 3. **Single source of truth:** One lockfile at the repository root (`pubspec.lock`) replaces the per-package and example locks.
 4. **Publish-ready:** `dart pub publish` understands workspaces and the published archive keeps the hosted constraint, not the local path. `resolution: workspace` is workspace metadata and does not make the package depend on the repository layout.
 
@@ -160,20 +172,21 @@ dependencies:
 | --- | --- |
 | `wmr_fusion` | none |
 | `wmr_tracking` | none |
-| `wmr_core` | `wmr_fusion: ^0.1.0` |
-| `wmr_companion` | `wmr_core: ^0.1.0`, `wmr_tracking: ^0.1.0` |
-| `wmr_ble` | `wmr_core: ^0.1.0` |
-| `wmr_ws` | `wmr_core: ^0.1.0` |
-| `wmr_companion_ui` | `wmr_companion: ^0.1.0` |
-| `wmr_companion_hid_android` | `wmr_companion: ^0.1.0` |
-| `wmr_tracking_android_xr` | `wmr_tracking: ^0.1.0` |
-| `wmr_tracking_viture` | `wmr_tracking: ^0.1.0` |
-| `wmr_tracking_xreal` | `wmr_tracking: ^0.1.0` |
+| `wmr_core` | `wmr_fusion: ^0.2.2` |
+| `wmr_companion` | `wmr_core: ^0.2.2`, `wmr_tracking: ^0.2.2` |
+| `wmr_ble` | `wmr_core: ^0.2.2` |
+| `wmr_ws` | `wmr_core: ^0.2.2` |
+| `wmr_companion_ui` | `wmr_companion: ^0.2.2` |
+| `wmr_companion_hid_android` | `wmr_companion: ^0.2.2`, `wmr_core: ^0.2.2` |
+| `wmr_tracking_android_xr` | `wmr_tracking: ^0.2.2` |
+| `wmr_tracking_dispatch` | `wmr_tracking: ^0.2.2` |
+| `wmr_tracking_viture` | `wmr_tracking: ^0.2.2`, `wmr_tracking_dispatch: ^0.2.2` |
+| `wmr_tracking_xreal` | `wmr_tracking: ^0.2.2`, `wmr_tracking_dispatch: ^0.2.2` |
 
-All eleven packages are fully prepared for publication:
-- `publish_to: none` has been removed from all eleven packages.
+All twelve packages are fully prepared for publication:
+- `publish_to: none` has been removed from all twelve packages.
 - Each package contains its own `LICENSE` file matching the root MIT license.
-- Each package contains a `CHANGELOG.md` with an honest `0.1.0` entry.
+- Each package contains a `CHANGELOG.md` with an honest `0.2.2` entry.
 - Each package specifies `repository:` and `issue_tracker:` pointing to the GitHub repository.
 - Each package has an `export_boundary_test.dart` under `test/` that fails if its `lib/` imports Riverpod, a file plugin, `dart:ui`, or a package above it in the graph. This replaced the hand-written `grep` steps that used to live only in CI.
 
@@ -184,10 +197,11 @@ The two application hosts (`wmr_companion_app` and `example/`) are workspace mem
 ## 5. First Publication
 
 **Status: on hold.** The owner decided on 2026-10-23 (ONY-41) to hold the
-`0.1.0` release. The same decision waived the iOS 18 device gate for this
+first release. The same decision waived the iOS 18 device gate for this
 release line, so the hold is a choice about timing, not an unresolved gate:
 nothing is published, and a release still needs an explicit owner go-ahead.
-Nothing in the repository publishes automatically.
+Nothing in the repository publishes automatically. The workspace packages are
+currently versioned `0.2.2`.
 
 Publishing is a separate, owner-authorised step. `dart pub publish --dry-run` uploads nothing.
 
@@ -196,7 +210,7 @@ When the owner authorises publication after the API freeze, publish in the wave 
 1. **Wave 1:**
    ```sh
    cd packages/wmr_fusion && dart pub publish
-   # wait for wmr_fusion 0.1.0 to be indexed on pub.dev
+   # wait for wmr_fusion 0.2.2 to be indexed on pub.dev
    cd packages/wmr_tracking && dart pub publish
    cd packages/wmr_core && dart pub publish
    ```
@@ -210,9 +224,16 @@ When the owner authorises publication after the API freeze, publish in the wave 
    cd packages/wmr_ws && dart pub publish
    cd packages/wmr_companion_ui && flutter pub publish
    cd packages/wmr_companion_hid_android && flutter pub publish
+   cd packages/wmr_tracking_android_xr && flutter pub publish
+   cd packages/wmr_tracking_dispatch && flutter pub publish
+   ```
+4. **Wave 4** (after `wmr_tracking_dispatch 0.2.2` is indexed):
+   ```sh
+   cd packages/wmr_tracking_viture && flutter pub publish
+   cd packages/wmr_tracking_xreal && flutter pub publish
    ```
 
-After the first release, `flutter pub get` in the app and `example/` still resolves the local workspace members, so local development keeps using the working tree. A consumer outside the repository gets the published versions through the same `^0.1.0` constraints.
+After the first release, `flutter pub get` in the app and `example/` still resolves the local workspace members, so local development keeps using the working tree. A consumer outside the repository gets the published versions through the same `^0.2.2` constraints.
 
 ---
 
@@ -220,7 +241,7 @@ After the first release, `flutter pub get` in the app and `example/` still resol
 
 The CI workflow (`.github/workflows/ci.yml`) is the gate for this document:
 
-- **Strict dry-run for every package in the publish set.** The `pub.dev publish dry-run (every package in the publish set)` step runs `dart pub publish --dry-run` for `wmr_fusion`, `wmr_tracking`, `wmr_core`, `wmr_companion`, and `wmr_ws`, and `flutter pub publish --dry-run` for `wmr_ble`, `wmr_companion_ui`, and `wmr_companion_hid_android`. It has no `|| true`: any dry-run error (or warning, which pub reports with a non-zero exit) fails the job. The workspace resolution is what lets the dependent packages pass before anything is on pub.dev.
+- **Strict dry-run for every package in the publish set.** The `pub.dev publish dry-run (every package in the publish set)` step runs `dart pub publish --dry-run` for `wmr_fusion`, `wmr_tracking`, `wmr_core`, `wmr_companion`, and `wmr_ws`, and `flutter pub publish --dry-run` for the other seven (`wmr_ble`, `wmr_companion_ui`, `wmr_companion_hid_android`, `wmr_tracking_android_xr`, `wmr_tracking_dispatch`, `wmr_tracking_viture` and `wmr_tracking_xreal`). It has no `|| true`: any dry-run error (or warning, which pub reports with a non-zero exit) fails the job. The workspace resolution is what lets the dependent packages pass before anything is on pub.dev.
 - **Export-boundary tests per package.** Each package's test suite includes `test/export_boundary_test.dart`, run by the existing per-package `dart test` / `flutter test` steps. It reads every file under the package's own `lib/` and fails on a forbidden import, so the boundary is checked where the package is developed rather than by a CI-only shell grep.
 - **Package tests and analysis.** Each package still runs its own `analyze` and test suite; the app and `example/` run theirs.
 - **A fresh app consumes the packages.** `tool/fresh_app_check.sh` creates a throwaway Flutter app, depends on the four host-facing packages by path, connects a `WmrCompanion` to `FakeTransport`, reads a gamepad frame and imports the BLE/UI/HID entry points. It proves the host-facing surface still works for a consumer that is not part of the workspace.

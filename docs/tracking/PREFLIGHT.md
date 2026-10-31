@@ -36,12 +36,12 @@ purchases for the same unproven gates.
 
 | Item | Value |
 |---|---|
-| Artifact | `wmr-companion-0.2.1-unified-debug.apk` |
-| Release | [`v0.2.1`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1), commit `58b5c40` |
-| APK SHA-256 | `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b` |
-| Unified export SHA-256 | `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5` (owner export, ONY-354) |
+| Artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk` |
+| Release | [`v0.3.5`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.5), commit `6648ffd` |
+| APK SHA-256 | `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` |
+| Unity export SHA-256 | `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072` (`unity-export-1.1`, pinned in CI) |
 | Flavor | `unified`: VITURE 0.9.0 + XREAL 3.1.0 in one `unityLibrary`, vendor selected at runtime |
-| Signing | debug key; not for distribution |
+| Signing | release key; tester build, not a store upload |
 
 The release APK already enables every tracking flag, so the XREAL sheet does
 not need a `--dart-define` rebuild. To rebuild locally from the owner export:
@@ -54,13 +54,14 @@ apps/wmr_companion_app/tool/build_flavor.sh unified --debug
 Validate any unified APK without a device before installing it:
 
 ```bash
-gh release download v0.2.1 -p 'wmr-companion-0.2.1-unified-debug.apk'
-python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.2.1-unified-debug.apk
+gh release download v0.3.5 -p 'wmr-companion-0.3.5-unified-arm64-v8a.apk'
+python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.5-unified-arm64-v8a.apk
 ```
 
 ## 3. Permission and session path (host-validated)
 
-`check_unified_apk.py` passed on the v0.2.1 artifact with its recorded SHA-256.
+`check_unified_apk.py` passed on the v0.3.5 release artifact in CI with its
+recorded SHA-256.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
 without `android:required` counts as required, as Android does — `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
@@ -68,7 +69,7 @@ parser (UTF-16 and UTF-8 pools) and that camera gate.
 
 | Check | Result |
 |---|---|
-| Merged permissions | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `CAMERA` present; `HAND_TRACKING` and `HEAD_TRACKING` also merged (Android XR plugin) |
+| Merged permissions | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `CAMERA` (checked by `check_unified_apk.py`); the Android XR plugin manifest declares `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`; `SCENE_UNDERSTANDING_FINE` must not be declared |
 | Features | `bluetooth_le`, `usb.host`, and `camera` declared `required=false` |
 | Both runtimes | `libVitureUnityXR.so`, `libXREALXRPlugin.so`, one `libunity.so`; Unity subsystems 0.9.0 and 3.1.0 |
 | Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 may rename them in a release build |
