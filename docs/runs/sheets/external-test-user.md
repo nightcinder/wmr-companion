@@ -57,7 +57,7 @@ This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR C
 
 Skip this in setup B.
 
-1. Power the board. Status LED must be **red** (no controllers).
+1. Power the board. Status LED should be **red** (no controllers).
 2. Open the app; grant Bluetooth / Nearby-devices permission.
 3. On the **Connect** screen, scan for `WMR Bridge` and connect.
 4. Confirm the screen says **connected, streaming** with negotiated **MTU** 517 (>= 61 is usable). Record the MTU shown.

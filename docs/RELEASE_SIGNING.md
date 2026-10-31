@@ -163,7 +163,7 @@ SHA256SUMS
 `wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
 XREAL glasses install. The unified flavor is published for `arm64-v8a` only:
 the approved export ships `arm64-v8a` natives, so a 32-bit or x86_64 unified
-split will install without any Unity runtime and report VITURE and XREAL as
+split would install without any Unity runtime and report VITURE and XREAL as
 `unavailable`. The job fails if an APK is debug-signed, lacks a
 `CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so a
 green tag run means the published APK matches this document.
@@ -198,8 +198,8 @@ git push origin :refs/tags/v0.3.6-dryrun
 
 Do this once now, then after any re-export of the keystore (key rotation).
 
-1. Download `wmr-release.keystore` from the ONY-493 task attachment : the
-   ONY-492 attachment is the superseded key : or copy it from
+1. Download `wmr-release.keystore` from the ONY-493 task attachment — the
+   ONY-492 attachment is the superseded key — or copy it from
    `apps/wmr_companion_app/android/wmr-release.keystore`.
 2. Copy it to **two** offline media in separate physical locations (for example
    two USB sticks or an encrypted archive on a disconnected drive). Do not keep
