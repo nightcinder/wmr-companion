@@ -168,6 +168,32 @@ split would install without any Unity runtime and report VITURE and XREAL as
 `CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so a
 green tag run means the published APK matches this document.
 
+## Release body
+
+`release-unified` renders the body from first-parent history with
+`tool/release_notes.py`: one bullet per pull request merged since the previous
+version tag (a squash commit subject ending in `(#123)`), plus the assets the
+tag publishes. The body is written to the run summary and passed to
+`gh release create --notes-file`; a re-run refreshes an existing release's
+notes. The generator and its tests use no network, so `python3 -m unittest -v
+tool/test_release_notes.py` runs in the normal `build` job.
+
+A dry-run tag renders the same body without building or publishing:
+
+```sh
+git tag v0.3.6-dryrun <commit>
+git push origin v0.3.6-dryrun
+```
+
+`release-notes-dryrun` prints the body to the run summary and uploads it as the
+`release-notes` artifact. `release-unified` and `release-checksums` skip any
+tag containing `-dryrun`, so a dry run cannot create a release. Delete the tag
+when done:
+
+```sh
+git push origin :refs/tags/v0.3.6-dryrun
+```
+
 ## Offline backup
 
 Do this once now, then after any re-export of the keystore (key rotation).

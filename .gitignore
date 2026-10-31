@@ -38,6 +38,9 @@ apps/wmr_companion_app/assets/monado/wmr_config_key.bin
 # android/unity/README.md documents the path.
 apps/wmr_companion_app/android/unity/*/
 
+# Python bytecode from the tool/ tests
+__pycache__/
+
 # The pub workspace has one lockfile at the root; members do not keep their own
 packages/*/pubspec.lock
 example/pubspec.lock
