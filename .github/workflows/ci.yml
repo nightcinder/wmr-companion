@@ -67,7 +67,7 @@ jobs:
 
       # One resolution for the whole workspace; every member is resolved here.
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_tracking_android_xr packages/wmr_tracking_viture packages/wmr_tracking_xreal packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
+      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_tracking_dispatch packages/wmr_tracking_android_xr packages/wmr_tracking_viture packages/wmr_tracking_xreal packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
       - working-directory: apps/wmr_companion_app
         run: flutter analyze
       - working-directory: apps/wmr_companion_app
@@ -132,6 +132,12 @@ jobs:
       - name: XR adapter contract harness
         working-directory: packages/wmr_tracking
         run: dart run tool/xr_contract_harness.dart
+
+      - name: wmr_tracking_dispatch package
+        working-directory: packages/wmr_tracking_dispatch
+        run: |
+          flutter analyze
+          flutter test
 
       - name: wmr_tracking_android_xr package
         working-directory: packages/wmr_tracking_android_xr
