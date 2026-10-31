@@ -1,6 +1,6 @@
-# External tester quickstart — WMR Companion v0.3.4 (unified APK)
+# External tester quickstart — WMR Companion v0.3.5 (unified APK)
 
-Three setups, 20–40 minutes depending on which one you are. Android 13+ phone.
+Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
 The WMR bridge instructions below are for the ESP32-based bridge. Raspberry Pi bridge instructions are still in development.
 
@@ -24,18 +24,33 @@ Say which one you ran in the intake block.
 - Blue — right controller only.
 - Green — both controllers connected.
 
+## 0.5. VITURE 6DoF host requirement (read before setup B)
+
+VITURE hand tracking runs only on a **VITURE Pro Neckband** hosting the app,
+with **Luma Ultra** glasses. The app runs on the Neckband, not on a paired
+phone, and wireless ADB is used. 3DoF VITURE models (One, OneLite, Pro,
+Pro2, Luma, LumaPro, LumaCyber, Beast) do not deliver hand tracking and are
+not supported for setup B. If your glasses are one of those, or you have no
+Neckband, record setup B as "not supported" rather than as a failure.
+
+Android XR hand tracking runs on the headset itself. It requests `CAMERA`,
+`SCENE_UNDERSTANDING_COARSE` ("movement and area data"), `HAND_TRACKING`
+and `HEAD_TRACKING`. A prompt for "Precise movement and area data"
+(`SCENE_UNDERSTANDING_FINE`) must not appear; if it does, record it as a
+regression. The VITURE slice requests `CAMERA` only.
+
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.4/wmr-companion-0.3.4-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.5/wmr-companion-0.3.5-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.4/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.5/SHA256SUMS
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
 ## 2. Install
 
 1. Download the APK and SHA256SUMS. Verify before installing — on a computer run `sha256sum -c SHA256SUMS` (or in Termux on the phone); otherwise compare the APK's SHA-256 to the value in SHA256SUMS.
-2. Open the APK on the phone; allow "install unknown apps" when asked.
+2. Open the APK on the host device (Neckband for VITURE, headset for Android XR, phone otherwise); allow "install unknown apps" when asked.
 3. Install. If Android blocks it, record the message and stop.
 
 ## 3. Connect to the bridge — setups A and C only
@@ -79,6 +94,16 @@ Pick **6DoF only**. The bridge steps are skipped, the run is shorter, and that i
 
 **Special note for 6DoF-only testers:** this path uses no bridge and no controllers. Do not attempt to pair controllers or connect to `WMR Bridge`. If your glasses do not report hand tracking, the **Capture 6DoF pose** step is unavailable and that is a valid result — record it as skipped. For deeper tracking observation (VITURE/XREAL hand-joint counts, recenter, etc.) see the WMR_Bridge internal runbook (https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) §7.4 and §7.5.
 
+
+**Stereo check (VITURE, setup B):** the Unity player must render in stereo
+3D (SpaceWalker mode). The debug overlay shows `playerHosted`,
+`stereoMode` and `stage`. A healthy run reaches `firstFrame` with
+`stereoMode` `multiPass`/`singlePass`/`singlePassInstanced` and the 3D view
+fills both eyes. If the stage stops at `playerHosted` or `loaderStarted`, or
+`stereoMode` is `unknown`, or you see half an image per eye, record the
+values and capture logs (section 7.5 below). A 2D/mono player fails closed
+with `unavailable` instead of stalling.
+
 **Capture 6DoF pose** appears only while your glasses report hand tracking. It records the full filter-spec rev 4 section 8 corpus: five motion classes (still, held drifting, slow pan, medium pan, fast flick), four runs per class per hand, each at least 30 s, plus one diagnostic occlusion run per hand. That is roughly 10 minutes per hand. Each run repeats its path until the timer ends, at the bench durations: still 30 s, held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s, occlusion 30 s. Paths: still (rest, arm braced), held drifting (aim and let it wander), slow pan 30 cm over 3 s back and forth, medium pan 50 cm in 1 s, fast flick 45 cm in 0.3 s. Skipping a run (whole or per run) is fine and does not break the run; skipped runs are recorded as skipped. Its files are inside the bundle you send.
 
 ### 6C — PSVR2 Sense (experimental)
@@ -90,6 +115,16 @@ PSVR2 Sense support is on by default and compiled into every v0.3.0 image (WMR_B
 - Capture the serial log during pairing (see the WMR_Bridge internal runbook §6.1 and §7.7: https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) and record the `model PSVR2` line, the wake line, and the first report's `frame_len`.
 - Expect the run to work or to fail; either is useful. Do not spend more than one retry on it.
 - In the intake block, note `Controllers: PSVR2` and anything that looked wrong — LED colours, dropped hand, wrong model label.
+
+## 7.5. Log capture (all setups)
+
+Capture logs for every run and include them in the zip:
+
+- Android: `adb logcat -v threadtime > wmr-<setup>-<YYYYMMDD-HHMMSS>.log`
+- Filter for tracking problems: `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted" wmr-*.log`
+- Bridge serial: save the `STREAM`/`LINKLOG` lines as `wmr-serial-<timestamp>.txt`.
+- Screenshot the debug overlay showing `playerHosted`, `stereoMode` and `stage` (VITURE) or the permission list (Android XR).
+- If a file is missing, say which; do not reconstruct numbers from memory.
 
 ## 7. Send
 
@@ -104,7 +139,8 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.0
-- App: 0.3.4 unified (signed release)
+- App: 0.3.5 unified (signed release)
+- Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
 - Result: PASS / PARTIAL / FAIL / BLOCKED
