@@ -79,6 +79,7 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
                     permissionGranted = usbManager?.hasPermission(it) == true,
                 )
             },
+            config = config,
         )
     }
 

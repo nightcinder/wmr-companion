@@ -450,6 +450,11 @@ class WmrTrackingXrealPlugin internal constructor(
         bridge.sendCommand(command)
     }
 
+    /** Test seam for the static `onUnityStage` entry point the C# rig calls. */
+    internal fun deliverUnityStage(stage: String, stereoMode: String?) {
+        unityCallbacks.onStage(stage, stereoMode)
+    }
+
     private fun stopTracking(reportError: Boolean) {
         failPendingStart()
         pendingStartCommand = null
@@ -546,12 +551,14 @@ class WmrTrackingXrealPlugin internal constructor(
         }
 
         /**
-         * Called by the hosted scene when it reaches a startup stage. The
-         * unified rig routes this only while XREAL is the active vendor.
+         * Called by the hosted scene when it reaches a startup stage. The scene
+         * is shared with VITURE, so the report is attributed to whichever
+         * vendor owns the shared runtime; ONY-707 points the C# rig here while
+         * XREAL is active.
          */
         @JvmStatic
         fun onUnityStage(stage: String, stereoMode: String?) {
-            SharedUnityRuntime.shared.dispatchStage(GlassesVendor.XREAL, stage, stereoMode)
+            SharedUnityRuntime.shared.dispatchHostStage(stage, stereoMode)
         }
     }
 }

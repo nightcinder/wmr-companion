@@ -590,10 +590,13 @@ class WmrTrackingViturePlugin internal constructor(
          * startup stage. The stereo mode is `multiPass`, `singlePass`,
          * `singlePassInstanced` or `unknown`; a mono player is reported as
          * `unknown` because the VITURE loader never presents mono as stereo.
+         *
+         * The same scene serves both vendors, so the report is attributed to
+         * whichever vendor owns the shared runtime rather than to VITURE.
          */
         @JvmStatic
         fun onUnityStage(stage: String, stereoMode: String?) {
-            SharedUnityRuntime.shared.dispatchStage(GlassesVendor.VITURE, stage, stereoMode)
+            SharedUnityRuntime.shared.dispatchHostStage(stage, stereoMode)
         }
     }
 }

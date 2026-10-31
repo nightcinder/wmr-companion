@@ -161,6 +161,23 @@ class SharedUnityRuntime(
     @Synchronized
     fun stage(vendor: GlassesVendor): UnityStageReport? = stages[vendor]
 
+    /**
+     * Routes a stage report that came from the one shared stereo scene to the
+     * vendor that currently owns the runtime.
+     *
+     * Both vendors load the same scene, and its rig still reports through the
+     * VITURE plugin's static entry point (the XREAL scene points at the XREAL
+     * class in ONY-707). Attributing the report to the owner keeps
+     * `playerHosted`, `stereoMode` and the start replay correct whichever
+     * vendor is active. Before any claim the report belongs to VITURE, which
+     * is the only vendor that ever hosted the shared scene before XREAL
+     * hosting existed.
+     */
+    fun dispatchHostStage(stage: String, stereoMode: String?) {
+        val vendor = synchronized(this) { owner } ?: GlassesVendor.VITURE
+        dispatchStage(vendor, stage, stereoMode)
+    }
+
     /** Drops the stage a previous session reported so a new one starts clean. */
     @Synchronized
     fun clearStage(vendor: GlassesVendor) {

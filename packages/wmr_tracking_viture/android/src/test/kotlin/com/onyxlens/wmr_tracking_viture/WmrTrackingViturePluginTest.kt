@@ -611,6 +611,44 @@ class WmrTrackingViturePluginTest {
     }
 
     @Test
+    fun theRigsStageReportReachesTheVendorThatOwnsTheRuntime() {
+        val runtime = SharedUnityRuntime.shared
+        val recorder = RecordingHandler()
+        runtime.register(GlassesVendor.XREAL, recorder)
+        try {
+            runtime.claim(GlassesVendor.XREAL) { true }
+
+            WmrTrackingViturePlugin.onUnityStage("playerHosted", "singlePassInstanced")
+
+            assertEquals(
+                listOf<Pair<String, String?>>("playerHosted" to "singlePassInstanced"),
+                recorder.stages,
+            )
+            assertEquals("playerHosted", runtime.stage(GlassesVendor.XREAL)?.stage)
+            assertNull(runtime.stage(GlassesVendor.VITURE))
+        } finally {
+            runtime.unregister(GlassesVendor.XREAL, recorder)
+            runtime.release(GlassesVendor.XREAL)
+            runtime.clearStage(GlassesVendor.XREAL)
+            runtime.clearStage(GlassesVendor.VITURE)
+        }
+    }
+
+    private class RecordingHandler : SharedUnityRuntime.Handler {
+        val stages = mutableListOf<Pair<String, String?>>()
+
+        override fun onFrame(frameJson: String) = Unit
+
+        override fun onError(code: String, message: String) = Unit
+
+        override fun onGlassesModel(modelName: String?) = Unit
+
+        override fun onStage(stage: String, stereoMode: String?) {
+            stages += stage to stereoMode
+        }
+    }
+
+    @Test
     fun aStartWithoutAnActivityCarriesTheActivityStageInTheDetailMap() {
         val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"))
         val result = RecordingResult()

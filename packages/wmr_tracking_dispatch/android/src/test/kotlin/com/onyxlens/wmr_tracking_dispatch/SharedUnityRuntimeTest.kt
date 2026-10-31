@@ -213,6 +213,37 @@ class SharedUnityRuntimeTest {
     }
 
     @Test
+    fun hostStageReportsRouteToTheVendorThatOwnsTheRuntime() {
+        val runtime = SharedUnityRuntime { true }
+        val viture = RecordingHandler()
+        val xreal = RecordingHandler()
+        runtime.register(GlassesVendor.VITURE, viture)
+        runtime.register(GlassesVendor.XREAL, xreal)
+        runtime.claim(GlassesVendor.XREAL)
+
+        runtime.dispatchHostStage("playerHosted", "singlePassInstanced")
+
+        assertEquals(
+            listOf<Pair<String, String?>>("playerHosted" to "singlePassInstanced"),
+            xreal.stages,
+        )
+        assertTrue(viture.stages.isEmpty())
+        assertEquals("playerHosted", runtime.stage(GlassesVendor.XREAL)?.stage)
+        assertNull(runtime.stage(GlassesVendor.VITURE))
+    }
+
+    @Test
+    fun hostStageReportsBeforeAClaimStayWithViture() {
+        val runtime = SharedUnityRuntime { true }
+        val viture = RecordingHandler()
+        runtime.register(GlassesVendor.VITURE, viture)
+
+        runtime.dispatchHostStage("playerHosted", "unknown")
+
+        assertEquals(listOf<Pair<String, String?>>("playerHosted" to "unknown"), viture.stages)
+    }
+
+    @Test
     fun clearStageDropsThePreviousSessionReport() {
         val runtime = SharedUnityRuntime { true }
         runtime.dispatchStage(GlassesVendor.VITURE, "firstFrame", "singlePassInstanced")

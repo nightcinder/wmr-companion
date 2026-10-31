@@ -143,6 +143,25 @@ class VendorDetectorTest {
     }
 
     @Test
+    fun productionEnvironmentIgnoresGrantedDevicesThatAreNotGlasses() {
+        val environment = glassesEnvironment(
+            manufacturer = "Google",
+            model = "Pixel 9",
+            isAndroidXrHost = false,
+            usbHostAvailable = true,
+            usbDevices = listOf(
+                UsbDeviceSnapshot(0x1234, 0x0001, permissionGranted = true),
+                UsbDeviceSnapshot(GlassesUsbConfig.VITURE_VENDOR_ID, 0x1011, permissionGranted = false),
+            ),
+        )
+
+        assertFalse(environment.usbPermissionGranted)
+        val result = detector.detect(environment)
+        assertEquals(GlassesVendor.VITURE, result.vendor)
+        assertFalse(result.usbPermissionGranted)
+    }
+
+    @Test
     fun neckbandHostWinsWithoutUsbAccess() {
         val result = detector.detect(
             GlassesEnvironment(

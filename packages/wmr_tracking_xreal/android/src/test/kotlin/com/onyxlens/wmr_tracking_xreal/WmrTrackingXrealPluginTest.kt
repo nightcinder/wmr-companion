@@ -519,6 +519,19 @@ class WmrTrackingXrealPluginTest {
     }
 
     @Test
+    fun aHostedSceneReportReplaysThePendingStart() {
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val plugin = xrealPlugin(bridge)
+        plugin.startUnityRelay(RecordingReply())
+        assertEquals(1, bridge.sentCommands.size)
+
+        plugin.deliverUnityStage(UnityPlayerHost.STAGE_PLAYER_HOSTED, "singlePassInstanced")
+
+        assertEquals(2, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[1].contains("\"cmd\":\"start\""))
+    }
+
+    @Test
     fun aStoppedSourceDoesNotReplayTheStart() {
         val bridge = FakeBridge(model = "Air2Ultra")
         val plugin = xrealPlugin(bridge)
