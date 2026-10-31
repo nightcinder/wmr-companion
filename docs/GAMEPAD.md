@@ -63,7 +63,7 @@ The mapping settings are saved to `gamepad_settings.json` in the app documents d
 
 The phone registers as a Bluetooth HID gamepad with Android's `BluetoothHidDevice` (Android 9+) and sends one input report whenever the mapped state changes.
 
-- `lib/hid/hid_report.dart` (pure Dart): report descriptor and `encodeHidReport`. Report ID 1, 9 bytes: 16 button bits (order `hidButtonOrder`, A first), hat switch from the d-pad (0..7 clockwise from up, 15 centred), left stick X/Y and right stick X/Y as signed -127..127 (HID Y is positive down, so the model's y is negated), left/right trigger as Brake/Accelerator 0..255.
+- `lib/hid/hid_report.dart` (pure Dart): report descriptor and `encodeHidReport`. Report ID 1, 9 bytes: 16 button bits in Android/Linux HID slot order (`hidButtonOrder`: A, B, C, X, Y, Z, L1, R1, L2, R2, Select, Start, Mode, L3, R3; C and Z are reserved and stay clear), hat switch from the d-pad (0..7 clockwise from up, 15 centred), left stick X/Y and right stick X/Y as signed -127..127 (HID Y is positive down, so the model's y is negated), left/right trigger as Brake/Accelerator 0..255.
 - `lib/hid/hid_gamepad_transport.dart`: `HidGamepadTransport` interface and the method/event-channel implementation. Without the Android plugin it reports `unsupported`.
 - `lib/hid/hid_output.dart`: `HidOutput` subscribes to the service's decoded samples (not the 30 Hz screen provider), maps both hands with the live settings and sends when the encoded bytes change. A new host gets the current state on connect.
 - `android/.../HidGamepadPlugin.kt`: permission request (BLUETOOTH_CONNECT), profile proxy, `registerApp`, connection state, `sendReport`, paired devices, discoverable request. `MainActivity` wires it up.

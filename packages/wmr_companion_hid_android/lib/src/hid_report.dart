@@ -6,7 +6,7 @@
 ///
 /// | byte | content |
 /// |---|---|
-/// | 0-1 | 16 button bits, little endian, order of [hidButtonOrder] (bit 0 first) |
+/// | 0-1 | 16 button bits, little endian, Android/Linux HID slot order of [hidButtonOrder] (bit 0 first) |
 /// | 2 | low nibble: hat switch 0..7 clockwise from up, 15 = centred; high nibble padding |
 /// | 3, 4 | left stick X, Y: signed -127..127, Y positive down (HID convention) |
 /// | 5, 6 | right stick X (Z), Y (Rz), same scale |
@@ -23,21 +23,25 @@ import 'package:wmr_companion/wmr_companion.dart';
 const int hidReportId = 1;
 const int hidReportSize = 9;
 
-/// Button bit order: bit 0 is the first entry.
-const List<GamepadButton> hidButtonOrder = [
+/// Button bit order: bit 0 is the first entry. This is the Android/Linux HID
+/// slot order, not the model order: slots 2 (C) and 5 (Z) are reserved and
+/// stay clear because no WMR control uses them.
+const List<GamepadButton?> hidButtonOrder = [
   GamepadButton.a,
   GamepadButton.b,
+  null, // C
   GamepadButton.x,
   GamepadButton.y,
+  null, // Z
   GamepadButton.l1,
   GamepadButton.r1,
   GamepadButton.l2,
   GamepadButton.r2,
-  GamepadButton.l3,
-  GamepadButton.r3,
   GamepadButton.select,
   GamepadButton.start,
   GamepadButton.guide,
+  GamepadButton.l3,
+  GamepadButton.r3,
 ];
 
 /// Value of the hat nibble when no direction is pressed.
@@ -126,8 +130,9 @@ int _trigger(double v) =>
 /// positive down, so both stick Y values are negated here.
 Uint8List encodeHidReport(GamepadState s) {
   var buttons = 0;
-  for (var i = 0; i < hidButtonOrder.length; i++) {
-    if (s.pressed(hidButtonOrder[i])) buttons |= 1 << i;
+  for (var slot = 0; slot < hidButtonOrder.length; slot++) {
+    final button = hidButtonOrder[slot];
+    if (button != null && s.pressed(button)) buttons |= 1 << slot;
   }
   final out = Uint8List(hidReportSize);
   final d = ByteData.sublistView(out);

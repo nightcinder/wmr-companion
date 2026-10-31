@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `encodeHidReport` packs buttons in Android/Linux HID slot order, matching firmware 0.3.2: C (bit 2) and Z (bit 5) are reserved and stay clear. The shared HID vectors are updated to match.
 - Migrate the Android plugin to AGP 9 built-in Kotlin: drop the Kotlin Gradle Plugin classpath and `org.jetbrains.kotlin.android`, and require Flutter 3.44 or later.
 
 ## 0.2.2
