@@ -159,7 +159,7 @@ apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), De
 | `apps/wmr_companion_app` | Flutter app | no | The current app; dogfoods every package | n/a |
 
 Use a Dart pub workspace (SDK is already `^3.13.5`) rather than adding Melos.
-Internal dependencies are hosted constraints (`wmr_core: ^0.1.0`) resolved to
+Internal dependencies are hosted constraints (`wmr_core: ^0.2.2`) resolved to
 the local members by the workspace; no `path:` dependencies remain. Keep
 the package names unpretentious and stable: `wmr_core`, `wmr_ble`,
 `wmr_companion`, `wmr_companion_ui`, `wmr_companion_hid_android`.

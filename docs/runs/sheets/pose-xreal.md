@@ -26,7 +26,7 @@ Gates covered: **3** (Unity-in-Flutter smoke test), **5** (XREAL Air 2 Ultra han
 | Glasses | XREAL Air 2 Ultra (the only model with hand tracking). `One`/`OnePro` (6DoF head only, no hands) and `Air`/`Air2`/`Air2Pro`/`Light` (3DoF) are rejected by the adapter and must not be used for gate 5. |
 | Host | Beam Pro or Samsung S24/S25 or later. XREAL warns against Android 16 on dev devices. Record model and Android version. |
 | Unity | Unity 2021.3+/6000.0 with Android build support, `com.unity.xr.hands`, XREAL SDK 3.x (`com.xreal.xr`). External SDK gate; not redistributable. |
-| App build | Release `v0.2.1` unified debug APK (SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b`, all tracking flags on, both SDKs in one `unityLibrary`), or a local `tool/build_flavor.sh unified --debug` from the same export. Record app commit. |
+| App build | Release `v0.3.5` unified APK (SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc`, all tracking flags on, both SDKs in one `unityLibrary`), or a local `tool/build_flavor.sh unified --debug` from the same export. Record app commit. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb`, terminal, logcat capture. |
 
@@ -66,12 +66,13 @@ Confirm the flag is live: the debug overlay shows "XREAL tracking: available" wh
    `unsupported (found <model>)`. The handshake model is not re-reported to the
    app, so do not expect a pre-start `Air2Ultra` read.
 
-## 2.1 Pre-flight (desk-only, done 2026-10-28)
+## 2.1 Pre-flight (desk-only, re-run 2026-10-31 on v0.3.5)
 
-Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). On the
-v0.2.1 unified APK (SHA-256 above) the merged manifest declares `CAMERA`,
-`BLUETOOTH_SCAN`/`CONNECT`, `HAND_TRACKING`/`HEAD_TRACKING`, `usb.host` and an
-optional camera feature; both vendor runtimes and their Unity subsystems are
+Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). The
+v0.3.5 unified APK (SHA-256 above) was re-checked on 2026-10-31: its merged
+manifest declares `CAMERA`,
+`SCENE_UNDERSTANDING_COARSE`, `BLUETOOTH_SCAN`/`CONNECT`, `HAND_TRACKING`/`HEAD_TRACKING`,
+`usb.host` and an optional camera feature, and never `SCENE_UNDERSTANDING_FINE`; both vendor runtimes and their Unity subsystems are
 present; and the session classes (`SharedUnityRuntime`, `PendingStartGate`,
 both vendor plugins) are in the dex. This is a build-content check only.
 
