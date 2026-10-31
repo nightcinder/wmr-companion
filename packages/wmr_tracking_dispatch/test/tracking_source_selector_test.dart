@@ -31,11 +31,7 @@ TrackingSourceFlags flags({
   bool viture = false,
   bool xreal = false,
   bool androidXr = false,
-}) => TrackingSourceFlags(
-  viture: viture,
-  xreal: xreal,
-  androidXr: androidXr,
-);
+}) => TrackingSourceFlags(viture: viture, xreal: xreal, androidXr: androidXr);
 
 const _viture = GlassesDetection(
   vendor: GlassesVendor.viture,
@@ -152,23 +148,26 @@ void main() {
     expect(selection.message, contains('refusing to guess'));
   });
 
-  test('permission denied detection is reported as none with a reason', () async {
-    final selector = TrackingSourceSelector(
-      detector: _FakeDetector(
-        const GlassesDetection(
-          vendor: GlassesVendor.none,
-          host: GlassesHost.phone,
-          reason: GlassesDetectionReason.usbPermissionDenied,
+  test(
+    'permission denied detection is reported as none with a reason',
+    () async {
+      final selector = TrackingSourceSelector(
+        detector: _FakeDetector(
+          const GlassesDetection(
+            vendor: GlassesVendor.none,
+            host: GlassesHost.phone,
+            reason: GlassesDetectionReason.usbPermissionDenied,
+          ),
         ),
-      ),
-      flags: flags(viture: true),
-    );
+        flags: flags(viture: true),
+      );
 
-    final selection = await selector.select();
+      final selection = await selector.select();
 
-    expect(selection.status, TrackingSelectionStatus.none);
-    expect(selection.message, contains('USB access was denied'));
-  });
+      expect(selection.status, TrackingSelectionStatus.none);
+      expect(selection.message, contains('USB access was denied'));
+    },
+  );
 
   test('missing factory reports unavailable', () async {
     final selector = TrackingSourceSelector(
@@ -207,18 +206,21 @@ void main() {
     expect(selection.message, contains('boom'));
   });
 
-  test('a start permission denial is typed and the source is disposed', () async {
-    final source = _ThrowOnStartSource();
-    final selector = TrackingSourceSelector(
-      detector: _FakeDetector(_viture),
-      flags: flags(viture: true),
-      vitureSource: () async => source,
-    );
+  test(
+    'a start permission denial is typed and the source is disposed',
+    () async {
+      final source = _ThrowOnStartSource();
+      final selector = TrackingSourceSelector(
+        detector: _FakeDetector(_viture),
+        flags: flags(viture: true),
+        vitureSource: () async => source,
+      );
 
-    final selection = await selector.select();
+      final selection = await selector.select();
 
-    expect(selection.status, TrackingSelectionStatus.permissionDenied);
-    expect(selection.message, 'camera denied');
-    expect(source.disposed, isTrue);
-  });
+      expect(selection.status, TrackingSelectionStatus.permissionDenied);
+      expect(selection.message, 'camera denied');
+      expect(source.disposed, isTrue);
+    },
+  );
 }

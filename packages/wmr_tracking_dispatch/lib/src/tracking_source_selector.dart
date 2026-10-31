@@ -146,7 +146,8 @@ class TrackingSourceSelector {
       return TrackingSelection(
         status: TrackingSelectionStatus.unavailable,
         detection: detection,
-        message: 'Creating the ${detection.vendor.wireName} source failed: '
+        message:
+            'Creating the ${detection.vendor.wireName} source failed: '
             '$error',
       );
     }
@@ -174,7 +175,8 @@ class TrackingSourceSelector {
       return TrackingSelection(
         status: TrackingSelectionStatus.unavailable,
         detection: detection,
-        message: 'Starting the ${detection.vendor.wireName} source failed: '
+        message:
+            'Starting the ${detection.vendor.wireName} source failed: '
             '$error',
       );
     }
@@ -189,7 +191,8 @@ class TrackingSourceSelector {
 
   static TrackingSelectionStatus _statusFor(TrackingExceptionKind kind) =>
       switch (kind) {
-        TrackingExceptionKind.unsupported => TrackingSelectionStatus.unsupported,
+        TrackingExceptionKind.unsupported =>
+          TrackingSelectionStatus.unsupported,
         TrackingExceptionKind.permissionDenied =>
           TrackingSelectionStatus.permissionDenied,
         TrackingExceptionKind.unavailable ||

@@ -5,7 +5,9 @@ Validates what can be proved without a device: the binary Android manifest is
 merged from the app and both vendor SDK manifests, both Unity XR runtimes are
 present with their hand-tracking libraries, the Monado config key is packaged,
 the Dart/Kotlin plugin entry classes are in the dex, and the permission/session
-contract the run sheet relies on is declared. It does not prove that a vendor
+contract the run sheet relies on is declared: BLE, camera and the Android XR
+scene-understanding-coarse, hand-tracking and head-tracking permissions, with
+no request for precise (fine) scene understanding. It does not prove that a vendor
 runtime starts, that permissions are granted, or that hands are tracked; those
 stay on the hardware gates.
 
@@ -28,6 +30,16 @@ REQUIRED_PERMISSIONS = {
     "android.permission.BLUETOOTH_SCAN",
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.CAMERA",
+    # Android XR: coarse scene understanding plus head and hand tracking are
+    # what the tracking source reads (ONY-614).
+    "android.permission.SCENE_UNDERSTANDING_COARSE",
+    "android.permission.HAND_TRACKING",
+    "android.permission.HEAD_TRACKING",
+}
+FORBIDDEN_PERMISSIONS = {
+    # This source reads poses only; requesting precise scene geometry would
+    # prompt the user for data the app never uses (ONY-614).
+    "android.permission.SCENE_UNDERSTANDING_FINE",
 }
 REQUIRED_FEATURES = {
     "android.hardware.bluetooth_le",
@@ -222,9 +234,10 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             print(f"PASS permissions: {sorted(REQUIRED_PERMISSIONS)}")
-        for optional in ("android.permission.HAND_TRACKING", "android.permission.HEAD_TRACKING"):
-            if optional in permissions:
-                print(f"INFO permission: {optional} (Android XR runtime)")
+        forbidden = FORBIDDEN_PERMISSIONS & permissions
+        if forbidden:
+            fail(f"forbidden permissions present: {sorted(forbidden)}")
+            failures += 1
 
         features = {row.get("name"): row.get("required") for row in manifest.of("uses-feature") if row.get("name")}
         missing = REQUIRED_FEATURES - set(features)
