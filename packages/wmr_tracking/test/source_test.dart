@@ -32,6 +32,14 @@ void main() {
     expect(androidXr.capabilities.hasHead6Dof, isTrue);
     expect(androidXr.capabilities.hasHandTracking, isTrue);
     expect(androidXr.capabilities.handJointCount, 26);
+    for (final permission in [
+      'android.permission.CAMERA',
+      'android.permission.SCENE_UNDERSTANDING_COARSE',
+      'android.permission.HAND_TRACKING',
+      'android.permission.HEAD_TRACKING',
+    ]) {
+      expect(androidXr.permissions, contains(permission));
+    }
     expect(
       androidXr.capabilities.supports(TrackingFeature.controllerPose),
       isFalse,
