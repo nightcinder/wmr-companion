@@ -1,6 +1,6 @@
 # VITURE Unity smoke project
 
-Minimal Unity 6000.0 project for the `wmr_tracking_viture` Unity-as-a-Library
+Small Unity 6000.0 project for the `wmr_tracking_viture` Unity-as-a-Library
 (UaaL) relay. It contains the runtime bridge, a one-scene smoke harness, and an
 editor script that exports the `unityLibrary` Gradle module.
 

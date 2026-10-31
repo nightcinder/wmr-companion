@@ -1,7 +1,7 @@
 # wmr_companion_ui
 
 Optional Flutter widgets for a [`wmr_companion`](../wmr_companion/README.md)
-host. Nothing in the facade requires this package.
+host. The facade does not require this package.
 
 Status: **phase 7**. The widgets are extracted from the reference app's debug
 screen; they take plain facade models and have no Riverpod, app or

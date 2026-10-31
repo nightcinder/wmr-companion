@@ -62,7 +62,7 @@ python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.2.1-uni
 
 `check_unified_apk.py` passed on the v0.2.1 artifact with its recorded SHA-256.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
-without `android:required` counts as required, as Android does — `camera` must
+without `android:required` counts as required, as Android does : `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
 parser (UTF-16 and UTF-8 pools) and that camera gate.
 
@@ -71,7 +71,7 @@ parser (UTF-16 and UTF-8 pools) and that camera gate.
 | Merged permissions | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `CAMERA` present; `HAND_TRACKING` and `HEAD_TRACKING` also merged (Android XR plugin) |
 | Features | `bluetooth_le`, `usb.host`, and `camera` declared `required=false` |
 | Both runtimes | `libVitureUnityXR.so`, `libXREALXRPlugin.so`, one `libunity.so`; Unity subsystems 0.9.0 and 3.1.0 |
-| Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 may rename them in a release build |
+| Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 can rename them in a release build |
 | Activities | Flutter `MainActivity`, `UnityPlayerActivity`, XREAL `NRXRActivity` |
 | Vendor metadata | VITURE `sdk 0.9.0`, `dof 6dof`; XREAL `supportDevices` present |
 

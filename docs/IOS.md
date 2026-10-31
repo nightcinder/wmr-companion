@@ -1,6 +1,6 @@
 # iOS Companion App Framework
 
-This document outlines the iOS architecture, CoreBluetooth GATT implementation, and the standalone Swift framework (`WMRCompanionKit`) for the WMR Companion application.
+This document describes the iOS architecture, CoreBluetooth GATT implementation, and the standalone Swift framework (`WMRCompanionKit`) for the WMR Companion application.
 
 ## 1. Overview & Architecture
 

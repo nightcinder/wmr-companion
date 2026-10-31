@@ -53,7 +53,7 @@ Failures are typed `TrackingException`s:
 - `unavailable`: the Unity UaaL runtime (`com.unity3d.player.UnityPlayer`) or
   VITURE XR SDK bridge is not linked, the host activity is detached, or `start`
   runs while the VITURE XR loader is not rendering in stereo 3D (SpaceWalker
-  mode) — a 2D player cannot deliver hand joints.
+  mode) : a 2D player cannot deliver hand joints.
 - `unsupported`: the reported glasses model is not a `LumaUltra` (`One`,
   `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`, or an
   unclassifiable name), or the host is not a VITURE Pro Neckband. An unreported
