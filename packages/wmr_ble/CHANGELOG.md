@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Scans also list devices the platform already connected (`getSystemDevices()`), so a bridge that the phone holds, for example as a HID gamepad, is found even though it no longer advertises.
+
 ## 0.2.2
 
 - Version aligned with the v0.2.2 release; `wmr_core` constraint raised to `^0.2.2`. No breaking public API change.
