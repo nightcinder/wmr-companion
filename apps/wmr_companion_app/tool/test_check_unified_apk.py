@@ -130,6 +130,7 @@ def build_apk(
     display_stub: bool = True,
     extra_launcher: bool = False,
     stereo_stages: bool = True,
+    monado_key: bytes | None = b"\0" * checker.MONADO_KEY_SIZE,
 ) -> Path:
     path = directory / "unified.apk"
     classes = list(checker.REQUIRED_DEX_CLASSES)
@@ -155,6 +156,8 @@ def build_apk(
             checker.UNITY_METADATA,
             b"\x00".join(stage.encode() for stage in stages),
         )
+        if monado_key is not None:
+            apk.writestr(checker.MONADO_KEY_ASSET, monado_key)
     return path
 
 
@@ -203,6 +206,27 @@ class MainTest(unittest.TestCase):
             "SharedUnityRuntime=renamed/inlined",
             output,
         )
+        self.assertIn(
+            f"PASS Monado key: {checker.MONADO_KEY_ASSET} "
+            f"({checker.MONADO_KEY_SIZE} bytes)",
+            output,
+        )
+
+    def test_missing_monado_key_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", monado_key=None))
+        self.assertEqual(code, 1, output)
+        self.assertIn("missing Monado config key", output)
+        self.assertIn(checker.MONADO_KEY_ASSET, output)
+        self.assertIn("APK monado entries: []", output)
+
+    def test_wrong_size_monado_key_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", monado_key=b"\0" * 16)
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("is 16 bytes, expected 1024", output)
 
     def test_stale_unity_metadata_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
