@@ -366,8 +366,8 @@ BleTransport (wmr_ble)
 WMR Bridge (ESP32)  -- BLE FF10/FF11..FF15 -->  WMR controllers
 ```
 
-The app-only concerns : screens, Riverpod providers, file pickers, share
-sheets, HID output, debug painters : sit above or beside this line and are not
+The app-only concerns (screens, Riverpod providers, file pickers, share
+sheets, HID output, debug painters) sit above or beside this line and are not
 imported by `wmr_core` or `wmr_companion`.
 
 ## 8. Repository layout after extraction

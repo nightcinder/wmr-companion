@@ -8,7 +8,7 @@ The WMR bridge instructions below are for the ESP32-based bridge. Raspberry Pi b
 
 - **A : Bridge + controllers (WMR).** You have the `WMR Bridge` board and one or two WMR controllers. Full run.
 - **B : 6DoF only (glasses, no bridge).** You have glasses with hand tracking and no bridge. No controllers needed; this is the short path.
-- **C : Bridge + PSVR2 Sense controllers.** Same as A, but with PSVR2 Sense controllers. Experimental : see section 6C before you start.
+- **C: Bridge + PSVR2 Sense controllers.** Same as A, but with PSVR2 Sense controllers. Experimental: see section 6C before you start.
 
 Say which one you ran in the intake block.
 
@@ -110,7 +110,7 @@ with `unavailable` instead of stalling.
 
 PSVR2 Sense support is on by default and compiled into every v0.3.0 image (WMR_Bridge docs/PSVR2.md §1), but it has **never been run on a controller**. Treat everything here as data collection, not as pass/fail.
 
-- Use the same pairing steps as section 4, with the pairing method you use with a PC. The app must label the controller `PSVR2`; if it says `WMR`, that is a result worth reporting.
+- Use the same pairing steps as section 4, with the pairing method you use with a PC. The app labels the controller `PSVR2`; if it says `WMR`, that is a result worth reporting.
 - PSVR2 is **raw-only** in this build: FF11 carries `0xA1 0x31` frames (up to 79 bytes). There is no PSVR2 decoder for FF12/FF14, FF13 is not read for a PSVR2 hand, and the 3D debug view can show nothing. That is expected. Use FF11 raw and the serial log.
 - Capture the serial log during pairing (see the WMR_Bridge internal runbook §6.1 and §7.7: https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) and record the `model PSVR2` line, the wake line, and the first report's `frame_len`.
 - Expect the run to work or to fail; either is useful. Do not spend more than one retry on it.

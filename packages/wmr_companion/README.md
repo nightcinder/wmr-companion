@@ -9,9 +9,9 @@ This package is the umbrella API from `docs/LIBRARY.md`. It wraps
 can adapt the streams to whatever state layer it already uses. The reference
 app in this repository is the first consumer.
 
-Status: **0.1.0, landed**. All eight packages : `wmr_core`, `wmr_companion`,
+Status: **0.1.0, landed**. All eight packages (`wmr_core`, `wmr_companion`,
 `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_companion_ui` and
-`wmr_companion_hid_android` : are in the pub workspace and pass their export
+`wmr_companion_hid_android`) are in the pub workspace and pass their export
 boundary checks; publishing to pub.dev is on hold per the owner's decision. The
 facade works on the fake transport and is dogfooded by the app's real connection
 path, including `WmrWsTransport` alongside `UniversalBleTransport` and
