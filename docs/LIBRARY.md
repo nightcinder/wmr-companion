@@ -530,7 +530,7 @@ Sequencing notes:
    `wmr_companion_hid_android`) the names to freeze, and is publishing to
    pub.dev intended, or private/path-only for now? : **settled: `wmr_fusion`,
    `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
-   `wmr_companion_hid_android`, and pub.dev is the target; `0.2.2` is held.**
+   `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` (now `0.2.2`) is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
    straight to the ONY-38 `WMRCompanionKit` transport on iOS? : **settled that
    `universal_ble` is the v1 transport on both platforms. It is still
@@ -547,7 +547,7 @@ Sequencing notes:
 
 Settled: **iOS 18 is the minimum** (owner, ONY-38). **Android and iOS are both
 in v1 scope** (owner, 2026-10-23 on ONY-41). **Publication to pub.dev is the
-release target and `0.2.2` is held for now** (owner, ONY-50 and ONY-41,
+release target and `0.1.0` (now `0.2.2`) is held for now** (owner, ONY-50 and ONY-41,
 2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
 2026-10-23 on ONY-41).
 
