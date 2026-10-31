@@ -27,7 +27,7 @@ Stop before starting if any required row is false.
 | Headset | Android XR device/glasses with an Android XR runtime and outward passthrough camera: Samsung Galaxy XR, "Aura or similar", or a dev kit. Record model and Android version. |
 | WMR bridge | One board on `main`, flashed, powered, both controllers paired and awake. Record firmware short SHA and boot banner. |
 | App build | Debug APK from wmr-companion `main` **after** ONY-212, built with `--dart-define=WMR_ANDROID_XR_TRACKING=true`. Record app commit. |
-| Permissions | `android.permission.HAND_TRACKING` and `android.permission.HEAD_TRACKING` declared in the manifest (shipped by the plugin). |
+| Permissions | `android.permission.CAMERA`, `android.permission.SCENE_UNDERSTANDING_COARSE`, `android.permission.HAND_TRACKING` and `android.permission.HEAD_TRACKING` declared in the manifest (shipped by the plugin). `SCENE_UNDERSTANDING_FINE` ("Precise movement and area data") is **not** requested; its appearance is a regression. |
 | Host phone | Only needed if the headset is a display-glasses host; for a standalone XR headset the app runs on the device. One client at a time. |
 | Tooling | `adb`, a terminal, and a way to capture `adb logcat` to a file. |
 | Controller state | Both controllers charged, connected, awake for the whole sitting. |
@@ -82,7 +82,7 @@ Record:
 Procedure:
 
 1. Launch the app with the flag on. From the debug overlay tap **Start tracking (Android XR)**.
-2. Accept the `HAND_TRACKING` and `HEAD_TRACKING` permission prompts. Record whether each was granted, denied, or "not applicable".
+2. Accept the permission prompts: `CAMERA`, `SCENE_UNDERSTANDING_COARSE` ("movement and area data"), `HAND_TRACKING` and `HEAD_TRACKING`. Record whether each was granted, denied, or "not applicable". A prompt for "Precise movement and area data" (`SCENE_UNDERSTANDING_FINE`) must not appear; if it does, stop and record it as a regression.
 3. Confirm the Kotlin side configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`. If `SPATIAL` throws `UnsupportedOperationException`, record it as `unsupported` and stop this gate.
 4. With the hand empty and visible, log for 60 s. Record head-pose rate and joint rate from `adb logcat`.
 5. Repeat with the hand gripping a WMR controller (controller awake, not streaming). Record whether joints still arrive.
@@ -95,14 +95,17 @@ Capture logcat for the whole gate:
 adb logcat -v threadtime > pose-androidxr-gate2-<YYYYMMDD-HHMMSS>.log
 ```
 
-Filter for the tracking tag when reading: `grep -i "WmrTracking\|TrackingException" pose-androidxr-gate2-*.log`.
+Filter for the tracking tag when reading: `grep -iE "WmrTracking|TrackingException|stage=" pose-androidxr-gate2-*.log`. Record `TrackingException.stage` for any failure.
 
 Record:
 
 | Item | Value (user-reported) |
 |---|---|
+| Permission CAMERA | granted / denied |
+| Permission SCENE_UNDERSTANDING_COARSE | granted / denied |
 | Permission HAND_TRACKING | granted / denied |
 | Permission HEAD_TRACKING | granted / denied / n/a |
+| `SCENE_UNDERSTANDING_FINE` prompt appeared? (must be no) | |
 | SPATIAL mode | supported / unsupported |
 | Head-pose rate (Hz) | |
 | Joint rate, empty hand (Hz) | |
@@ -112,6 +115,7 @@ Record:
 | Idempotent start/stop (yes/no) | |
 | Activity recreation (clean restart yes/no) | |
 | Errors / exceptions | |
+| `TrackingException.stage` on failure (permissions/sessionCreate/sessionConfigure/trackingStart) | |
 
 **Pass for 1.0:** permissions granted (or documented denial), `SPATIAL` supported, joints arrive at >0 Hz for an empty hand, and the gripping-hand result is recorded. A "no" for gripping is a valid, recorded result, not a failure of the sheet.
 

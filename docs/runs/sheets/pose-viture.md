@@ -22,12 +22,12 @@ Gates covered: **1** (capture one frame), **3** (Unity-in-Flutter smoke test), *
 
 | Item | Required |
 |---|---|
-| Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gate 1/4/9. 3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) are rejected by the adapter for hand tracking and must not be used for gate 4. |
-| Host | VITURE Pro Neckband (Android, wireless ADB) for gate 3/4/7/8. For gate 9, an Android phone with USB host. |
+| Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) are rejected by the adapter for hand tracking and must not be used for gate 4. An unreported model is not an error: `create()` succeeds and the Unity `start` handshake reports the real model. |
+| Host | **VITURE Pro Neckband** (Android, wireless ADB) for gates 3/4/7/8/9 stereo checks. The app runs on the Neckband, not on a paired phone. Gate 9 (optional C path) needs an Android phone with USB host instead. |
 | Unity | Unity 6000.0+ with Android build support, `com.unity.xr.hands`, VITURE XR SDK for Unity v0.7.0 (`com.viture.xr`). External SDK gate; not redistributable. |
-| App build | Debug APK from wmr-companion `main` after ONY-213, built with `--dart-define=WMR_VITURE_TRACKING=true`, with the `unityLibrary` AAR linked. Record app commit. |
+| App build | Debug APK from wmr-companion `main` after ONY-612/ONY-617, built with `--dart-define=WMR_VITURE_TRACKING=true`, with the `unityLibrary` AAR linked (export pinned by CI). The VITURE slice requests `android.permission.CAMERA` only. Record app commit and export SHA. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
-| Tooling | `adb` (wireless for the Neckband), terminal, logcat capture. |
+| Tooling | `adb` (wireless for the Neckband), terminal, logcat capture, and a way to screenshot the debug overlay. |
 
 Build the APK (after exporting the Unity `unityLibrary` AAR per FRAMEWORK.md "Packaging"):
 
@@ -46,6 +46,8 @@ Confirm the flag is live: the debug overlay shows "VITURE tracking: available" w
 3. Start the serial monitor (bridge) and a logcat capture (Neckband).
 4. Connect the app to the bridge, select **Batched FF14**, confirm `STREAM` shows `stream=batched`, `sub=1`, live `rate_rx`. Confirm `bridge_hands=0`.
 5. Confirm the glasses model reported by the app is `LumaUltra` before gate 4; if it is a 3DoF model, gate 4 fails with `unsupported` and must be recorded as such.
+6. From the debug overlay, record the VITURE `start` reply fields: `playerHosted`, `stereoMode` and `stage`. A healthy run reaches `playerHosted` → `loaderStarted` → `firstFrame` with `stereoMode` one of `multiPass`/`singlePass`/`singlePassInstanced`. If `stereoMode` is `unknown` or the stage stops at `playerHosted`/`loaderStarted`, record it and stop; the loader is not rendering in stereo 3D (SpaceWalker mode). A 2D/mono player fails closed with `unavailable`.
+7. Capture logcat for every gate (see §9): `adb logcat -v threadtime > pose-viture-gate<N>-<timestamp>.log`, then filter with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted"`.
 
 ## 3. Gate 1 — capture one frame per device (IR question)
 
@@ -103,6 +105,10 @@ Record:
 | Activity recreation recovers? | |
 | Pause/resume deadlocks? | |
 | Unity→OpenXR conversion within 1e-6? | |
+| `playerHosted` (true/false) | |
+| `stereoMode` (multiPass/singlePass/singlePassInstanced/unknown) | |
+| Highest stage reached (playerHosted/loaderStarted/firstFrame) | |
+| Stereo timeout error (10 s loader / 20 s frame)? | |
 
 **Pass for 1.0:** commands round-trip, frames arrive, and no deadlock across hot restart / recreation / pause-resume. If the AAR is not linked, record `unavailable` and stop; the gate is not failed, it is blocked on the SDK gate.
 
@@ -137,6 +143,9 @@ Record:
 | Joints present (count of 26) | |
 | Recenter works? | |
 | Errors / exceptions | |
+| `playerHosted` (true/false) | |
+| `stereoMode` | |
+| Highest stage reached | |
 
 **Pass for 1.0:** joints arrive at >0 Hz for an empty hand and the gripping-hand result is recorded. "No" for gripping is a valid recorded result.
 
@@ -201,11 +210,12 @@ Record:
 
 During each gate, capture:
 
-1. `adb logcat -v threadtime > pose-viture-<gate>-<YYYYMMDD-HHMMSS>.log` (wireless ADB for the Neckband).
-2. Any app-exported JSON/CSV tracking frames, via Share or `adb pull <path>`; name them `pose-viture-<gate>-<timestamp>.json`.
-3. The bridge serial capture as `pose-viture-serial-<timestamp>.txt`.
-4. Unity player logs if available (`pose-viture-unity-<timestamp>.log`).
-5. Photos of the setup.
+1. `adb logcat -v threadtime > pose-viture-<gate>-<YYYYMMDD-HHMMSS>.log` (wireless ADB for the Neckband). Read it with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted"`; record the highest stage and `stereoMode`.
+2. Screenshot the debug overlay showing `playerHosted`, `stereoMode` and `stage` for each start attempt (this is the field a tester can read without parsing logs).
+3. Any app-exported JSON/CSV tracking frames, via Share or `adb pull <path>`; name them `pose-viture-<gate>-<timestamp>.json`.
+4. The bridge serial capture as `pose-viture-serial-<timestamp>.txt`.
+5. Unity player logs if available (`pose-viture-unity-<timestamp>.log`).
+6. Photos of the setup.
 
 After the sitting:
 

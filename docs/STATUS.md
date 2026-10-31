@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-30 (records the v0.3.3 signed unified release APK: project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-10-30 (records the v0.3.5 signed unified release APK (ONY-621): VITURE Unity player host + stereo stage, Android XR full permission set, Unity export pin; see tracking changes below): project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -26,13 +26,13 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ## Current state
 
-### Current release (v0.3.3, 2026-10-30)
+### Current release (v0.3.5, 2026-10-30)
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.3.3` (release tag) at `95050437caa5378fe425473ff4bb6d947c62c807` |
-| App version | `0.3.3+8` (`versionName 0.3.3`, `versionCode 8`); the Dart packages remain at `0.2.2` |
-| Android artifact | `wmr-companion-0.3.3-unified-arm64-v8a.apk`, 428,355,373 B, SHA-256 `b2103dd39255ae8e6e309c82f1df1d210016733288268a721f8ae45ea19888ad` |
+| Tag / commit | `v0.3.5` (release tag) at `6648ffd28fd56992f3bc73c09285c9ebcc984617` |
+| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 10`); the Dart packages remain at `0.2.2` |
+| Android artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk`, SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` (size not recorded) |
 | Flavor | `unified` — one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
 | Signing | Project release key (signed by CI on `v*` tags). Updates in place across release builds |
 | Install identity | Release APKs share `com.onyxlens.wmr_companion` and update in place. Debug builds carry the `.debug` suffix (`com.onyxlens.wmr_companion.debug`) since 0.3.3, so they no longer collide with the release APK. A phone holding a pre-0.3.3 debug or locally signed build must be uninstalled once first (`docs/RELEASE_SIGNING.md`) |
@@ -190,6 +190,41 @@ The roadmap is governed by ONY-50's plan document (`/PAP/issues/ONY-50#document-
 The honest current state is that the companion still ships 3DoF. Calling it 6DoF requires an adapter and the hardware gates listed in [GATES.md](tracking/GATES.md#gates-before-calling-this-6dof).
 
 **Named 1.0 path (ONY-440, 2026-10-28): XREAL Air 2 Ultra**, hosted by an existing Beam Pro or Samsung S24-or-later phone; VITURE (Luma Ultra + Pro Neckband) is the fallback and needs two purchases. The `v0.2.1` unified APK was checked host-side: merged `CAMERA`/`HAND_TRACKING`/`HEAD_TRACKING` declarations, both vendor runtimes, and the shared-runtime session classes are present. Nothing was installed or started. Decision and open gaps: [tracking/PREFLIGHT.md](tracking/PREFLIGHT.md).
+
+### VITURE host, permissions and stereo (ONY-607)
+
+VITURE hand tracking is not a phone feature. It needs a **VITURE Pro
+Neckband** as the Android host (wireless ADB) and **Luma Ultra** glasses;
+3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`,
+`LumaCyber`, `Beast`) are rejected by the adapter. An unreported model is
+not an error: `create()` succeeds and the Unity `start` handshake reports the
+real model. `v0.3.5` ships this path.
+
+- **Host requirement:** the app runs on the Neckband, not on a paired phone.
+  The glasses must report `LumaUltra`; otherwise the path is `unsupported`.
+- **Permission set:** the VITURE slice requests `android.permission.CAMERA`
+  only (declared with `android.hardware.camera` optional). The Android XR
+  slice requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING`
+  and `HEAD_TRACKING`; it does **not** request
+  `SCENE_UNDERSTANDING_FINE` ("Precise movement and area data"), which is
+  only needed for fine scene geometry. Each failure names its boundary in
+  `TrackingException.stage` (`permissions`, `sessionCreate`,
+  `sessionConfigure`, `trackingStart`).
+- **Stereo behaviour:** the VITURE XR loader must render in stereo 3D
+  (SpaceWalker mode). The export assigns the loader for Android and enables
+  **Initialize XR on Startup**; `start` fails closed with `unavailable`
+  from a 2D/mono player. The stereo mode is fixed by the loader at
+  initialisation and is read-only (`multiPass`, `singlePass`,
+  `singlePassInstanced`, or `unknown`). The hosted scene reports
+  `playerHosted` → `loaderStarted` → `firstFrame`; if no loader starts
+  within 10 s or no frame renders within 20 s it sends a typed
+  `unavailable` error carrying `stage=... stereo=... playerHosted=...`.
+  The `start` reply and `capabilities` carry `playerHosted`,
+  `stereoMode` and the last `stage`. The stereo camera rig keeps
+  `stereoTargetEye = Both` with depth markers at 1.5/2.5/3.5 m and
+  reports the first frame only after the loader started, so a recorded
+  `firstFrame` proves stereo frames flow. Nothing here has run on hardware;
+  all of it is unverified.
 
 ### Hand-anchor pose filter (ONY-502, 2026-10-29)
 
