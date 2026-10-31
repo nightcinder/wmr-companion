@@ -9,17 +9,21 @@ This package is the umbrella API from `docs/LIBRARY.md`. It wraps
 can adapt the streams to whatever state layer it already uses. The reference
 app in this repository is the first consumer.
 
-Status: **0.1.0, landed**. All eight packages (`wmr_core`, `wmr_companion`,
-`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_companion_ui` and
-`wmr_companion_hid_android`) are in the pub workspace and pass their export
-boundary checks; publishing to pub.dev is on hold per the owner's decision. The
-facade works on the fake transport and is dogfooded by the app's real connection
-path, including `WmrWsTransport` alongside `UniversalBleTransport` and
-`FakeTransport`. Nothing here has been run on iOS hardware.
+Status: **0.2.2, landed**. All twelve packages — `wmr_core`, `wmr_companion`,
+`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_tracking_dispatch`,
+`wmr_tracking_android_xr`, `wmr_tracking_viture`, `wmr_tracking_xreal`,
+`wmr_companion_ui` and `wmr_companion_hid_android` — are in the pub workspace at
+0.2.2 and pass their export boundary checks; publishing to pub.dev is on hold per
+the owner's decision. The facade works on the fake transport and is dogfooded by
+the app's real connection path, including `WmrWsTransport` alongside
+`UniversalBleTransport` and `FakeTransport`. Nothing here has been run on iOS
+hardware.
 
 The optional, publishable `wmr_tracking` package (covered by the release
 dry-run) defines the `TrackingSource` seam and `SixDofFuser` behind `poses`.
-The facade re-exports its types. No vendor adapter ships yet, and no headset has been tested; see
+The facade re-exports its types. Vendor adapters ship in their own packages
+(`wmr_tracking_android_xr`, `wmr_tracking_viture`, `wmr_tracking_xreal`) and
+are off by default; no headset has been tested; see
 [`docs/TRACKING.md`](../../docs/TRACKING.md).
 
 ## Why in-process input

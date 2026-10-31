@@ -44,7 +44,7 @@ The framework consumes all three when present. It never invents a controller pos
 Official guidance: [Work with hands using ARCore for Jetpack XR](https://developer.android.com/develop/xr/jetpack-xr-sdk/arcore/hands) and [Track a device's pose](https://developer.android.com/develop/xr/jetpack-xr-sdk/arcore/device-pose).
 
 - **Hand tracking is opt-in per session.** Build a session config with `setHandTracking(HandTrackingMode.BOTH)` and apply it with `session.configure(...)`. Without that, no hand data arrives.
-- **Permission:** `android.permission.HAND_TRACKING` is a runtime permission. Device pose in `DeviceTrackingMode.SPATIAL` needs `android.permission.HEAD_TRACKING` on immersive devices.
+- **Permissions:** the XR session needs `android.permission.CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`. `HAND_TRACKING` is a runtime permission. Device pose in `DeviceTrackingMode.SPATIAL` needs `android.permission.HEAD_TRACKING` on immersive devices. `SCENE_UNDERSTANDING_FINE` ("Precise movement and area data") is not requested: head and hand poses need only coarse scene data.
 - **API shape:** `Hand.left(session).state` and `Hand.right(session).state` are flows of hand state. The state has `trackingState` and `handJoints`, a map of `HandJointType` to `Pose`. Joint poses follow OpenXR conventions; the documented examples use `HandJointType.PALM` and `HandJointType.INDEX_TIP`.
 - **Device pose:** `ArDevice.getInstance(session).state` exposes `devicePose` (translation and rotation) relative to the tracking origin. `DeviceTrackingMode.SPATIAL` is not supported on every device, so configure and handle `UnsupportedOperationException`.
 - **Space conversion:** poses live in the perception space; `session.scene.perceptionSpace.transformPoseTo(pose, session.scene.activitySpace)` converts them to the activity space.
@@ -52,7 +52,7 @@ Official guidance: [Work with hands using ARCore for Jetpack XR](https://develop
 - **What is not available:** the tracking cameras. Android XR permits the outward passthrough camera (subject to permission), not the non-standard tracking cameras ([CAMERAS.md](../CAMERAS.md)). This rules out direct WMR LED constellation tracking on the headset.
 - **Host constraint:** this API runs in an Android XR app on the XR device, not on a phone driving display glasses. The companion's BLE link will have to move to that device, or the pose has to be relayed to the phone.
 
-**Companion path (implemented in `wmr_tracking_android_xr`):** a Kotlin Flutter plugin owns the XR session, requests `HAND_TRACKING` and `HEAD_TRACKING`, configures `HandTrackingMode.BOTH` with `DeviceTrackingMode.SPATIAL`, converts perception-space poses to the activity space and forwards head plus both hands as `TrackingFrameCodec` JSON over one event channel. The Dart side implements `TrackingSource`; `WmrCompanion.attachTrackingSource` aligns the `System.nanoTime()` timestamp to the BLE clock and feeds `SixDofFuser`.
+**Companion path (implemented in `wmr_tracking_android_xr`):** a Kotlin Flutter plugin owns the XR session, requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING` (never `SCENE_UNDERSTANDING_FINE`), configures `HandTrackingMode.BOTH` with `DeviceTrackingMode.SPATIAL`, converts perception-space poses to the activity space and forwards head plus both hands as `TrackingFrameCodec` JSON over one event channel. The Dart side implements `TrackingSource`; `WmrCompanion.attachTrackingSource` aligns the `System.nanoTime()` timestamp to the BLE clock and feeds `SixDofFuser`.
 
 - **Default off.** `AndroidXrTracking.enabled` is `bool.fromEnvironment('WMR_ANDROID_XR_TRACKING')`, default false. `AndroidXrTrackingSource.create()` returns null without touching a channel when the flag is off, so BLE, controller IMU and 3DoF are unchanged. Enable with `--dart-define=WMR_ANDROID_XR_TRACKING=true` and attach the returned source explicitly.
 - **Typed outcomes.** A denied permission, a non-XR device, a refused `SPATIAL` mode, an unlinked runtime library and activity detach all surface as `TrackingException` kinds (`permissionDenied`, `unsupported`, `unavailable`), not as an empty stream.
@@ -160,7 +160,7 @@ Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glas
 | App-visible tracking cameras | No | No | No | VGA spatial camera (no raw feed documented) | No | **Yes, 8-bit gray 25 Hz** | No |
 | Passthrough RGB | Yes (permission) | Yes | Yes (Eye) | Yes, 12 MP | Yes | Yes (UVC) | Yes |
 | Native Android/Flutter API | Kotlin plugin | No (Unity) | No (Unity) | No (Unity for tracking) | No (Unity) | **Yes (C/FFI)** | No (Unity) |
-| Permission gates | `HAND_TRACKING`, `HEAD_TRACKING` | Camera | Camera | Camera | Camera | USB + camera | Camera |
+| Permission gates | `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING`, `HEAD_TRACKING` | Camera | Camera | Camera | Camera | USB + camera | Camera |
 | Practical companion path | Native plugin | Unity sidecar | Unity sidecar | Embedded Unity on glasses | Embedded Unity on Station | FFI plugin | **Embedded Unity on Neckband** |
 
 

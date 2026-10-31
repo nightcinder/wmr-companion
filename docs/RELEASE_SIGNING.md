@@ -227,11 +227,11 @@ Android requires a strictly increasing `versionCode` for every distributed APK.
 The app version lives in `apps/wmr_companion_app/pubspec.yaml`:
 
 ```yaml
-version: 0.2.2+4   # versionName 0.2.2, versionCode 4
+version: 0.3.5+10   # versionName 0.3.5, versionCode 10
 ```
 
 Before building a new tester APK, increment the build number after `+`
-(`0.2.2+4` → `0.2.2+5`) and commit that change with the release PR. Also bump
+(`0.3.5+10` → `0.3.5+11`) and commit that change with the release PR. Also bump
 `versionName` when the user-facing version changes. `flutter build` maps these
 to Android `versionName`/`versionCode`; confirm with:
 
