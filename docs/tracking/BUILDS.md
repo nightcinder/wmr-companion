@@ -1,4 +1,4 @@
-# Build matrix — tracking flavors (v0.2.2)
+# Build matrix — tracking flavors (v0.3.5)
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
 `apps/wmr_companion_app/tool/install_unity_export.sh`,
@@ -6,27 +6,25 @@ Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.
 `apps/wmr_companion_app/android/settings.gradle.kts`. No build here has been run on
 hardware; these are compile/packaging facts only.
 
-## Current release: v0.2.2 unified APK
+## Current release: v0.3.5 unified APK
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.2.2` (release tag) |
-| App version | `0.2.2+4` (`versionName 0.2.2`, `versionCode 4`) |
-| Artifact | `wmr-companion-0.2.2-unified-debug.apk`, 584,288,364 B, SHA-256 `2507626a981b060566d2e3c7da41a7aa24844435c0db6ea7fbd68d5ca222c755` |
+| Tag / commit | `v0.3.5` (release tag) at `6648ffd` |
+| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 10`) |
+| Artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk`, 428,243,881 B, SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` |
 | Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
-| Unified or fallback | Truly unified. The approved all-flags `base` fallback was **not** used |
-| Signing | Android debug key; not suitable for store distribution |
+| Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
+| Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
-| Licence gate | The owner approved bundling both proprietary SDKs and exported the shared `unityLibrary` (ONY-354; export SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`) |
+| Licence gate | Pinned `unity-export-1.1` (SHA-256 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072`); owner approved SDK redistribution (ONY-354) |
 
-Release notes: [`v0.2.2`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.2).
-The APK was built from the ONY-481 release branch with the owner export, and the
-GATT probe asset is `wmr-gatt-probe-0.2.2-debug.apk`. The only app change from
-v0.2.1 is the FF16 firmware string and FF11–FF16 feature bits on the Debug screen.
+Release notes: [`v0.3.5`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.5).
+Carrying the VITURE stereo Unity player host (ONY-612), Android XR full permission set (ONY-614), pinned unity-export-1.1 (ONY-617), and the self-hosted Liesa release build (ONY-605).
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
-metadata and the tracking/session classes in the dex. It passed on the v0.2.2
+metadata and the tracking/session classes in the dex. It passed on the v0.3.5
 artifact; the open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
 
 ## Release signing
