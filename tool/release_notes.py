@@ -80,11 +80,14 @@ def default_repo() -> str:
 
 
 def previous_tag(tag: str) -> str:
-    """The newest non-dry-run version tag reachable from the tag itself.
+    """The newest stable version tag reachable from the tag itself.
 
-    The tag being released is excluded, so a real tag resolves to the release
-    before it. A dry-run tag that points at the previous release's commit
-    resolves to that same release and therefore reports no new changes.
+    Stable tags are ``vX.Y.Z`` with no suffix; pre-release tags (``-rc1``,
+    ``-test``, ``-dryrun``) are skipped so a release candidate cut just before
+    the real tag does not hide the whole release. The tag being released is
+    excluded, so a real tag resolves to the release before it. A dry-run tag
+    that points at the previous release's commit resolves to that same release
+    and therefore reports no new changes.
     """
     try:
         return git(
@@ -94,7 +97,7 @@ def previous_tag(tag: str) -> str:
             "--match",
             "v[0-9]*",
             "--exclude",
-            "*-dryrun*",
+            "*-*",
             "--exclude",
             tag,
             tag,
