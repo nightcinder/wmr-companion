@@ -82,6 +82,13 @@ internal object AndroidXrJoints {
 
 }
 
+/** A typed failure caught at one native boundary, ready for the method channel. */
+internal data class AndroidXrFailure(
+    val code: String,
+    val message: String,
+    val stage: StartStage,
+)
+
 /**
  * Android XR head and 26-joint hand tracking as a Flutter plugin.
  *
@@ -255,7 +262,10 @@ class WmrTrackingAndroidXrPlugin :
                 "reason" to "Android XR is not available: ${describe(error)}",
             )
         }
-        val handSupported = device.isHandTrackingModeSupported(HandTrackingMode.BOTH)
+        val handReason = handTrackingReason {
+            device.isHandTrackingModeSupported(HandTrackingMode.BOTH)
+        }
+        val handSupported = handReason == null
         return mapOf(
             "supported" to handSupported,
             "handTracking" to handSupported,
@@ -263,7 +273,7 @@ class WmrTrackingAndroidXrPlugin :
             // start call reports a refusal as `unsupported`.
             "headTracking" to true,
             "handJointCount" to if (handSupported) HandJointType.values().size else 0,
-            "reason" to if (handSupported) null else "HandTrackingMode.BOTH is unsupported",
+            "reason" to handReason,
             "permissions" to mapOf(
                 "camera" to permissionState(context, AndroidXrPermissions.CAMERA),
                 "sceneUnderstanding" to permissionState(
@@ -419,19 +429,21 @@ class WmrTrackingAndroidXrPlugin :
             }
         }
 
-        val config = Config.Builder(xrSession.config)
-            .setHandTracking(HandTrackingMode.BOTH)
-            .setDeviceTracking(DeviceTrackingMode.SPATIAL)
-            .build()
+        val config = try {
+            Config.Builder(xrSession.config)
+                .setHandTracking(HandTrackingMode.BOTH)
+                .setDeviceTracking(DeviceTrackingMode.SPATIAL)
+                .build()
+        } catch (error: Throwable) {
+            val failure = configureFailure(error)
+            startGate.fail(failure.code, failure.message, failure.stage.wire)
+            return
+        }
         val configured = try {
             xrSession.configure(config)
         } catch (error: Throwable) {
-            val kind = if (error is IllegalArgumentException) ERROR_UNSUPPORTED else ERROR_UNAVAILABLE
-            startGate.fail(
-                kind,
-                "Session.configure failed: ${describe(error)}",
-                StartStage.SessionConfigure.wire,
-            )
+            val failure = configureFailure(error)
+            startGate.fail(failure.code, failure.message, failure.stage.wire)
             return
         }
         when (configured) {
@@ -506,17 +518,19 @@ class WmrTrackingAndroidXrPlugin :
     }
 
     private fun trackingFailed(error: Throwable) {
+        val failure = trackingFailure(error)
+        // `started` is set before the collectors launch and the main dispatcher
+        // runs immediately, so the first `collect()` can fault while the start
+        // reply is still held. Resolve that reply at `trackingStart`; the
+        // detached-activity cancel would otherwise hide the real boundary.
+        if (startGate.fail(failure.code, failure.message, failure.stage.wire)) {
+            stopTracking(reportError = false)
+            return
+        }
         if (!started) return
-        eventSink?.error(
-            ERROR_UNAVAILABLE,
-            "Android XR tracking failed: ${describe(error)}",
-            detailsFor(StartStage.TrackingStart),
-        )
+        eventSink?.error(failure.code, failure.message, detailsFor(failure.stage))
         stopTracking(reportError = false)
     }
-
-    private fun describe(error: Throwable): String =
-        error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
 
     private suspend fun collectHead(xrSession: Session) {
         ArDevice.getInstance(xrSession).state.collect { state ->
@@ -609,12 +623,43 @@ class WmrTrackingAndroidXrPlugin :
         stopTracking(reportError = false)
     }
 
-    private companion object {
+    internal companion object {
         const val PERMISSION_REQUEST_CODE = 0x5752
         const val ERROR_PERMISSION_DENIED = "permissionDenied"
         const val ERROR_UNSUPPORTED = "unsupported"
         const val ERROR_UNAVAILABLE = "unavailable"
         const val ERROR_CLOSED = "closed"
+
+        /**
+         * The reason hand tracking is unavailable, or null when BOTH works.
+         *
+         * The runtime's support probe is not trusted to answer: a fault means
+         * "cannot confirm hand tracking", reported as unsupported instead of
+         * taking the capability handshake down.
+         */
+        fun handTrackingReason(probe: () -> Boolean): String? =
+            try {
+                if (probe()) null else "HandTrackingMode.BOTH is unsupported"
+            } catch (error: Throwable) {
+                "Android XR hand tracking check failed: ${describe(error)}"
+            }
+
+        /** A `Session.configure` fault, including building the config itself. */
+        fun configureFailure(error: Throwable): AndroidXrFailure = AndroidXrFailure(
+            if (error is IllegalArgumentException) ERROR_UNSUPPORTED else ERROR_UNAVAILABLE,
+            "Session.configure failed: ${describe(error)}",
+            StartStage.SessionConfigure,
+        )
+
+        /** A tracking collector fault; it is a `trackingStart` boundary failure. */
+        fun trackingFailure(error: Throwable): AndroidXrFailure = AndroidXrFailure(
+            ERROR_UNAVAILABLE,
+            "Android XR tracking failed: ${describe(error)}",
+            StartStage.TrackingStart,
+        )
+
+        fun describe(error: Throwable): String =
+            error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
 
         fun detailsFor(stage: StartStage): Map<String, String> = mapOf("stage" to stage.wire)
 
