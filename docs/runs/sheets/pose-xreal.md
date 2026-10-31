@@ -66,10 +66,11 @@ Confirm the flag is live: the debug overlay shows "XREAL tracking: available" wh
    `unsupported (found <model>)`. The handshake model is not re-reported to the
    app, so do not expect a pre-start `Air2Ultra` read.
 
-## 2.1 Pre-flight (desk-only, done 2026-10-28)
+## 2.1 Pre-flight (desk-only, re-run 2026-10-31 on v0.3.5)
 
-Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). On the
-v0.3.5 unified APK (SHA-256 above) the merged manifest declares `CAMERA`,
+Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). The
+v0.3.5 unified APK (SHA-256 above) was re-checked on 2026-10-31: its merged
+manifest declares `CAMERA`,
 `SCENE_UNDERSTANDING_COARSE`, `BLUETOOTH_SCAN`/`CONNECT`, `HAND_TRACKING`/`HEAD_TRACKING`,
 `usb.host` and an optional camera feature, and never `SCENE_UNDERSTANDING_FINE`; both vendor runtimes and their Unity subsystems are
 present; and the session classes (`SharedUnityRuntime`, `PendingStartGate`,

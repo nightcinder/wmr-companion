@@ -1,7 +1,7 @@
 # 6DoF pre-flight: named path, current build, desk evidence
 
-Status: **desk work only, 2026-10-28.** No glasses, phone or Unity runtime was
-started. The artifact checks below are real host-side results; every tracking
+Status: **desk work only, re-checked 2026-10-31 on v0.3.5.** No glasses, phone
+or Unity runtime was started. The artifact checks below are real host-side results; every tracking
 figure and permission prompt remains a hardware gate.
 
 This is the ONY-440 pre-flight companion to [GATES.md](GATES.md),
@@ -60,8 +60,8 @@ python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.5-uni
 
 ## 3. Permission and session path (host-validated)
 
-`check_unified_apk.py` passed on the v0.3.5 release artifact in CI with its
-recorded SHA-256.
+`check_unified_apk.py` passed on the v0.3.5 release artifact with its recorded
+SHA-256, re-run 2026-10-31 against the downloaded release asset.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
 without `android:required` counts as required, as Android does : `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML

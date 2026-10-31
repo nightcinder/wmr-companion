@@ -18,7 +18,7 @@ The repository contains modular Dart and Flutter packages that are intended to b
 - `wmr_companion_ui` (optional Flutter UI widgets, landed in PR #45)
 - `wmr_companion_hid_android` (optional Android BLE HID output plugin, landed in PR #48)
 - `wmr_tracking_android_xr` (optional Android XR head/hand tracking plugin, ONY-212)
-- `wmr_tracking_dispatch` (pure-Dart vendor detection and `TrackingSource` selection, ONY-568)
+- `wmr_tracking_dispatch` (Flutter/Android plugin for vendor detection and `TrackingSource` selection, ONY-568)
 - `wmr_tracking_viture` (optional VITURE Pro Neckband Unity UaaL head/hand tracking relay plugin, ONY-213)
 - `wmr_tracking_xreal` (optional XREAL Air 2 Ultra Unity UaaL head/hand tracking relay plugin, ONY-214)
 
@@ -75,7 +75,7 @@ Because a published package cannot depend on a package version that does not yet
      - Already declares `wmr_companion: ^0.2.2` and depends on the Flutter SDK.
      - Publish once `wmr_companion 0.2.2` is indexed.
    - **Step 3d: `packages/wmr_companion_hid_android`**
-     - Already declares `wmr_companion: ^0.2.2` and `wmr_core: ^0.2.2`; it is an Android Flutter plugin.
+     - Already declares `wmr_companion: ^0.2.2`; it is an Android Flutter plugin. `wmr_core` is only a dev dependency.
      - Publish once `wmr_companion 0.2.2` is indexed.
    - **Step 3e: `packages/wmr_tracking_android_xr`**
      - Already declares `wmr_tracking: ^0.2.2` and is an Android Flutter plugin.
@@ -177,7 +177,7 @@ dependencies:
 | `wmr_ble` | `wmr_core: ^0.2.2` |
 | `wmr_ws` | `wmr_core: ^0.2.2` |
 | `wmr_companion_ui` | `wmr_companion: ^0.2.2` |
-| `wmr_companion_hid_android` | `wmr_companion: ^0.2.2`, `wmr_core: ^0.2.2` |
+| `wmr_companion_hid_android` | `wmr_companion: ^0.2.2` |
 | `wmr_tracking_android_xr` | `wmr_tracking: ^0.2.2` |
 | `wmr_tracking_dispatch` | `wmr_tracking: ^0.2.2` |
 | `wmr_tracking_viture` | `wmr_tracking: ^0.2.2`, `wmr_tracking_dispatch: ^0.2.2` |
