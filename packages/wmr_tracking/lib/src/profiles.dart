@@ -47,6 +47,8 @@ const androidXrRuntimeProfile = TrackingDeviceProfile(
   ),
   host: 'On the headset or wired XR glasses; ARCore for Jetpack XR',
   permissions:
+      'android.permission.CAMERA, '
+      'android.permission.SCENE_UNDERSTANDING_COARSE, '
       'android.permission.HAND_TRACKING and '
       'android.permission.HEAD_TRACKING at runtime',
   integration: 'Flutter Android plugin (Kotlin) that forwards frames',

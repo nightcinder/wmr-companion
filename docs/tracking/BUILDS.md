@@ -1,4 +1,4 @@
-# Build matrix — tracking flavors (v0.3.5)
+# Build matrix : tracking flavors (v0.3.5)
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
 `apps/wmr_companion_app/tool/install_unity_export.sh`,
@@ -50,7 +50,7 @@ unified APK ships and there is no per-vendor flavor to build.
 
 ## Why there is only one Unity export
 
-- Only one `UnityPlayer` may run in a process (Unity as a Library restriction).
+- Only one `UnityPlayer` can run in a process (Unity as a Library restriction).
 - The Gradle build links at most one `unityLibrary`, and only the `unified`
   flavor depends on it (`settings.gradle.kts` includes the module only when
   `android/unity/unified/unityLibrary` exists).

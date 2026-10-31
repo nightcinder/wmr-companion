@@ -205,7 +205,7 @@ currently versioned `0.2.2`.
 
 Publishing is a separate, owner-authorised step. `dart pub publish --dry-run` uploads nothing.
 
-When the owner authorises publication after the API freeze, publish in the wave order from §2 — **no pubspec edits are required**:
+When the owner authorises publication after the API freeze, publish in the wave order from §2 : **no pubspec edits are required**:
 
 1. **Wave 1:**
    ```sh

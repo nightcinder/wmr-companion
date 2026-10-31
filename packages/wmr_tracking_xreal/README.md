@@ -1,6 +1,6 @@
 # wmr_tracking_xreal
 
-Default-off XREAL Air 2 Ultra head and 26-joint hand tracking relay source for
+Off by default: XREAL Air 2 Ultra head and 26-joint hand tracking relay source for
 [`wmr_tracking`](../wmr_tracking).
 
 XREAL hand tracking is available only through the XREAL SDK for Unity 3.x

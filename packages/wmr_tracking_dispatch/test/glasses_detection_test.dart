@@ -32,10 +32,7 @@ void main() {
   });
 
   test('a non-map detection is a protocol error', () {
-    expect(
-      () => GlassesDetection.fromMap('viture'),
-      throwsFormatException,
-    );
+    expect(() => GlassesDetection.fromMap('viture'), throwsFormatException);
   });
 
   test('a missing plugin reports detectorUnavailable', () async {

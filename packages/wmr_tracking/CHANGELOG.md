@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- ONY-669: the Android XR runtime profile now lists `CAMERA`,
+  `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`, matching
+  the plugin's required set.
 - ONY-614: `TrackingException` gains an optional `stage`, the platform boundary
   that failed (for example `sessionCreate`), and its `toString` names it. No
   breaking change for existing constructors or handlers.

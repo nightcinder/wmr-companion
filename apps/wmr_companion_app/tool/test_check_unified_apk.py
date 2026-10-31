@@ -90,7 +90,10 @@ def build_manifest(elements: list[tuple[str, dict[str, str]]], utf8: bool = Fals
 
 
 def _manifest_elements(
-    camera_required: str | None, extra_launcher: bool = False
+    camera_required: str | None,
+    extra_launcher: bool = False,
+    xr_permissions: bool = True,
+    scene_fine: bool = False,
 ) -> list[tuple[str, dict[str, str]]]:
     camera = {"name": "android.hardware.camera"}
     if camera_required is not None:
@@ -100,6 +103,18 @@ def _manifest_elements(
         ("uses-permission", {"name": "android.permission.CAMERA"}),
         ("uses-permission", {"name": "android.permission.BLUETOOTH_SCAN"}),
         ("uses-permission", {"name": "android.permission.BLUETOOTH_CONNECT"}),
+    ]
+    if xr_permissions:
+        elements += [
+            ("uses-permission", {"name": "android.permission.SCENE_UNDERSTANDING_COARSE"}),
+            ("uses-permission", {"name": "android.permission.HAND_TRACKING"}),
+            ("uses-permission", {"name": "android.permission.HEAD_TRACKING"}),
+        ]
+    if scene_fine:
+        elements.append(
+            ("uses-permission", {"name": "android.permission.SCENE_UNDERSTANDING_FINE"})
+        )
+    elements += [
         ("uses-feature", {"name": "android.hardware.bluetooth_le", "required": "true"}),
         ("uses-feature", camera),
         ("uses-feature", {"name": "android.hardware.usb.host", "required": "false"}),
@@ -131,6 +146,8 @@ def build_apk(
     extra_launcher: bool = False,
     stereo_stages: bool = True,
     monado_key: bytes | None = b"\0" * checker.MONADO_KEY_SIZE,
+    xr_permissions: bool = True,
+    scene_fine: bool = False,
 ) -> Path:
     path = directory / "unified.apk"
     classes = list(checker.REQUIRED_DEX_CLASSES)
@@ -141,7 +158,9 @@ def build_apk(
     with zipfile.ZipFile(path, "w") as apk:
         apk.writestr(
             "AndroidManifest.xml",
-            build_manifest(_manifest_elements(camera_required, extra_launcher)),
+            build_manifest(
+                _manifest_elements(camera_required, extra_launcher, xr_permissions, scene_fine)
+            ),
         )
         apk.writestr(
             "classes.dex",
@@ -211,6 +230,30 @@ class MainTest(unittest.TestCase):
             f"({checker.MONADO_KEY_SIZE} bytes)",
             output,
         )
+        self.assertIn("android.permission.SCENE_UNDERSTANDING_COARSE", output)
+        self.assertIn("android.permission.HAND_TRACKING", output)
+        self.assertIn("android.permission.HEAD_TRACKING", output)
+
+    def test_missing_xr_permissions_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", xr_permissions=False)
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("missing permissions:", output)
+        for permission in (
+            "android.permission.SCENE_UNDERSTANDING_COARSE",
+            "android.permission.HAND_TRACKING",
+            "android.permission.HEAD_TRACKING",
+        ):
+            self.assertIn(permission, output)
+
+    def test_scene_understanding_fine_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", scene_fine=True))
+        self.assertEqual(code, 1, output)
+        self.assertIn("forbidden permissions present:", output)
+        self.assertIn("android.permission.SCENE_UNDERSTANDING_FINE", output)
 
     def test_missing_monado_key_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
