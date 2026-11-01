@@ -9,6 +9,7 @@ import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import 'raw_mode_notifier.dart';
 
@@ -44,6 +45,7 @@ Future<void> close(WidgetTester tester) async {
 Future<void> open(
   WidgetTester tester, {
   DebugTrackingSourceFactory? factory,
+  TrackingSourceSelector? selector,
 }) async {
   tall(tester);
   await tester.pumpWidget(
@@ -60,6 +62,8 @@ Future<void> open(
         ),
         if (factory != null)
           debugTrackingSourceFactoryProvider.overrideWithValue(factory),
+        if (selector != null)
+          debugTrackingSelectorProvider.overrideWithValue(selector),
       ],
       child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
     ),
@@ -96,6 +100,15 @@ TrackingFrame _handFrame(int timeNs) {
       palm: TrackedPose(pose: palm(0.18)),
     ),
   );
+}
+
+class _FixedDetector implements GlassesDetector {
+  const _FixedDetector(this.detection);
+
+  final GlassesDetection detection;
+
+  @override
+  Future<GlassesDetection> detect() async => detection;
 }
 
 void main() {
@@ -135,6 +148,59 @@ void main() {
     for (final choice in DebugTrackingSource.values) {
       expect(find.text(choice.label), findsWidgets);
     }
+    await close(tester);
+  });
+
+  testWidgets('Auto (USB) attaches the natively detected vendor source', (
+    tester,
+  ) async {
+    FakeTrackingSource? source;
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.viture,
+            host: GlassesHost.neckband,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => source = FakeTrackingSource(),
+      ),
+    );
+
+    select(tester, DebugTrackingSource.auto);
+    await settle(tester);
+
+    expect(source?.started, isTrue);
+    expect(find.textContaining('Attached viture tracking'), findsOneWidget);
+
+    source!.addFrame(_handFrame(1));
+    await settle(tester);
+    expect(find.textContaining('source handAnchor'), findsNWidgets(2));
+    await close(tester);
+  });
+
+  testWidgets('Auto (USB) reports when no glasses are detected', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(GlassesDetection.none),
+        flags: const TrackingSourceFlags(viture: true),
+      ),
+    );
+
+    select(tester, DebugTrackingSource.auto);
+    await settle(tester);
+
+    expect(
+      find.textContaining(
+        'No VITURE, XREAL or Android XR glasses were detected',
+      ),
+      findsOneWidget,
+    );
     await close(tester);
   });
 

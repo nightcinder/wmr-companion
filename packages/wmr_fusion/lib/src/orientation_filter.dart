@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'quaternion.dart';
 import 'vector3.dart';
 
@@ -82,9 +84,19 @@ abstract class OrientationFilterBase implements OrientationFilter {
 
   @override
   void resetYaw() {
-    final yaw = orientation.toEuler().yaw;
-    final unyaw = Quaternion.fromAxisAngle(const Vector3(0, 0, 1), -yaw);
-    _set((unyaw * orientation).normalized());
+    // Compute the heading from the quaternion components, not via toEuler(),
+    // and detect gimbal lock explicitly: near pitch = +/-90 degrees the heading
+    // is undefined and both terms below vanish. Extracting it there would turn
+    // rounding noise into an arbitrary yaw, so leave the orientation alone.
+    final q = orientation;
+    final sinYaw = 2 * (q.w * q.z + q.x * q.y);
+    final cosYaw = 1 - 2 * (q.y * q.y + q.z * q.z);
+    if (sinYaw * sinYaw + cosYaw * cosYaw < 1e-12) return;
+    final unyaw = Quaternion.fromAxisAngle(
+      const Vector3(0, 0, 1),
+      -math.atan2(sinYaw, cosYaw),
+    );
+    _set((unyaw * q).normalized());
   }
 
   @override

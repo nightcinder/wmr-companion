@@ -705,6 +705,16 @@ class RealBenchSession implements BenchSession {
   }
 }
 
+/// The host clock for a capture with no controller service behind it.
+///
+/// A tracking-only session has no transport clock, but [benchSessionProvider]
+/// is resolved again for every pose segment: a fresh [MonotonicClock] per
+/// resolve would re-base `host_ns` near zero at each segment. Kept here so the
+/// fallback spans the whole session like a transport clock does.
+final benchFallbackClockProvider = Provider<MonotonicClock>(
+  (ref) => MonotonicClock(),
+);
+
 /// Resolves the session from the live connection or the attached hand-tracking
 /// source, or null when neither exists. The wizard calls it again on each step,
 /// so a bridge that comes back after a drop is picked up.
@@ -725,6 +735,8 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
               id: service.protocolFor(id)?.firmwareVersion,
           })
         : null;
+    final MonotonicClock clock =
+        service?.transport.clock ?? ref.read(benchFallbackClockProvider);
     final poseRecorder = availability.available
         ? RealBenchPoseRecorder(
             ref: ref,
@@ -732,13 +744,19 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
             runtime: availability.runtime!,
             appCommit: appCommit,
             firmwareSha: firmwareSha,
+            // Same monotonic clock as the session and controller samples, so
+            // a capture's host_ns does not restart at every segment.
+            hostClock: () => clock.nowUs * 1000,
+            controllerOrientation: service == null
+                ? null
+                : (hand) => service.pipeline(hand).orientation,
           )
         : null;
     return RealBenchSession(
       service: connected ? service : null,
       tracking: tracking,
       poseRecorder: poseRecorder,
-      clock: service?.transport.clock ?? MonotonicClock(),
+      clock: clock,
       captureStore: await ref.read(captureStoreProvider.future),
       latencyStore: await ref.read(latencyStoreProvider.future),
       durations: ref.read(benchDurationsProvider),

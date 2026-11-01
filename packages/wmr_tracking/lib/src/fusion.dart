@@ -452,6 +452,26 @@ class SixDofFuser {
     }
   }
 
+  /// Drops the offsets learned under the current IMU heading for [hand], or
+  /// both hands when null, after `resetYaw` zeroes that heading.
+  ///
+  /// The user's grip calibration is kept: its translation is expressed in the
+  /// controller/IMU frame, which a heading reset does not rotate. Buffered
+  /// tracking frames are kept too; only state derived from the old heading is
+  /// cleared, so the next frame re-learns the head-relative fallback instead of
+  /// jumping by the removed yaw.
+  void resetYaw({TrackedHand? hand}) {
+    final hands = hand == null ? TrackedHand.values : [hand];
+    for (final tracked in hands) {
+      _headLocal.remove(tracked);
+      _lastWorld.remove(tracked);
+      _lastOutput.remove(tracked);
+      _lastSource.remove(tracked);
+      _clearAnchorState(tracked);
+      _handFilters[tracked]!.reset();
+    }
+  }
+
   void _resetHand(TrackedHand hand) {
     _handFilters[hand]!.reset();
     _lastSource.remove(hand);

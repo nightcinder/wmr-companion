@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:vector_math/vector_math_64.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 import '../../services/test_bundle.dart';
@@ -182,6 +183,7 @@ class BenchPoseAvailability {
     DebugTrackingSelection selection,
   ) {
     const supported = {
+      DebugTrackingSource.auto,
       DebugTrackingSource.androidXr,
       DebugTrackingSource.viture,
       DebugTrackingSource.xreal,
@@ -197,7 +199,12 @@ class BenchPoseAvailability {
         'unavailable: no 6DoF hand-tracking source',
       );
     }
-    return BenchPoseAvailability.available(selection.choice.name);
+    // Auto detection attaches a concrete vendor source, so capture file names
+    // use its runtime rather than the "auto" choice.
+    final runtime = selection.choice == DebugTrackingSource.auto
+        ? source.vendor.name
+        : selection.choice.name;
+    return BenchPoseAvailability.available(runtime);
   }
 }
 
@@ -274,6 +281,7 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
     this.appCommit = 'unknown',
     this.firmwareSha,
     this.hostClock,
+    this.controllerOrientation,
   });
 
   final Ref ref;
@@ -291,6 +299,12 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
   /// Arrival clock for the [SourceClockAligner]; tests inject a fixed one.
   /// Defaults to a [Stopwatch] started when a segment begins.
   final HostClock? hostClock;
+
+  /// Controller IMU orientation per hand (0 left, 1 right), or null when no
+  /// controller stream is attached. The recorder fuses it with the tracking
+  /// frame so a capture keeps the poses the viewer would show, not just the
+  /// 6DoF anchors.
+  final Quaternion Function(int hand)? controllerOrientation;
 
   @override
   Future<PoseCaptureResult> record({
@@ -310,6 +324,8 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
     final clock = Stopwatch()..start();
     final hostNowNs = hostClock ?? () => clock.elapsed.inMicroseconds * 1000;
     final aligner = SourceClockAligner();
+    final controllerOrientation = this.controllerOrientation;
+    final fuser = controllerOrientation == null ? null : SixDofFuser();
     var lastSourceNs = -1;
     int? firstPresentNs;
     var lastPresentNs = 0;
@@ -328,7 +344,24 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
         sourceTimeNs: sourceNs,
         hostTimeNs: hostNowNs(),
       );
-      if (!builder.add(hostTimeNs: time, tracking: frame.withHostTime(time))) {
+      final stamped = frame.withHostTime(time);
+      final fuserState = fuser;
+      if (fuserState != null) fuserState.onTrackingFrame(stamped);
+      ControllerPose? poseFor(TrackedHand tracked, int index) {
+        if (fuserState == null || controllerOrientation == null) return null;
+        return fuserState.update(
+          hand: tracked,
+          orientation: controllerOrientation(index),
+          hostTimeNs: time,
+        );
+      }
+
+      if (!builder.add(
+        hostTimeNs: time,
+        left: poseFor(TrackedHand.left, 0),
+        right: poseFor(TrackedHand.right, 1),
+        tracking: stamped,
+      )) {
         return;
       }
 

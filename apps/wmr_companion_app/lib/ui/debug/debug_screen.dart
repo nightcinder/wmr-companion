@@ -47,6 +47,10 @@ String _trackingStatus(
       if (error != null) {
         return 'TrackingException(${error.kind.name}): ${error.message}';
       }
+      final message = value.message;
+      if (message != null) {
+        return message;
+      }
       if (value.running) {
         return choice == DebugTrackingSource.simulated
             ? 'FakeTrackingSource trajectory (no hardware)'
@@ -232,6 +236,11 @@ class DebugScreen extends ConsumerWidget {
                     ref.read(yawOffsetProvider.notifier).zeroAt(raw);
                   } else if (decoded) {
                     ref.read(controllerServiceProvider(source))?.resetYaw(hand);
+                    // The IMU yaw just changed, so drop the fallback offsets
+                    // learned under the old heading.
+                    ref
+                        .read(debugFuserProvider(source))
+                        ?.resetYaw(hand: trackedHand);
                   }
                 },
                 child: const Text('Reset orientation'),
