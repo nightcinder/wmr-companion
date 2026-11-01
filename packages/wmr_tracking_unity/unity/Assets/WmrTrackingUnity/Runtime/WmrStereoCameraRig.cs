@@ -275,21 +275,54 @@ namespace OnyxLens.WmrTrackingUnity
             }
         }
 
+        // `playerHosted` is reported before any vendor is selected, because
+        // XREAL only becomes selected when it accepts `start`. The stage is
+        // how the XREAL plugin replays a `start` that a freshly created player
+        // can drop (the first UnitySendMessage is sent before Awake), so it
+        // must reach both plugin classes while the vendor is still unresolved.
+        // Each plugin only replays its own pending command, so the extra call
+        // is a no-op in the other one.
+        private bool ReportsToBothVendors(string stage)
+        {
+            return unifiedBridge != null &&
+                   unifiedBridge.SelectedVendor == VendorBackend.None &&
+                   string.Equals(stage, StereoStage.PlayerHosted, StringComparison.Ordinal);
+        }
+
         private void Report(string stage, string stereoMode)
         {
             if (!reportToHost) return;
 #if UNITY_ANDROID && !UNITY_EDITOR
-            try
+            string vendor = EffectiveStageVendor();
+            CallStage(vendor, stage, stereoMode);
+            if (ReportsToBothVendors(stage))
             {
-                GetPluginClass(EffectiveStageVendor())
-                    ?.CallStatic("onUnityStage", stage, stereoMode);
-            }
-            catch (Exception)
-            {
-                // Running outside the Flutter host; the log line is the report.
+                CallStage(OtherVendor(vendor), stage, stereoMode);
             }
 #endif
         }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private static string OtherVendor(string vendor)
+        {
+            return string.Equals(vendor, VendorNames.Xreal, StringComparison.OrdinalIgnoreCase)
+                ? VendorNames.Viture
+                : VendorNames.Xreal;
+        }
+
+        private void CallStage(string vendor, string stage, string stereoMode)
+        {
+            try
+            {
+                GetPluginClass(vendor)?.CallStatic("onUnityStage", stage, stereoMode);
+            }
+            catch (Exception)
+            {
+                // Running outside the Flutter host, or this per-vendor project
+                // does not package the other plugin; the log line is the report.
+            }
+        }
+#endif
 
         private void ReportError(string code, string message)
         {
