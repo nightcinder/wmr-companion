@@ -45,6 +45,8 @@ https://github.com/nightcinder/wmr-companion/releases/download/v0.3.11/wmr-compa
 
 SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.11/SHA256SUMS
 
+Confirm the v0.3.11 release exists and the installed APK reports `versionName` 0.3.11 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.10, the tag was not cut from a bumped tree: record the value and stop.
+
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
 Do not run an older build for this pass. v0.3.11 carries fixes that change results:
@@ -52,7 +54,8 @@ selecting **AndroidXR** as the hand-tracking source on a Galaxy XR no longer
 crashes the app (v0.3.10), the Luma Ultra + Pro Neckband 3D view now fills
 both eyes (v0.3.9), the Unity player resumes and focuses on first host so the
 Neckband no longer drops to 0DoF with a greyed 6DoF button (v0.3.11), and on a
-Neckband host the app auto-selects the VITURE source and shows a 0DoF/6DoF
+Neckband host the app auto-selects `Auto (USB)` (which resolves to the VITURE
+runtime) and shows a 0DoF/6DoF
 status line (v0.3.11). A crash, a black right eye, or a 0DoF drop on v0.3.11
 is a regression worth recording. Known older behaviour: a crash on v0.3.7
 through v0.3.9, a black right eye on v0.3.7 or v0.3.8, and a 0DoF drop with
@@ -222,7 +225,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.3
-- App: 0.3.11 unified (signed release)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.11; confirm the release exists and the installed APK reports it before testing)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
