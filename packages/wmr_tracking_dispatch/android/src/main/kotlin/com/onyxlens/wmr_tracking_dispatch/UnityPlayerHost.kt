@@ -21,6 +21,18 @@ data class PlayerHostResult(
 }
 
 /**
+ * Where the player's view goes inside the host activity.
+ *
+ * Unity UaaL wants a real, attached, full-screen surface so the VITURE XR
+ * loader initialises, but an opaque player on top of Flutter hides the bench
+ * and debug screens. Placing it under the existing content keeps the Flutter
+ * view visible while the player keeps the surface it needs.
+ */
+enum class PlayerViewPlacement {
+    BEHIND_EXISTING_CONTENT,
+}
+
+/**
  * Seam that owns the `com.unity3d.player.UnityPlayer` instance and its view.
  *
  * Production uses [ReflectiveUnityPlayerViewHost] so this module compiles
@@ -30,8 +42,11 @@ interface UnityPlayerViewHost {
     /** True when `com.unity3d.player.UnityPlayer` is linked into the build. */
     val isLinked: Boolean
 
-    /** Creates the player in [target] (an [Activity]) and attaches its view full-screen. */
-    fun create(target: Any): Boolean
+    /**
+     * Creates the player in [target] (an [Activity]) and attaches its view
+     * full-screen at [placement].
+     */
+    fun create(target: Any, placement: PlayerViewPlacement): Boolean
 
     /** Removes the attached view without destroying the player. */
     fun detach()
@@ -64,7 +79,10 @@ interface PlayerHost {
  * The VITURE plugin claims the shared runtime lazily on `start`, so nothing
  * creates a player before a source starts. [host] is idempotent for the same
  * activity, replaces the player when the activity changes, and reports a typed
- * stage instead of throwing. [release] gives the display back to Flutter.
+ * stage instead of throwing. The player is layered behind the activity's
+ * existing Flutter content so hosting it does not blank BenchScreen or
+ * TrackingDebugScreen, while still giving Unity the attached surface the XR
+ * loader needs. [release] gives the display back to Flutter.
  */
 class UnityPlayerHost internal constructor(
     private val viewHost: UnityPlayerViewHost,
@@ -111,7 +129,7 @@ class UnityPlayerHost internal constructor(
                 )
             }
             val created = try {
-                viewHost.create(newTarget)
+                viewHost.create(newTarget, PlayerViewPlacement.BEHIND_EXISTING_CONTENT)
             } catch (error: Throwable) {
                 return PlayerHostResult(
                     hosted = false,
@@ -207,21 +225,21 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
             return playerClass != null
         }
 
-    override fun create(target: Any): Boolean {
+    override fun create(target: Any, placement: PlayerViewPlacement): Boolean {
         val activity = target as? Activity ?: return false
         // A UnityPlayer may be constructed only once per process, so a stop
         // detaches the view and a later start re-attaches the same one.
         val existing = playerView
         if (existing != null) {
             (existing.parent as? ViewGroup)?.removeView(existing)
-            activity.addContentView(existing, fullScreenParams())
+            attach(activity, existing, placement)
             call("resume")
             return true
         }
         val clazz = playerClass ?: return false
         val instance = instantiate(clazz, activity) ?: return false
         val root = viewOf(instance) ?: return false
-        activity.addContentView(root, fullScreenParams())
+        attach(activity, root, placement)
         player = instance
         playerView = root
         return true
@@ -254,6 +272,30 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT,
     )
+
+    /**
+     * Adds the player's view to [activity]'s content frame at [placement].
+     *
+     * The player still receives a real full-screen surface, which the VITURE
+     * XR loader needs, but at index 0 it sits under the Flutter view that
+     * FlutterActivity added earlier, so the Flutter UI stays visible instead
+     * of being covered by an opaque black player surface.
+     */
+    private fun attach(
+        activity: Activity,
+        view: View,
+        placement: PlayerViewPlacement,
+    ) {
+        val content = activity.findViewById<ViewGroup>(android.R.id.content)
+        if (content == null) {
+            activity.addContentView(view, fullScreenParams())
+            return
+        }
+        val index = when (placement) {
+            PlayerViewPlacement.BEHIND_EXISTING_CONTENT -> 0
+        }
+        content.addView(view, index, fullScreenParams())
+    }
 
     /**
      * Unity 6 takes a `Context` (optionally with a lifecycle listener); the

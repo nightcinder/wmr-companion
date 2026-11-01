@@ -18,10 +18,12 @@ class UnityPlayerHostTest {
         var destroys = 0
         var focusCalls = mutableListOf<Boolean>()
         var lastTarget: Any? = null
+        var placements = mutableListOf<PlayerViewPlacement>()
 
-        override fun create(target: Any): Boolean {
+        override fun create(target: Any, placement: PlayerViewPlacement): Boolean {
             creates += 1
             lastTarget = target
+            placements += placement
             if (throwOnCreate) throw IllegalStateException("unity player failed")
             return createResult
         }
@@ -66,6 +68,20 @@ class UnityPlayerHostTest {
     }
 
     @Test
+    fun hostsThePlayerBehindExistingContent() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade)
+        val activity = Any()
+
+        host.hostTarget(activity)
+
+        assertEquals(
+            listOf(PlayerViewPlacement.BEHIND_EXISTING_CONTENT),
+            facade.placements,
+        )
+    }
+
+    @Test
     fun aNewActivityReplacesTheAttachedView() {
         val facade = FakeViewHost()
         val host = UnityPlayerHost(facade)
@@ -78,6 +94,13 @@ class UnityPlayerHostTest {
         assertEquals(2, facade.creates)
         assertEquals(1, facade.detaches)
         assertEquals(second, facade.lastTarget)
+        assertEquals(
+            listOf(
+                PlayerViewPlacement.BEHIND_EXISTING_CONTENT,
+                PlayerViewPlacement.BEHIND_EXISTING_CONTENT,
+            ),
+            facade.placements,
+        )
     }
 
     @Test
