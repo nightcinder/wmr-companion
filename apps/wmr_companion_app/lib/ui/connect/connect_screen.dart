@@ -13,48 +13,163 @@ import '../debug/debug_providers.dart';
 import '../debug/debug_screen.dart';
 import '../latency/latency_screen.dart';
 import '../legal/terms_screen.dart';
+import '../sbs/stereo_sbs.dart';
 import 'connect_providers.dart';
 
-class ConnectScreen extends StatelessWidget {
+class ConnectScreen extends ConsumerStatefulWidget {
   const ConnectScreen({super.key});
 
   @override
+  ConsumerState<ConnectScreen> createState() => _ConnectScreenState();
+}
+
+/// Mutable state the Connect screen keeps above [StereoSbsWrapper]: both eye
+/// halves inflate their own element tree, so focus nodes, controllers and the
+/// scroll offset have to live here to stay identical in both halves.
+class ConnectUiState extends ChangeNotifier {
+  final FocusNode scanFocus = FocusNode(debugLabel: 'connect-scan');
+  final FocusNode disconnectFocus = FocusNode(debugLabel: 'connect-disconnect');
+  final FocusNode reconnectFocus = FocusNode(debugLabel: 'connect-reconnect');
+  final FocusNode captureFocus = FocusNode(debugLabel: 'connect-capture');
+  final FocusNode debugFocus = FocusNode(debugLabel: 'connect-debug');
+  final FocusNode latencyFocus = FocusNode(debugLabel: 'connect-latency');
+  final FocusNode exportFocus = FocusNode(debugLabel: 'connect-export');
+  final FocusNode benchFocus = FocusNode(debugLabel: 'connect-bench');
+  final FocusNode wifiConnectFocus = FocusNode(debugLabel: 'wifi-connect');
+  final FocusNode hostFocus = FocusNode(debugLabel: 'wifi-host');
+  final FocusNode portFocus = FocusNode(debugLabel: 'wifi-port');
+  final FocusNode tokenFocus = FocusNode(debugLabel: 'wifi-token');
+  final FocusNode secureFocus = FocusNode(debugLabel: 'wifi-secure');
+
+  final TextEditingController host = TextEditingController();
+  final TextEditingController port = TextEditingController(text: '8765');
+  final TextEditingController token = TextEditingController();
+
+  final ScrollController scroll = StereoSbsScrollController();
+
+  bool secure = false;
+  String? wifiError;
+  bool exportBusy = false;
+  String? exportMessage;
+  String? exportError;
+
+  void setSecure(bool value) {
+    secure = value;
+    notifyListeners();
+  }
+
+  void setWifiError(String? value) {
+    wifiError = value;
+    notifyListeners();
+  }
+
+  void setExportBusy(bool value) {
+    exportBusy = value;
+    if (value) {
+      exportMessage = null;
+      exportError = null;
+    }
+    notifyListeners();
+  }
+
+  void setExportMessage(String value) {
+    exportMessage = value;
+    exportError = null;
+    notifyListeners();
+  }
+
+  void setExportError(String value) {
+    exportMessage = null;
+    exportError = value;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    for (final node in [
+      scanFocus,
+      disconnectFocus,
+      reconnectFocus,
+      captureFocus,
+      debugFocus,
+      latencyFocus,
+      exportFocus,
+      benchFocus,
+      wifiConnectFocus,
+      hostFocus,
+      portFocus,
+      tokenFocus,
+      secureFocus,
+    ]) {
+      node.dispose();
+    }
+    host.dispose();
+    port.dispose();
+    token.dispose();
+    scroll.dispose();
+    super.dispose();
+  }
+}
+
+class _ConnectScreenState extends ConsumerState<ConnectScreen> {
+  final _ui = ConnectUiState();
+
+  @override
+  void dispose() {
+    _ui.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const _AppTitle(),
-        actions: [
-          PopupMenuButton<String>(
-            tooltip: 'About',
-            onSelected: (value) {
-              switch (value) {
-                case 'terms':
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const TermsScreen(),
-                    ),
-                  );
-                case 'licences':
-                  showLicensePage(
-                    context: context,
-                    applicationName: 'WMR Companion',
-                  );
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'terms', child: Text('Terms')),
-              PopupMenuItem(value: 'licences', child: Text('Licences')),
-            ],
+    return StereoSbsWrapper(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const _AppTitle(),
+          actions: [
+            const SbsToggleButton(),
+            PopupMenuButton<String>(
+              tooltip: 'About',
+              onSelected: (value) {
+                switch (value) {
+                  case 'terms':
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const TermsScreen(),
+                      ),
+                    );
+                  case 'licences':
+                    showLicensePage(
+                      context: context,
+                      applicationName: 'WMR Companion',
+                    );
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'terms', child: Text('Terms')),
+                PopupMenuItem(value: 'licences', child: Text('Licences')),
+              ],
+            ),
+          ],
+        ),
+        body: FocusTraversalGroup(
+          key: const Key('connect-focus-order'),
+          policy: OrderedTraversalPolicy(),
+          child: ListView(
+            controller: _ui.scroll,
+            padding: const EdgeInsets.all(16),
+            children: [RealPanel(ui: _ui)],
           ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [RealPanel()],
+        ),
       ),
     );
   }
 }
+
+/// D-pad order for the action row: the primary action is reached first, the
+/// rest follow in reading order.
+Widget _actionOrder(double order, Widget child) =>
+    FocusTraversalOrder(order: NumericFocusOrder(order), child: child);
 
 /// The app name with the running build's version below it, so testers can
 /// quote the exact build in a bug report.
@@ -84,7 +199,11 @@ class _AppTitle extends ConsumerWidget {
 }
 
 class RealPanel extends ConsumerWidget {
-  const RealPanel({super.key});
+  const RealPanel({super.key, required this.ui});
+
+  /// Shared by both eye halves, so the two copies read the same focus, field
+  /// and scroll state.
+  final ConnectUiState ui;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -125,7 +244,7 @@ class RealPanel extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         if (link == BridgeTransportKind.wifi) ...[
-          _WifiConnectPanel(controller: controller, busy: s.busy),
+          _WifiConnectPanel(controller: controller, busy: s.busy, ui: ui),
           const SizedBox(height: 12),
         ],
         Text(
@@ -168,58 +287,91 @@ class RealPanel extends ConsumerWidget {
           spacing: 8,
           children: [
             if (link == BridgeTransportKind.ble)
-              FilledButton.tonal(
-                onPressed: s.busy
-                    ? null
-                    : (s.scanning ? controller.stopScan : controller.startScan),
-                child: Text(s.scanning ? 'Stop scan' : 'Scan'),
+              _actionOrder(
+                1,
+                FilledButton.tonal(
+                  key: const Key('connect-scan'),
+                  focusNode: ui.scanFocus,
+                  autofocus: true,
+                  onPressed: s.busy
+                      ? null
+                      : (s.scanning
+                            ? controller.stopScan
+                            : controller.startScan),
+                  child: Text(s.scanning ? 'Stop scan' : 'Scan'),
+                ),
               ),
             if (s.connected || status.phase == BleLinkPhase.connectionLost)
-              FilledButton(
-                onPressed: controller.disconnect,
-                child: Text(
-                  s.connectedDeviceIds.length > 1
-                      ? 'Disconnect all'
-                      : 'Disconnect',
+              _actionOrder(
+                2,
+                FilledButton(
+                  focusNode: ui.disconnectFocus,
+                  onPressed: controller.disconnect,
+                  child: Text(
+                    s.connectedDeviceIds.length > 1
+                        ? 'Disconnect all'
+                        : 'Disconnect',
+                  ),
                 ),
               ),
             if (status.phase == BleLinkPhase.connectionLost &&
                 s.deviceId != null)
-              FilledButton(
-                onPressed: () => controller.connect(s.deviceId!),
-                child: const Text('Reconnect'),
-              ),
-            if (s.connected)
-              FilledButton.tonal(
-                onPressed: () => _openCapture(context, controller),
-                child: const Text('Capture'),
-              ),
-            if (s.connected)
-              FilledButton.tonal(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const DebugScreen(source: DebugSource.real),
-                  ),
+              _actionOrder(
+                3,
+                FilledButton(
+                  focusNode: ui.reconnectFocus,
+                  onPressed: () => controller.connect(s.deviceId!),
+                  child: const Text('Reconnect'),
                 ),
-                child: const Text('Open 3D debug view'),
               ),
             if (s.connected)
-              FilledButton.tonal(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const LatencyScreen(),
-                  ),
+              _actionOrder(
+                4,
+                FilledButton.tonal(
+                  focusNode: ui.captureFocus,
+                  onPressed: () => _openCapture(context, controller),
+                  child: const Text('Capture'),
                 ),
-                child: const Text('Latency test'),
               ),
-            const _ExportBundleButton(),
+            if (s.connected)
+              _actionOrder(
+                5,
+                FilledButton.tonal(
+                  focusNode: ui.debugFocus,
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const DebugScreen(source: DebugSource.real),
+                    ),
+                  ),
+                  child: const Text('Open 3D debug view'),
+                ),
+              ),
+            if (s.connected)
+              _actionOrder(
+                6,
+                FilledButton.tonal(
+                  focusNode: ui.latencyFocus,
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LatencyScreen(),
+                    ),
+                  ),
+                  child: const Text('Latency test'),
+                ),
+              ),
+            _actionOrder(7, _ExportBundleButton(ui: ui)),
             // Also without a bridge: the 6DoF-only bench path needs no link.
-            FilledButton.tonal(
-              key: const Key('open-guided-bench'),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
+            _actionOrder(
+              8,
+              FilledButton.tonal(
+                key: const Key('open-guided-bench'),
+                focusNode: ui.benchFocus,
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
+                ),
+                child: const Text('Run guided bench'),
               ),
-              child: const Text('Run guided bench'),
             ),
           ],
         ),
@@ -311,131 +463,130 @@ class RealPanel extends ConsumerWidget {
 /// Entry for a Pi Wi-Fi bridge: host, port and the optional shared token.
 /// No discovery; the user types what the daemon printed at startup.
 ///
-/// This is a separate widget so the fields keep their contents while the
-/// controller rebuilds on stream statistics.
-class _WifiConnectPanel extends ConsumerStatefulWidget {
-  const _WifiConnectPanel({required this.controller, required this.busy});
+/// The fields and their errors live in [ConnectUiState] so both eye halves
+/// show the same values while the controller rebuilds on stream statistics.
+class _WifiConnectPanel extends ConsumerWidget {
+  const _WifiConnectPanel({
+    required this.controller,
+    required this.busy,
+    required this.ui,
+  });
 
   final RealDeviceController controller;
   final bool busy;
-
-  @override
-  ConsumerState<_WifiConnectPanel> createState() => _WifiConnectPanelState();
-}
-
-class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
-  final _host = TextEditingController();
-  final _port = TextEditingController(text: '8765');
-  final _token = TextEditingController();
-  bool _secure = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _host.dispose();
-    _port.dispose();
-    _token.dispose();
-    super.dispose();
-  }
+  final ConnectUiState ui;
 
   Future<void> _connect() async {
-    final host = _host.text.trim();
-    final port = int.tryParse(_port.text.trim());
+    final host = ui.host.text.trim();
+    final port = int.tryParse(ui.port.text.trim());
     if (host.isEmpty) {
-      setState(() => _error = 'Enter the bridge host or IP address.');
+      ui.setWifiError('Enter the bridge host or IP address.');
       return;
     }
     if (port == null || port < 1 || port > 65535) {
-      setState(() => _error = 'Port must be a number between 1 and 65535.');
+      ui.setWifiError('Port must be a number between 1 and 65535.');
       return;
     }
-    setState(() => _error = null);
+    ui.setWifiError(null);
     try {
-      await widget.controller.connectWifi(
+      await controller.connectWifi(
         host: host,
         port: port,
-        token: _token.text,
-        secure: _secure,
+        token: ui.token.text,
+        secure: ui.secure,
       );
     } on ArgumentError catch (error) {
-      if (mounted) setState(() => _error = '${error.message}');
+      ui.setWifiError('${error.message}');
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      ui.setWifiError('$error');
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Pi Wi-Fi bridge', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 4),
-        Text(
-          'Host and control port of the wmr_bridge daemon, plus the shared '
-          'token when it runs with one. The token is not stored.',
-          style: theme.textTheme.bodySmall,
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          key: const Key('wifi-host'),
-          controller: _host,
-          enabled: !widget.busy,
-          autocorrect: false,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            labelText: 'Host or IP',
-            hintText: 'wmr-pi.local',
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          key: const Key('wifi-port'),
-          controller: _port,
-          enabled: !widget.busy,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Port'),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          key: const Key('wifi-token'),
-          controller: _token,
-          enabled: !widget.busy,
-          obscureText: true,
-          autocorrect: false,
-          enableSuggestions: false,
-          decoration: const InputDecoration(labelText: 'Token (optional)'),
-        ),
-        CheckboxListTile(
-          key: const Key('wifi-secure'),
-          contentPadding: EdgeInsets.zero,
-          value: _secure,
-          onChanged: widget.busy
-              ? null
-              : (value) => setState(() => _secure = value ?? false),
-          title: const Text('TLS (wss)'),
-          subtitle: const Text(
-            'Only when a TLS proxy fronts the daemon; wmr_bridge itself '
-            'serves plain ws://.',
-          ),
-        ),
-        if (!_secure)
+    return ListenableBuilder(
+      listenable: ui,
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Pi Wi-Fi bridge', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
           Text(
-            'The token and the stream cross the network in cleartext over '
-            'ws://. Use a trusted LAN, or a TLS proxy with TLS on.',
+            'Host and control port of the wmr_bridge daemon, plus the shared '
+            'token when it runs with one. The token is not stored.',
             style: theme.textTheme.bodySmall,
           ),
-        if (_error != null) ...[
           const SizedBox(height: 8),
-          Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+          TextField(
+            key: const Key('wifi-host'),
+            controller: ui.host,
+            focusNode: ui.hostFocus,
+            enabled: !busy,
+            autocorrect: false,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Host or IP',
+              hintText: 'wmr-pi.local',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('wifi-port'),
+            controller: ui.port,
+            focusNode: ui.portFocus,
+            enabled: !busy,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Port'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('wifi-token'),
+            controller: ui.token,
+            focusNode: ui.tokenFocus,
+            enabled: !busy,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: const InputDecoration(labelText: 'Token (optional)'),
+          ),
+          CheckboxListTile(
+            key: const Key('wifi-secure'),
+            focusNode: ui.secureFocus,
+            contentPadding: EdgeInsets.zero,
+            value: ui.secure,
+            onChanged: busy ? null : (value) => ui.setSecure(value ?? false),
+            title: const Text('TLS (wss)'),
+            subtitle: const Text(
+              'Only when a TLS proxy fronts the daemon; wmr_bridge itself '
+              'serves plain ws://.',
+            ),
+          ),
+          if (!ui.secure)
+            Text(
+              'The token and the stream cross the network in cleartext over '
+              'ws://. Use a trusted LAN, or a TLS proxy with TLS on.',
+              style: theme.textTheme.bodySmall,
+            ),
+          if (ui.wifiError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              ui.wifiError!,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 8),
+          _actionOrder(
+            1,
+            FilledButton(
+              focusNode: ui.wifiConnectFocus,
+              autofocus: true,
+              onPressed: busy ? null : _connect,
+              child: const Text('Connect over Wi-Fi'),
+            ),
+          ),
         ],
-        const SizedBox(height: 8),
-        FilledButton(
-          onPressed: widget.busy ? null : _connect,
-          child: const Text('Connect over Wi-Fi'),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -443,61 +594,52 @@ class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
 /// One tap on the Connect screen: zip what the app already holds and open the
 /// system share sheet. Available without a connection, so saved captures and
 /// latency runs can still be exported.
-class _ExportBundleButton extends ConsumerStatefulWidget {
-  const _ExportBundleButton();
+class _ExportBundleButton extends ConsumerWidget {
+  const _ExportBundleButton({required this.ui});
 
-  @override
-  ConsumerState<_ExportBundleButton> createState() =>
-      _ExportBundleButtonState();
-}
+  final ConnectUiState ui;
 
-class _ExportBundleButtonState extends ConsumerState<_ExportBundleButton> {
-  bool _busy = false;
-  String? _message;
-  String? _error;
-
-  Future<void> _export() async {
-    setState(() {
-      _busy = true;
-      _message = null;
-      _error = null;
-    });
+  Future<void> _export(WidgetRef ref) async {
+    ui.setExportBusy(true);
     try {
       final bundle = await ref.read(exportTestBundleProvider)();
-      if (!mounted) return;
       final missing = bundle.missing.length;
-      setState(() {
-        _message =
-            'Shared ${bundle.fileName}'
-            '${missing == 0 ? '.' : '. Missing $missing item(s): see README.md.'}';
-      });
+      ui.setExportMessage(
+        'Shared ${bundle.fileName}'
+        '${missing == 0 ? '.' : '. Missing $missing item(s): see README.md.'}',
+      );
     } catch (error) {
-      if (mounted) setState(() => _error = 'Export failed: $error');
+      ui.setExportError('Export failed: $error');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      ui.setExportBusy(false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        FilledButton.tonal(
-          key: const Key('export-test-bundle'),
-          onPressed: _busy ? null : _export,
-          child: Text(_busy ? 'Exporting...' : 'Export test bundle'),
-        ),
-        if (_message != null) Text(_message!, style: theme.textTheme.bodySmall),
-        if (_error != null)
-          Text(
-            _error!,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.error,
-            ),
+    return ListenableBuilder(
+      listenable: ui,
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FilledButton.tonal(
+            key: const Key('export-test-bundle'),
+            focusNode: ui.exportFocus,
+            onPressed: ui.exportBusy ? null : () => _export(ref),
+            child: Text(ui.exportBusy ? 'Exporting...' : 'Export test bundle'),
           ),
-      ],
+          if (ui.exportMessage != null)
+            Text(ui.exportMessage!, style: theme.textTheme.bodySmall),
+          if (ui.exportError != null)
+            Text(
+              ui.exportError!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -55,6 +55,16 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('the scan action takes the initial D-pad focus', (tester) async {
+    await open(tester);
+    await tester.pump();
+    final scan = tester.widget<FilledButton>(
+      find.byKey(const Key('connect-scan')),
+    );
+    expect(scan.focusNode?.hasFocus, isTrue);
+    await close(tester);
+  });
+
   testWidgets('scan, connect and show MTU and stream counters', (tester) async {
     await open(tester);
 

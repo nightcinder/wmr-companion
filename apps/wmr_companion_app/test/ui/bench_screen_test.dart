@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
@@ -220,6 +221,53 @@ void main() {
     }
     fail('did not reach ${target.id}');
   }
+
+  testWidgets('the primary bench action takes the initial D-pad focus', (
+    tester,
+  ) async {
+    await open(tester, _FakeSession());
+    await tester.pump();
+    final start = tester.widget<FilledButton>(
+      find.byKey(const Key('bench-start')),
+    );
+    expect(start.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('D-pad order is the primary action, then the rest', (
+    tester,
+  ) async {
+    await open(tester, _FakeSession());
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('bench-start')))
+          .focusNode
+          ?.hasFocus,
+      isTrue,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    final mode = tester.widget<OutlinedButton>(
+      find.byKey(Key('bench-mode-${BenchMode.threeDofOnly.id}')),
+    );
+    expect(mode.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('the primary action keeps the focus when the step changes', (
+    tester,
+  ) async {
+    final container = await open(tester, _FakeSession());
+    await tester.pump();
+    await tap(tester, 'bench-start');
+
+    final next = container.read(benchControllerProvider);
+    final key = next.step.isPrompt ? 'bench-confirm' : 'bench-start';
+    expect(
+      tester.widget<FilledButton>(find.byKey(Key(key))).focusNode?.hasFocus,
+      isTrue,
+    );
+  });
 
   testWidgets('happy path: one step per screen through the bundle', (
     tester,
