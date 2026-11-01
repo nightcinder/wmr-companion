@@ -119,7 +119,7 @@ PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_B
 - Expect the run to work or to fail; either is useful. Do not spend more than one retry on it.
 - In the intake block, note `Controllers: PSVR2` and anything that looked wrong : LED colours, dropped hand, wrong model label.
 
-## 6D. Luma Ultra + Pro Neckband: 3D SBS launch triage
+### 6D : Luma Ultra + Pro Neckband: 3D SBS launch triage
 
 On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half.
 
