@@ -782,25 +782,6 @@ jobs:
           tool/build_flavor.sh unified --release --split-per-abi
           --target-platform android-arm64
 
-      # Prints the on-disk asset next to the APK's own entry list, so a failure
-      # shows whether the key was never packaged or the checker looked in the
-      # wrong place. Flutter stores declared pubspec assets under
-      # assets/flutter_assets/, not at the bare pubspec path.
-      - name: Show where the Monado key landed
-        working-directory: apps/wmr_companion_app
-        run: |
-          set -euo pipefail
-          echo "assets/monado on disk:"
-          ls -l assets/monado/
-          apk=build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
-          echo "monado entries in $apk:"
-          # Do not require `unzip` on the self-hosted runner.
-          if command -v unzip >/dev/null 2>&1; then
-            unzip -l "$apk" | grep -i monado || echo "  (none)"
-          else
-            python3 -m zipfile -l "$apk" | grep -i monado || echo "  (none)"
-          fi
-
       # The pre-flight checker proves both Unity runtimes, their hand tracking
       # libraries and the Monado config key are packaged in the APK.
       - name: Check the unified APK carries both vendors and the Monado key
