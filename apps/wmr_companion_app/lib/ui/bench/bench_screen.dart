@@ -422,7 +422,9 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     BenchStep.latency => 'Start ${durations.latency.inSeconds} s',
     BenchStep.handEmpty => 'Start ${durations.handEmpty.inSeconds} s',
     BenchStep.handGrip => 'Start ${durations.handGrip.inSeconds} s',
-    BenchStep.carinaLeds => 'Start 4 x ${durations.carinaFrame.inSeconds} s',
+    BenchStep.carinaLeds =>
+      'Start ${carinaLedDistancesM.length * carinaLedOrientations.length} x '
+          '${durations.carinaFrame.inSeconds} s',
     BenchStep.carinaCheckerboard =>
       'Start 10 x ${durations.carinaCheckerboardPose.inSeconds} s',
     BenchStep.carinaPose => 'Start ${durations.carinaPoseRun.inSeconds} s',
