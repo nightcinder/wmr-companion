@@ -108,8 +108,22 @@ class MainTest(unittest.TestCase):
                 build_export(Path(tmp), metadata=build_metadata(symbols=("StereoMode",)))
             )
         self.assertEqual(code, 1, output)
-        self.assertIn("stale, missing the ONY-612 stereo path", output)
+        self.assertIn("missing the stereo or unified dispatch path", output)
         self.assertIn("playerHosted", output)
+
+    def test_missing_unified_dispatch_export_fails(self) -> None:
+        symbols = tuple(
+            name
+            for name in checker.REQUIRED_METADATA
+            if name != "WmrTrackingUnifiedBridge"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_export(Path(tmp), metadata=build_metadata(symbols=symbols))
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("WmrTrackingUnifiedBridge", output)
+        self.assertIn("unified dispatch path", output)
 
     def test_mono_export_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

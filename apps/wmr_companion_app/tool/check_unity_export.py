@@ -12,6 +12,9 @@ the 120-minute release build:
     subsystem manifests);
   - the IL2CPP metadata carries the ONY-612 stereo path: WmrStereoCameraRig,
     StereoStage, StereoMode, its three stage names and its three stereo modes;
+  - the metadata carries the unified dispatch types (WmrTrackingUnifiedBridge,
+    VendorLoaderGate, VendorRelayDispatch), so an export that still ships the
+    separate vendor relays cannot pass;
   - StereoMode no longer emits `mono`, so an export built from the mono source
     is rejected even if the rest matches.
 
@@ -60,6 +63,11 @@ REQUIRED_METADATA = (
     "multiPass",
     "singlePass",
     "singlePassInstanced",
+    # The unified relay replaced the per-vendor Unity scenes. An export that
+    # still carries only the old vendor bridges must not pass the release gate.
+    "WmrTrackingUnifiedBridge",
+    "VendorLoaderGate",
+    "VendorRelayDispatch",
 )
 # IL2CPP keeps C# string literals in a delimiter-free `stringLiteralData` blob,
 # indexed by an `Il2CppStringLiteral` table of (length, dataIndex) pairs. The
@@ -128,11 +136,11 @@ def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
     metadata = archive.read(METADATA_PATH)
     missing = [name for name in REQUIRED_METADATA if name.encode() not in metadata]
     if missing:
-        fail(f"IL2CPP metadata is stale, missing the ONY-612 stereo path: {missing}")
+        fail(f"IL2CPP metadata is stale, missing the stereo or unified dispatch path: {missing}")
         return 1
     print(
-        "PASS stereo path: WmrStereoCameraRig, StereoStage/StereoMode, "
-        + ", ".join(REQUIRED_METADATA[3:])
+        "PASS metadata: WmrStereoCameraRig, StereoStage/StereoMode, "
+        "WmrTrackingUnifiedBridge, VendorLoaderGate, VendorRelayDispatch"
     )
     try:
         literals = string_literals(metadata)

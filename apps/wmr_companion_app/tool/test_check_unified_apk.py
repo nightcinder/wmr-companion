@@ -94,10 +94,14 @@ def _manifest_elements(
     extra_launcher: bool = False,
     xr_permissions: bool = True,
     scene_fine: bool = False,
+    usb_required: str | None = "false",
 ) -> list[tuple[str, dict[str, str]]]:
     camera = {"name": "android.hardware.camera"}
     if camera_required is not None:
         camera["required"] = camera_required
+    usb = {"name": "android.hardware.usb.host"}
+    if usb_required is not None:
+        usb["required"] = usb_required
     elements = [
         ("manifest", {"package": "com.onyxlens.wmr_companion", "versionName": "0.2.1"}),
         ("uses-permission", {"name": "android.permission.CAMERA"}),
@@ -117,7 +121,7 @@ def _manifest_elements(
     elements += [
         ("uses-feature", {"name": "android.hardware.bluetooth_le", "required": "true"}),
         ("uses-feature", camera),
-        ("uses-feature", {"name": "android.hardware.usb.host", "required": "false"}),
+        ("uses-feature", usb),
         ("application", {"name": "android.app.Application"}),
         ("meta-data", {"name": "com.viture.xr.sdk_version", "value": "0.9.0"}),
         ("meta-data", {"name": "com.viture.xr.dof", "value": "6dof"}),
@@ -148,6 +152,8 @@ def build_apk(
     monado_key: bytes | None = b"\0" * checker.MONADO_KEY_SIZE,
     xr_permissions: bool = True,
     scene_fine: bool = False,
+    usb_required: str | None = "false",
+    unified_dispatch: bool = True,
 ) -> Path:
     path = directory / "unified.apk"
     classes = list(checker.REQUIRED_DEX_CLASSES)
@@ -159,7 +165,13 @@ def build_apk(
         apk.writestr(
             "AndroidManifest.xml",
             build_manifest(
-                _manifest_elements(camera_required, extra_launcher, xr_permissions, scene_fine)
+                _manifest_elements(
+                    camera_required,
+                    extra_launcher,
+                    xr_permissions,
+                    scene_fine,
+                    usb_required,
+                )
             ),
         )
         apk.writestr(
@@ -170,7 +182,13 @@ def build_apk(
             apk.writestr(lib, b"\x7fELF")
         for asset, (name, version) in checker.UNITY_SUBSYSTEMS.items():
             apk.writestr(asset, json.dumps({"name": name, "version": version}))
-        stages = checker.REQUIRED_STEREO_LITERALS if stereo_stages else ("playerHosted",)
+        stages = (
+            checker.REQUIRED_STEREO_LITERALS + checker.REQUIRED_METADATA_LITERALS
+            if stereo_stages
+            else ("playerHosted",)
+        )
+        if not unified_dispatch:
+            stages = checker.REQUIRED_STEREO_LITERALS
         apk.writestr(
             checker.UNITY_METADATA,
             b"\x00".join(stage.encode() for stage in stages),
@@ -275,8 +293,33 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             code, output = run_checker(build_apk(Path(tmp), "false", stereo_stages=False))
         self.assertEqual(code, 1, output)
-        self.assertIn("pre-ONY-612 export", output)
+        self.assertIn("stale", output)
         self.assertIn("loaderStarted", output)
+
+    def test_missing_unified_dispatch_metadata_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", unified_dispatch=False)
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("WmrTrackingUnifiedBridge", output)
+        self.assertIn("VendorLoaderGate", output)
+
+    def test_usb_host_required_by_default_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", usb_required=None)
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("android.hardware.usb.host is required", output)
+
+    def test_usb_host_explicitly_required_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", usb_required="true")
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("android.hardware.usb.host is required", output)
 
     def test_missing_xreal_display_stub_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

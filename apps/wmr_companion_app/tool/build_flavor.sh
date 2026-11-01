@@ -42,11 +42,10 @@ case "$flavor" in
     ;;
 esac
 
-# The bundle manifest records the commit the capture came from.
-app_commit="${WMR_APP_COMMIT:-$(git -C "$app_dir" rev-parse --short HEAD 2>/dev/null || true)}"
-if [ -n "$app_commit" ]; then
-  defines+=(--dart-define=WMR_APP_COMMIT="$app_commit")
-fi
+# The bundle manifest records the commit the capture came from. A caller-set
+# WMR_APP_COMMIT wins over the checkout's HEAD and is defined exactly once.
+app_commit="${WMR_APP_COMMIT:-$(git -C "$app_dir" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+defines+=(--dart-define=WMR_APP_COMMIT="$app_commit")
 
 mode=--debug
 passthrough=()
@@ -57,8 +56,6 @@ for arg in "$@"; do
   esac
 done
 
-commit="$(git -C "$app_dir" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 cd "$app_dir"
 exec flutter build apk "$mode" --flavor "$flavor" \
-  --dart-define=WMR_APP_COMMIT="$commit" \
   "${defines[@]}" "${passthrough[@]+"${passthrough[@]}"}"

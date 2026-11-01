@@ -87,11 +87,11 @@ input is the existing `vendor` field now being authoritative:
 
 | Command | Behaviour |
 | --- | --- |
-| `configure` + `"vendor":"viture"\|"xreal"` | Selects and enables that backend. Does not start tracking and does not initialise an XR loader. VITURE receives the `configure` relay command and applies `options`; XREAL has no `configure` command, so the unified bridge only enables its backend and does not forward it (no spurious `protocol` error). |
+| `configure` + `"vendor":"viture"\|"xreal"` | Records the selection. Does not enable the backend, start tracking or initialise an XR loader; `start` does that after the loader gate. VITURE receives the `configure` relay command and applies `options`; XREAL has no `configure` command, so the unified bridge does not forward it (no spurious `protocol` error). |
 | `start` + `"vendor":"viture"\|"xreal"` | Selects the vendor (overriding an idle `configure`), enables its bridge, initialises only its XR loader, then forwards `start`. |
 | `start` without `vendor` | Reuses the vendor from the last successful `configure`, or the running vendor. Rejected with `protocol` when neither is known. |
 | `stop` | Forwards to the running vendor. Keeps the selection so a later `start` can omit `vendor`. |
-| `recenter` | Forwards to the running vendor. Rejected with `unavailable` when stopped. XREAL's existing bridge reports `protocol` for `recenter`; that behaviour is unchanged. |
+| `recenter` | Forwards to the running vendor. Rejected with `unavailable` when stopped. XREAL has no recenter, so its bridge treats `recenter` as a no-op instead of reporting `protocol`. |
 | `dispose` | Forwards, deinitialises the selected XR loader, and clears the selection. |
 
 Frames, glasses-model callbacks and vendor failures still come from the vendor
@@ -129,7 +129,7 @@ through `WmrTrackingViturePlugin.onUnityStage(stage, stereoMode)`:
 
 | Stage | Meaning |
 | --- | --- |
-| `playerHosted` | The Android host created and attached the player; the scene is awake. |
+| `playerHosted` | The Android host created and attached the player; the scene is awake. Reported to both vendor plugins while no vendor is selected yet, so an XREAL `start` sent before Awake is replayed. |
 | `loaderStarted` | `XRSettings.isDeviceActive`; `stereoMode` is now `multiPass`, `singlePass` or `singlePassInstanced`. |
 | `firstFrame` | The first rendered frame was produced. |
 
@@ -208,7 +208,7 @@ Requires the .NET 8 SDK. It:
 - runs `tool/sync_vendor_unity_runtime.sh --check`;
 - compiles the unified bridge plus both copied vendor bridges in the Android
   player and Editor configurations;
-- runs 59 dispatch assertions covering vendor parsing,
+- runs 68 dispatch assertions covering vendor parsing,
   configure/start/stop/dispose, idempotent start, busy vendor switches,
   recenter-before-start and start-failure retry;
 - runs 14 loader-gate assertions covering start, stop, switch to the other
@@ -266,8 +266,7 @@ both SDKs coexist in one build.
    host must detect the glasses and send the correct `vendor`; `auto` is
    intentionally rejected.
 9. **Per-vendor `recenter`.** Only the VITURE bridge implements recenter today.
-   The unified bridge preserves XREAL's existing `protocol` rejection rather
-   than inventing an API.
+   XREAL's bridge treats `recenter` as a no-op rather than inventing an API.
 10. **No hardware run.** A real export and the 0.2.1 unified APK exist
     (ONY-354/ONY-388), but there is no Neckband, Air 2 Ultra or measured-frame
     run. The C# assertions, export checks and APK inspection are the evidence
