@@ -69,7 +69,9 @@ class StereoSbs extends InheritedWidget {
 /// Scope: the wrapper only mirrors screens that hoist their mutable state like
 /// this — currently Connect and Bench. Pushed screens that still keep local
 /// state (debug view, latency, capture, terms) are not wrapped, so they render
-/// once at full viewport width.
+/// once at full viewport width. Root overlays built by the app's [Overlay]
+/// (popup menu, licence page, dialogs, snackbars) also span the full viewport
+/// and are not mirrored.
 class StereoSbsWrapper extends ConsumerWidget {
   const StereoSbsWrapper({super.key, required this.child});
 
