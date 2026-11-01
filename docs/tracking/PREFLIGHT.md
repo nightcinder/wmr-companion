@@ -61,7 +61,11 @@ python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.7-uni
 ## 3. Permission and session path (host-validated)
 
 `check_unified_apk.py` passed on the v0.3.7 release artifact with its recorded
-SHA-256, re-run 2026-11-01 against the downloaded release asset.
+SHA-256, re-run 2026-11-01 against the downloaded release asset, except for the
+`Android XR callbacks` row: v0.3.7 predates that gate (ONY-758) and its callbacks
+are shrunk, so the checker reports `xr_callback_failures` on it. That failure is
+the crash the gate now catches; run the checker on a build from v0.3.8 or later
+to reproduce the pass.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
 without `android:required` counts as required, as Android does : `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
@@ -73,7 +77,7 @@ parser (UTF-16 and UTF-8 pools) and that camera gate.
 | Features | `bluetooth_le`, `usb.host`, and `camera` declared `required=false` |
 | Both runtimes | `libVitureUnityXR.so`, `libXREALXRPlugin.so`, one `libunity.so`; Unity subsystems 0.9.0 and 3.1.0 |
 | Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 can rename them in a release build |
-| Android XR callbacks | Every dex class that implements a device `com.android.extensions.xr` callback interface (`function.Consumer`, `splitengine.RequestCallback`, `splitengine.MessageGroupCallback`) keeps its method. When R8 cannot resolve those interfaces it shrinks the callbacks to empty classes and the device kills the process with an `AbstractMethodError` as soon as the session starts (ONY-758) |
+| Android XR callbacks | Builds after ONY-758 (v0.3.8 and later): every dex class that implements a device `com.android.extensions.xr` callback interface (`function.Consumer`, `splitengine.RequestCallback`, `splitengine.MessageGroupCallback`) keeps its method. When R8 cannot resolve those interfaces it shrinks the callbacks to empty classes and the device kills the process with an `AbstractMethodError` as soon as the session starts, so older builds such as v0.3.7 fail this row |
 | Activities | Flutter `MainActivity`, `UnityPlayerActivity`, XREAL `NRXRActivity` |
 | Vendor metadata | VITURE `sdk 0.9.0`, `dof 6dof`; XREAL `supportDevices` present |
 
