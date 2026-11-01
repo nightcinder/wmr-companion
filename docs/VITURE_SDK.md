@@ -53,6 +53,18 @@ VITURE's SDK License Agreement (effective September 2025, ships as
 - **9** forbids using "VITURE" in the application name. The app is
   "WMR Companion"; VITURE appears only in the licence and notice text.
 
+## Multi-vendor builds
+
+The app supports VITURE, XREAL and Android XR devices from one APK. Agreement
+2.1.9 forbids using the SDK "to develop applications for other platforms", not
+shipping an app that also supports other platforms. The tracking code keeps the
+uses separate: `wmr_tracking_dispatch` detects the glasses vendor and selects
+the matching source, so `wmr_tracking_viture` (and the VITURE C SDK) is only
+used for VITURE devices, and `wmr_tracking_xreal` for XREAL devices. No VITURE
+SDK code path runs against another vendor's hardware, and the APK is still a
+Developed Program designed to function with VITURE products (1.3). The unified
+APK has shipped this way since ONY-354.
+
 ## Updating the SDK
 
 Replace the three files on the runner, update the size and digest in
