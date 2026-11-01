@@ -12,6 +12,40 @@ import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
+
+class _NeckbandDetector implements GlassesDetector {
+  const _NeckbandDetector();
+
+  @override
+  Future<GlassesDetection> detect() async => const GlassesDetection(
+    vendor: GlassesVendor.viture,
+    host: GlassesHost.neckband,
+    usbPermissionGranted: true,
+  );
+}
+
+/// A started source that reports hand joints and the VITURE runtime, so the
+/// bench labels captures and the status line the way a neckband run does.
+class _VitureFakeSource extends FakeTrackingSource {
+  @override
+  TrackingVendor get vendor => TrackingVendor.viture;
+}
+
+class _StereoInactiveSource extends FakeTrackingSource {
+  @override
+  TrackingVendor get vendor => TrackingVendor.viture;
+
+  @override
+  Future<void> start() async {
+    throw const TrackingException(
+      TrackingExceptionKind.unavailable,
+      'VITURE hand tracking needs the VITURE XR loader rendering in stereo 3D '
+      '(SpaceWalker mode); this Unity player is running in 2D. Enable VITURE '
+      'XR Plug-in Management and Initialize XR on Startup.',
+    );
+  }
+}
 
 class _FakeSession implements BenchSession {
   @override
@@ -101,6 +135,7 @@ void main() {
   Future<ProviderContainer> open(
     WidgetTester tester, {
     bool withHandJoints = false,
+    TrackingSourceSelector? selector,
   }) async {
     final documents = Directory.systemTemp.createTempSync('bench_modes_docs');
     addTearDown(() => documents.deleteSync(recursive: true));
@@ -113,6 +148,8 @@ void main() {
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) async => bundle,
         ),
+        if (selector != null)
+          debugTrackingSelectorProvider.overrideWithValue(selector),
         if (withHandJoints)
           debugTrackingSourceFactoryProvider.overrideWithValue(
             (choice) async => FakeTrackingSource(),
@@ -147,6 +184,84 @@ void main() {
     await tester.pump();
     await tester.pump();
   }
+
+  /// Pumps until the neckband auto-probe has picked a source and finished
+  /// attaching it.
+  Future<void> settleTracking(
+    WidgetTester tester,
+    ProviderContainer container,
+  ) async {
+    for (var i = 0; i < 20; i++) {
+      final selection = container.read(debugTrackingSourceProvider);
+      if (selection.choice != DebugTrackingSource.none &&
+          !selection.attachment.isLoading) {
+        return;
+      }
+      await tester.pump();
+    }
+  }
+
+  testWidgets('neckband host auto-selects VITURE and enables 6DoF only', (
+    tester,
+  ) async {
+    final source = _VitureFakeSource();
+    final container = await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _NeckbandDetector(),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => source,
+      ),
+    );
+    await settleTracking(tester, container);
+
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.choice, DebugTrackingSource.auto);
+    expect(selection.attachment.value?.source, same(source));
+    expect(source.started, isTrue);
+
+    final button = tester.widget<OutlinedButton>(
+      find.byKey(const Key('bench-mode-6dof_only')),
+    );
+    expect(button.onPressed, isNotNull);
+    expect(
+      find.text('6DoF: Auto (USB) hand tracking attached (viture runtime).'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('bench-6dof-reason')), findsNothing);
+
+    await tap(tester, 'bench-mode-6dof_only');
+    expect(container.read(benchControllerProvider).mode, BenchMode.sixDofOnly);
+  });
+
+  testWidgets('inactive XR stereo shows a 0DoF status and an action', (
+    tester,
+  ) async {
+    final container = await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _NeckbandDetector(),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => _StereoInactiveSource(),
+      ),
+    );
+    await settleTracking(tester, container);
+
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.choice, DebugTrackingSource.auto);
+    expect(
+      selection.attachment.value?.error?.kind,
+      TrackingExceptionKind.unavailable,
+    );
+
+    final button = tester.widget<OutlinedButton>(
+      find.byKey(const Key('bench-mode-6dof_only')),
+    );
+    expect(button.onPressed, isNull);
+    expect(find.textContaining('VITURE XR stereo is inactive'), findsOneWidget);
+    expect(find.textContaining('Switch the glasses to 3D'), findsOneWidget);
+    expect(find.byKey(const Key('bench-6dof-reason')), findsOneWidget);
+  });
 
   testWidgets('6DoF only is disabled without a hand-joint source', (
     tester,

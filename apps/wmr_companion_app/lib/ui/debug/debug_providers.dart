@@ -425,12 +425,41 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       _owned = null;
       if (source != null) unawaited(releaseDebugTrackingSource(source));
     });
+    // A VITURE Pro Neckband is the vendor's own compute unit, so the glasses
+    // are already known: attach the detected source as the screens open
+    // instead of leaving the tester on `none` (0DoF, `6DoF only` greyed out).
+    // The probe only runs once this build returns.
+    unawaited(_autoSelectOnNeckband());
     return const DebugTrackingSelection(
       choice: DebugTrackingSource.none,
       attachment: AsyncValue.data(
         DebugTrackingAttachment(choice: DebugTrackingSource.none),
       ),
     );
+  }
+
+  /// Selects [DebugTrackingSource.auto] when the native detector reports a
+  /// VITURE Pro Neckband host.
+  ///
+  /// The detector is only called when a vendor flag is built in, so a
+  /// flag-off build stays channel-free. A manual selection made while the
+  /// probe runs wins: [select] is only called from [DebugTrackingSource.none].
+  Future<void> _autoSelectOnNeckband() async {
+    final selector = ref.read(debugTrackingSelectorProvider);
+    if (!selector.flags.any) return;
+    final GlassesHost host;
+    try {
+      host = (await selector.detector.detect()).host;
+    } catch (_) {
+      // Detection is best-effort; the dropdown still offers Auto.
+      return;
+    }
+    if (host != GlassesHost.neckband) return;
+    if (state.choice != DebugTrackingSource.none ||
+        state.attachment.isLoading) {
+      return;
+    }
+    await select(DebugTrackingSource.auto);
   }
 
   void set(DebugTrackingSource choice) => unawaited(select(choice));
@@ -471,6 +500,11 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
           choice: choice,
           source: selected.source,
           message: selected.message,
+          // Auto carries the detection/start failure in [message]; surface it
+          // as the typed error the bench and the debug viewer read, so a 2D
+          // (XR stereo inactive) player is actionable instead of "Starting
+          // Auto (USB)...".
+          error: selected.source == null ? _selectionError(selected) : null,
         ),
       );
       return;
@@ -535,6 +569,26 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
     state = DebugTrackingSelection(
       choice: attachment.choice,
       attachment: AsyncValue.data(attachment),
+    );
+  }
+
+  /// The typed error for a failed [DebugTrackingSource.auto] selection.
+  ///
+  /// "No glasses detected" stays a message rather than an error: nothing
+  /// failed, and the dropdown still lets the tester pick a vendor by hand.
+  static TrackingException? _selectionError(TrackingSelection selection) {
+    if (selection.status == TrackingSelectionStatus.none) return null;
+    final kind = switch (selection.status) {
+      TrackingSelectionStatus.unsupported => TrackingExceptionKind.unsupported,
+      TrackingSelectionStatus.permissionDenied =>
+        TrackingExceptionKind.permissionDenied,
+      TrackingSelectionStatus.attached ||
+      TrackingSelectionStatus.unavailable ||
+      TrackingSelectionStatus.none => TrackingExceptionKind.unavailable,
+    };
+    return TrackingException(
+      kind,
+      selection.message ?? 'The automatic tracking source failed',
     );
   }
 }
