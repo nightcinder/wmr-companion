@@ -32,6 +32,9 @@ android {
     // SDK ships. CI pins the same NDK for the app's Unity export.
     ndkVersion = "28.2.13676358"
 
+    // AGP 9 configures CMake paths per module, not per build type, so the
+    // harness library is built and packaged into every variant. It is inert
+    // outside debug: the Dart trigger refuses to load it unless kDebugMode.
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")

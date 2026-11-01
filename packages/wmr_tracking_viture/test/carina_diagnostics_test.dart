@@ -1,5 +1,26 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
+
+/// Resolves the package root whether the tests run from it or the repo root.
+Directory _packageRoot() {
+  final cwd = Directory.current.absolute;
+  for (final candidate in <Directory>[
+    cwd,
+    Directory('${cwd.path}/packages/wmr_tracking_viture'),
+  ]) {
+    final pubspec = File('${candidate.path}/pubspec.yaml');
+    if (pubspec.existsSync() &&
+        RegExp(
+          r'^name:\s*wmr_tracking_viture\s*$',
+          multiLine: true,
+        ).hasMatch(pubspec.readAsStringSync())) {
+      return candidate;
+    }
+  }
+  throw StateError('cannot find wmr_tracking_viture from ${cwd.path}');
+}
 
 Map<String, Object?> _report({bool ok = true, int code = 0, String? error}) =>
     <String, Object?>{
@@ -40,6 +61,22 @@ void main() {
   test('the diagnostic ladder and gain are fixed by counsel', () {
     expect(carinaDiagnosticExposureLadderMs, <double>[0.1, 0.3, 1.0, 3.0]);
     expect(carinaDiagnosticGain, 6);
+  });
+
+  test('the harness the trigger opens is the one CMake packages', () {
+    final root = _packageRoot();
+    final cmake = File('${root.path}/android/src/main/cpp/CMakeLists.txt')
+        .readAsStringSync();
+    final target = RegExp(r'add_library\(\s*(\w+)\s+SHARED')
+        .firstMatch(cmake)
+        ?.group(1);
+    expect(target, isNotNull);
+    final source = File('${root.path}/lib/src/carina_diagnostics.dart')
+        .readAsStringSync();
+    final library = RegExp(r"_libraryName\s*=\s*'([^']+)'")
+        .firstMatch(source)
+        ?.group(1);
+    expect(library, 'lib$target.so');
   });
 
   test('capture stays off unless the debug dart-define is set', () async {

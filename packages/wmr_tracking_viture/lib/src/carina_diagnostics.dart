@@ -27,7 +27,7 @@ const int carinaDiagnosticGain = 6;
 /// The default per-capture duration: 3 s per rung at the SDK's 25 Hz.
 const Duration carinaDiagnosticDefaultDuration = Duration(seconds: 12);
 
-const String _libraryName = 'libcarina_diag.so';
+const String _libraryName = 'libwmr_carina_diag.so';
 const String _telemetryFile = 'carina-diagnostics.json';
 const String _schema = 'wmr.carina.diagnostics.v1';
 

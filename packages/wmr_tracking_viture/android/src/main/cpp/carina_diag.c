@@ -11,9 +11,10 @@
  *   5. copies left0/right0/left1/right1 inside the callback, and
  *   6. writes one PGM per buffer per rung plus a JSON telemetry file.
  *
- * The only caller is the debug-only Dart FFI trigger; nothing here is built
- * into a release path. See the package README for the local libglasses.so
- * staging step.
+ * The only caller is the debug-only Dart FFI trigger. AGP 9 has no
+ * per-build-type CMake path, so libwmr_carina_diag.so is packaged into every
+ * variant, but it is never loaded outside a debug build. See the package
+ * README for the local libglasses.so staging step.
  */
 
 #include <android/log.h>
@@ -164,8 +165,15 @@ static void on_camera(char* left0,
                       int width,
                       int height) {
     CarinaCameraState* state = g_camera;
-    if (state == NULL || !atomic_load(&state->accepting)) return;
+    if (state == NULL) return;
+    /* Count before the accepting check: the owner drains this counter before
+     * freeing `state`, and a callback preempted between the gate check and the
+     * increment would otherwise be invisible to that drain. */
     atomic_fetch_add(&state->callback_active, 1);
+    if (!atomic_load(&state->accepting)) {
+        atomic_fetch_sub(&state->callback_active, 1);
+        return;
+    }
 
     if (left0 == NULL || right0 == NULL || left1 == NULL || right1 == NULL) {
         atomic_fetch_sub(&state->callback_active, 1);

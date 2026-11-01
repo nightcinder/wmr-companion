@@ -86,7 +86,9 @@ final report = await VitureCarinaDiagnostics.capture(
 ```
 
 The native harness (`android/src/main/cpp/carina_diag.c`, built as
-`libcarina_diag.so`) hands the glasses' USB fd to
+`libwmr_carina_diag.so`) is packaged into every variant because AGP 9 has no
+per-build-type CMake path, but the trigger only opens it in a debug build.
+The harness hands the glasses' USB fd to
 `xr_device_provider_create`, registers the Carina camera callback, polls
 `xr_device_provider_get_gl_pose_carina` every 10 ms, and keeps one copied frame
 per rung for `left0`, `right0`, `left1` and `right1`. It applies the fixed
