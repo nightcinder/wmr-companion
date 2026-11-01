@@ -104,7 +104,8 @@ Pick **6DoF only**. The bridge steps are skipped, the run is shorter, and that i
 fills both eyes. If the stage stops at `playerHosted` or `loaderStarted`, or
 `stereoMode` is `unknown`, or you see half an image per eye, record the
 values and capture logs (section 7.5 below). A 2D/mono player fails closed
-with `unavailable` instead of stalling.
+with `unavailable` instead of stalling. If the app shows a black right eye on
+launch, see section 6D.
 
 **Capture 6DoF pose** appears only while your glasses report hand tracking. It records the full filter-spec rev 4 section 8 corpus: five motion classes (still, held drifting, slow pan, medium pan, fast flick), four runs per class per hand, each at least 30 s, plus one diagnostic occlusion run per hand. That is roughly 10 minutes per hand. Each run repeats its path until the timer ends, at the bench durations: still 30 s, held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s, occlusion 30 s. Paths: still (rest, arm braced), held drifting (aim and let it wander), slow pan 30 cm over 3 s back and forth, medium pan 50 cm in 1 s, fast flick 45 cm in 0.3 s. Skipping a run (whole or per run) is fine and does not break the run; skipped runs are recorded as skipped. Its files are inside the bundle you send.
 
@@ -117,6 +118,27 @@ PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_B
 - Capture the serial log during pairing (see the WMR_Bridge internal runbook §6.1 and §7.7: https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) and record the `model PSVR2` line, the wake line, and the first report's `frame_len`.
 - Expect the run to work or to fail; either is useful. Do not spend more than one retry on it.
 - In the intake block, note `Controllers: PSVR2` and anything that looked wrong : LED colours, dropped hand, wrong model label.
+
+### 6D : Luma Ultra + Pro Neckband: 3D SBS launch triage
+
+On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half.
+
+Immediate workaround for v0.3.7/v0.3.8 testers:
+
+1. Switch the glasses to 2D mode with the glasses 2D/3D mode toggle button. The viewport becomes single-screen, so the app fills the view and you can use it normally.
+2. If you stay in 3D mode, use the Neckband D-pad (up, down, left, right, OK) to move focus to "Run guided bench" on the Connect screen and select it. The right eye stays black, but the action runs.
+3. If you used 2D mode to navigate, switch back to 3D mode before the Capture 6DoF pose step, since that step needs stereo rendering.
+
+Diagnostic capture for this case. Run these and include the output in the zip:
+
+- APK version: `adb shell dumpsys package com.onyxlens.wmr_companion | grep -E "versionName|versionCode"`
+- Display size: `adb shell wm size`
+- Display info: `adb shell dumpsys display | grep -iE "DisplayDeviceInfo|size=|density=|mode="`
+- Logs: `adb logcat -v threadtime > wmr-neckband-sbs-<YYYYMMDD-HHMMSS>.log`
+
+If the Neckband is connected over wireless ADB, connect first: `adb connect <neckband-ip>:5555`.
+
+Record the values in the intake block. Do not reconstruct them from memory.
 
 ## 7.5. Log capture (all setups)
 
@@ -149,6 +171,9 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Pairing: BOTH controllers paired together ____
 - LED: red / yellow / blue / green
 - MTU shown: ____
+- Neckband SBS: black right eye / full screen / n/a
+- ADB wm size: ____
+- ADB display mode: ____
 - Files: manifest, exports
 - What happened (3 lines max):
 ```
