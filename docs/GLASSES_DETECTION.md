@@ -45,7 +45,7 @@ both vendor USB IDs are attached, the app stays on 3DoF and offers a
 
 | Item | Value | Source / status |
 | --- | --- | --- |
-| VITURE USB vendor ID | `0x35CA` | Public; recorded in [TRACKING.md](TRACKING.md). |
+| VITURE USB vendor ID | `0x35CA` | Public; shipped as `GlassesUsbConfig.VITURE_VENDOR_ID`. |
 | VITURE USB product IDs | unknown | Not published in this repository; default matches any product. Configurable. |
 | XREAL USB vendor ID | `0x3318` | Public; shipped as `GlassesUsbConfig.XREAL_VENDOR_ID`. |
 | XREAL USB product IDs | unknown | Not published in this repository; default matches any product. Configurable. |

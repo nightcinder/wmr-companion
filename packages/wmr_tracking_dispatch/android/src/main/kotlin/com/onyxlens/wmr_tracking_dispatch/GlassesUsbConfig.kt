@@ -27,10 +27,10 @@ data class GlassesUsbConfig(
             (xrealProductIds.isEmpty() || device.productId in xrealProductIds)
 
     companion object {
-        /** Published by VITURE (see docs/TRACKING.md). */
+        /** Published by VITURE (see docs/GLASSES_DETECTION.md). */
         const val VITURE_VENDOR_ID: Int = 0x35CA
 
-        /** Published by XREAL (see docs/TRACKING.md). */
+        /** Published by XREAL (see docs/GLASSES_DETECTION.md). */
         const val XREAL_VENDOR_ID: Int = 0x3318
 
         val DEFAULT = GlassesUsbConfig()

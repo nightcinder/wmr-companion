@@ -175,7 +175,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   ),
                 ],
                 const SizedBox(height: 8),
-                const TrackingSourceBanner(),
+                TrackingSourceBanner(enabled: !state.started && !state.busy),
                 const SizedBox(height: 4),
                 Text(
                   tracking.status,

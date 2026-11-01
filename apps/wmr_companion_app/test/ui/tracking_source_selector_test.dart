@@ -9,6 +9,7 @@ import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
+import 'package:wmr_companion_app/ui/debug/tracking_source_banner.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
@@ -180,6 +181,46 @@ void main() {
     await close(tester);
   });
 
+  testWidgets(
+    'the banner disables both source controls when its host gates it',
+    (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            debugTrackingSelectorProvider.overrideWithValue(
+              const TrackingSourceSelector(
+                detector: _FixedDetector(GlassesDetection.none),
+                flags: TrackingSourceFlags(),
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: TrackingSourceBanner(enabled: false)),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(const Key('tracking-source-redetect')),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(const Key('tracking-source-simulated')),
+            )
+            .onChanged,
+        isNull,
+      );
+    },
+  );
+
   testWidgets('startup attaches the detected vendor on any host', (
     tester,
   ) async {
@@ -321,6 +362,37 @@ void main() {
     final selection = container.read(debugTrackingSourceProvider);
     expect(selection.choice, DebugTrackingSource.auto);
     expect(selection.attachment.value?.source, isNull);
+    // No vendor source exists to fall back from, so Simulated is the only
+    // way to reach 6DoF in this build.
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('a detected but unbuildable vendor still offers Simulated', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.xreal,
+            host: GlassesHost.beamPro,
+            usbPermissionGranted: true,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+      ),
+    );
+    await settle(tester);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DebugScreen)),
+    );
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.attachment.value?.source, isNull);
+    expect(find.textContaining('does not enable that vendor'), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
     await close(tester);
   });
 

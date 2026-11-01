@@ -67,10 +67,15 @@ String? _detectionSummary(GlassesDetection? detection) {
 ///
 /// The vendor is detected from the host and USB; there is no manual dropdown.
 /// [redetect] re-runs detection after the tester connects glasses, and the
-/// Simulated switch is the fallback when nothing is detected or both vendor
-/// USB IDs are present, so a tester can still exercise 6DoF.
+/// Simulated switch is the fallback whenever auto has no running source:
+/// nothing detected, ambiguous USB IDs, a vendor that is not built, or a
+/// source that could not start. A tester can still exercise 6DoF.
 class TrackingSourceBanner extends ConsumerWidget {
-  const TrackingSourceBanner({super.key});
+  const TrackingSourceBanner({super.key, this.enabled = true});
+
+  /// False while a bench run owns the tracking source, so swapping sources
+  /// cannot invalidate a capture in progress.
+  final bool enabled;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -81,15 +86,13 @@ class TrackingSourceBanner extends ConsumerWidget {
     final loading = selection.attachment.isLoading;
     final canDetect = ref.watch(debugTrackingSelectorProvider).flags.any;
     final simulated = selection.choice == DebugTrackingSource.simulated;
-    // Auto stays selected with no source when nothing matched or both vendors
-    // are attached; that is the 0DoF state where Simulated is the fallback.
-    // A flag-off build has no vendor source to fall back from, so keep the
-    // banner compact there.
+    // Any auto selection without a running source is 0DoF: nothing matched,
+    // both vendors are attached, the vendor flag is off, or the source could
+    // not start. Simulated is the fallback in all of those states.
     final fallback =
-        canDetect &&
         selection.choice == DebugTrackingSource.auto &&
         !loading &&
-        !(detection?.hasVendor ?? false);
+        attachment?.source == null;
 
     return Material(
       key: const Key('tracking-source-banner'),
@@ -112,7 +115,7 @@ class TrackingSourceBanner extends ConsumerWidget {
                 ),
                 TextButton.icon(
                   key: const Key('tracking-source-redetect'),
-                  onPressed: loading || !canDetect
+                  onPressed: !enabled || loading || !canDetect
                       ? null
                       : () => ref
                             .read(debugTrackingSourceProvider.notifier)
@@ -139,16 +142,18 @@ class TrackingSourceBanner extends ConsumerWidget {
                       ? 'Fake 6DoF trajectory, no glasses needed'
                       : 'No glasses detected; use the simulated 6DoF source',
                 ),
-                onChanged: (value) {
-                  final notifier = ref.read(
-                    debugTrackingSourceProvider.notifier,
-                  );
-                  if (value) {
-                    notifier.set(DebugTrackingSource.simulated);
-                  } else {
-                    notifier.redetect();
-                  }
-                },
+                onChanged: !enabled
+                    ? null
+                    : (value) {
+                        final notifier = ref.read(
+                          debugTrackingSourceProvider.notifier,
+                        );
+                        if (value) {
+                          notifier.set(DebugTrackingSource.simulated);
+                        } else {
+                          notifier.redetect();
+                        }
+                      },
               ),
           ],
         ),
