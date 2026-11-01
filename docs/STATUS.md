@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-11-01 (records the v0.3.7 signed unified release APK (ONY-713): VITURE Unity player host + stereo stage, Android XR full permission set, Unity export pin; see tracking changes below): project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-11-01 (records the v0.3.7 signed unified release APK (ONY-713): XREAL player host & boundary guards, fail-closed Unity loader gates, tracking stage fixes, and fusion yaw reset / bench pose recorder; see tracking changes below: project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -40,7 +40,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified; the 0.3.7 signed APK has only passed CI/export checks |
 | Licence gate | Pinned `unity-export-1.1` (SHA-256 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072`); owner approved SDK redistribution (ONY-354 with historical 1.0 export `945bd425…`) |
 
-Release notes: [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7). This release is the signed (project-key) cut at commit `16f2218`, carrying the VITURE stereo Unity player host (ONY-612), Android XR full permission set (ONY-614), pinned unity-export-1.1 (ONY-617), and the self-hosted Liesa release build (ONY-605). The debug-build `.debug` package suffix and install/uninstall recovery for pre-0.3.3 builds remain documented in `docs/RELEASE_SIGNING.md`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
+Release notes: [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7). This release is the signed (project-key) cut at commit `16f2218`, carrying the XREAL player host and boundary guards (ONY-706), fail-closed Unity bridge loader gates (ONY-707), tracking stage fixes and OpenXR fixtures (ONY-708), and fusion yaw reset with bench pose recording and USB auto-detect (ONY-709). The debug-build `.debug` package suffix and install/uninstall recovery for pre-0.3.3 builds remain documented in `docs/RELEASE_SIGNING.md`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
 
 ### Milestones (see [PLAN.md](PLAN.md))
 

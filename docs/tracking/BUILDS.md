@@ -20,7 +20,7 @@ hardware; these are compile/packaging facts only.
 | Licence gate | Pinned `unity-export-1.1` (SHA-256 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072`); owner approved SDK redistribution (ONY-354) |
 
 Release notes: [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7).
-Carrying the VITURE stereo Unity player host (ONY-612), Android XR full permission set (ONY-614), pinned unity-export-1.1 (ONY-617), and the self-hosted Liesa release build (ONY-605).
+Carrying the XREAL player host and boundary guards (ONY-706), fail-closed Unity bridge loader gates (ONY-707), tracking stage fixes and OpenXR fixtures (ONY-708), and fusion yaw reset with bench pose recorder and USB auto-detect (ONY-709).
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
