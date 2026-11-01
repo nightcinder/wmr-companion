@@ -63,7 +63,7 @@ Skip this in setup B.
 4. Confirm the screen says **connected, streaming** with negotiated **MTU** 517 (>= 61 is usable). Record the MTU shown.
 5. Tap **Open 3D debug view**; stay on the debug screen.
 
-> **HID / Gamepad Coexistence Warning:** Firmware 0.3.0+ exposes a standard BLE HID gamepad (HOGP) directly to Android upon pairing. Do not enable app-level HID output in WMR Companion at the same time: running both simultaneously creates duplicate, conflicting gamepad inputs.
+> **HID / Gamepad Coexistence Warning:** Firmware 0.3.0+ exposes a standard BLE HID gamepad (HOGP) directly to Android upon pairing. Do not enable app-level HID output (`BluetoothHidDevice`) in WMR Companion at the same time: registering the app HID peripheral disables Android's HID Host service (stopping bridge HOGP input reception) and degrades latency across the phone's shared radio. Keep Companion app HID output disabled.
 
 ## 4. Pair controllers : setups A and C only
 

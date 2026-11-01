@@ -203,13 +203,13 @@ All accessed 2026-10-25.
 - Unity as a Library (Android): https://docs.unity3d.com/Manual/UnityasaLibrary-Android.html
 - Unity `UnitySendMessage` from Java/Kotlin: https://docs.unity3d.com/Manual/android-plugins-csharp-code-from-java-kotlin.html
 - `flutter_embed_unity` (UaaL packaging reference): https://github.com/learntoflutter/flutter_embed_unity
+- OpenXR hand tracking extension (joint names): https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#XR_EXT_hand_tracking
 
 ## BLE HOGP vs Companion Android HID coexistence
 
 When using the ESP32 WMR Bridge with Android hosts (including phone, VITURE Pro Neckband, and Beam Pro):
 - The ESP32 firmware advertises standard BLE HID-over-GATT (HOGP, service `0x1812`) and `0xFF10` concurrently on the same LE link. Android binds the bridge's HOGP gamepad profile directly at the OS level upon bonding.
-- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`).
-- **Coexistence rule**: Testers must **not** enable Companion app HID output while the phone/host is paired to the bridge's HOGP gamepad. Running both creates duplicate and conflicting input devices in Android games and testers. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
-- OpenXR hand tracking extension (joint names): https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#XR_EXT_hand_tracking
+- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`) targeting remote PC/console hosts.
+- **Coexistence rule**: Testers must **not** enable Companion app HID output while the host is paired to the bridge's HOGP gamepad. Registering `BluetoothHidDevice` disables Android's HID Host service (causing bridge HOGP input to be dropped) and creates radio contention on the phone between the Classic HID link and the BLE GATT stream. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
 
 

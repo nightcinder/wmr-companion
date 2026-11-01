@@ -106,8 +106,8 @@ Unity start, frame rate and joint delivery are gates 3 and 5 in the run sheet.
 
 When using the ESP32 WMR Bridge with Android hosts (including phone, VITURE Pro Neckband, and Beam Pro):
 - The ESP32 firmware advertises standard BLE HID-over-GATT (HOGP, service `0x1812`) and `0xFF10` concurrently on the same LE link. Android binds the bridge's HOGP gamepad profile directly at the OS level upon bonding.
-- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`).
-- **Coexistence rule**: Testers must **not** enable Companion app HID output while the phone/host is paired to the bridge's HOGP gamepad. Running both creates duplicate and conflicting input devices in Android games and testers. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
+- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`) to send controller reports to a remote PC or console host.
+- **Coexistence rule**: Testers must **not** enable Companion app HID output while the host is paired to the bridge's HOGP gamepad. Registering `BluetoothHidDevice` disables Android's HID Host service (preventing the host from receiving HOGP input from the bridge) and causes radio contention on the phone between Classic HID and the BLE GATT stream. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
 
 ## 5. What was not done here
 
