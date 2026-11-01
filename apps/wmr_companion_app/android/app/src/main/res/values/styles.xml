@@ -13,6 +13,10 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- MainActivity asks for a transparent background so Flutter renders
+             through a texture view and the shared Unity surface behind it keeps
+             compositing (ONY-767). -->
+        <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
 </resources>

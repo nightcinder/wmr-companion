@@ -44,7 +44,9 @@ interface UnityPlayerViewHost {
 
     /**
      * Creates the player in [target] (an [Activity]) and attaches its view
-     * full-screen at [placement].
+     * full-screen at [placement]. The host delivers the initial [resume] and
+     * [windowFocusChanged] callbacks afterwards, because creation happens after
+     * the activity's own lifecycle callbacks have already run.
      */
     fun create(target: Any, placement: PlayerViewPlacement): Boolean
 
@@ -146,6 +148,12 @@ class UnityPlayerHost internal constructor(
             }
             target = newTarget
             hosted = true
+            // The player is created lazily during a plugin `start`, long after
+            // MainActivity ran onResume/onWindowFocusChanged. Unity never boots
+            // its XR loader until it is resumed and focused, so the first host
+            // has to deliver those two callbacks itself (ONY-767).
+            runCatching { viewHost.resume() }
+            runCatching { viewHost.windowFocusChanged(true) }
             return PlayerHostResult(hosted = true, stage = STAGE_PLAYER_HOSTED)
         }
     }
@@ -233,7 +241,6 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
         if (existing != null) {
             (existing.parent as? ViewGroup)?.removeView(existing)
             attach(activity, existing, placement)
-            call("resume")
             return true
         }
         val clazz = playerClass ?: return false
