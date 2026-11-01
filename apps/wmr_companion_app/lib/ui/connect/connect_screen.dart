@@ -12,6 +12,7 @@ import 'package:wmr_core/services/controller_service.dart';
 import '../debug/debug_providers.dart';
 import '../debug/debug_screen.dart';
 import '../latency/latency_screen.dart';
+import '../legal/terms_screen.dart';
 import 'connect_providers.dart';
 
 class ConnectScreen extends StatelessWidget {
@@ -20,7 +21,33 @@ class ConnectScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const _AppTitle()),
+      appBar: AppBar(
+        title: const _AppTitle(),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'About',
+            onSelected: (value) {
+              switch (value) {
+                case 'terms':
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const TermsScreen(),
+                    ),
+                  );
+                case 'licences':
+                  showLicensePage(
+                    context: context,
+                    applicationName: 'WMR Companion',
+                  );
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'terms', child: Text('Terms')),
+              PopupMenuItem(value: 'licences', child: Text('Licences')),
+            ],
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: const [RealPanel()],
