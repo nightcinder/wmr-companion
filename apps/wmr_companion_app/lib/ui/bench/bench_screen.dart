@@ -199,6 +199,12 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                       ),
                   ],
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  tracking.status,
+                  key: const Key('bench-tracking-status'),
+                  style: theme.textTheme.bodySmall,
+                ),
                 const SizedBox(height: 8),
                 LinearProgressIndicator(value: finished / total),
                 const SizedBox(height: 12),
