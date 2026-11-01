@@ -50,14 +50,15 @@ typedef _CaptureDart = int Function(
   int durationMs,
 );
 
-/// Debug-only trigger for the VITURE Luma Ultra Carina frame-capture spike.
+/// Opt-in trigger for the VITURE Luma Ultra Carina frame-capture diagnostic.
 ///
 /// Off unless the app is built with `--dart-define=WMR_VITURE_CARINA_DIAG=true`
-/// *and* runs in debug mode. The capture opens the glasses over USB, blocks a
-/// background isolate while the native harness walks the fixed exposure
+/// (the unified flavor sets it). The capture opens the glasses over USB, blocks
+/// a background isolate while the native harness walks the fixed exposure
 /// ladder, then writes one PGM per rung/channel plus JSON telemetry.
 ///
-/// The proprietary `libglasses.so` is not vendored. Stage it in the app's
+/// It is reachable only from the guided bench, not from the normal UI. The
+/// proprietary `libglasses.so` is not vendored. Stage it in the app's
 /// `jniLibs/arm64-v8a/` for a local run; without it the native harness returns
 /// a typed `sdkUnavailable` report instead of crashing.
 abstract final class VitureCarinaDiagnostics {
@@ -66,8 +67,8 @@ abstract final class VitureCarinaDiagnostics {
     defaultValue: false,
   );
 
-  /// True only in a debug build with the opt-in dart-define.
-  static bool get enabled => _compileTimeEnabled && kDebugMode;
+  /// True in any build mode when the opt-in dart-define is set.
+  static bool get enabled => _compileTimeEnabled;
 
   /// Runs one capture and returns its telemetry.
   ///
@@ -82,7 +83,7 @@ abstract final class VitureCarinaDiagnostics {
   }) async {
     if (!enabled) {
       throw StateError(
-        'Carina diagnostics need a debug build with '
+        'Carina diagnostics need a build with '
         '--dart-define=WMR_VITURE_CARINA_DIAG=true',
       );
     }

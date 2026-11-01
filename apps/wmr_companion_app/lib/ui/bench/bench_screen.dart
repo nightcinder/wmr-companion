@@ -406,23 +406,29 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     };
   }
 
-  static String _startLabel(BenchStep step, BenchDurations durations) =>
-      switch (step) {
-        BenchStep.deviceSummary => 'Check capabilities',
-        BenchStep.connect => 'Check connection',
-        BenchStep.bothHands => 'Wait for both hands',
-        BenchStep.firmwareConfig => 'Read firmware and config',
-        BenchStep.stillLeft ||
-        BenchStep.stillRight => 'Start ${durations.still.inSeconds} s',
-        BenchStep.moveLeft ||
-        BenchStep.moveRight => 'Start ${durations.move.inSeconds} s',
-        BenchStep.capture => 'Start ${durations.capture.inSeconds} s capture',
-        BenchStep.latency => 'Start ${durations.latency.inSeconds} s',
-        BenchStep.poseCapture => 'Start',
-        BenchStep.photo ||
-        BenchStep.serialLog ||
-        BenchStep.export => 'Continue',
-      };
+  static String _startLabel(
+    BenchStep step,
+    BenchDurations durations,
+  ) => switch (step) {
+    BenchStep.deviceSummary => 'Check capabilities',
+    BenchStep.connect => 'Check connection',
+    BenchStep.bothHands => 'Wait for both hands',
+    BenchStep.firmwareConfig => 'Read firmware and config',
+    BenchStep.stillLeft ||
+    BenchStep.stillRight => 'Start ${durations.still.inSeconds} s',
+    BenchStep.moveLeft ||
+    BenchStep.moveRight => 'Start ${durations.move.inSeconds} s',
+    BenchStep.capture => 'Start ${durations.capture.inSeconds} s capture',
+    BenchStep.latency => 'Start ${durations.latency.inSeconds} s',
+    BenchStep.handEmpty => 'Start ${durations.handEmpty.inSeconds} s',
+    BenchStep.handGrip => 'Start ${durations.handGrip.inSeconds} s',
+    BenchStep.carinaLeds => 'Start 4 x ${durations.carinaFrame.inSeconds} s',
+    BenchStep.carinaCheckerboard =>
+      'Start 10 x ${durations.carinaCheckerboardPose.inSeconds} s',
+    BenchStep.carinaPose => 'Start ${durations.carinaPoseRun.inSeconds} s',
+    BenchStep.poseCapture => 'Start',
+    BenchStep.photo || BenchStep.serialLog || BenchStep.export => 'Continue',
+  };
 
   static IconData _icon(BenchStatus status) => switch (status) {
     BenchStatus.done => Icons.check_circle,

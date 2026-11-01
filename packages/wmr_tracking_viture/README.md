@@ -65,16 +65,17 @@ Failures are typed `TrackingException`s:
   VITURE slice can exclude it using `tools:node="remove"`.
 - `protocol`: a relay frame or capability handshake was malformed.
 
-## Carina C-SDK diagnostic spike (debug only)
+## Carina C-SDK diagnostic (bench only)
 
 The Luma Ultra exposes four 8-bit grayscale stereo buffers through the C SDK's
 `XRCameraCallback`. `VitureCarinaDiagnostics` is a local spike for deciding
-whether that feed beats the hand-tracking route; it is not a product path.
+whether that feed beats the hand-tracking route; it is not a product path and
+is reachable only from the guided bench, never the normal UI.
 
-Build a debug app with both the flag and a debuggable APK:
+Build any app variant with the opt-in flag (the unified flavor sets it):
 
 ```sh
-flutter run --debug --dart-define=WMR_VITURE_CARINA_DIAG=true
+flutter build apk --dart-define=WMR_VITURE_CARINA_DIAG=true
 ```
 
 Then trigger one 12 s capture and write it to a directory you can pull:
@@ -87,7 +88,8 @@ final report = await VitureCarinaDiagnostics.capture(
 
 The native harness (`android/src/main/cpp/carina_diag.c`, built as
 `libwmr_carina_diag.so`) is packaged into every variant because AGP 9 has no
-per-build-type CMake path, but the trigger only opens it in a debug build.
+per-build-type CMake path, but the trigger only opens it when the dart-define
+is set.
 The harness hands the glasses' USB fd to
 `xr_device_provider_create`, registers the Carina camera callback, polls
 `xr_device_provider_get_gl_pose_carina` every 10 ms, and keeps one copied frame
@@ -105,9 +107,8 @@ in `WMR_CARINA_LIBGLASSES`). Without it the capture returns a typed
 SDK still needs written VITURE permission (ONY-732 audit).
 
 The Kotlin side only requests USB permission and returns
-`UsbDeviceConnection.fileDescriptor`; it is rejected unless the app is
-debuggable. `flutter test` covers the ladder and telemetry decoding, not the
-native call.
+`UsbDeviceConnection.fileDescriptor`. `flutter test` covers the ladder and
+telemetry decoding, not the native call.
 
 ## Unity smoke project
 

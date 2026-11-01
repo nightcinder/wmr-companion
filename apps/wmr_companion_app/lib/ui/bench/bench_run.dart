@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +12,7 @@ import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_core/services/latency_recorder.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 
 import '../../services/firmware_identity.dart';
 import '../../services/test_bundle_export.dart';
@@ -36,6 +38,11 @@ class BenchDurations {
     this.poseOcclusion = const Duration(seconds: 30),
     this.handTimeout = const Duration(seconds: 5),
     this.firmwareTimeout = const Duration(seconds: 3),
+    this.handEmpty = const Duration(seconds: 60),
+    this.handGrip = const Duration(seconds: 60),
+    this.carinaFrame = const Duration(seconds: 12),
+    this.carinaCheckerboardPose = const Duration(seconds: 4),
+    this.carinaPoseRun = const Duration(seconds: 60),
   });
 
   final Duration still;
@@ -68,11 +75,86 @@ class BenchDurations {
 
   /// How long to wait for the one-time FF16 read.
   final Duration firmwareTimeout;
+
+  /// ONY-733 Gate 4: empty-hand baseline and controller-grip runs.
+  final Duration handEmpty;
+  final Duration handGrip;
+
+  /// ONY-735 Gate 1: one capture per distance.
+  final Duration carinaFrame;
+
+  /// ONY-735 checkerboard: one short capture per board pose.
+  final Duration carinaCheckerboardPose;
+
+  /// ONY-735 Gate 9: the 60 s head-pose run.
+  final Duration carinaPoseRun;
 }
 
 final benchDurationsProvider = Provider<BenchDurations>(
   (ref) => const BenchDurations(),
 );
+
+/// ONY-738 section 4: the distances the LED run must cover.
+const List<double> carinaLedDistancesM = <double>[0.3, 0.5, 0.8, 1.0];
+
+/// One checkerboard pose from ONY-738 section 5.
+class CarinaCheckerboardPose {
+  const CarinaCheckerboardPose(this.distanceM, this.pose);
+
+  final double distanceM;
+  final String pose;
+
+  String get id => '${_distanceTag(distanceM)}-$pose';
+
+  String get label => '${distanceM.toStringAsFixed(1)} m, $pose';
+}
+
+/// Two distances, five angles each, in the sheet's order.
+const List<CarinaCheckerboardPose> carinaCheckerboardPoses =
+    <CarinaCheckerboardPose>[
+      CarinaCheckerboardPose(0.5, 'fronto'),
+      CarinaCheckerboardPose(0.5, 'left'),
+      CarinaCheckerboardPose(0.5, 'right'),
+      CarinaCheckerboardPose(0.5, 'up'),
+      CarinaCheckerboardPose(0.5, 'down'),
+      CarinaCheckerboardPose(0.8, 'fronto'),
+      CarinaCheckerboardPose(0.8, 'left'),
+      CarinaCheckerboardPose(0.8, 'right'),
+      CarinaCheckerboardPose(0.8, 'up'),
+      CarinaCheckerboardPose(0.8, 'down'),
+    ];
+
+String _distanceTag(double distance) =>
+    '${distance.toStringAsFixed(1)}m'.replaceAll('.', 'p');
+
+/// Runs one Carina capture. The default implementation is the real USB/SDK
+/// spike; tests override the provider to avoid hardware.
+abstract interface class CarinaCaptureRunner {
+  Future<CarinaDiagnosticReport> capture({
+    required Duration duration,
+    required String outputDirectory,
+  });
+}
+
+final class RealCarinaCaptureRunner implements CarinaCaptureRunner {
+  const RealCarinaCaptureRunner();
+
+  @override
+  Future<CarinaDiagnosticReport> capture({
+    required Duration duration,
+    required String outputDirectory,
+  }) => VitureCarinaDiagnostics.capture(
+    duration: duration,
+    outputDirectory: outputDirectory,
+  );
+}
+
+/// Null when the build has no `WMR_VITURE_CARINA_DIAG` flag, so the bench can
+/// record the Carina steps as skipped with a reason.
+final carinaCaptureProvider = Provider<CarinaCaptureRunner?>((ref) {
+  if (!VitureCarinaDiagnostics.enabled) return null;
+  return const RealCarinaCaptureRunner();
+});
 
 /// The wizard variant chosen on the bench page.
 enum BenchMode {
@@ -98,6 +180,9 @@ enum BenchMode {
       BenchStep.latency,
       BenchStep.photo,
       BenchStep.serialLog,
+      BenchStep.carinaLeds,
+      BenchStep.carinaCheckerboard,
+      BenchStep.carinaPose,
       BenchStep.export,
     ],
     BenchMode.sixDofOnly => const [
@@ -113,6 +198,8 @@ enum BenchMode {
       BenchStep.latency,
       BenchStep.photo,
       BenchStep.serialLog,
+      BenchStep.handEmpty,
+      BenchStep.handGrip,
       BenchStep.poseCapture,
       BenchStep.export,
     ],
@@ -128,7 +215,12 @@ enum BenchMode {
       BenchStep.latency,
       BenchStep.photo,
       BenchStep.serialLog,
+      BenchStep.handEmpty,
+      BenchStep.handGrip,
       BenchStep.poseCapture,
+      BenchStep.carinaLeds,
+      BenchStep.carinaCheckerboard,
+      BenchStep.carinaPose,
       BenchStep.export,
     ],
   };
@@ -165,7 +257,12 @@ enum BenchStep {
   latency('latency'),
   photo('photo'),
   serialLog('serial_log'),
+  handEmpty('hand_empty'),
+  handGrip('hand_grip'),
   poseCapture('pose_capture'),
+  carinaLeds('carina_leds'),
+  carinaCheckerboard('carina_checkerboard'),
+  carinaPose('carina_pose'),
   export('export');
 
   const BenchStep(this.id);
@@ -185,7 +282,12 @@ enum BenchStep {
     BenchStep.latency => 'Measure latency',
     BenchStep.photo => 'LED photo',
     BenchStep.serialLog => 'Serial log',
+    BenchStep.handEmpty => 'Hand tracking: empty hand',
+    BenchStep.handGrip => 'Hand tracking: gripping a controller',
     BenchStep.poseCapture => 'Capture 6DoF pose',
+    BenchStep.carinaLeds => 'Carina: LED visibility',
+    BenchStep.carinaCheckerboard => 'Carina: checkerboard captures',
+    BenchStep.carinaPose => 'Carina: head-pose speed',
     BenchStep.export => 'Write the test bundle',
   };
 
@@ -228,12 +330,38 @@ enum BenchStep {
     BenchStep.deviceSummary =>
       'Reports the attached hand-tracking runtime and the joints and rate it '
           'offers. No bridge is needed for the 6DoF path.',
+    BenchStep.handEmpty =>
+      'ONY-733 Gate 4 baseline. Hold the hand empty and visible for '
+          '${durations.handEmpty.inSeconds} s. The run records the joint rate '
+          'and the share of time with no hand joints.',
+    BenchStep.handGrip =>
+      'ONY-733 Gate 4. Grip a powered WMR controller and keep the hand in '
+          'view for ${durations.handGrip.inSeconds} s. Grip dropout under 5% '
+          'passes, over 15% fails, and 5-15% is marginal. ONY-736 scores the '
+          'recorded percentage.',
     BenchStep.poseCapture =>
       'Records the filter-spec section 8 corpus: four runs of each of the five '
           'motion classes per hand, then one occlusion diagnostic run per '
           'hand. Every run is at least 30 s and is sampled at the anchor rate '
           'with provenance. Each run has its own screen and can be skipped; an '
           'interrupted run resumes where it stopped.',
+    BenchStep.carinaLeds =>
+      'ONY-735 Gate 1. Keep both controllers on, dim the room, and connect '
+          'the Luma Ultra over USB. Four ${durations.carinaFrame.inSeconds} s '
+          'captures run in order at 0.3, 0.5, 0.8 and 1.0 m; hold three '
+          'orientations at each distance. Pass is at least 5 LED blobs in at '
+          'least 90% of frames at 0.8 m. ONY-736 scores the saved PGMs.',
+    BenchStep.carinaCheckerboard =>
+      'ONY-735 calibration. Use a flat, rigid checkerboard with at least '
+          '8x6 inner corners and the controller LEDs off. Ten '
+          '${durations.carinaCheckerboardPose.inSeconds} s captures run at '
+          '0.5 m and 0.8 m, each fronto-parallel, left, right, up and down. '
+          'Record the square size in millimetres.',
+    BenchStep.carinaPose =>
+      'ONY-735 Gate 9. Connect the Luma Ultra to an Android phone over USB '
+          '(OTG) or use the Neckband, accept the USB permission prompt, and '
+          'run one ${durations.carinaPoseRun.inSeconds} s capture. It records '
+          'the C-SDK head-pose rate, pose status and valid-pose count.',
     BenchStep.export =>
       'Writes the same zip as Export test bundle, with this run\'s step '
           'results in the manifest, then opens the share sheet.',
@@ -279,6 +407,16 @@ abstract class BenchSession {
   });
   Future<BenchStepOutcome> capture();
   Future<BenchStepOutcome> latency();
+
+  /// ONY-733 Gate 4. [gripping] false records the empty-hand baseline.
+  Future<BenchStepOutcome> handTracking({
+    required bool gripping,
+    required Duration duration,
+  });
+
+  Future<BenchStepOutcome> carinaLeds();
+  Future<BenchStepOutcome> carinaCheckerboard();
+  Future<BenchStepOutcome> carinaPose();
 }
 
 /// The real session: reads and records through [ControllerService], the same
@@ -296,6 +434,8 @@ class RealBenchSession implements BenchSession {
     this.appCommit = 'unknown',
     this.firmwareSha,
     this.applyMode,
+    this.carinaCapture,
+    this.carinaRoot,
   });
 
   /// Null in the 6DoF-only path, where no bridge is attached.
@@ -318,6 +458,24 @@ class RealBenchSession implements BenchSession {
   /// Applies a stream mode to both the service and the app's mode choice, so
   /// the debug pose path follows the bench.
   final Future<void> Function(StreamMode mode)? applyMode;
+
+  /// Null when the build has no Carina diagnostic; the bench skips Gate 1/9.
+  final CarinaCaptureRunner? carinaCapture;
+
+  /// Where Carina writes its PGM and JSON directories.
+  final String? carinaRoot;
+
+  String get _carinaRoot => carinaRoot ?? Directory.systemTemp.path;
+
+  /// A clean output directory, so a repeated run cannot leave stale frames.
+  Future<Directory> _freshCarinaDirectory(String path) async {
+    final directory = Directory(path);
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+    await directory.create(recursive: true);
+    return directory;
+  }
 
   static String handName(int hand) => hand == wmrHandLeft ? 'LEFT' : 'RIGHT';
 
@@ -670,6 +828,224 @@ class RealBenchSession implements BenchSession {
     );
   }
 
+  @override
+  Future<BenchStepOutcome> handTracking({
+    required bool gripping,
+    required Duration duration,
+  }) async {
+    final source = tracking;
+    final caps = source?.capabilities;
+    if (source == null || caps == null || !caps.hasHandTracking) {
+      return const BenchStepOutcome.failed(
+        'No hand-tracking source with hand joints is attached.',
+      );
+    }
+    var frames = 0;
+    var jointFrames = 0;
+    var headFrames = 0;
+    var maxJoints = 0;
+    var lastUs = 0;
+    var dropoutUs = 0;
+    var hadJoints = false;
+    final clock = Stopwatch()..start();
+    final sub = source.frames.listen((frame) {
+      final nowUs = clock.elapsedMicroseconds;
+      final deltaUs = nowUs - lastUs;
+      lastUs = nowUs;
+      if (!hadJoints) dropoutUs += deltaUs;
+      frames++;
+      final left = frame.leftHand?.joints.length ?? 0;
+      final right = frame.rightHand?.joints.length ?? 0;
+      final joints = left > right ? left : right;
+      if (joints > 0) {
+        jointFrames++;
+        hadJoints = true;
+        if (joints > maxJoints) maxJoints = joints;
+      } else {
+        hadJoints = false;
+      }
+      if (frame.head != null) headFrames++;
+    }, onError: (_) {});
+    try {
+      await Future<void>.delayed(duration);
+    } finally {
+      await sub.cancel();
+    }
+    final elapsedUs = clock.elapsedMicroseconds;
+    if (!hadJoints) dropoutUs += elapsedUs - lastUs;
+    if (frames == 0) {
+      return BenchStepOutcome.failed(
+        'No tracking frames arrived. Attach the ${source.vendor.name} source '
+        'and try again.',
+        data: {'mode': gripping ? 'gripping' : 'empty'},
+      );
+    }
+    final seconds = duration.inMicroseconds / Duration.microsecondsPerSecond;
+    final dropout = elapsedUs <= 0
+        ? 0.0
+        : (dropoutUs / elapsedUs * 100).clamp(0.0, 100.0);
+    final jointRate = jointFrames / seconds;
+    final headRate = headFrames / seconds;
+    final data = <String, Object?>{
+      'mode': gripping ? 'gripping' : 'empty',
+      'duration_seconds': seconds,
+      'frames': frames,
+      'frames_with_joints': jointFrames,
+      'joint_rate_hz': jointRate,
+      'head_rate_hz': headRate,
+      'joints_present': maxJoints,
+      'dropout_percent': dropout,
+      'hand_tracked': jointFrames > 0,
+    };
+    if (!gripping) {
+      return BenchStepOutcome.done(
+        'Empty-hand baseline: ${jointRate.toStringAsFixed(1)} Hz, '
+        '$maxJoints joints, ${dropout.toStringAsFixed(1)}% dropout',
+        data: data,
+      );
+    }
+    return BenchStepOutcome.done(
+      'Grip dropout ${dropout.toStringAsFixed(1)}% over '
+      '${seconds.toStringAsFixed(0)} s; ${jointRate.toStringAsFixed(1)} Hz, '
+      '$maxJoints joints',
+      data: data,
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> carinaLeds() async {
+    final runner = carinaCapture;
+    if (runner == null) {
+      return const BenchStepOutcome.failed(
+        'This build has no WMR_VITURE_CARINA_DIAG diagnostic.',
+      );
+    }
+    final captures = <Map<String, Object?>>[];
+    final directories = <String>[];
+    for (final distance in carinaLedDistancesM) {
+      final directory = await _freshCarinaDirectory(
+        '$_carinaRoot/carina-led-${_distanceTag(distance)}',
+      );
+      try {
+        final report = await runner.capture(
+          duration: durations.carinaFrame,
+          outputDirectory: directory.path,
+        );
+        directories.add(directory.path);
+        captures.add({
+          'distance_m': distance,
+          'directory': directory.path,
+          'report': report.raw,
+        });
+      } on CarinaDiagnosticException catch (error) {
+        return BenchStepOutcome.failed(
+          'Gate 1 capture failed at ${distance.toStringAsFixed(1)} m '
+          '(${error.code}): ${error.message}',
+          data: {'captures': captures, 'directories': directories},
+        );
+      } on Object catch (error) {
+        return BenchStepOutcome.failed(
+          'Gate 1 capture failed at ${distance.toStringAsFixed(1)} m: $error',
+          data: {'captures': captures, 'directories': directories},
+        );
+      }
+    }
+    return BenchStepOutcome.done(
+      '${captures.length} LED captures saved at '
+      '${carinaLedDistancesM.map((d) => '${d.toStringAsFixed(1)} m').join(', ')}',
+      data: {'captures': captures, 'directories': directories},
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> carinaCheckerboard() async {
+    final runner = carinaCapture;
+    if (runner == null) {
+      return const BenchStepOutcome.failed(
+        'This build has no WMR_VITURE_CARINA_DIAG diagnostic.',
+      );
+    }
+    final captures = <Map<String, Object?>>[];
+    final directories = <String>[];
+    for (final pose in carinaCheckerboardPoses) {
+      final directory = await _freshCarinaDirectory(
+        '$_carinaRoot/carina-checkerboard-${pose.id}',
+      );
+      try {
+        final report = await runner.capture(
+          duration: durations.carinaCheckerboardPose,
+          outputDirectory: directory.path,
+        );
+        directories.add(directory.path);
+        captures.add({
+          'distance_m': pose.distanceM,
+          'pose': pose.pose,
+          'directory': directory.path,
+          'report': report.raw,
+        });
+      } on CarinaDiagnosticException catch (error) {
+        return BenchStepOutcome.failed(
+          'Checkerboard capture failed at ${pose.label} '
+          '(${error.code}): ${error.message}',
+          data: {'captures': captures, 'directories': directories},
+        );
+      } on Object catch (error) {
+        return BenchStepOutcome.failed(
+          'Checkerboard capture failed at ${pose.label}: $error',
+          data: {'captures': captures, 'directories': directories},
+        );
+      }
+    }
+    return BenchStepOutcome.done(
+      '${captures.length} checkerboard stereo captures saved',
+      data: {'captures': captures, 'directories': directories},
+    );
+  }
+
+  @override
+  Future<BenchStepOutcome> carinaPose() async {
+    final runner = carinaCapture;
+    if (runner == null) {
+      return const BenchStepOutcome.failed(
+        'This build has no WMR_VITURE_CARINA_DIAG diagnostic.',
+      );
+    }
+    final directory = await _freshCarinaDirectory('$_carinaRoot/carina-pose');
+    try {
+      final report = await runner.capture(
+        duration: durations.carinaPoseRun,
+        outputDirectory: directory.path,
+      );
+      return BenchStepOutcome.done(
+        'Pose ${report.poseRateHz.toStringAsFixed(1)} Hz; '
+        '${report.poseSuccesses}/${report.posePolls} polls valid',
+        data: {
+          'directories': [directory.path],
+          'report': report.raw,
+          'pose_rate_hz': report.poseRateHz,
+          'pose_successes': report.poseSuccesses,
+          'pose_polls': report.posePolls,
+          'pose_status': report.poseStatus,
+          'pose_valid': report.poseValid,
+        },
+      );
+    } on CarinaDiagnosticException catch (error) {
+      return BenchStepOutcome.failed(
+        'Gate 9 capture failed (${error.code}): ${error.message}',
+        data: {
+          'directories': [directory.path],
+        },
+      );
+    } on Object catch (error) {
+      return BenchStepOutcome.failed(
+        'Gate 9 capture failed: $error',
+        data: {
+          'directories': [directory.path],
+        },
+      );
+    }
+  }
+
   Future<void> _ensureMode(StreamMode mode) async {
     final apply = applyMode;
     if (apply != null) {
@@ -764,6 +1140,7 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
       appCommit: appCommit,
       firmwareSha: firmwareSha,
       applyMode: notifier.setStreamMode,
+      carinaCapture: ref.read(carinaCaptureProvider),
     );
   };
 });

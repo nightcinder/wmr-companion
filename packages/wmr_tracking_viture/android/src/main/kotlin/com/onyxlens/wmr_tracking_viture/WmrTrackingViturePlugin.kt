@@ -2,7 +2,6 @@ package com.onyxlens.wmr_tracking_viture
 
 import android.app.Activity
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
@@ -199,14 +198,6 @@ class WmrTrackingViturePlugin internal constructor(
                 result.success(null)
             }
             "carinaDiagnosticUsb" -> {
-                if (!isDebuggable()) {
-                    result.error(
-                        ERROR_UNSUPPORTED,
-                        "Carina diagnostics require a debuggable build",
-                        null,
-                    )
-                    return
-                }
                 val diagnostics = carinaDiagnostics
                 if (diagnostics == null) {
                     result.error(ERROR_UNAVAILABLE, "VITURE plugin is detached", null)
@@ -230,11 +221,6 @@ class WmrTrackingViturePlugin internal constructor(
             }
             else -> result.notImplemented()
         }
-    }
-
-    private fun isDebuggable(): Boolean {
-        val flags = (activity ?: appContext)?.applicationInfo?.flags ?: 0
-        return flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     }
 
     internal fun capabilities(): Map<String, Any?> {

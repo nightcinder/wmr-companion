@@ -79,7 +79,7 @@ void main() {
     expect(library, 'lib$target.so');
   });
 
-  test('capture stays off unless the debug dart-define is set', () async {
+  test('capture stays off unless the dart-define is set', () async {
     expect(VitureCarinaDiagnostics.enabled, isFalse);
     await expectLater(VitureCarinaDiagnostics.capture(), throwsStateError);
   });

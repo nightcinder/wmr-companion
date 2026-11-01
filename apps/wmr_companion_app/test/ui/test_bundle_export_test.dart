@@ -322,4 +322,47 @@ void main() {
     await tester.pump();
     container.dispose();
   });
+
+  test(
+    'Carina PGM and telemetry directories are added to the bundle',
+    () async {
+      final carina = Directory('${dir.path}/carina-led-0p8m')
+        ..createSync(recursive: true);
+      File('${carina.path}/carina-diagnostics.json')
+          .writeAsStringSync('{"schema":"wmr.carina.diagnostics.v1"}');
+      File('${carina.path}/carina-rung0-left0-0.1ms.pgm')
+          .writeAsStringSync('P5');
+      final bundle = await writeTestBundle(
+        TestBundleInput(
+          now: DateTime(2026, 11, 1, 12),
+          appVersion: '0.3.8+13',
+          phone: 'test',
+          androidVersion: 'Android 14',
+          streamMode: 'raw',
+          benchRun: BenchBundleRun([
+            BenchBundleStep(
+              id: 'carina_leds',
+              status: 'done',
+              data: {
+                'directories': [carina.path],
+              },
+            ),
+          ]),
+        ),
+        Directory('${dir.path}/out'),
+      );
+      expect(bundle.present.join('\n'), contains('Carina captures'));
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final names = [for (final file in archive.files) file.name];
+      expect(
+        names,
+        containsAll([
+          'carina/carina-led-0p8m/carina-diagnostics.json',
+          'carina/carina-led-0p8m/carina-rung0-left0-0.1ms.pgm',
+        ]),
+      );
+    },
+  );
 }
