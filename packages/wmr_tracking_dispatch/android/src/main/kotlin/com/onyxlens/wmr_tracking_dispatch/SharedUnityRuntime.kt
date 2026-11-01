@@ -75,6 +75,7 @@ class SharedUnityRuntime(
 
     private var created = false
     private var owner: GlassesVendor? = null
+    private var hosted = false
     private val handlers = LinkedHashMap<GlassesVendor, Handler>()
     private val glassesModels = mutableMapOf<GlassesVendor, String?>()
     private val stages = mutableMapOf<GlassesVendor, UnityStageReport>()
@@ -154,12 +155,36 @@ class SharedUnityRuntime(
      */
     fun dispatchStage(vendor: GlassesVendor, stage: String, stereoMode: String?) {
         if (vendor == GlassesVendor.NONE || stage.isBlank()) return
-        synchronized(this) { stages[vendor] = UnityStageReport(stage, stereoMode) }
+        synchronized(this) {
+            stages[vendor] = UnityStageReport(stage, stereoMode)
+            if (stage == UnityPlayerHost.STAGE_PLAYER_HOSTED) hosted = true
+        }
         handlerFor(vendor)?.onStage(stage, stereoMode)
     }
 
     @Synchronized
     fun stage(vendor: GlassesVendor): UnityStageReport? = stages[vendor]
+
+    /**
+     * Whether the shared scene has ever reported [UnityPlayerHost.STAGE_PLAYER_HOSTED].
+     *
+     * Unlike [stage] this survives [clearStage]: the player is constructed once
+     * per process, so a later start only re-attaches and resumes an already
+     * initialised scene. Vendor plugins use it to tell a cold start, where
+     * `UnitySendMessage` must wait, from a warm one, where it is safe (ONY-776).
+     */
+    @Synchronized
+    fun hasHostedScene(): Boolean = hosted
+
+    /**
+     * Forgets that the scene was hosted after its player is destroyed. The
+     * next start may construct a new player, so it must wait for `playerHosted`
+     * again instead of sending `UnitySendMessage` during init (ONY-776).
+     */
+    @Synchronized
+    fun clearHostedScene() {
+        hosted = false
+    }
 
     /**
      * Routes a stage report that came from the one shared stereo scene to the

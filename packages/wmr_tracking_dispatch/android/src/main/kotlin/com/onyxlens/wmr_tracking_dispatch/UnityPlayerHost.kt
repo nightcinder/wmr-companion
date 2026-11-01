@@ -190,6 +190,9 @@ class UnityPlayerHost internal constructor(
         synchronized(this) {
             if (hosted) releaseLocked()
             runCatching { viewHost.destroy() }
+            // The scene died with the player, so the next start must not treat
+            // the process as warm (ONY-776).
+            SharedUnityRuntime.shared.clearHostedScene()
         }
     }
 
@@ -217,6 +220,7 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
     private var linkChecked = false
     private var player: Any? = null
     private var playerView: View? = null
+    private var activityFieldOwner: Class<*>? = null
 
     override val isLinked: Boolean
         get() {
@@ -239,11 +243,15 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
         // detaches the view and a later start re-attaches the same one.
         val existing = playerView
         if (existing != null) {
+            setCurrentActivity(activity)
             (existing.parent as? ViewGroup)?.removeView(existing)
             attach(activity, existing, placement)
             return true
         }
         val clazz = playerClass ?: return false
+        // Set it before construction: the XR loader reads currentActivity while
+        // the player initialises, not only after the view is attached.
+        setCurrentActivity(activity)
         val instance = instantiate(clazz, activity) ?: return false
         val root = viewOf(instance) ?: return false
         attach(activity, root, placement)
@@ -265,6 +273,7 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
     override fun destroy() {
         (playerView?.parent as? ViewGroup)?.removeView(playerView)
         call("destroy")
+        clearCurrentActivity()
         player = null
         playerView = null
     }
@@ -343,6 +352,45 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
             }
         }
         return null
+    }
+
+    /**
+     * Unity keeps the hosting activity in the static `UnityPlayer.currentActivity`
+     * field. Unity 6 moved the player to `UnityPlayerForActivityOrService` and
+     * no longer sets the field for a manually constructed player, so plugins
+     * that read it (the XREAL SDK among them) see null and crash (ONY-776).
+     * Walk the hierarchy because the field's declaring class moved between
+     * Unity versions, and stay best-effort: a missing field must not stop the
+     * player from hosting.
+     */
+    private fun setCurrentActivity(activity: Activity) {
+        var type: Class<*>? = playerClass
+        while (type != null) {
+            try {
+                val field = type.getDeclaredField("currentActivity")
+                field.isAccessible = true
+                field.set(null, activity)
+                activityFieldOwner = type
+                return
+            } catch (_: NoSuchFieldException) {
+                type = type.superclass
+            } catch (_: Throwable) {
+                return
+            }
+        }
+    }
+
+    private fun clearCurrentActivity() {
+        val owner = activityFieldOwner ?: return
+        activityFieldOwner = null
+        try {
+            val field = owner.getDeclaredField("currentActivity")
+            field.isAccessible = true
+            field.set(null, null)
+        } catch (_: Throwable) {
+            // The player is going away; a stale activity reference only
+            // matters to a later player in the same process.
+        }
     }
 
     private fun call(name: String, vararg args: Any?) {

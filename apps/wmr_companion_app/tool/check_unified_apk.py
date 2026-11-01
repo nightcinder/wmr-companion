@@ -105,6 +105,30 @@ XR_CALLBACKS = {
 # Consumer is the callback the Android XR session registers, so at least one
 # implementation must survive every release build.
 XR_REQUIRED_CALLBACK = "Lcom/android/extensions/xr/function/Consumer;"
+# The Unity C# bridges reach these Kotlin objects by hard-coded class and method
+# name through AndroidJavaClass.CallStatic. R8 renamed both in 0.3.10, so frames
+# and stage reports silently stopped reaching Dart. Keep the names (ONY-776).
+R8_JNI_CALLBACKS = {
+    "Lcom/onyxlens/wmr_tracking_xreal/WmrTrackingXrealPlugin;": (
+        ("onUnityFrame", ("Ljava/lang/String;",), "V"),
+        ("onUnityError", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+        ("onUnityGlassesModel", ("Ljava/lang/String;",), "V"),
+        ("onUnityStage", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+    ),
+    "Lcom/onyxlens/wmr_tracking_viture/WmrTrackingViturePlugin;": (
+        ("onUnityFrame", ("Ljava/lang/String;",), "V"),
+        ("onUnityError", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+        ("onUnityGlassesModel", ("Ljava/lang/String;",), "V"),
+        ("onUnityStage", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+    ),
+}
+# Vendor SDK and Unity player classes are called from native/JNI code, so R8
+# cannot see their callers and shrinks them unless the release keeps them.
+R8_REQUIRED_CLASSES = {
+    "Lcom/unity3d/player/UnityPlayer;": "Unity player",
+    "Lai/nreal/activitylife/NRXRActivity;": "XREAL NREAL activity",
+    "Lcom/xreal/glassesdisplayplugevent/provider/GlassesInitProvider;": "XREAL display provider",
+}
 
 
 class Dex:
@@ -240,6 +264,43 @@ def xr_callback_failures(dex_files: list[bytes]) -> list[str]:
         )
     return failures
 
+
+
+def r8_keep_failures(dex_files: list[bytes]) -> list[str]:
+    """Reject an APK where R8 renamed a class or method that is called by name.
+
+    The Unity side resolves plugin callbacks with AndroidJavaClass.CallStatic
+    and the vendor SDKs are entered from native code, so neither shows up as a
+    Java reference R8 can follow. Only the -keep rules in proguard-rules.pro
+    protect them (ONY-776).
+    """
+    classes: dict[str, set[tuple[str, str]]] = {}
+    for data in dex_files:
+        for name, _, methods in Dex(data).classes():
+            classes.setdefault(name, set()).update(methods)
+    failures = []
+    for name, label in R8_REQUIRED_CLASSES.items():
+        if name not in classes:
+            failures.append(
+                f"{label} class {name} was renamed or removed by R8; "
+                "add a -keep rule (ONY-776)"
+            )
+    for name, callbacks in R8_JNI_CALLBACKS.items():
+        methods = classes.get(name)
+        if methods is None:
+            failures.append(
+                f"{name} was renamed or removed by R8; "
+                "the Unity JNI callbacks cannot reach it (ONY-776)"
+            )
+            continue
+        for method, params, returns in callbacks:
+            proto = f"({''.join(params)}){returns}"
+            if (method, proto) not in methods:
+                failures.append(
+                    f"{name} lost {method}{proto}; "
+                    "the Unity JNI callback cannot reach it (ONY-776)"
+                )
+    return failures
 
 
 class Axml:
@@ -497,6 +558,14 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             print("PASS dex: Android XR callbacks keep their methods")
+
+        keep_failures = r8_keep_failures(dex_files)
+        if keep_failures:
+            for message in keep_failures:
+                fail(message)
+            failures += 1
+        else:
+            print("PASS dex: vendor/Unity classes and plugin JNI callbacks kept")
 
         # XREAL's glasses AAR bundles android.hardware.display.DisplayManager
         # as a stub. R8 must keep it: when it is shrunk, R8 rewrites the SDK's

@@ -488,7 +488,15 @@ class WmrTrackingViturePlugin internal constructor(
             filterMode = pendingFilterMode,
             aimSensitivity = pendingAimSensitivity,
         )
-        if (!bridge.sendCommand(commandJson)) {
+        started = true
+        // A player created by this start is still inside
+        // UnityPlayerForActivityOrService init, where UnitySendMessage
+        // SIGSEGVs the process (ONY-776). Queue the start until the scene
+        // reports `playerHosted`; a warm scene already reported it, so it can
+        // take the command immediately and a duplicate start stays idempotent.
+        pendingStartCommand = commandJson
+        if (runtime.hasHostedScene() && !flushPendingStart()) {
+            started = false
             runtime.release(GlassesVendor.VITURE)
             playerHost.release()
             reply.error(
@@ -498,24 +506,21 @@ class WmrTrackingViturePlugin internal constructor(
             )
             return
         }
-        // A player created for this start reaches `Awake` after the constructor
-        // returns, so the first `UnitySendMessage` may land before the scene
-        // exists. Keep the command and replay it when the scene reports
-        // `playerHosted`; a duplicate start is idempotent in the bridge.
-        pendingStartCommand = commandJson
-        started = true
         reply.success(stageFields())
     }
 
     /**
      * Replays the start command once the hosted scene is alive. No-op when the
      * command was consumed, the source stopped, or the scene reported late.
+     *
+     * @return true when a command was sent successfully; false when nothing was
+     *   pending or the bridge refused it.
      */
-    internal fun flushPendingStart() {
-        val command = pendingStartCommand ?: return
+    internal fun flushPendingStart(): Boolean {
+        val command = pendingStartCommand ?: return false
         pendingStartCommand = null
-        if (!started) return
-        bridge.sendCommand(command)
+        if (!started) return false
+        return bridge.sendCommand(command)
     }
 
     private fun stopTracking(reportError: Boolean) {

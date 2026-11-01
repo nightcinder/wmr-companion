@@ -215,6 +215,8 @@ class WmrTrackingViturePluginTest {
 
         assertTrue(reply.errors.isEmpty())
         assertEquals(1, reply.reports.size)
+        assertEquals(0, bridge.sentCommands.size)
+        assertTrue(plugin.flushPendingStart())
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
@@ -263,6 +265,11 @@ class WmrTrackingViturePluginTest {
 
         assertTrue(reply.errors.isEmpty())
         assertEquals(1, reply.reports.size)
+        // A cold player is still initialising: no UnitySendMessage yet.
+        assertTrue(bridge.sentCommands.isEmpty())
+
+        assertTrue(plugin.flushPendingStart())
+
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
@@ -320,6 +327,7 @@ class WmrTrackingViturePluginTest {
     @Test
     fun failedStartCommandReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
+        runtime.dispatchStage(GlassesVendor.VITURE, UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
         val plugin = trackedPlugin(
             FakeBridge(model = "LumaUltra", sendSucceeds = false),
             runtime,
@@ -466,16 +474,15 @@ class WmrTrackingViturePluginTest {
         val bridge = FakeBridge(model = "LumaUltra")
         val plugin = trackedPlugin(bridge)
         plugin.startUnityRelay(RecordingReply())
+        assertEquals(0, bridge.sentCommands.size)
+
+        assertTrue(plugin.flushPendingStart())
+
         assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
 
         plugin.flushPendingStart()
-
-        assertEquals(2, bridge.sentCommands.size)
-        assertEquals(bridge.sentCommands[0], bridge.sentCommands[1])
-        assertTrue(bridge.sentCommands[1].contains("\"cmd\":\"start\""))
-
-        plugin.flushPendingStart()
-        assertEquals(2, bridge.sentCommands.size)
+        assertEquals(1, bridge.sentCommands.size)
     }
 
     @Test
@@ -536,6 +543,7 @@ class WmrTrackingViturePluginTest {
     @Test
     fun aThrowingStartCommandFailsTheStartAndReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
+        runtime.dispatchStage(GlassesVendor.VITURE, UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
         val host = FakePlayerHost()
         val plugin = trackedPlugin(
             ThrowingBridge(throwOnModel = false, throwOnSend = true),

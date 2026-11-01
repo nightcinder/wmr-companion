@@ -107,6 +107,23 @@ class SharedUnityRuntimeTest {
     }
 
     @Test
+    fun aHostedSceneStaysHostedAfterTheStageIsClearedForANewSession() {
+        val runtime = SharedUnityRuntime { true }
+        runtime.claim(GlassesVendor.VITURE)
+
+        assertEquals(false, runtime.hasHostedScene())
+        runtime.dispatchStage(GlassesVendor.VITURE, "playerHosted", null)
+        runtime.clearStage(GlassesVendor.VITURE)
+
+        assertEquals(true, runtime.hasHostedScene())
+        assertNull(runtime.stage(GlassesVendor.VITURE))
+
+        runtime.clearHostedScene()
+
+        assertEquals(false, runtime.hasHostedScene())
+    }
+
+    @Test
     fun untaggedCallbacksFallBackToTheOwner() {
         val runtime = SharedUnityRuntime { true }
         val owner = Recorder()

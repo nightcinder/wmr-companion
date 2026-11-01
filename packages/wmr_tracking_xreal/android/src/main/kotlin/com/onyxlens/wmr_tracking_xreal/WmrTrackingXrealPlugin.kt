@@ -422,7 +422,15 @@ class WmrTrackingXrealPlugin internal constructor(
             return
         }
         val commandJson = XrealRelayCommandBuilder.start()
-        if (!bridge.sendCommand(commandJson)) {
+        started = true
+        // A player created by this start is still inside
+        // UnityPlayerForActivityOrService init, where UnitySendMessage
+        // SIGSEGVs the process (ONY-776). Queue the start until the scene
+        // reports `playerHosted`; a warm scene already reported it, so it can
+        // take the command immediately.
+        pendingStartCommand = commandJson
+        if (runtime.hasHostedScene() && !flushPendingStart()) {
+            started = false
             runtime.release(GlassesVendor.XREAL)
             playerHost.release()
             reply.error(
@@ -432,22 +440,21 @@ class WmrTrackingXrealPlugin internal constructor(
             )
             return
         }
-        // A freshly created player reaches `Awake` after the constructor
-        // returns, so replay the start once the scene reports `playerHosted`.
-        pendingStartCommand = commandJson
-        started = true
         reply.success(stageFields())
     }
 
     /**
      * Replays the start command once the hosted scene is alive. No-op when the
      * command was consumed, the source stopped, or the scene reported late.
+     *
+     * @return true when a command was sent successfully; false when nothing was
+     *   pending or the bridge refused it.
      */
-    internal fun flushPendingStart() {
-        val command = pendingStartCommand ?: return
+    internal fun flushPendingStart(): Boolean {
+        val command = pendingStartCommand ?: return false
         pendingStartCommand = null
-        if (!started) return
-        bridge.sendCommand(command)
+        if (!started) return false
+        return bridge.sendCommand(command)
     }
 
     /** Test seam for the static `onUnityStage` entry point the C# rig calls. */

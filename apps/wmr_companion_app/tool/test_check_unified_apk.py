@@ -312,11 +312,20 @@ def build_apk(
     unified_dispatch: bool = True,
     consumer_accept: bool = True,
     consumer_classes: int = 1,
+    r8_keep: bool = True,
 ) -> Path:
     path = directory / "unified.apk"
     dex = DexBuilder()
     for name in checker.REQUIRED_DEX_CLASSES:
         dex.add_class(f"Lcom/onyxlens/wmr_tracking/{name};")
+    if r8_keep:
+        for name in checker.R8_REQUIRED_CLASSES:
+            dex.add_class(name)
+        for name, callbacks in checker.R8_JNI_CALLBACKS.items():
+            dex.add_class(
+                name,
+                methods=[(method, list(params), returns) for method, params, returns in callbacks],
+            )
     if display_stub:
         # XREAL's GlassesDisplayPlugEvent AAR ships this as a program class;
         # the release build must keep it (ONY-557).
@@ -481,6 +490,18 @@ class MainTest(unittest.TestCase):
         self.assertIn("android.permission.HAND_TRACKING", output)
         self.assertIn("android.permission.HEAD_TRACKING", output)
         self.assertIn("PASS dex: Android XR callbacks keep their methods", output)
+        self.assertIn(
+            "PASS dex: vendor/Unity classes and plugin JNI callbacks kept",
+            output,
+        )
+
+    def test_missing_r8_kept_plugin_class_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", r8_keep=False))
+        self.assertEqual(code, 1, output)
+        self.assertIn("WmrTrackingXrealPlugin", output)
+        self.assertIn("renamed or removed by R8", output)
+        self.assertIn("RESULT: FAIL", output)
 
     def test_consumer_without_accept_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -246,6 +246,8 @@ class WmrTrackingXrealPluginTest {
 
         assertTrue(reply.errors.isEmpty())
         assertEquals(1, reply.reports.size)
+        assertEquals(0, bridge.sentCommands.size)
+        assertTrue(plugin.flushPendingStart())
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
@@ -313,6 +315,11 @@ class WmrTrackingXrealPluginTest {
 
         assertTrue(reply.errors.isEmpty())
         assertEquals(1, reply.reports.size)
+        // A cold player is still initialising: no UnitySendMessage yet.
+        assertTrue(bridge.sentCommands.isEmpty())
+
+        plugin.deliverUnityStage(UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
+
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
@@ -409,6 +416,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun aThrowingStartCommandFailsTheStartAndReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
+        runtime.dispatchStage(GlassesVendor.XREAL, UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
         val host = FakePlayerHost()
         val plugin = xrealPlugin(
             ThrowingBridge(throwOnModel = false, throwOnSend = true),
@@ -440,6 +448,7 @@ class WmrTrackingXrealPluginTest {
     @Test
     fun failedStartCommandReleasesTheClaim() {
         val runtime = SharedUnityRuntime { true }
+        runtime.dispatchStage(GlassesVendor.XREAL, UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
         val plugin = xrealPlugin(
             FakeBridge(model = "Air2Ultra", sendSucceeds = false),
             runtime,
@@ -506,16 +515,15 @@ class WmrTrackingXrealPluginTest {
         val bridge = FakeBridge(model = "Air2Ultra")
         val plugin = xrealPlugin(bridge)
         plugin.startUnityRelay(RecordingReply())
+        assertEquals(0, bridge.sentCommands.size)
+
+        assertTrue(plugin.flushPendingStart())
+
         assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
 
         plugin.flushPendingStart()
-
-        assertEquals(2, bridge.sentCommands.size)
-        assertEquals(bridge.sentCommands[0], bridge.sentCommands[1])
-        assertTrue(bridge.sentCommands[1].contains("\"cmd\":\"start\""))
-
-        plugin.flushPendingStart()
-        assertEquals(2, bridge.sentCommands.size)
+        assertEquals(1, bridge.sentCommands.size)
     }
 
     @Test
@@ -523,12 +531,12 @@ class WmrTrackingXrealPluginTest {
         val bridge = FakeBridge(model = "Air2Ultra")
         val plugin = xrealPlugin(bridge)
         plugin.startUnityRelay(RecordingReply())
-        assertEquals(1, bridge.sentCommands.size)
+        assertEquals(0, bridge.sentCommands.size)
 
         plugin.deliverUnityStage(UnityPlayerHost.STAGE_PLAYER_HOSTED, "singlePassInstanced")
 
-        assertEquals(2, bridge.sentCommands.size)
-        assertTrue(bridge.sentCommands[1].contains("\"cmd\":\"start\""))
+        assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
 
     @Test
