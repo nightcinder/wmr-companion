@@ -18,12 +18,14 @@ class WmrTrackingViturePluginTest {
     private class FakePlayerHost(
         override val isHosted: Boolean = true,
         private val detail: String? = null,
+        private val throwOnHost: Boolean = false,
     ) : PlayerHost {
         var hostCalls = 0
         var releases = 0
 
         override fun host(activity: android.app.Activity?): PlayerHostResult {
             hostCalls += 1
+            if (throwOnHost) throw IllegalStateException("host exploded")
             return if (isHosted) {
                 PlayerHostResult(true, UnityPlayerHost.STAGE_PLAYER_HOSTED)
             } else {
@@ -60,27 +62,64 @@ class WmrTrackingViturePluginTest {
 
     private class RecordingResult : MethodChannel.Result {
         var completed = false
+        var errorCode: String? = null
+        var errorDetails: Any? = null
 
         override fun success(result: Any?) {
             completed = true
         }
 
-        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) = Unit
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            this.errorCode = errorCode
+            this.errorDetails = errorDetails
+        }
 
         override fun notImplemented() = Unit
     }
 
     private class RecordingReply : StartReply {
         val reports = mutableListOf<Map<String, Any?>>()
-        val errors = mutableListOf<Pair<String, String>>()
+        val errors = mutableListOf<Triple<String, String, String?>>()
 
         override fun success(report: Map<String, Any?>) {
             reports += report
         }
 
-        override fun error(code: String, message: String) {
-            errors += code to message
+        override fun error(code: String, message: String, stage: String?) {
+            errors += Triple(code, message, stage)
         }
+    }
+
+    private class ThrowingBridge(
+        private val throwOnModel: Boolean = true,
+        private val throwOnSend: Boolean = false,
+    ) : VitureUnityBridge {
+        override val isUnityAvailable: Boolean = true
+
+        override fun queryGlassesModel(): String? {
+            if (throwOnModel) throw IllegalStateException("model query failed")
+            return "LumaUltra"
+        }
+
+        override fun sendCommand(payloadJson: String, gameObject: String, method: String): Boolean {
+            if (throwOnSend) throw IllegalStateException("host command failed")
+            return true
+        }
+    }
+
+    private class RecordingSink : io.flutter.plugin.common.EventChannel.EventSink {
+        val events = mutableListOf<Any?>()
+        val errors = mutableListOf<Triple<String, String?, Any?>>()
+
+        override fun success(event: Any?) {
+            events += event
+        }
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            errors += Triple(errorCode, errorMessage, errorDetails)
+        }
+
+        override fun endOfStream() = Unit
     }
 
     @Test
@@ -450,5 +489,177 @@ class WmrTrackingViturePluginTest {
         plugin.flushPendingStart()
 
         assertEquals(sentAfterStop, bridge.sentCommands.size)
+    }
+
+    @Test
+    fun startErrorsCarryTheFailingStage() {
+        val host = FakePlayerHost(isHosted = false, detail = "player failed")
+        val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"), host = host)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals("unavailable", reply.errors.single().first)
+        assertEquals(UnityPlayerHost.STAGE_UNAVAILABLE, reply.errors.single().third)
+    }
+
+    @Test
+    fun modelRejectionReportsTheModelStage() {
+        val plugin = trackedPlugin(FakeBridge(model = "Luma"))
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals("unsupported", reply.errors.single().first)
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.MODEL,
+            reply.errors.single().third,
+        )
+    }
+
+    @Test
+    fun aThrowingBridgeFailsTheStartExactlyOnceAndReleasesThePlayer() {
+        val host = FakePlayerHost()
+        val plugin = trackedPlugin(ThrowingBridge(), host = host)
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.START_FAILED,
+            reply.errors.single().third,
+        )
+        assertEquals(1, host.releases)
+    }
+
+    @Test
+    fun aThrowingStartCommandFailsTheStartAndReleasesTheClaim() {
+        val runtime = SharedUnityRuntime { true }
+        val host = FakePlayerHost()
+        val plugin = trackedPlugin(
+            ThrowingBridge(throwOnModel = false, throwOnSend = true),
+            runtime,
+            host,
+        )
+        val reply = RecordingReply()
+
+        plugin.startUnityRelay(reply)
+
+        assertEquals(1, reply.errors.size)
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.START_FAILED,
+            reply.errors.single().third,
+        )
+        assertNull(runtime.ownerVendor)
+        assertEquals(1, host.releases)
+    }
+
+    @Test
+    fun aUnityErrorStopsTheRelayBeforeDetaching() {
+        val bridge = FakeBridge(model = "LumaUltra")
+        val plugin = trackedPlugin(bridge)
+        val sink = RecordingSink()
+        plugin.onListen(null, sink)
+        plugin.startUnityRelay(RecordingReply())
+        bridge.sentCommands.clear()
+
+        plugin.deliverUnityError("unavailable", "loader did not start")
+
+        assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands.single().contains("\"cmd\":\"stop\""))
+        val details = sink.errors.single().third as Map<*, *>
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.RUNTIME,
+            details["stage"],
+        )
+    }
+
+    @Test
+    fun aDeniedPermissionFailsTheHeldStartWithThePermissionStage() {
+        val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"))
+        val reply = RecordingReply()
+        assertTrue(plugin.pendingStart.hold(reply))
+
+        val handled = plugin.onRequestPermissionsResult(
+            WmrTrackingViturePlugin.PERMISSION_REQUEST_CODE,
+            arrayOf(WmrTrackingViturePlugin.PERMISSION_CAMERA),
+            intArrayOf(android.content.pm.PackageManager.PERMISSION_DENIED),
+        )
+
+        assertTrue(handled)
+        assertEquals("permissionDenied", reply.errors.single().first)
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.PERMISSION,
+            reply.errors.single().third,
+        )
+    }
+
+    @Test
+    fun stopWhilePermissionIsPendingFailsTheHeldStartWithThePendingStage() {
+        val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"))
+        val reply = RecordingReply()
+        assertTrue(plugin.pendingStart.hold(reply))
+
+        plugin.onMethodCall(MethodCall("stop", null), RecordingResult())
+
+        assertEquals("unavailable", reply.errors.single().first)
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.PENDING,
+            reply.errors.single().third,
+        )
+    }
+
+    @Test
+    fun theRigsStageReportReachesTheVendorThatOwnsTheRuntime() {
+        val runtime = SharedUnityRuntime.shared
+        val recorder = RecordingHandler()
+        runtime.register(GlassesVendor.XREAL, recorder)
+        try {
+            runtime.claim(GlassesVendor.XREAL) { true }
+
+            WmrTrackingViturePlugin.onUnityStage("playerHosted", "singlePassInstanced")
+
+            assertEquals(
+                listOf<Pair<String, String?>>("playerHosted" to "singlePassInstanced"),
+                recorder.stages,
+            )
+            assertEquals("playerHosted", runtime.stage(GlassesVendor.XREAL)?.stage)
+            assertNull(runtime.stage(GlassesVendor.VITURE))
+        } finally {
+            runtime.unregister(GlassesVendor.XREAL, recorder)
+            runtime.release(GlassesVendor.XREAL)
+            runtime.clearStage(GlassesVendor.XREAL)
+            runtime.clearStage(GlassesVendor.VITURE)
+        }
+    }
+
+    private class RecordingHandler : SharedUnityRuntime.Handler {
+        val stages = mutableListOf<Pair<String, String?>>()
+
+        override fun onFrame(frameJson: String) = Unit
+
+        override fun onError(code: String, message: String) = Unit
+
+        override fun onGlassesModel(modelName: String?) = Unit
+
+        override fun onStage(stage: String, stereoMode: String?) {
+            stages += stage to stereoMode
+        }
+    }
+
+    @Test
+    fun aStartWithoutAnActivityCarriesTheActivityStageInTheDetailMap() {
+        val plugin = trackedPlugin(FakeBridge(model = "LumaUltra"))
+        val result = RecordingResult()
+
+        plugin.onMethodCall(MethodCall("start", null), result)
+
+        assertEquals("unavailable", result.errorCode)
+        val details = result.errorDetails as Map<*, *>
+        assertEquals(
+            com.onyxlens.wmr_tracking_dispatch.TrackingStartStage.ACTIVITY,
+            details["stage"],
+        )
     }
 }

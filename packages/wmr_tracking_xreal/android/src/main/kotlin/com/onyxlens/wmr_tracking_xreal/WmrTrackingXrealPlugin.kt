@@ -8,7 +8,10 @@ import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
+import com.onyxlens.wmr_tracking_dispatch.PlayerHost
 import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+import com.onyxlens.wmr_tracking_dispatch.TrackingStartStage
+import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -34,6 +37,7 @@ import io.flutter.plugin.common.PluginRegistry
 class WmrTrackingXrealPlugin internal constructor(
     private val bridge: XrealUnityBridge,
     private val runtime: SharedUnityRuntime = SharedUnityRuntime.shared,
+    private val playerHost: PlayerHost = UnityPlayerHost.shared,
 ) :
     FlutterPlugin,
     MethodChannel.MethodCallHandler,
@@ -50,7 +54,7 @@ class WmrTrackingXrealPlugin internal constructor(
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var eventSink: EventChannel.EventSink? = null
-    private val pendingStart = PendingStartGate()
+    internal val pendingStart = PendingStartGate()
 
     /** Routes the shared UnityPlayer callbacks for this vendor onto Flutter. */
     private val unityCallbacks = object : SharedUnityRuntime.Handler {
@@ -71,10 +75,20 @@ class WmrTrackingXrealPlugin internal constructor(
         }
 
         override fun onGlassesModel(modelName: String?) = Unit
+
+        override fun onStage(stage: String, stereoMode: String?) {
+            if (stage != UnityPlayerHost.STAGE_PLAYER_HOSTED) return
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                flushPendingStart()
+            } else {
+                mainHandler.post { flushPendingStart() }
+            }
+        }
     }
 
     private var started = false
     private var disposed = false
+    private var pendingStartCommand: String? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
@@ -129,12 +143,18 @@ class WmrTrackingXrealPlugin internal constructor(
             "capabilities" -> result.success(capabilities())
             "start" -> start(MethodChannelStartReply(result))
             "stop" -> {
-                failPendingStart("XREAL tracking stopped before the start completed")
+                failPendingStart(
+                    "XREAL tracking stopped before the start completed",
+                    TrackingStartStage.PENDING,
+                )
                 stopTracking(reportError = false)
                 result.success(null)
             }
             "dispose" -> {
-                failPendingStart("XREAL tracking source was disposed before the start completed")
+                failPendingStart(
+                    "XREAL tracking source was disposed before the start completed",
+                    TrackingStartStage.PENDING,
+                )
                 stopTracking(reportError = false)
                 bridge.sendCommand(XrealRelayCommandBuilder.dispose())
                 disposed = true
@@ -152,6 +172,7 @@ class WmrTrackingXrealPlugin internal constructor(
         } else {
             emptyMap()
         }
+        val stageFields = stageFields()
         if (!bridge.isUnityAvailable) {
             return mapOf(
                 "unityAvailable" to false,
@@ -162,7 +183,7 @@ class WmrTrackingXrealPlugin internal constructor(
                 "glassesModel" to XrealGlassesModelSpec.UNKNOWN.sdkName,
                 "reason" to "XREAL Unity UaaL runtime (com.unity3d.player.UnityPlayer) is not linked",
                 "permissions" to permissions,
-            )
+            ) + stageFields
         }
         val reportedModel = bridge.queryGlassesModel()
         val modelSpec = XrealGlassesModelSpec.fromSdkName(reportedModel)
@@ -184,7 +205,7 @@ class WmrTrackingXrealPlugin internal constructor(
                 "glassesModel" to modelSpec.sdkName,
                 "reason" to null,
                 "permissions" to permissions,
-            )
+            ) + stageFields
         }
         val supported = modelSpec.head6Dof && modelSpec.handTracking
         val modelName = if (modelSpec == XrealGlassesModelSpec.UNKNOWN) {
@@ -208,6 +229,25 @@ class WmrTrackingXrealPlugin internal constructor(
                 "XREAL hand tracking requires Air 2 Ultra (found $modelName)"
             },
             "permissions" to permissions,
+        ) + stageFields
+    }
+
+    /**
+     * The hosting/display report the tester reads: whether this process put a
+     * player on screen, the stereo mode the scene last reported, and the last
+     * startup stage it reached.
+     */
+    internal fun stageFields(): Map<String, Any?> {
+        val stage = runtime.stage(GlassesVendor.XREAL)
+        return mapOf(
+            "playerHosted" to playerHost.isHosted,
+            "stereoMode" to (stage?.stereoMode ?: STEREO_UNKNOWN),
+            "stage" to (stage?.stage
+                ?: if (playerHost.isHosted) {
+                    UnityPlayerHost.STAGE_PLAYER_HOSTED
+                } else {
+                    STAGE_NOT_HOSTED
+                }),
         )
     }
 
@@ -219,38 +259,78 @@ class WmrTrackingXrealPlugin internal constructor(
 
     private fun start(reply: StartReply) {
         if (disposed) {
-            reply.error(ERROR_CLOSED, "XREAL tracking source has been disposed")
+            reply.error(
+                ERROR_CLOSED,
+                "XREAL tracking source has been disposed",
+                TrackingStartStage.DISPOSED,
+            )
             return
         }
         if (started) {
-            reply.success()
+            reply.success(stageFields())
             return
         }
         if (pendingStart.isPending) {
-            reply.error(ERROR_UNAVAILABLE, "An XREAL tracking start is already pending")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "An XREAL tracking start is already pending",
+                TrackingStartStage.PENDING,
+            )
             return
         }
         if (!bridge.isUnityAvailable) {
-            reply.error(ERROR_UNAVAILABLE, "XREAL Unity UaaL runtime is not linked")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "XREAL Unity UaaL runtime is not linked",
+                TrackingStartStage.LINK,
+            )
             return
         }
         val current = activity
         if (current == null) {
-            reply.error(ERROR_UNAVAILABLE, "No activity to host the XREAL Unity relay")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "No activity to host the XREAL Unity relay",
+                TrackingStartStage.ACTIVITY,
+            )
             return
         }
-        if (ContextCompat.checkSelfPermission(current, PERMISSION_CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        val cameraGranted = try {
+            ContextCompat.checkSelfPermission(current, PERMISSION_CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        } catch (error: Throwable) {
+            reply.error(
+                ERROR_UNAVAILABLE,
+                error.message ?: "Failed to read the XREAL camera permission",
+                TrackingStartStage.PERMISSION,
+            )
+            return
+        }
+        if (cameraGranted) {
             startUnityRelay(reply)
             return
         }
-        pendingStart.hold(reply)
-        ActivityCompat.requestPermissions(
-            current,
-            arrayOf(PERMISSION_CAMERA),
-            PERMISSION_REQUEST_CODE,
-        )
+        if (!pendingStart.hold(reply)) {
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "An XREAL tracking start is already pending",
+                TrackingStartStage.PENDING,
+            )
+            return
+        }
+        try {
+            ActivityCompat.requestPermissions(
+                current,
+                arrayOf(PERMISSION_CAMERA),
+                PERMISSION_REQUEST_CODE,
+            )
+        } catch (error: Throwable) {
+            pendingStart.cancel(
+                ERROR_UNAVAILABLE,
+                error.message ?: "Failed to request the XREAL camera permission",
+                TrackingStartStage.PERMISSION,
+            )
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -266,11 +346,16 @@ class WmrTrackingXrealPlugin internal constructor(
             reply.error(
                 ERROR_PERMISSION_DENIED,
                 "XREAL camera permission was denied: $PERMISSION_CAMERA",
+                TrackingStartStage.PERMISSION,
             )
             return true
         }
         if (activity == null) {
-            reply.error(ERROR_UNAVAILABLE, "No activity to host the XREAL Unity relay")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "No activity to host the XREAL Unity relay",
+                TrackingStartStage.ACTIVITY,
+            )
             return true
         }
         startUnityRelay(reply)
@@ -278,9 +363,43 @@ class WmrTrackingXrealPlugin internal constructor(
     }
 
     internal fun startUnityRelay(reply: StartReply) {
-        val claim = runtime.claim(GlassesVendor.XREAL) { bridge.isUnityAvailable }
+        try {
+            startUnityRelayGuarded(reply)
+        } catch (error: Throwable) {
+            runtime.release(GlassesVendor.XREAL)
+            playerHost.release()
+            reply.error(
+                ERROR_UNAVAILABLE,
+                error.message ?: "XREAL Unity relay start failed",
+                TrackingStartStage.START_FAILED,
+            )
+        }
+    }
+
+    private fun startUnityRelayGuarded(reply: StartReply) {
+        // A new session must not report the previous session's stage.
+        runtime.clearStage(GlassesVendor.XREAL)
+        // XREAL-first must create and attach the one shared player before the
+        // runtime is claimed; claiming first would let a claim without a view
+        // own the runtime and make every later vendor merely reuse it.
+        val host = playerHost.host(activity)
+        if (!host.hosted) {
+            reply.error(
+                ERROR_UNAVAILABLE,
+                host.detail ?: "No shared UnityPlayer is linked into this build",
+                host.stage,
+            )
+            return
+        }
+        val claim = runtime.claim(GlassesVendor.XREAL) { host.hosted }
         if (!claim.granted) {
-            reply.error(ERROR_UNAVAILABLE, "No shared UnityPlayer is linked into this build")
+            runtime.release(GlassesVendor.XREAL)
+            playerHost.release()
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "No shared UnityPlayer is linked into this build",
+                TrackingStartStage.CLAIM,
+            )
             return
         }
         val reportedModel = bridge.queryGlassesModel()
@@ -289,6 +408,7 @@ class WmrTrackingXrealPlugin internal constructor(
             (!modelSpec.handTracking || !modelSpec.head6Dof)
         ) {
             runtime.release(GlassesVendor.XREAL)
+            playerHost.release()
             val modelName = if (modelSpec == XrealGlassesModelSpec.UNKNOWN) {
                 reportedModel?.takeIf { it.isNotBlank() } ?: modelSpec.sdkName
             } else {
@@ -297,33 +417,71 @@ class WmrTrackingXrealPlugin internal constructor(
             reply.error(
                 ERROR_UNSUPPORTED,
                 "XREAL hand tracking requires Air 2 Ultra (found $modelName)",
+                TrackingStartStage.MODEL,
             )
             return
         }
-        if (!bridge.sendCommand(XrealRelayCommandBuilder.start())) {
+        val commandJson = XrealRelayCommandBuilder.start()
+        if (!bridge.sendCommand(commandJson)) {
             runtime.release(GlassesVendor.XREAL)
-            reply.error(ERROR_UNAVAILABLE, "Failed to dispatch start command to Unity relay")
+            playerHost.release()
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "Failed to dispatch start command to Unity relay",
+                TrackingStartStage.COMMAND,
+            )
             return
         }
+        // A freshly created player reaches `Awake` after the constructor
+        // returns, so replay the start once the scene reports `playerHosted`.
+        pendingStartCommand = commandJson
         started = true
-        reply.success()
+        reply.success(stageFields())
+    }
+
+    /**
+     * Replays the start command once the hosted scene is alive. No-op when the
+     * command was consumed, the source stopped, or the scene reported late.
+     */
+    internal fun flushPendingStart() {
+        val command = pendingStartCommand ?: return
+        pendingStartCommand = null
+        if (!started) return
+        bridge.sendCommand(command)
+    }
+
+    /** Test seam for the static `onUnityStage` entry point the C# rig calls. */
+    internal fun deliverUnityStage(stage: String, stereoMode: String?) {
+        unityCallbacks.onStage(stage, stereoMode)
     }
 
     private fun stopTracking(reportError: Boolean) {
         failPendingStart()
+        pendingStartCommand = null
         val wasStarted = started
         started = false
         if (wasStarted) {
             bridge.sendCommand(XrealRelayCommandBuilder.stop())
         }
         runtime.release(GlassesVendor.XREAL)
+        runtime.clearStage(GlassesVendor.XREAL)
+        // On stop the display goes back to Flutter; the player can stay in the
+        // process and be hosted again by the next start.
+        playerHost.release()
         if (reportError) {
-            eventSink?.error(ERROR_UNAVAILABLE, "XREAL host activity was detached", null)
+            eventSink?.error(
+                ERROR_UNAVAILABLE,
+                "XREAL host activity was detached",
+                mapOf("stage" to TrackingStartStage.DETACH),
+            )
         }
     }
 
-    private fun failPendingStart(message: String = "XREAL host activity was detached") {
-        pendingStart.cancel(ERROR_UNAVAILABLE, message)
+    private fun failPendingStart(
+        message: String = "XREAL host activity was detached",
+        stage: String = TrackingStartStage.DETACH,
+    ) {
+        pendingStart.cancel(ERROR_UNAVAILABLE, message, stage)
     }
 
     internal fun deliverUnityFrame(frameJson: String) {
@@ -334,9 +492,12 @@ class WmrTrackingXrealPlugin internal constructor(
     internal fun deliverUnityError(code: String, message: String) {
         if (!started) return
         started = false
-        runtime.release(GlassesVendor.XREAL)
+        pendingStartCommand = null
         bridge.sendCommand(XrealRelayCommandBuilder.stop())
-        eventSink?.error(code, message, null)
+        runtime.release(GlassesVendor.XREAL)
+        runtime.clearStage(GlassesVendor.XREAL)
+        playerHost.release()
+        eventSink?.error(code, message, mapOf("stage" to TrackingStartStage.RUNTIME))
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -356,6 +517,8 @@ class WmrTrackingXrealPlugin internal constructor(
         internal const val ERROR_UNAVAILABLE = "unavailable"
         internal const val ERROR_PROTOCOL = "protocol"
         internal const val ERROR_CLOSED = "closed"
+        internal const val STAGE_NOT_HOSTED = "notHosted"
+        internal const val STEREO_UNKNOWN = "unknown"
 
         /**
          * Called by C# `XrealTrackingRelayBridge` when a new tracking frame is
@@ -386,13 +549,25 @@ class WmrTrackingXrealPlugin internal constructor(
         fun onUnityGlassesModel(modelName: String?) {
             SharedUnityRuntime.shared.dispatchGlassesModel(GlassesVendor.XREAL, modelName)
         }
+
+        /**
+         * Called by the hosted scene when it reaches a startup stage. The scene
+         * is shared with VITURE, so the report is attributed to whichever
+         * vendor owns the shared runtime; ONY-707 points the C# rig here while
+         * XREAL is active.
+         */
+        @JvmStatic
+        fun onUnityStage(stage: String, stereoMode: String?) {
+            SharedUnityRuntime.shared.dispatchHostStage(stage, stereoMode)
+        }
     }
 }
 
 private class MethodChannelStartReply(
     private val result: MethodChannel.Result,
 ) : StartReply {
-    override fun success() = result.success(null)
+    override fun success(report: Map<String, Any?>) = result.success(report)
 
-    override fun error(code: String, message: String) = result.error(code, message, null)
+    override fun error(code: String, message: String, stage: String?) =
+        result.error(code, message, stage?.let { mapOf("stage" to it) })
 }

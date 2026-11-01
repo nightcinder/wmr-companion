@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
 import com.onyxlens.wmr_tracking_dispatch.PlayerHost
 import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+import com.onyxlens.wmr_tracking_dispatch.TrackingStartStage
 import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -53,7 +54,7 @@ class WmrTrackingViturePlugin internal constructor(
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var eventSink: EventChannel.EventSink? = null
-    private val pendingStart = PendingStartGate()
+    internal val pendingStart = PendingStartGate()
 
     /** Routes the shared UnityPlayer callbacks for this vendor onto Flutter. */
     private val unityCallbacks = object : SharedUnityRuntime.Handler {
@@ -149,12 +150,18 @@ class WmrTrackingViturePlugin internal constructor(
                 start(filterMode, aimSensitivity, MethodChannelStartReply(result))
             }
             "stop" -> {
-                failPendingStart("VITURE tracking stopped before the start completed")
+                failPendingStart(
+                    "VITURE tracking stopped before the start completed",
+                    TrackingStartStage.PENDING,
+                )
                 stopTracking(reportError = false)
                 result.success(null)
             }
             "dispose" -> {
-                failPendingStart("VITURE tracking source was disposed before the start completed")
+                failPendingStart(
+                    "VITURE tracking source was disposed before the start completed",
+                    TrackingStartStage.PENDING,
+                )
                 stopTracking(reportError = false)
                 bridge.sendCommand(VitureRelayCommandBuilder.dispose())
                 disposed = true
@@ -283,7 +290,11 @@ class WmrTrackingViturePlugin internal constructor(
 
     private fun start(filterMode: String, aimSensitivity: String, reply: StartReply) {
         if (disposed) {
-            reply.error(ERROR_CLOSED, "VITURE tracking source has been disposed")
+            reply.error(
+                ERROR_CLOSED,
+                "VITURE tracking source has been disposed",
+                TrackingStartStage.DISPOSED,
+            )
             return
         }
         if (started) {
@@ -291,32 +302,68 @@ class WmrTrackingViturePlugin internal constructor(
             return
         }
         if (pendingStart.isPending) {
-            reply.error(ERROR_UNAVAILABLE, "A VITURE tracking start is already pending")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "A VITURE tracking start is already pending",
+                TrackingStartStage.PENDING,
+            )
             return
         }
         if (!bridge.isUnityAvailable) {
-            reply.error(ERROR_UNAVAILABLE, "VITURE Unity UaaL runtime is not linked")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "VITURE Unity UaaL runtime is not linked",
+                TrackingStartStage.LINK,
+            )
             return
         }
         val current = activity
         if (current == null) {
-            reply.error(ERROR_UNAVAILABLE, "No activity to host the VITURE Unity relay")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "No activity to host the VITURE Unity relay",
+                TrackingStartStage.ACTIVITY,
+            )
             return
         }
         pendingFilterMode = filterMode
         pendingAimSensitivity = aimSensitivity
-        if (ContextCompat.checkSelfPermission(current, PERMISSION_CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        val cameraGranted = try {
+            ContextCompat.checkSelfPermission(current, PERMISSION_CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        } catch (error: Throwable) {
+            reply.error(
+                ERROR_UNAVAILABLE,
+                error.message ?: "Failed to read the VITURE camera permission",
+                TrackingStartStage.PERMISSION,
+            )
+            return
+        }
+        if (cameraGranted) {
             startUnityRelay(reply)
             return
         }
-        pendingStart.hold(reply)
-        ActivityCompat.requestPermissions(
-            current,
-            arrayOf(PERMISSION_CAMERA),
-            PERMISSION_REQUEST_CODE,
-        )
+        if (!pendingStart.hold(reply)) {
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "A VITURE tracking start is already pending",
+                TrackingStartStage.PENDING,
+            )
+            return
+        }
+        try {
+            ActivityCompat.requestPermissions(
+                current,
+                arrayOf(PERMISSION_CAMERA),
+                PERMISSION_REQUEST_CODE,
+            )
+        } catch (error: Throwable) {
+            pendingStart.cancel(
+                ERROR_UNAVAILABLE,
+                error.message ?: "Failed to request the VITURE camera permission",
+                TrackingStartStage.PERMISSION,
+            )
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -332,11 +379,16 @@ class WmrTrackingViturePlugin internal constructor(
             reply.error(
                 ERROR_PERMISSION_DENIED,
                 "VITURE camera permission was denied: $PERMISSION_CAMERA",
+                TrackingStartStage.PERMISSION,
             )
             return true
         }
         if (activity == null) {
-            reply.error(ERROR_UNAVAILABLE, "No activity to host the VITURE Unity relay")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "No activity to host the VITURE Unity relay",
+                TrackingStartStage.ACTIVITY,
+            )
             return true
         }
         startUnityRelay(reply)
@@ -344,18 +396,42 @@ class WmrTrackingViturePlugin internal constructor(
     }
 
     internal fun startUnityRelay(reply: StartReply) {
+        try {
+            startUnityRelayGuarded(reply)
+        } catch (error: Throwable) {
+            runtime.release(GlassesVendor.VITURE)
+            playerHost.release()
+            reply.error(
+                ERROR_UNAVAILABLE,
+                error.message ?: "VITURE Unity relay start failed",
+                TrackingStartStage.START_FAILED,
+            )
+        }
+    }
+
+    private fun startUnityRelayGuarded(reply: StartReply) {
         // A new session must not report the previous session's stage.
         runtime.clearStage(GlassesVendor.VITURE)
         // The player has to exist before UnitySendMessage can reach the scene.
         // Host it in the foreground activity and attach its view full-screen,
-        // then let that result decide whether the runtime is usable.
+        // then claim the shared runtime only after it reports an attached player.
         val host = playerHost.host(activity)
-        val claim = runtime.claim(GlassesVendor.VITURE) { host.hosted }
-        if (!claim.granted || !host.hosted) {
-            runtime.release(GlassesVendor.VITURE)
+        if (!host.hosted) {
             reply.error(
                 ERROR_UNAVAILABLE,
                 host.detail ?: "No shared UnityPlayer is linked into this build",
+                host.stage,
+            )
+            return
+        }
+        val claim = runtime.claim(GlassesVendor.VITURE) { host.hosted }
+        if (!claim.granted) {
+            runtime.release(GlassesVendor.VITURE)
+            playerHost.release()
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "No shared UnityPlayer is linked into this build",
+                TrackingStartStage.CLAIM,
             )
             return
         }
@@ -374,6 +450,7 @@ class WmrTrackingViturePlugin internal constructor(
             reply.error(
                 ERROR_UNSUPPORTED,
                 "VITURE hand tracking requires LumaUltra on Pro Neckband (found $modelName)",
+                TrackingStartStage.MODEL,
             )
             return
         }
@@ -384,7 +461,11 @@ class WmrTrackingViturePlugin internal constructor(
         if (!bridge.sendCommand(commandJson)) {
             runtime.release(GlassesVendor.VITURE)
             playerHost.release()
-            reply.error(ERROR_UNAVAILABLE, "Failed to dispatch start command to Unity relay")
+            reply.error(
+                ERROR_UNAVAILABLE,
+                "Failed to dispatch start command to Unity relay",
+                TrackingStartStage.COMMAND,
+            )
             return
         }
         // A player created for this start reaches `Awake` after the constructor
@@ -421,12 +502,19 @@ class WmrTrackingViturePlugin internal constructor(
         // process and be hosted again by the next start.
         playerHost.release()
         if (reportError) {
-            eventSink?.error(ERROR_UNAVAILABLE, "VITURE host activity was detached", null)
+            eventSink?.error(
+                ERROR_UNAVAILABLE,
+                "VITURE host activity was detached",
+                mapOf("stage" to TrackingStartStage.DETACH),
+            )
         }
     }
 
-    private fun failPendingStart(message: String = "VITURE host activity was detached") {
-        pendingStart.cancel(ERROR_UNAVAILABLE, message)
+    private fun failPendingStart(
+        message: String = "VITURE host activity was detached",
+        stage: String = TrackingStartStage.DETACH,
+    ) {
+        pendingStart.cancel(ERROR_UNAVAILABLE, message, stage)
     }
 
     internal fun deliverUnityFrame(frameJson: String) {
@@ -438,10 +526,13 @@ class WmrTrackingViturePlugin internal constructor(
         if (!started) return
         started = false
         pendingStartCommand = null
+        // The C# bridge keeps its own `_running` flag; stop the session before
+        // detaching so a later start does not see an already-running relay.
+        bridge.sendCommand(VitureRelayCommandBuilder.stop())
         runtime.release(GlassesVendor.VITURE)
         runtime.clearStage(GlassesVendor.VITURE)
         playerHost.release()
-        eventSink?.error(code, message, null)
+        eventSink?.error(code, message, mapOf("stage" to TrackingStartStage.RUNTIME))
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -499,10 +590,13 @@ class WmrTrackingViturePlugin internal constructor(
          * startup stage. The stereo mode is `multiPass`, `singlePass`,
          * `singlePassInstanced` or `unknown`; a mono player is reported as
          * `unknown` because the VITURE loader never presents mono as stereo.
+         *
+         * The same scene serves both vendors, so the report is attributed to
+         * whichever vendor owns the shared runtime rather than to VITURE.
          */
         @JvmStatic
         fun onUnityStage(stage: String, stereoMode: String?) {
-            SharedUnityRuntime.shared.dispatchStage(GlassesVendor.VITURE, stage, stereoMode)
+            SharedUnityRuntime.shared.dispatchHostStage(stage, stereoMode)
         }
     }
 }
@@ -512,5 +606,6 @@ private class MethodChannelStartReply(
 ) : StartReply {
     override fun success(report: Map<String, Any?>) = result.success(report)
 
-    override fun error(code: String, message: String) = result.error(code, message, null)
+    override fun error(code: String, message: String, stage: String?) =
+        result.error(code, message, stage?.let { mapOf("stage" to it) })
 }

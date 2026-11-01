@@ -15,6 +15,26 @@ enum class UnityClaimState(val wireName: String) {
 /** The latest stage and display report the hosted player sent for a vendor. */
 data class UnityStageReport(val stage: String, val stereoMode: String?)
 
+/**
+ * Failure boundaries reported in a start error's `details.stage`.
+ *
+ * Both vendor plugins share these names so Dart can tell "player never hosted"
+ * from "loader never initialised" from "start was detached".
+ */
+object TrackingStartStage {
+    const val DISPOSED = "disposed"
+    const val PENDING = "pending"
+    const val LINK = "link"
+    const val ACTIVITY = "activity"
+    const val PERMISSION = "permission"
+    const val CLAIM = "claim"
+    const val MODEL = "model"
+    const val COMMAND = "command"
+    const val RUNTIME = "runtime"
+    const val DETACH = "detach"
+    const val START_FAILED = "startFailed"
+}
+
 /** The result of [SharedUnityRuntime.claim]. */
 data class UnityClaim(val state: UnityClaimState, val owner: GlassesVendor?) {
     val granted: Boolean = state != UnityClaimState.UNAVAILABLE
@@ -30,10 +50,11 @@ data class UnityClaim(val state: UnityClaimState, val owner: GlassesVendor?) {
  * plugin registered for a vendor.
  *
  * The first VITURE or XREAL plugin to call [claim] becomes the owner and marks
- * the runtime created; [createPlayer] is the injected creation seam, and both
- * plugins still check that `com.unity3d.player.UnityPlayer` is linked before
- * claiming. The other plugin reuses the same runtime
- * ([UnityClaimState.REUSED]) and never creates a second player. Frames, errors
+ * the runtime created; [createPlayer] is the injected creation seam. Both
+ * plugins host a [PlayerHost] and only claim after it reports an attached
+ * player, so ownership always means a real view exists. The other plugin
+ * reuses the same runtime ([UnityClaimState.REUSED]) and never creates a
+ * second player. Frames, errors
  * addressed by vendor, with the owner as a fallback for untagged callbacks.
  * Android XR does not use Unity and never claims.
  */
@@ -139,6 +160,23 @@ class SharedUnityRuntime(
 
     @Synchronized
     fun stage(vendor: GlassesVendor): UnityStageReport? = stages[vendor]
+
+    /**
+     * Routes a stage report that came from the one shared stereo scene to the
+     * vendor that currently owns the runtime.
+     *
+     * Both vendors load the same scene, and its rig still reports through the
+     * VITURE plugin's static entry point (the XREAL scene points at the XREAL
+     * class in ONY-707). Attributing the report to the owner keeps
+     * `playerHosted`, `stereoMode` and the start replay correct whichever
+     * vendor is active. Before any claim the report belongs to VITURE, which
+     * is the only vendor that ever hosted the shared scene before XREAL
+     * hosting existed.
+     */
+    fun dispatchHostStage(stage: String, stereoMode: String?) {
+        val vendor = synchronized(this) { owner } ?: GlassesVendor.VITURE
+        dispatchStage(vendor, stage, stereoMode)
+    }
 
     /** Drops the stage a previous session reported so a new one starts clean. */
     @Synchronized
