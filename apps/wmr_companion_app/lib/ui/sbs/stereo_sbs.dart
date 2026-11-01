@@ -56,9 +56,15 @@ class StereoSbs extends InheritedWidget {
 /// both eyes show the same UI instead of a black right half.
 ///
 /// Each half gets its own [MediaQuery] sized to that half, so layouts wrap at
-/// the eye width rather than at the full 3840 px. A single widget tree stays
-/// mounted: navigation and Riverpod state are shared, only the painted tree is
-/// built twice.
+/// the eye width rather than at the full 3840 px. [child] is inflated twice,
+/// once per half, so the two halves are two element trees: navigation and
+/// Riverpod state are shared, but a screen must keep its D-pad focus nodes,
+/// controllers and other mutable state *above* this wrapper so both halves read
+/// the same value. [StereoSbsScrollController] does that for scroll offsets.
+///
+/// A [FocusNode] owned above the wrapper is attached to both halves; Flutter
+/// keeps one attachment live but every `Focus` widget listening to the node
+/// still paints the focus ring, so both eyes show the highlight.
 class StereoSbsWrapper extends ConsumerWidget {
   const StereoSbsWrapper({super.key, required this.child});
 
@@ -86,13 +92,15 @@ class StereoSbsWrapper extends ConsumerWidget {
           data: media.copyWith(size: size),
           child: child,
         );
-        // One pane when off, two when on. The first pane keeps its element
-        // across a toggle, so typed text and open decisions survive it.
+        // One pane when off, two when on. Rebuilding both panes on a toggle
+        // gives the shared focus nodes a fresh attachment in the surviving
+        // pane; the state that matters lives above the wrapper anyway.
         return StereoSbs(
           data: data,
           child: Directionality(
             textDirection: TextDirection.ltr,
             child: Row(
+              key: ValueKey(active),
               children: [
                 Expanded(child: pane(active ? eye : viewport)),
                 if (active) Expanded(child: pane(eye)),
@@ -128,3 +136,41 @@ class SbsToggleButton extends ConsumerWidget {
     );
   }
 }
+
+/// A [ScrollController] shared by both eye halves: a D-pad focus change
+/// scrolls the pane that owns the focus, so every attached position mirrors
+/// its offset to the others and the halves keep showing the same rows.
+class StereoSbsScrollController extends ScrollController {
+  bool _syncing = false;
+
+  @override
+  void attach(ScrollPosition position) {
+    super.attach(position);
+    position.addListener(() => _mirror(position));
+  }
+
+  void _mirror(ScrollPosition source) {
+    if (_syncing || !source.hasPixels) return;
+    _syncing = true;
+    try {
+      for (final position in positions) {
+        if (identical(position, source) || !position.hasContentDimensions) {
+          continue;
+        }
+        final target = source.pixels.clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+        if (position.pixels != target) position.jumpTo(target);
+      }
+    } finally {
+      _syncing = false;
+    }
+  }
+}
+
+/// A pushed route that keeps the stereo mirroring: the root [Navigator] is
+/// above the home screen's wrapper, so a pushed screen has to wrap itself.
+Route<T> stereoRoute<T>(WidgetBuilder builder) => MaterialPageRoute<T>(
+  builder: (context) => StereoSbsWrapper(child: builder(context)),
+);

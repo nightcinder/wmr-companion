@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
@@ -92,19 +93,102 @@ void main() {
     await close(tester);
   });
 
-  testWidgets('one scan action takes the initial D-pad focus in SBS', (
-    tester,
-  ) async {
+  testWidgets('both eyes share the focused scan action in SBS', (tester) async {
     await openApp(tester, const Size(3840, 1080));
 
     final buttons = tester
         .widgetList<FilledButton>(find.byKey(const Key('connect-scan')))
         .toList();
     expect(buttons, hasLength(2));
-    expect(
-      buttons.where((button) => button.focusNode?.hasFocus ?? false),
-      hasLength(1),
+    // One node shared by both halves, so both paint the focus ring.
+    expect(buttons.first.focusNode, same(buttons.last.focusNode));
+    expect(buttons.first.focusNode?.hasFocus, isTrue);
+    await close(tester);
+  });
+
+  testWidgets('turning SBS off keeps the shared scan node focused', (
+    tester,
+  ) async {
+    await openApp(tester, const Size(3840, 1080));
+
+    await tester.tap(find.byKey(const Key('toggle-sbs')).first);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('connect-scan')), findsOneWidget);
+    final button = tester.widget<FilledButton>(
+      find.byKey(const Key('connect-scan')),
     );
+    expect(button.focusNode?.hasFocus, isTrue);
+    await close(tester);
+  });
+
+  testWidgets('D-pad traversal follows the Connect action order', (
+    tester,
+  ) async {
+    await openApp(tester, const Size(3840, 1080));
+
+    bool focused(String key) =>
+        tester
+            .widgetList<FilledButton>(find.byKey(Key(key)))
+            .first
+            .focusNode
+            ?.hasFocus ??
+        false;
+    expect(focused('connect-scan'), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(focused('export-test-bundle'), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(focused('open-guided-bench'), isTrue);
+    await close(tester);
+  });
+
+  testWidgets('Wi-Fi fields and the TLS switch stay identical in both eyes', (
+    tester,
+  ) async {
+    await openApp(tester, const Size(3840, 1080));
+
+    await tester.tap(find.text('Wi-Fi').first);
+    await tester.pump();
+    expect(find.byKey(const Key('wifi-host')), findsNWidgets(2));
+
+    await tester.enterText(
+      find.byKey(const Key('wifi-host')).first,
+      '10.0.0.7',
+    );
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('wifi-host')),
+        matching: find.text('10.0.0.7'),
+      ),
+      findsNWidgets(2),
+    );
+
+    await tester.tap(find.byKey(const Key('wifi-secure')).first);
+    await tester.pump();
+    expect(find.textContaining('cleartext over'), findsNothing);
+    await close(tester);
+  });
+
+  testWidgets('a 32:9 bench shares one focused primary action', (tester) async {
+    await openApp(tester, const Size(3840, 1080));
+
+    await tester.tap(find.byKey(const Key('open-guided-bench')).first);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    final starts = tester
+        .widgetList<FilledButton>(find.byKey(const Key('bench-start')))
+        .toList();
+    expect(starts, hasLength(2));
+    expect(starts.first.focusNode, same(starts.last.focusNode));
+    expect(starts.first.focusNode?.hasFocus, isTrue);
     await close(tester);
   });
 }

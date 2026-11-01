@@ -23,7 +23,20 @@ class BenchScreen extends ConsumerStatefulWidget {
 
 class _BenchScreenState extends ConsumerState<BenchScreen> {
   late final BenchBundleNotifier _bundles;
+
+  /// D-pad state lives above [StereoSbsWrapper]: both eye halves inflate the
+  /// screen, and sharing these nodes keeps the focus ring in both eyes.
   final FocusNode _primaryFocus = FocusNode(debugLabel: 'bench-primary');
+  final FocusNode _skipFocus = FocusNode(debugLabel: 'bench-skip');
+  final FocusNode _skipRemainingFocus = FocusNode(
+    debugLabel: 'bench-skip-remaining',
+  );
+  final FocusNode _trackingFocus = FocusNode(debugLabel: 'bench-tracking');
+  final Map<BenchMode, FocusNode> _modeFocus = {
+    for (final mode in BenchMode.values)
+      mode: FocusNode(debugLabel: 'bench-mode-${mode.id}'),
+  };
+  final ScrollController _scroll = StereoSbsScrollController();
   Timer? _poseTimer;
   int? _poseTimerSegment;
   int _poseRemaining = 0;
@@ -48,6 +61,13 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   void dispose() {
     _poseTimer?.cancel();
     _primaryFocus.dispose();
+    _skipFocus.dispose();
+    _skipRemainingFocus.dispose();
+    _trackingFocus.dispose();
+    for (final node in _modeFocus.values) {
+      node.dispose();
+    }
+    _scroll.dispose();
     // A finished run must not attach itself to a later plain export.
     _bundles.clear();
     super.dispose();
@@ -134,6 +154,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
             key: const Key('bench-focus-order'),
             policy: OrderedTraversalPolicy(),
             child: ListView(
+              controller: _scroll,
               padding: const EdgeInsets.all(16),
               children: [
                 Text('Bench mode', style: theme.textTheme.titleMedium),
@@ -158,6 +179,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                 Text('Hand tracking source', style: theme.textTheme.labelLarge),
                 DropdownButton<DebugTrackingSource>(
                   key: const Key('bench-tracking-source'),
+                  focusNode: _trackingFocus,
                   isExpanded: true,
                   value: selection.choice,
                   onChanged: state.started || state.busy
@@ -270,6 +292,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         (mode != BenchMode.sixDofOnly || tracking.available);
     return OutlinedButton(
       key: Key('bench-mode-${mode.id}'),
+      focusNode: _modeFocus[mode],
       onPressed: enabled ? () => controller.selectMode(mode) : null,
       style: selected
           ? OutlinedButton.styleFrom(
@@ -333,6 +356,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         const SizedBox(height: 8),
         TextButton(
           key: const Key('bench-skip'),
+          focusNode: _skipFocus,
           onPressed: state.busy ? null : controller.skipCurrent,
           child: const Text('Skip step'),
         ),
@@ -352,6 +376,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         const SizedBox(height: 8),
         TextButton(
           key: const Key('bench-skip'),
+          focusNode: _skipFocus,
           onPressed: controller.skipCurrent,
           child: const Text('Skip step'),
         ),
@@ -364,12 +389,14 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
       return [
         TextButton(
           key: const Key('bench-skip'),
+          focusNode: _skipFocus,
           onPressed: controller.skipCurrent,
           child: const Text('Skip segment'),
         ),
         if (state.poseSegment + 1 < sequence.length)
           TextButton(
             key: const Key('bench-skip-remaining'),
+            focusNode: _skipRemainingFocus,
             onPressed: controller.skipRemainingPose,
             child: const Text('Skip remaining'),
           ),
@@ -400,6 +427,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
       if (poseSpec != null && state.poseSegment + 1 < sequence.length)
         TextButton(
           key: const Key('bench-skip-remaining'),
+          focusNode: _skipRemainingFocus,
           onPressed: controller.skipRemainingPose,
           child: const Text('Skip remaining'),
         ),
