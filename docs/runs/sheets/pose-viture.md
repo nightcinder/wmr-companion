@@ -49,6 +49,40 @@ Confirm the flag is live: the debug overlay shows "VITURE tracking: available" w
 6. From the debug overlay, record the VITURE `start` reply fields: `playerHosted`, `stereoMode` and `stage`. A healthy run reaches `playerHosted` → `loaderStarted` → `firstFrame` with `stereoMode` one of `multiPass`/`singlePass`/`singlePassInstanced`. If `stereoMode` is `unknown` or the stage stops at `playerHosted`/`loaderStarted`, record it and stop; the loader is not rendering in stereo 3D (SpaceWalker mode). A 2D/mono player fails closed with `unavailable`.
 7. Capture logcat for every gate (see §9): `adb logcat -v threadtime > pose-viture-gate<N>-<timestamp>.log`, then filter with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted"`.
 
+### 2.1 Neckband 0DoF / 6DoF status (v0.3.11)
+
+On a Luma Ultra with a Pro Neckband the app can open and then drop to 0DoF, with
+the **6DoF only** button greyed out. Two causes, both fixed in v0.3.11:
+
+1. The Unity player is created lazily during a VITURE start, after
+   `MainActivity` has already run `onResume` and `onWindowFocusChanged`, so the
+   first host left it paused and unfocused and the VITURE XR loader never
+   became active. v0.3.11 resumes and focuses the player once per successful
+   host and runs Flutter in transparent background mode so the Unity surface
+   keeps compositing.
+2. 6DoF needs the VITURE XR source to be running and rendering in stereo 3D
+   (SpaceWalker mode). Until that source starts, the app is 0DoF. A 2D / mono
+   player fails closed with `unavailable`.
+
+**Hand tracking source.** The bench screen has a **Hand tracking source**
+dropdown: `None`, `Simulated`, `Auto (USB)`, `Android XR`, `VITURE`, `XREAL`.
+On a Neckband host the app auto-selects `Auto (USB)` on screen open, so VITURE
+attaches without a manual pick; the detector only runs when a vendor flag is
+built in. A manual pick made while the probe runs wins. **6DoF only** is
+enabled only while a started source reports hand joints. A status line above the
+dropdown always shows the current state:
+
+- `6DoF: Auto (USB) hand tracking attached (viture runtime).` when 6DoF is available.
+- `0DoF: no hand-tracking source attached.` when the source is `None`.
+- `0DoF: <source> is not built into this app.` when the flag is off.
+- `0DoF: Starting <source>...` while it starts.
+- `0DoF: <source> failed to start (<kind>).` on a start failure.
+- `0DoF: VITURE XR stereo is inactive, so hand tracking cannot start. Switch the glasses to 3D (SpaceWalker) and select the source again.` when the glasses are in 2D mode.
+- `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
+- `0DoF: <message>.` for any other failure.
+
+Record the status line in the run log. If the app still shows 0DoF on v0.3.11, capture logs with the filter above plus `0DoF`, `6DoF`, `spacewalker`, `running in 2d`.
+
 ## 3. Gate 1 — capture one frame per device (IR question)
 
 **Question:** do the Luma Ultra stereo grayscale frames show the WMR controller LEDs?
@@ -210,7 +244,7 @@ Record:
 
 During each gate, capture:
 
-1. `adb logcat -v threadtime > pose-viture-<gate>-<YYYYMMDD-HHMMSS>.log` (wireless ADB for the Neckband). Read it with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted"`; record the highest stage and `stereoMode`.
+1. `adb logcat -v threadtime > pose-viture-<gate>-<YYYYMMDD-HHMMSS>.log` (wireless ADB for the Neckband). Read it with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted|0DoF|6DoF|spacewalker|running in 2d"`; record the highest stage and `stereoMode`.
 2. Screenshot the debug overlay showing `playerHosted`, `stereoMode` and `stage` for each start attempt (this is the field a tester can read without parsing logs).
 3. Any app-exported JSON/CSV tracking frames, via Share or `adb pull <path>`; name them `pose-viture-<gate>-<timestamp>.json`.
 4. The bridge serial capture as `pose-viture-serial-<timestamp>.txt`.
