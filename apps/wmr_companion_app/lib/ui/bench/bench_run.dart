@@ -97,6 +97,15 @@ final benchDurationsProvider = Provider<BenchDurations>(
 /// ONY-738 section 4: the distances the LED run must cover.
 const List<double> carinaLedDistancesM = <double>[0.3, 0.5, 0.8, 1.0];
 
+/// ONY-738 section 4: one capture per orientation at each distance. The harness
+/// ramps exposure by elapsed time, so mixing orientations in one capture would
+/// confound exposure with pose.
+const List<String> carinaLedOrientations = <String>[
+  'front',
+  'rotated',
+  'tilted',
+];
+
 /// One checkerboard pose from ONY-738 section 5.
 class CarinaCheckerboardPose {
   const CarinaCheckerboardPose(this.distanceM, this.pose);
@@ -347,10 +356,12 @@ enum BenchStep {
           'interrupted run resumes where it stopped.',
     BenchStep.carinaLeds =>
       'ONY-735 Gate 1. Keep both controllers on, dim the room, and connect '
-          'the Luma Ultra over USB. Four ${durations.carinaFrame.inSeconds} s '
-          'captures run in order at 0.3, 0.5, 0.8 and 1.0 m; hold three '
-          'orientations at each distance. Pass is at least 5 LED blobs in at '
-          'least 90% of frames at 0.8 m. ONY-736 scores the saved PGMs.',
+          'the Luma Ultra over USB. ${carinaLedDistancesM.length} distances '
+          'times ${carinaLedOrientations.length} orientations '
+          '(front, rotated, tilted) run ${durations.carinaFrame.inSeconds} s '
+          'captures at 0.3, 0.5, 0.8 and 1.0 m; hold one orientation for the '
+          'whole capture. Pass is at least 5 LED blobs in at least 90% of '
+          'frames at 0.8 m. ONY-736 scores the saved PGMs.',
     BenchStep.carinaCheckerboard =>
       'ONY-735 calibration. Use a flat, rigid checkerboard with at least '
           '8x6 inner corners and the controller LEDs off. Ten '
@@ -923,31 +934,37 @@ class RealBenchSession implements BenchSession {
     final captures = <Map<String, Object?>>[];
     final directories = <String>[];
     for (final distance in carinaLedDistancesM) {
-      final directory = await _freshCarinaDirectory(
-        '$_carinaRoot/carina-led-${_distanceTag(distance)}',
-      );
-      try {
-        final report = await runner.capture(
-          duration: durations.carinaFrame,
-          outputDirectory: directory.path,
+      for (final orientation in carinaLedOrientations) {
+        final directory = await _freshCarinaDirectory(
+          '$_carinaRoot/carina-led-${_distanceTag(distance)}-$orientation',
         );
+        // Recorded before the capture, so a failed rung still packs the
+        // partial PGMs and failure telemetry the harness wrote.
         directories.add(directory.path);
-        captures.add({
-          'distance_m': distance,
-          'directory': directory.path,
-          'report': report.raw,
-        });
-      } on CarinaDiagnosticException catch (error) {
-        return BenchStepOutcome.failed(
-          'Gate 1 capture failed at ${distance.toStringAsFixed(1)} m '
-          '(${error.code}): ${error.message}',
-          data: {'captures': captures, 'directories': directories},
-        );
-      } on Object catch (error) {
-        return BenchStepOutcome.failed(
-          'Gate 1 capture failed at ${distance.toStringAsFixed(1)} m: $error',
-          data: {'captures': captures, 'directories': directories},
-        );
+        try {
+          final report = await runner.capture(
+            duration: durations.carinaFrame,
+            outputDirectory: directory.path,
+          );
+          captures.add({
+            'distance_m': distance,
+            'orientation': orientation,
+            'directory': directory.path,
+            'report': report.raw,
+          });
+        } on CarinaDiagnosticException catch (error) {
+          return BenchStepOutcome.failed(
+            'Gate 1 capture failed at ${distance.toStringAsFixed(1)} m '
+            '($orientation, ${error.code}): ${error.message}',
+            data: {'captures': captures, 'directories': directories},
+          );
+        } on Object catch (error) {
+          return BenchStepOutcome.failed(
+            'Gate 1 capture failed at ${distance.toStringAsFixed(1)} m '
+            '($orientation): $error',
+            data: {'captures': captures, 'directories': directories},
+          );
+        }
       }
     }
     return BenchStepOutcome.done(
@@ -971,12 +988,12 @@ class RealBenchSession implements BenchSession {
       final directory = await _freshCarinaDirectory(
         '$_carinaRoot/carina-checkerboard-${pose.id}',
       );
+      directories.add(directory.path);
       try {
         final report = await runner.capture(
           duration: durations.carinaCheckerboardPose,
           outputDirectory: directory.path,
         );
-        directories.add(directory.path);
         captures.add({
           'distance_m': pose.distanceM,
           'pose': pose.pose,
@@ -1091,6 +1108,33 @@ final benchFallbackClockProvider = Provider<MonotonicClock>(
   (ref) => MonotonicClock(),
 );
 
+/// Where the Carina harness writes its PGM and telemetry directories. Kept in
+/// the documents store, not the cache, so a purge between capture and export
+/// cannot lose the evidence the bundle is supposed to carry.
+String carinaRootFor(CaptureStore store) =>
+    '${store.directory.path}${Platform.pathSeparator}carina';
+
+/// A session for the Carina steps when no bridge or tracking source is
+/// attached: Gate 1 and Gate 9 need only the glasses over USB.
+final carinaOnlySessionProvider = Provider<Future<BenchSession?> Function()>((
+  ref,
+) {
+  return () async {
+    final carinaCapture = ref.read(carinaCaptureProvider);
+    if (carinaCapture == null) return null;
+    final captureStore = await ref.read(captureStoreProvider.future);
+    return RealBenchSession(
+      clock: ref.read(benchFallbackClockProvider),
+      captureStore: captureStore,
+      latencyStore: await ref.read(latencyStoreProvider.future),
+      durations: ref.read(benchDurationsProvider),
+      appCommit: ref.read(appCommitProvider),
+      carinaCapture: carinaCapture,
+      carinaRoot: carinaRootFor(captureStore),
+    );
+  };
+});
+
 /// Resolves the session from the live connection or the attached hand-tracking
 /// source, or null when neither exists. The wizard calls it again on each step,
 /// so a bridge that comes back after a drop is picked up.
@@ -1113,6 +1157,7 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
         : null;
     final MonotonicClock clock =
         service?.transport.clock ?? ref.read(benchFallbackClockProvider);
+    final captureStore = await ref.read(captureStoreProvider.future);
     final poseRecorder = availability.available
         ? RealBenchPoseRecorder(
             ref: ref,
@@ -1133,7 +1178,7 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
       tracking: tracking,
       poseRecorder: poseRecorder,
       clock: clock,
-      captureStore: await ref.read(captureStoreProvider.future),
+      captureStore: captureStore,
       latencyStore: await ref.read(latencyStoreProvider.future),
       durations: ref.read(benchDurationsProvider),
       mtu: device.status.mtu,
@@ -1141,6 +1186,7 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
       firmwareSha: firmwareSha,
       applyMode: notifier.setStreamMode,
       carinaCapture: ref.read(carinaCaptureProvider),
+      carinaRoot: carinaRootFor(captureStore),
     );
   };
 });

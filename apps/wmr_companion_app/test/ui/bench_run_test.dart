@@ -643,7 +643,7 @@ void main() {
         clock: MonotonicClock(),
         captureStore: CaptureStore(Directory('${dir.path}/captures')),
         latencyStore: LatencyStore(Directory('${dir.path}/latency')),
-        durations: const BenchDurations(handGrip: Duration(milliseconds: 300)),
+        durations: const BenchDurations(handGrip: Duration(seconds: 2)),
       );
       final joint = HandPose(
         hand: TrackedHand.left,
@@ -651,7 +651,7 @@ void main() {
       );
       final run = session.handTracking(
         gripping: true,
-        duration: const Duration(milliseconds: 300),
+        duration: const Duration(seconds: 2),
       );
       for (var i = 0; i < 10; i++) {
         source.addFrame(TrackingFrame(timeNs: i, leftHand: joint));
@@ -671,7 +671,7 @@ void main() {
       expect(outcome.data['dropout_percent'], lessThan(100));
     });
 
-    test('Gate 1 saves one capture per distance', () async {
+    test('Gate 1 saves one capture per distance and orientation', () async {
       final runner = _FakeCarinaRunner();
       final session = RealBenchSession(
         clock: MonotonicClock(),
@@ -684,12 +684,25 @@ void main() {
       final outcome = await session.carinaLeds();
       expect(outcome.ok, isTrue, reason: outcome.error);
       final captures = (outcome.data['captures']! as List).cast<Map>();
-      expect(captures, hasLength(carinaLedDistancesM.length));
       expect(
-        captures.map((capture) => capture['distance_m']),
-        carinaLedDistancesM,
+        captures,
+        hasLength(carinaLedDistancesM.length * carinaLedOrientations.length),
       );
-      expect((outcome.data['directories']! as List), hasLength(4));
+      expect(
+        captures.map((capture) => capture['distance_m']).toSet(),
+        carinaLedDistancesM.toSet(),
+      );
+      expect(
+        captures.map((capture) => capture['orientation']).toSet(),
+        carinaLedOrientations.toSet(),
+      );
+      final directories = (outcome.data['directories']! as List).cast<String>();
+      expect(directories, hasLength(captures.length));
+      expect(
+        directories.toSet(),
+        hasLength(captures.length),
+        reason: 'each orientation keeps its own output directory',
+      );
     });
 
     test('Gate 1 reports the distance where the capture failed', () async {
@@ -698,13 +711,19 @@ void main() {
         captureStore: CaptureStore(Directory('${dir.path}/captures')),
         latencyStore: LatencyStore(Directory('${dir.path}/latency')),
         durations: const BenchDurations(carinaFrame: Duration(milliseconds: 1)),
-        carinaCapture: _FakeCarinaRunner(failOnCall: 3),
+        carinaCapture: _FakeCarinaRunner(failOnCall: 7),
         carinaRoot: '${dir.path}/carina',
       );
       final outcome = await session.carinaLeds();
       expect(outcome.ok, isFalse);
       expect(outcome.error, contains('0.8 m'));
-      expect((outcome.data['captures']! as List), hasLength(2));
+      expect((outcome.data['captures']! as List), hasLength(6));
+      final directories = (outcome.data['directories']! as List).cast<String>();
+      expect(
+        directories,
+        hasLength(7),
+        reason: 'the failed capture directory is packed too',
+      );
     });
 
     test('Gate 9 records the pose rate and status', () async {
@@ -722,6 +741,42 @@ void main() {
       expect(outcome.ok, isTrue, reason: outcome.error);
       expect(outcome.data['pose_rate_hz'], 99.0);
       expect(outcome.data['pose_polls'], 100);
+    });
+
+    test('Carina gates run with no bridge or tracking source', () async {
+      final runner = _FakeCarinaRunner();
+      final carinaSession = RealBenchSession(
+        clock: MonotonicClock(),
+        captureStore: CaptureStore(Directory('${dir.path}/captures')),
+        latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+        durations: const BenchDurations(carinaFrame: Duration(milliseconds: 1)),
+        carinaCapture: runner,
+        carinaRoot: '${dir.path}/carina',
+      );
+      final container = ProviderContainer(
+        overrides: [
+          benchSessionProvider.overrideWithValue(() async => null),
+          carinaOnlySessionProvider.overrideWithValue(
+            () async => carinaSession,
+          ),
+          carinaCaptureProvider.overrideWithValue(runner),
+        ],
+      );
+      addTearDown(container.dispose);
+      final sub = container.listen(benchControllerProvider, (_, _) {});
+      addTearDown(sub.close);
+      final controller = container.read(benchControllerProvider.notifier);
+      controller.selectMode(BenchMode.threeDofOnly);
+      while (container.read(benchControllerProvider).step !=
+          BenchStep.carinaLeds) {
+        controller.skipCurrent();
+      }
+      await controller.runCurrent();
+      final result = container
+          .read(benchControllerProvider)
+          .resultFor(BenchStep.carinaLeds);
+      expect(result.status, BenchStatus.done, reason: result.error);
+      expect((result.data['captures']! as List), isNotEmpty);
     });
   });
 

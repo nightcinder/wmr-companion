@@ -192,7 +192,12 @@ class BenchController extends Notifier<BenchRunState> {
     }
     _setResult(step, const BenchStepResult(status: BenchStatus.running));
     try {
-      final session = await ref.read(benchSessionProvider)();
+      var session = await ref.read(benchSessionProvider)();
+      // The Carina gates need only the glasses over USB, so they run without
+      // a bridge or a tracking source attached.
+      if (session == null && _isCarinaStep(step)) {
+        session = await ref.read(carinaOnlySessionProvider)();
+      }
       if (session == null) {
         _setResult(
           step,
@@ -285,6 +290,11 @@ class BenchController extends Notifier<BenchRunState> {
     }
     return null;
   }
+
+  static bool _isCarinaStep(BenchStep step) =>
+      step == BenchStep.carinaLeds ||
+      step == BenchStep.carinaCheckerboard ||
+      step == BenchStep.carinaPose;
 
   /// Runs one segment of the 6DoF step. Each segment keeps the step current so
   /// the screen can show its own prompt and countdown; the step ends after the
