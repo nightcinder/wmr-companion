@@ -1,6 +1,6 @@
 # Run sheet: pose validation — VITURE (Pro Neckband + Luma Ultra)
 
-> **Proposed sheet, not yet run.** Nothing here is a hardware result. Every figure is recorded by the owner; all result tables are empty and must not be pre-filled. The Unity-in-Flutter relay is implemented and host-tested, but no Neckband run has happened. Current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1; the v0.7.0 prerequisite below is historical.
+> **Proposed sheet, not yet run.** Nothing here is a hardware result. Every figure is recorded by the owner; all result tables are empty and must not be pre-filled. The Unity-in-Flutter relay is implemented and host-tested, but no Neckband run has happened. Current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1; v0.7.0 is historical.
 
 Companion documents:
 
@@ -24,7 +24,7 @@ Gates covered: **1** (capture one frame), **3** (Unity-in-Flutter smoke test), *
 |---|---|
 | Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) are rejected by the adapter for hand tracking and must not be used for gate 4. An unreported model is not an error: `create()` succeeds and the Unity `start` handshake reports the real model. |
 | Host | **VITURE Pro Neckband** (Android, wireless ADB) for gates 3/4/7/8 stereo checks. The app runs on the Neckband, not on a paired phone. Gate 9 (optional C path) needs an Android phone with USB host instead. |
-| Unity | Unity 6000.0+ with Android build support, `com.unity.xr.hands`, VITURE XR SDK for Unity v0.7.0 (`com.viture.xr`). External SDK gate; not redistributable. |
+| Unity | Unity 6000.0+ with Android build support, `com.unity.xr.hands`, VITURE XR SDK for Unity v0.9.0 (`com.viture.xr`, `Viture.XR.VitureXR`; v0.7.0 is historical). External SDK gate; not redistributable. |
 | App build | Debug APK from wmr-companion `main` after ONY-612/ONY-617, built with `--dart-define=WMR_VITURE_TRACKING=true`, with the `unityLibrary` AAR linked (export pinned by CI). The VITURE slice requests `android.permission.CAMERA` only. Record app commit and export SHA. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb` (wireless for the Neckband), terminal, logcat capture, and a way to screenshot the debug overlay. |

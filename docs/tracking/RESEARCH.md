@@ -19,7 +19,7 @@ Companion research: [CAMERAS.md](../CAMERAS.md) covers raw camera access. This p
   3. Controller IMU only → the current 3DoF behaviour, unchanged.
 - **The framework** is `packages/wmr_tracking` plus `WmrCompanion.attachTrackingSource`: a `TrackingSource` seam, a normalised `TrackingFrame`, vendor capability profiles, a clock aligner, a JSON relay codec, a reusable Unity UaaL relay contract with left-handed Unity to right-handed OpenXR conversion, a shared One Euro filter and `SixDofFuser`. It is pure Dart and hardware-free to test. Kotlin and Unity belong in Flutter *plugin* packages around it, not inside it.
 - **The Android XR adapter is implemented** in `packages/wmr_tracking_android_xr` (Kotlin + Dart, default off). It compiles and its host tests pass, but it has not run on an Android XR device or glasses, so nothing here is a hardware result.
-- **The VITURE Pro Neckband relay is implemented** in `packages/wmr_tracking_viture` (Dart + Kotlin UaaL relay plugin + minimal Unity C# bridge script, default off). Dart and Kotlin compile and pass host/JVM tests without the proprietary Unity 6000.0+ UaaL export or VITURE Unity SDK (`com.viture.xr` v0.7.0); no Neckband or glasses hardware run has happened.
+- **The VITURE Pro Neckband relay is implemented** in `packages/wmr_tracking_viture` (Dart + Kotlin UaaL relay plugin + minimal Unity C# bridge script, default off). Dart and Kotlin compile and pass host/JVM tests without the proprietary Unity 6000.0+ UaaL export or VITURE Unity SDK (`com.viture.xr` v0.9.0; targeted by current code per ONY-378, while v0.7.0 is historical); no Neckband or glasses hardware run has happened.
 
 
 ## What "hand tracking" means for this project
@@ -138,14 +138,14 @@ Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glas
 
 ### Unity XR SDK (the hand-tracking path)
 
-- The VITURE XR SDK for Unity 0.7.0 documents **6DoF tracking**, **hand tracking** (skeletal joints, built-in and custom gestures), XR Hands/XRI integration, camera access and marker tracking.
+- The VITURE XR SDK for Unity (v0.9.0 targeted; v0.7.0 research record) documents **6DoF tracking**, **hand tracking** (skeletal joints, built-in and custom gestures), XR Hands/XRI integration, camera access and marker tracking.
 - **Requirements are the whole story: Unity 6000.0+, Android build support, and a VITURE Pro Neckband with compatible glasses.** The docs list the Pro Neckband as required hardware, full stop. Luma Ultra is the 6DoF model; Luma, Luma Pro, Pro, One and One Lite are 3DoF.
 - Hand tracking is a first-class API: `VitureXR.HandTracking.IsActive`, `Start()`, `Stop()`, `filterMode` (`Responsive`/`Stable`) and `aimSensitivity` (6DoF only), with joints supplied to Unity XR Hands and interactions built on XRI. The SDK also has a "Activate Hand Tracking on Startup" project setting. There is no Flutter or native C hand-tracking API documented.
 - **The Pro Neckband is a viable companion host, not a dead end.** It runs Android, has wireless ADB, and runs the Unity app itself. A Flutter Android app on the Neckband can embed the Unity scene (UaaL), keep BLE and fusion in Dart, and get real hand joints. The phone-only architecture will need a relay instead.
 - **Do not expect hands from the C SDK on the phone.** The C library talks to the glasses over USB and has no hand pipeline; hand tracking is computed for the Neckband's Unity XR runtime.
 
 **Companion path:** two VITURE adapters, in preference order.
-1. **Neckband + embedded Unity (implemented in `wmr_tracking_viture`, default off).** Flutter app on the Pro Neckband, Unity 6000.0+ UaaL module with the VITURE XR SDK (`com.viture.xr` v0.7.0) and `com.unity.xr.hands`, `UnitySendMessage` for `UnityRelayCommand`s (`start`, `stop`, `dispose`, `recenter`, `configure`) and a JNI/`AndroidJavaClass` callback (`WmrTrackingViturePlugin.onUnityFrame`) streaming `TrackingFrame` JSON back to Dart. Head recentering delegates to `VitureXR.HeadTracking.SetWorldOrigin()`. Only `LumaUltra` advertises 6DoF head and 26-joint hand tracking; 3DoF glasses (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) and unreported glasses models are rejected as `unsupported` for hand tracking. Enable with `--dart-define=WMR_VITURE_TRACKING=true`.
+1. **Neckband + embedded Unity (implemented in `wmr_tracking_viture`, default off).** Flutter app on the Pro Neckband, Unity 6000.0+ UaaL module with the VITURE XR SDK (`com.viture.xr` v0.9.0; v0.7.0 historical) and `com.unity.xr.hands`, `UnitySendMessage` for `UnityRelayCommand`s (`start`, `stop`, `dispose`, `recenter`, `configure`) and a JNI/`AndroidJavaClass` callback (`WmrTrackingViturePlugin.onUnityFrame`) streaming `TrackingFrame` JSON back to Dart. Head recentering delegates to `VitureXR.HeadTracking.SetWorldOrigin()`. Only `LumaUltra` advertises 6DoF head and 26-joint hand tracking; 3DoF glasses (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) and unreported glasses models are rejected as `unsupported` for hand tracking. Enable with `--dart-define=WMR_VITURE_TRACKING=true`.
 2. **C SDK over FFI (head only, out of scope for ONY-213).** Wrap `libglasses` on the phone; poll `get_gl_pose_carina` or register the IMU callback. It gives head pose but no hands, so it lands on the head-relative fallback. The stereo grayscale feed is interesting for future LED tracking but not usable yet: 25 Hz, unknown IR sensitivity, and no calibration or extrinsic documentation in what was read.
 
 
@@ -199,10 +199,17 @@ All accessed 2026-10-25.
 - Rokid UXR docs (archived 2021, Dock/Phone SDK split): https://github.com/RokidGlass/UXR-docs
 - Rokid UXR 3.0 field notes (Unity 2022, input modes, gesture interaction; community): https://github.com/fallingheaven/Rokid-Striking-Iron-Flower/blob/main/Rokid%20UXR3.0%20SDK%E4%BD%BF%E7%94%A8%E6%80%BB%E7%BB%93.md
 - VITURE C glasses SDK: https://www.viture.com/developer/glasses-sdk/glasses
-- VITURE Unity XR SDK 0.7.0 (Pro Neckband requirement, `VitureXR.HandTracking`): https://www.viture.com/developer/unity-sdk/unity
+- VITURE Unity XR SDK (v0.9.0 current, v0.7.0 historical research; Pro Neckband requirement, `VitureXR.HandTracking`): https://www.viture.com/developer/unity-sdk/unity
 - Unity as a Library (Android): https://docs.unity3d.com/Manual/UnityasaLibrary-Android.html
 - Unity `UnitySendMessage` from Java/Kotlin: https://docs.unity3d.com/Manual/android-plugins-csharp-code-from-java-kotlin.html
 - `flutter_embed_unity` (UaaL packaging reference): https://github.com/learntoflutter/flutter_embed_unity
+
+## BLE HOGP vs Companion Android HID coexistence
+
+When using the ESP32 WMR Bridge with Android hosts (including phone, VITURE Pro Neckband, and Beam Pro):
+- The ESP32 firmware advertises standard BLE HID-over-GATT (HOGP, service `0x1812`) and `0xFF10` concurrently on the same LE link. Android binds the bridge's HOGP gamepad profile directly at the OS level upon bonding.
+- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`).
+- **Coexistence rule**: Testers must **not** enable Companion app HID output while the phone/host is paired to the bridge's HOGP gamepad. Running both creates duplicate and conflicting input devices in Android games and testers. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
 - OpenXR hand tracking extension (joint names): https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#XR_EXT_hand_tracking
 
 
