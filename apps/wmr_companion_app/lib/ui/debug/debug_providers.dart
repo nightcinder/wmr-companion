@@ -12,6 +12,7 @@ import 'package:wmr_core/domain/synthetic_motion.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 import 'package:wmr_tracking_android_xr/wmr_tracking_android_xr.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 import 'package:wmr_tracking_xreal/wmr_tracking_xreal.dart';
 
@@ -277,6 +278,7 @@ final decodedViewProvider = StreamProvider.family<DecodedView, DebugSource>((
 enum DebugTrackingSource {
   none('None', null),
   simulated('Simulated', null),
+  auto('Auto (USB)', null),
   androidXr('Android XR', 'WMR_ANDROID_XR_TRACKING'),
   viture('VITURE', 'WMR_VITURE_TRACKING'),
   xreal('XREAL', 'WMR_XREAL_TRACKING');
@@ -285,10 +287,29 @@ enum DebugTrackingSource {
 
   final String label;
 
-  /// The `--dart-define` that enables this source. Null for [none] and
-  /// [simulated], which need no platform support.
+  /// The `--dart-define` that enables this source. Null for [none], [simulated]
+  /// and [auto], which gate on the vendor component flags instead.
   final String? buildFlag;
 }
+
+/// Picks the vendor source from the native USB/host detection instead of a
+/// manual vendor choice.
+///
+/// The selector only calls the detector when at least one vendor component is
+/// built in, so a flag-off build never touches `wmr_tracking_dispatch`.
+final debugTrackingSelectorProvider = Provider<TrackingSourceSelector>((ref) {
+  return TrackingSourceSelector(
+    detector: const PlatformGlassesDetector(),
+    flags: TrackingSourceFlags(
+      viture: VitureTracking.enabled,
+      xreal: XrealTracking.enabled,
+      androidXr: AndroidXrTracking.enabled,
+    ),
+    vitureSource: VitureNeckbandTrackingSource.create,
+    xrealSource: XrealAir2UltraTrackingSource.create,
+    androidXrSource: AndroidXrTrackingSource.create,
+  );
+});
 
 /// The source selected in the debug screen. [DebugTrackingSource.none] by
 /// default: the viewer shows the controller's 3DoF orientation with an
@@ -328,6 +349,10 @@ Future<TrackingSource?> createDebugTrackingSource(
   switch (choice) {
     case DebugTrackingSource.none:
       return null;
+    case DebugTrackingSource.auto:
+      // Auto detection needs the selector, which the notifier owns; it never
+      // reaches this per-vendor factory.
+      return null;
     case DebugTrackingSource.simulated:
       return FakeTrackingSource();
     case DebugTrackingSource.androidXr:
@@ -346,6 +371,7 @@ class DebugTrackingAttachment {
     this.source,
     this.error,
     this.disabled = false,
+    this.message,
   });
 
   final DebugTrackingSource choice;
@@ -359,6 +385,10 @@ class DebugTrackingAttachment {
 
   /// The source exists but its default-off build flag is not set.
   final bool disabled;
+
+  /// Extra status text, such as the selector's detection result for
+  /// [DebugTrackingSource.auto].
+  final String? message;
 
   bool get running => source != null;
 }
@@ -424,6 +454,24 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       state = DebugTrackingSelection(
         choice: choice,
         attachment: AsyncValue.data(DebugTrackingAttachment(choice: choice)),
+      );
+      return;
+    }
+    if (choice == DebugTrackingSource.auto) {
+      final selected = await ref.read(debugTrackingSelectorProvider).select();
+      if (generation != _generation) {
+        final created = selected.source;
+        if (created != null) await releaseDebugTrackingSource(created);
+        return;
+      }
+      if (selected.source != null) _owned = selected.source;
+      _publish(
+        generation,
+        DebugTrackingAttachment(
+          choice: choice,
+          source: selected.source,
+          message: selected.message,
+        ),
       );
       return;
     }
@@ -516,6 +564,23 @@ class DebugPoses {
   ControllerPose? forHand(int hand) => hand == 0 ? left : right;
 }
 
+/// The [SixDofFuser] behind [debugPosesProvider] for [source].
+///
+/// Hoisted out of the stream provider so "Reset orientation" can drop the
+/// offsets learned under the old IMU heading. It is recreated with the tracking
+/// source, so switching sources never carries state across.
+final debugFuserProvider = Provider.family<SixDofFuser?, DebugSource>((
+  ref,
+  source,
+) {
+  final tracking = ref
+      .watch(debugTrackingSourceProvider)
+      .attachment
+      .value
+      ?.source;
+  return tracking == null ? null : SixDofFuser();
+});
+
 /// Poses for the 6DoF viewer.
 ///
 /// A loaded recording wins over the live stream and is stepped by
@@ -550,9 +615,13 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   final choice = selection.choice;
   final tracking = selection.attachment.value?.source;
   final simulated = choice == DebugTrackingSource.simulated;
-  final fuser = tracking == null ? null : SixDofFuser();
+  final fuser = ref.watch(debugFuserProvider(source));
   const motion = SyntheticMotion();
   final clock = Stopwatch()..start();
+  final transport = source == DebugSource.fake
+      ? ref.watch(transportProvider)
+      : ref.watch(realLinkTransportProvider);
+  final hostClock = service?.transport.clock ?? transport.clock;
   final aligner = SourceClockAligner();
   StreamSubscription<TrackingFrame>? trackingSub;
   Pose? head;
@@ -567,7 +636,7 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
             : frame.withHostTime(
                 aligner.align(
                   sourceTimeNs: frame.timeNs,
-                  hostTimeNs: clock.elapsed.inMicroseconds * 1000,
+                  hostTimeNs: hostClock.nowUs * 1000,
                 ),
               );
         fuser?.onTrackingFrame(aligned);
@@ -594,7 +663,10 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   void tick() {
     if (controller.isClosed) return;
     final now = clock.elapsed;
-    final nowNs = now.inMicroseconds * 1000 + 1;
+    // Frames are aligned to the transport's monotonic clock and controller
+    // samples already live in it, so poses tick on that same clock. The
+    // synthetic motion phase above keeps its own tick clock.
+    final nowNs = hostClock.nowUs * 1000 + 1;
     final trackingSource = tracking;
     final fuserState = fuser;
     if (simulated && trackingSource != null && fuserState != null) {

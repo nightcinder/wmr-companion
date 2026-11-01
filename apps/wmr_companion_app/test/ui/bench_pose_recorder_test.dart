@@ -24,6 +24,19 @@ final _recorderProvider =
       ),
     );
 
+/// The same recorder with a controller IMU attached, so captures also carry
+/// the fused `left`/`right` poses.
+final _recorderWithImuProvider =
+    Provider.family<RealBenchPoseRecorder, ({Directory dir, HostClock clock})>(
+      (ref, key) => RealBenchPoseRecorder(
+        ref: ref,
+        store: PoseRecordingStore(key.dir),
+        runtime: 'viture',
+        controllerOrientation: (_) => Quaternion.identity(),
+        hostClock: key.clock,
+      ),
+    );
+
 class _FixedTracking extends DebugTrackingSourceNotifier {
   _FixedTracking(this.selection);
 
@@ -137,6 +150,36 @@ void main() {
     expect(recording.provenance['run_index'], 2);
     expect(recording.provenance['anchor_rate_hz'], closeTo(1000, 0.1));
     expect(result.anchorRateHz, closeTo(1000, 0.1));
+  });
+
+  test('records fused controller poses alongside the tracking frame', () async {
+    final subject = container.read(
+      _recorderWithImuProvider((
+        dir: dir,
+        clock: () => hostArrivals.removeAt(0),
+      )),
+    );
+    final future = subject.record(
+      hand: 0,
+      segment: PoseSegment.still,
+      duration: const Duration(milliseconds: 50),
+    );
+    feed(1000000);
+    feed(2000000, moved: true);
+    final result = await future;
+
+    final recording = PoseRecording.decode(
+      File(result.path).readAsStringSync(),
+    );
+    expect(recording.samples, hasLength(2));
+    final first = recording.samples.first;
+    expect(first.left?.hand, TrackedHand.left);
+    expect(first.right?.hand, TrackedHand.right);
+    expect(first.left?.hostTimeNs, 1000000);
+    expect(first.right?.hostTimeNs, 1000000);
+    expect(first.left?.orientation.x, 0);
+    expect(first.left?.orientation.w, 1);
+    expect(first.tracking, isNotNull);
   });
 
   test('vendor-only timestamps are aligned to the host clock', () async {

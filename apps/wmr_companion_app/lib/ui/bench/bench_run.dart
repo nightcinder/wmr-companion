@@ -725,6 +725,7 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
               id: service.protocolFor(id)?.firmwareVersion,
           })
         : null;
+    final clock = service?.transport.clock ?? MonotonicClock();
     final poseRecorder = availability.available
         ? RealBenchPoseRecorder(
             ref: ref,
@@ -732,13 +733,19 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
             runtime: availability.runtime!,
             appCommit: appCommit,
             firmwareSha: firmwareSha,
+            // Same monotonic clock as the session and controller samples, so
+            // a capture's host_ns does not restart at every segment.
+            hostClock: () => clock.nowUs * 1000,
+            controllerOrientation: service == null
+                ? null
+                : (hand) => service.pipeline(hand).orientation,
           )
         : null;
     return RealBenchSession(
       service: connected ? service : null,
       tracking: tracking,
       poseRecorder: poseRecorder,
-      clock: service?.transport.clock ?? MonotonicClock(),
+      clock: clock,
       captureStore: await ref.read(captureStoreProvider.future),
       latencyStore: await ref.read(latencyStoreProvider.future),
       durations: ref.read(benchDurationsProvider),
