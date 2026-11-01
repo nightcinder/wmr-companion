@@ -1,4 +1,4 @@
-# External tester quickstart : WMR Companion v0.3.5 (unified APK)
+# External tester quickstart : WMR Companion v0.3.6 (unified APK)
 
 Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
@@ -41,9 +41,9 @@ regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.5/wmr-companion-0.3.5-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.6/wmr-companion-0.3.6-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.5/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.6/SHA256SUMS
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
@@ -62,6 +62,8 @@ Skip this in setup B.
 3. On the **Connect** screen, scan for `WMR Bridge` and connect.
 4. Confirm the screen says **connected, streaming** with negotiated **MTU** 517 (>= 61 is usable). Record the MTU shown.
 5. Tap **Open 3D debug view**; stay on the debug screen.
+
+> **HID / Gamepad Coexistence Warning:** Firmware 0.3.0+ exposes a standard BLE HID gamepad (HOGP) directly to Android upon pairing. Do not enable app-level HID output (`BluetoothHidDevice`) in WMR Companion at the same time: registering the app HID peripheral disables Android's HID Host service (stopping bridge HOGP input reception) and degrades latency across the phone's shared radio. Keep Companion app HID output disabled.
 
 ## 4. Pair controllers : setups A and C only
 
@@ -139,7 +141,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.0
-- App: 0.3.5 unified (signed release)
+- App: 0.3.6 unified (signed release)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none

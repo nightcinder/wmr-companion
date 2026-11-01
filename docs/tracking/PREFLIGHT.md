@@ -1,6 +1,6 @@
 # 6DoF pre-flight: named path, current build, desk evidence
 
-Status: **desk work only, re-checked 2026-10-31 on v0.3.5.** No glasses, phone
+Status: **desk work only, re-checked 2026-10-31 on v0.3.6.** No glasses, phone
 or Unity runtime was started. The artifact checks below are real host-side results; every tracking
 figure and permission prompt remains a hardware gate.
 
@@ -36,9 +36,9 @@ purchases for the same unproven gates.
 
 | Item | Value |
 |---|---|
-| Artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk` |
-| Release | [`v0.3.5`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.5), commit `6648ffd` |
-| APK SHA-256 | `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` |
+| Artifact | `wmr-companion-0.3.6-unified-arm64-v8a.apk` |
+| Release | [`v0.3.6`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.6), commit `627d191` |
+| APK SHA-256 | `42a5b01992237a8b1c7da1fc711f11e848c362389f811c61d30a55bf22735407` |
 | Unity export SHA-256 | `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072` (`unity-export-1.1`, pinned in CI) |
 | Flavor | `unified`: VITURE 0.9.0 + XREAL 3.1.0 in one `unityLibrary`, vendor selected at runtime |
 | Signing | release key; tester build, not a store upload |
@@ -54,13 +54,13 @@ apps/wmr_companion_app/tool/build_flavor.sh unified --debug
 Validate any unified APK without a device before installing it:
 
 ```bash
-gh release download v0.3.5 -p 'wmr-companion-0.3.5-unified-arm64-v8a.apk'
-python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.5-unified-arm64-v8a.apk
+gh release download v0.3.6 -p 'wmr-companion-0.3.6-unified-arm64-v8a.apk'
+python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.6-unified-arm64-v8a.apk
 ```
 
 ## 3. Permission and session path (host-validated)
 
-`check_unified_apk.py` passed on the v0.3.5 release artifact with its recorded
+`check_unified_apk.py` passed on the v0.3.6 release artifact with its recorded
 SHA-256, re-run 2026-10-31 against the downloaded release asset.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
 without `android:required` counts as required, as Android does : `camera` must
@@ -101,6 +101,13 @@ Unity start, frame rate and joint delivery are gates 3 and 5 in the run sheet.
    still unmeasured. They are run-sheet fields, not assumptions.
 6. **VITURE remains unvalidated.** It is carried in the same artifact; the
    unified export's coexistence of both SDKs is still only host-tested.
+
+## 4.1 BLE HOGP vs Companion Android HID coexistence
+
+When using the ESP32 WMR Bridge with Android hosts (including phone, VITURE Pro Neckband, and Beam Pro):
+- The ESP32 firmware advertises standard BLE HID-over-GATT (HOGP, service `0x1812`) and `0xFF10` concurrently on the same LE link. Android binds the bridge's HOGP gamepad profile directly at the OS level upon bonding.
+- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`) to send controller reports to a remote PC or console host.
+- **Coexistence rule**: Testers must **not** enable Companion app HID output while the host is paired to the bridge's HOGP gamepad. Registering `BluetoothHidDevice` disables Android's HID Host service (preventing the host from receiving HOGP input from the bridge) and causes radio contention on the phone between Classic HID and the BLE GATT stream. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
 
 ## 5. What was not done here
 

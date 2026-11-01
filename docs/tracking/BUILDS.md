@@ -1,4 +1,4 @@
-# Build matrix : tracking flavors (v0.3.5)
+# Build matrix : tracking flavors (v0.3.6)
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
 `apps/wmr_companion_app/tool/install_unity_export.sh`,
@@ -6,25 +6,25 @@ Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.
 `apps/wmr_companion_app/android/settings.gradle.kts`. No build here has been run on
 hardware; these are compile/packaging facts only.
 
-## Current release: v0.3.5 unified APK
+## Current release: v0.3.6 unified APK
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.3.5` (release tag) at `6648ffd` |
-| App version | `0.3.5+10` (`versionName 0.3.5`, `versionCode 2010` for `arm64-v8a`) |
-| Artifact | `wmr-companion-0.3.5-unified-arm64-v8a.apk`, 428,243,881 B, SHA-256 `f95078c7a68079eed7d78f0f17f61bc874814d8c5dcd9b2cfea6598c7dd712dc` |
+| Tag / commit | `v0.3.6` (release tag) at `627d191` |
+| App version | `0.3.6+11` (`versionName 0.3.6`, `versionCode 2011` for `arm64-v8a`) |
+| Artifact | `wmr-companion-0.3.6-unified-arm64-v8a.apk`, 428,243,881 B, SHA-256 `42a5b01992237a8b1c7da1fc711f11e848c362389f811c61d30a55bf22735407` |
 | Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
 | Licence gate | Pinned `unity-export-1.1` (SHA-256 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072`); owner approved SDK redistribution (ONY-354) |
 
-Release notes: [`v0.3.5`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.5).
+Release notes: [`v0.3.6`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.6).
 Carrying the VITURE stereo Unity player host (ONY-612), Android XR full permission set (ONY-614), pinned unity-export-1.1 (ONY-617), and the self-hosted Liesa release build (ONY-605).
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
-metadata and the tracking/session classes in the dex. It passed on the v0.3.5
+metadata and the tracking/session classes in the dex. It passed on the v0.3.6
 artifact; the open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
 
 ## Release signing
