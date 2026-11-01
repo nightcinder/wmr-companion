@@ -3,14 +3,19 @@
 // Attach to the Main Camera of the exported scene. It assumes the camera is
 // already the XR/stereo target, keeps it targeting both eyes, builds a small
 // depth ladder so a tester can see one coherent 3D image, and reports the
-// startup stages to Kotlin through
-//   com.onyxlens.wmr_tracking_viture.WmrTrackingViturePlugin.onUnityStage
+// startup stages to Kotlin through the selected vendor plugin's
+// `onUnityStage` entry point (VITURE by default, XREAL when configured).
 //
 // The VITURE loader owns the actual stereo presentation mode; this script only
 // reads it back. It never switches a mono player into stereo at runtime.
+//
+// The loader/stereo expectations are VITURE-only. In a unified scene the rig
+// stays inert until a VITURE session is running, so an XREAL session (or an
+// idle scene before any start) never reports the VITURE 10 s loader timeout.
 
 using System;
 using System.Collections;
+using OnyxLens.WmrTrackingUnity.Dispatch;
 using OnyxLens.WmrTrackingUnity.Stereo;
 using UnityEngine;
 using UnityEngine.XR;
@@ -23,8 +28,19 @@ namespace OnyxLens.WmrTrackingUnity
     {
         private const string ViturePluginClass =
             "com.onyxlens.wmr_tracking_viture.WmrTrackingViturePlugin";
+        private const string XrealPluginClass =
+            "com.onyxlens.wmr_tracking_xreal.WmrTrackingXrealPlugin";
 
         [SerializeField] private bool reportToHost = true;
+
+        // Which Kotlin plugin receives the stage/error reports. A standalone
+        // XREAL scene sets this to "xreal"; the unified scene follows the
+        // vendor selected on the unified bridge.
+        [SerializeField] private string stageVendor = VendorNames.Viture;
+
+        // Optional; found automatically. Present in the unified scene, absent
+        // in the per-vendor projects.
+        [SerializeField] private WmrTrackingUnifiedBridge unifiedBridge;
 
         // A late loader is reported instead of leaving the tester on a blank
         // surface with no explanation.
@@ -38,6 +54,8 @@ namespace OnyxLens.WmrTrackingUnity
         private bool _firstFrameReported;
         private bool _timeoutReported;
         private bool _sessionBegun;
+        private bool _vitureSession;
+        private int _sessionId;
         private float _awakeAt;
         private string _stereoMode = StereoMode.Unknown;
 
@@ -48,11 +66,16 @@ namespace OnyxLens.WmrTrackingUnity
         public bool IsStereo => StereoMode.IsStereo(_stereoMode);
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-        private AndroidJavaClass _pluginClass;
+        private AndroidJavaClass _viturePluginClass;
+        private AndroidJavaClass _xrealPluginClass;
 #endif
 
         private void Awake()
         {
+            if (unifiedBridge == null)
+            {
+                unifiedBridge = FindObjectOfType<WmrTrackingUnifiedBridge>();
+            }
             _camera = GetComponent<Camera>();
             _awakeAt = Time.unscaledTime;
             ConfigureCamera();
@@ -122,6 +145,7 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void BeginSession()
         {
+            _sessionId++;
             _loaderReported = false;
             _firstFrameReported = false;
             _timeoutReported = false;
@@ -132,12 +156,63 @@ namespace OnyxLens.WmrTrackingUnity
                 _camera = GetComponent<Camera>();
             }
             ConfigureCamera();
+            // Reported even before a vendor is selected: Kotlin uses this
+            // stage to replay the pending `start` command.
             Report(StereoStage.PlayerHosted, StereoMode.Unknown);
-            StartCoroutine(ReportFirstFrameAfterLoader());
+            if (_vitureSession)
+            {
+                StartCoroutine(ReportFirstFrameAfterLoader(_sessionId));
+            }
+        }
+
+        private bool IsXrealStageVendor() =>
+            string.Equals(stageVendor, VendorNames.Xreal, StringComparison.OrdinalIgnoreCase);
+
+        private string EffectiveStageVendor()
+        {
+            if (unifiedBridge != null)
+            {
+                VendorBackend selected = unifiedBridge.SelectedVendor;
+                if (selected != VendorBackend.None)
+                {
+                    return VendorNames.ToWireName(selected);
+                }
+            }
+            return IsXrealStageVendor() ? VendorNames.Xreal : VendorNames.Viture;
+        }
+
+        private bool IsVitureSession()
+        {
+            if (unifiedBridge == null)
+            {
+                // Per-vendor project: the rig is VITURE unless configured for
+                // an XREAL-only scene.
+                return !IsXrealStageVendor();
+            }
+            return unifiedBridge.IsRunning && unifiedBridge.ActiveVendor == VendorBackend.Viture;
         }
 
         private void Update()
         {
+            if (!IsVitureSession())
+            {
+                _vitureSession = false;
+                return;
+            }
+            if (!_vitureSession)
+            {
+                // First VITURE frame of this session: start the loader clock
+                // now, not at player creation. Otherwise an idle scene or a
+                // late start reports a spurious 10 s timeout.
+                _vitureSession = true;
+                _sessionId++;
+                _loaderReported = false;
+                _firstFrameReported = false;
+                _timeoutReported = false;
+                _stereoMode = StereoMode.Unknown;
+                _awakeAt = Time.unscaledTime;
+                StartCoroutine(ReportFirstFrameAfterLoader(_sessionId));
+            }
             float elapsed = Time.unscaledTime - _awakeAt;
             if (!_loaderReported)
             {
@@ -183,12 +258,14 @@ namespace OnyxLens.WmrTrackingUnity
         // pipeline and for URP alike, unlike OnPostRender. The boot frame is
         // skipped because the loader has not been started yet; the report is
         // the first frame produced in stereo, which is what a tester needs.
-        private IEnumerator ReportFirstFrameAfterLoader()
+        private IEnumerator ReportFirstFrameAfterLoader(int sessionId)
         {
-            while (!_firstFrameReported && !_timeoutReported)
+            while (sessionId == _sessionId && _vitureSession &&
+                   !_firstFrameReported && !_timeoutReported)
             {
                 yield return new WaitForEndOfFrame();
-                if (_firstFrameReported || _timeoutReported || !_loaderReported) continue;
+                if (sessionId != _sessionId || !_vitureSession ||
+                    _firstFrameReported || _timeoutReported || !_loaderReported) continue;
                 _firstFrameReported = true;
                 Report(StereoStage.FirstFrame, _stereoMode);
                 Debug.Log(
@@ -204,7 +281,8 @@ namespace OnyxLens.WmrTrackingUnity
 #if UNITY_ANDROID && !UNITY_EDITOR
             try
             {
-                GetPluginClass()?.CallStatic("onUnityStage", stage, stereoMode);
+                GetPluginClass(EffectiveStageVendor())
+                    ?.CallStatic("onUnityStage", stage, stereoMode);
             }
             catch (Exception)
             {
@@ -220,7 +298,8 @@ namespace OnyxLens.WmrTrackingUnity
 #if UNITY_ANDROID && !UNITY_EDITOR
             try
             {
-                GetPluginClass()?.CallStatic("onUnityError", code, message);
+                GetPluginClass(EffectiveStageVendor())
+                    ?.CallStatic("onUnityError", code, message);
             }
             catch (Exception)
             {
@@ -230,13 +309,21 @@ namespace OnyxLens.WmrTrackingUnity
         }
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-        private AndroidJavaClass GetPluginClass()
+        private AndroidJavaClass GetPluginClass(string vendor)
         {
-            if (_pluginClass == null)
+            if (string.Equals(vendor, VendorNames.Xreal, StringComparison.OrdinalIgnoreCase))
             {
-                _pluginClass = new AndroidJavaClass(ViturePluginClass);
+                if (_xrealPluginClass == null)
+                {
+                    _xrealPluginClass = new AndroidJavaClass(XrealPluginClass);
+                }
+                return _xrealPluginClass;
             }
-            return _pluginClass;
+            if (_viturePluginClass == null)
+            {
+                _viturePluginClass = new AndroidJavaClass(ViturePluginClass);
+            }
+            return _viturePluginClass;
         }
 #endif
     }

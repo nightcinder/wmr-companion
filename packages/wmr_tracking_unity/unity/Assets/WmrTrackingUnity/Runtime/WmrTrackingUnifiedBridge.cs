@@ -203,15 +203,23 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void HandleConfigure(RelayDecision decision, string json)
         {
-            if (!Activate(decision.Target, out string failure))
+            // Do not enable the vendor backend yet. Enabling it runs `Awake`,
+            // which queries the vendor SDK, and the loader gate has not run.
+            // Selection is recorded here; `start` activates the backend after
+            // `EnsureOnly` initialises the matching XR loader.
+            if (!HasBackend(decision.Target))
             {
-                ReportError(decision.Target, "unavailable", failure);
+                ReportError(
+                    decision.Target,
+                    "unavailable",
+                    "No " + VendorNames.ToWireName(decision.Target) + " backend is wired"
+                );
                 return;
             }
 
             // The XREAL relay has no `configure` command; forwarding it would
             // raise a spurious `onUnityError("protocol", ...)` even though
-            // selection succeeded. XREAL only needs the backend enabled here.
+            // selection succeeded.
             if (decision.Target != VendorBackend.Xreal)
             {
                 Forward(decision.Target, json);
@@ -225,13 +233,9 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void HandleStart(RelayDecision decision, string json)
         {
-            if (!Activate(decision.Target, out string failure))
-            {
-                _dispatch.StartFailed(decision);
-                ReportError(decision.Target, "unavailable", failure);
-                return;
-            }
-
+            // Initialise the vendor loader before the backend is enabled, so
+            // the bridge's `Awake` SDK query runs against the selected loader
+            // instead of whatever loader was active before.
             if (initialiseVendorLoader)
             {
                 VendorLoaderGate.Result result = _loaderGate.EnsureOnly(decision.Target);
@@ -250,6 +254,13 @@ namespace OnyxLens.WmrTrackingUnity
                     return;
 #endif
                 }
+            }
+
+            if (!Activate(decision.Target, out string failure))
+            {
+                _dispatch.StartFailed(decision);
+                ReportError(decision.Target, "unavailable", failure);
+                return;
             }
 
             Forward(decision.Target, json);
@@ -288,6 +299,12 @@ namespace OnyxLens.WmrTrackingUnity
             _loaderGate?.Deinitialise();
             _dispatch.Accepted(decision);
             Debug.Log("[WmrTrackingUnity] disposed");
+        }
+
+        private bool HasBackend(VendorBackend vendor)
+        {
+            return (vendor == VendorBackend.Viture && vitureBackend != null) ||
+                   (vendor == VendorBackend.Xreal && xrealBackend != null);
         }
 
         private bool Activate(VendorBackend vendor, out string failure)
@@ -396,9 +413,9 @@ namespace OnyxLens.WmrTrackingUnity
             );
             ErrorReported?.Invoke(code, message);
 #if UNITY_ANDROID && !UNITY_EDITOR
-            AndroidJavaClass plugin = GetPluginClass(vendor);
             try
             {
+                AndroidJavaClass plugin = GetPluginClass(vendor);
                 plugin?.CallStatic("onUnityError", code, message);
             }
             catch (Exception)

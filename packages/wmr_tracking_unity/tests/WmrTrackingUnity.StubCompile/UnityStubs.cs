@@ -10,6 +10,8 @@ namespace UnityEngine
     public class Object
     {
         public string name { get; set; }
+
+        public static T FindObjectOfType<T>() where T : class => null;
     }
 
     public class GameObject : Object

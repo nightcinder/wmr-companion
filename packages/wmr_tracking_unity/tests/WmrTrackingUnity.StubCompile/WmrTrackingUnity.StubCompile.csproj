@@ -15,6 +15,18 @@
   <PropertyGroup Condition="'$(UnityEditorStub)' != 'true'">
     <DefineConstants>$(DefineConstants);UNITY_ANDROID</DefineConstants>
   </PropertyGroup>
+  <!-- The on-device branches are gated by Unity version defines. The default
+       build exercises the no-SDK fallbacks; `test_dispatch.sh` also builds
+       with these set so the real SDK paths are type-checked. -->
+  <PropertyGroup Condition="'$(WmrVitureXrSdk)' == 'true'">
+    <DefineConstants>$(DefineConstants);WMR_VITURE_XR_SDK</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(WmrXrealXrSdk)' == 'true'">
+    <DefineConstants>$(DefineConstants);WMR_XREAL_XR_SDK</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(WmrUnityXrHands)' == 'true'">
+    <DefineConstants>$(DefineConstants);WMR_UNITY_XR_HANDS</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/Dispatch/*.cs" />
     <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/*.cs" />
@@ -24,5 +36,6 @@
     <Compile Include="../../unity/Assets/WmrTrackingViture/Runtime/*.cs" />
     <Compile Include="../../unity/Assets/WmrTrackingXreal/Runtime/*.cs" />
     <Compile Include="UnityStubs.cs" />
+    <Compile Include="VendorSdkStubs.cs" />
   </ItemGroup>
 </Project>

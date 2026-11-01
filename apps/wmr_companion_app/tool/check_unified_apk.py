@@ -77,6 +77,13 @@ UNITY_SUBSYSTEMS = {
 # export carries none of them, so their absence proves the release artifact
 # does not hold the current bridge.
 REQUIRED_STEREO_LITERALS = ("playerHosted", "loaderStarted", "firstFrame")
+# The unified relay replaced the per-vendor Unity scenes; an APK built from an
+# export with only the old vendor bridges must not pass.
+REQUIRED_METADATA_LITERALS = (
+    "WmrTrackingUnifiedBridge",
+    "VendorLoaderGate",
+    "VendorRelayDispatch",
+)
 UNITY_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 
 
@@ -245,12 +252,21 @@ def main(argv: list[str]) -> int:
             fail(f"missing features: {sorted(missing)}")
             failures += 1
         else:
-            camera_required = features.get("android.hardware.camera")
-            if is_required(camera_required):
-                fail("android.hardware.camera is required (explicitly or by default); it would filter devices")
-                failures += 1
-            else:
-                print("PASS features: bluetooth_le, camera(required=false), usb.host")
+            for feature in ("android.hardware.camera", "android.hardware.usb.host"):
+                if is_required(features.get(feature)):
+                    fail(
+                        f"{feature} is required (explicitly or by default); "
+                        "it would filter devices"
+                    )
+                    failures += 1
+            if not any(
+                is_required(features.get(feature))
+                for feature in ("android.hardware.camera", "android.hardware.usb.host")
+            ):
+                print(
+                    "PASS features: bluetooth_le, camera(required=false), "
+                    "usb.host(required=false)"
+                )
 
         missing_libs = REQUIRED_LIBS - names
         if missing_libs:
@@ -277,12 +293,16 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             metadata = apk.read(UNITY_METADATA)
-            missing_stages = [name for name in REQUIRED_STEREO_LITERALS if name.encode() not in metadata]
-            if missing_stages:
-                fail(f"IL2CPP metadata is from the pre-ONY-612 export, missing stereo stages: {missing_stages}")
+            required = REQUIRED_STEREO_LITERALS + REQUIRED_METADATA_LITERALS
+            missing_symbols = [name for name in required if name.encode() not in metadata]
+            if missing_symbols:
+                fail(
+                    "IL2CPP metadata is stale, missing the stereo or unified "
+                    f"dispatch path: {missing_symbols}"
+                )
                 failures += 1
             else:
-                print(f"PASS stereo stages: {list(REQUIRED_STEREO_LITERALS)}")
+                print(f"PASS metadata: {list(required)}")
 
         dex = b"".join(apk.read(name) for name in names if name.startswith("classes") and name.endswith(".dex"))
         missing_classes = {name for name in REQUIRED_DEX_CLASSES if name.encode() not in dex}

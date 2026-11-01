@@ -37,6 +37,12 @@ namespace OnyxLens.WmrTrackingViture
 
         private bool _running;
         private bool _applicationPaused;
+#if WMR_UNITY_XR_HANDS
+        private bool _handReadErrorReported;
+#endif
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private bool _relayErrorReported;
+#endif
         private Transform _headTransform;
 
         /// <summary>True while a `start` command has been accepted and not stopped.</summary>
@@ -116,7 +122,17 @@ namespace OnyxLens.WmrTrackingViture
             {
                 _headTransform = Camera.main.transform;
             }
-            ReportGlassesModel();
+            try
+            {
+                ReportGlassesModel();
+            }
+            catch (Exception ex)
+            {
+                ReportError(
+                    "unavailable",
+                    "VITURE glasses model query failed during Awake: " + ex.Message
+                );
+            }
         }
 
         /// <summary>
@@ -200,24 +216,46 @@ namespace OnyxLens.WmrTrackingViture
             }
 #endif
 #if WMR_VITURE_XR_SDK
-            var model = VitureGlasses.GetGlassesModel().ToString();
-            if (!string.Equals(model, "LumaUltra", StringComparison.OrdinalIgnoreCase))
+            try
+            {
+                var model = VitureGlasses.GetGlassesModel().ToString();
+                if (!string.Equals(model, "LumaUltra", StringComparison.OrdinalIgnoreCase))
+                {
+                    ReportError(
+                        "unsupported",
+                        "VITURE hand tracking requires LumaUltra on Pro Neckband (found " +
+                        model + ")"
+                    );
+                    return;
+                }
+                if (!VitureHandTracking.IsActive)
+                {
+                    VitureHandTracking.Start();
+                }
+                if (!VitureHandTracking.IsActive)
+                {
+                    ReportError("unavailable", "VitureXR.HandTracking.Start() did not activate");
+                    return;
+                }
+            }
+            catch (Exception ex)
             {
                 ReportError(
-                    "unsupported",
-                    "VITURE hand tracking requires LumaUltra on Pro Neckband (found " + model + ")"
+                    "unavailable",
+                    "VITURE hand tracking start failed: " + ex.Message
                 );
                 return;
             }
-            if (!VitureHandTracking.IsActive)
-            {
-                VitureHandTracking.Start();
-            }
-            if (!VitureHandTracking.IsActive)
-            {
-                ReportError("unavailable", "VitureXR.HandTracking.Start() did not activate");
-                return;
-            }
+#else
+            // Without the vendor SDK the bridge cannot confirm the glasses
+            // model or start hands. Report `unavailable` instead of running a
+            // head-only session that the Kotlin host believes is full tracking.
+            ReportError(
+                "unavailable",
+                "VITURE XR SDK is not compiled into this build; rebuild with the " +
+                "VITURE XR SDK package (WMR_VITURE_XR_SDK)."
+            );
+            return;
 #endif
             _running = true;
         }
@@ -226,9 +264,16 @@ namespace OnyxLens.WmrTrackingViture
         {
             _running = false;
 #if WMR_VITURE_XR_SDK
-            if (VitureHandTracking.IsActive)
+            try
             {
-                VitureHandTracking.Stop();
+                if (VitureHandTracking.IsActive)
+                {
+                    VitureHandTracking.Stop();
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportError("unavailable", "VitureXR.HandTracking.Stop() failed: " + ex.Message);
             }
 #endif
         }
@@ -237,25 +282,35 @@ namespace OnyxLens.WmrTrackingViture
         {
             if (options == null) return;
 #if WMR_VITURE_XR_SDK
-            if (!string.IsNullOrEmpty(options.filter_mode))
+            try
             {
-                VitureHandTracking.filterMode = string.Equals(
-                    options.filter_mode,
-                    "stable",
-                    StringComparison.OrdinalIgnoreCase
-                )
-                    ? VitureHandFilterMode.Stable
-                    : VitureHandFilterMode.Responsive;
+                if (!string.IsNullOrEmpty(options.filter_mode))
+                {
+                    VitureHandTracking.filterMode = string.Equals(
+                        options.filter_mode,
+                        "stable",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                        ? VitureHandFilterMode.Stable
+                        : VitureHandFilterMode.Responsive;
+                }
+                if (!string.IsNullOrEmpty(options.aim_sensitivity))
+                {
+                    VitureHandTracking.aimSensitivity = string.Equals(
+                        options.aim_sensitivity,
+                        "low",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                        ? VitureHandAimSensitivity.Low
+                        : VitureHandAimSensitivity.High;
+                }
             }
-            if (!string.IsNullOrEmpty(options.aim_sensitivity))
+            catch (Exception ex)
             {
-                VitureHandTracking.aimSensitivity = string.Equals(
-                    options.aim_sensitivity,
-                    "low",
-                    StringComparison.OrdinalIgnoreCase
-                )
-                    ? VitureHandAimSensitivity.Low
-                    : VitureHandAimSensitivity.High;
+                ReportError(
+                    "unavailable",
+                    "VITURE hand tracking options were rejected: " + ex.Message
+                );
             }
 #endif
         }
@@ -323,8 +378,12 @@ namespace OnyxLens.WmrTrackingViture
         {
             long timeNs = MonotonicTimeNs();
             var sb = new StringBuilder(2048);
-            sb.Append("{\"v\":1,\"space\":\"openxr\",\"time_ns\":")
+            sb.Append("{\"v\":1,\"schemaVersion\":1,\"space\":\"openxr\",\"time_ns\":")
               .Append(timeNs.ToString(CultureInfo.InvariantCulture));
+#if WMR_UNITY_XR_HANDS
+            sb.Append(",\"handJointCount\":")
+              .Append(JointTable.Length.ToString(CultureInfo.InvariantCulture));
+#endif
 
             if (_headTransform != null)
             {
@@ -339,29 +398,40 @@ namespace OnyxLens.WmrTrackingViture
             }
 
 #if WMR_UNITY_XR_HANDS
-            EnsureHandSubsystem();
-            if (_handSubsystem != null && _handSubsystem.running)
+            try
             {
-                bool hasLeft = _handSubsystem.leftHand.isTracked;
-                bool hasRight = _handSubsystem.rightHand.isTracked;
-                if (hasLeft || hasRight)
+                EnsureHandSubsystem();
+                if (_handSubsystem != null && _handSubsystem.running)
                 {
-                    sb.Append(",\"hands\":{");
-                    if (hasLeft)
+                    bool hasLeft = _handSubsystem.leftHand.isTracked;
+                    bool hasRight = _handSubsystem.rightHand.isTracked;
+                    if (hasLeft || hasRight)
                     {
-                        sb.Append("\"left\":");
-                        AppendHand(sb, _handSubsystem.leftHand, "left");
+                        sb.Append(",\"hands\":{");
+                        if (hasLeft)
+                        {
+                            sb.Append("\"left\":");
+                            AppendHand(sb, _handSubsystem.leftHand, "left");
+                        }
+                        if (hasLeft && hasRight)
+                        {
+                            sb.Append(',');
+                        }
+                        if (hasRight)
+                        {
+                            sb.Append("\"right\":");
+                            AppendHand(sb, _handSubsystem.rightHand, "right");
+                        }
+                        sb.Append('}');
                     }
-                    if (hasLeft && hasRight)
-                    {
-                        sb.Append(',');
-                    }
-                    if (hasRight)
-                    {
-                        sb.Append("\"right\":");
-                        AppendHand(sb, _handSubsystem.rightHand, "right");
-                    }
-                    sb.Append('}');
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_handReadErrorReported)
+                {
+                    _handReadErrorReported = true;
+                    ReportError("unavailable", "XR Hands frame read failed: " + ex.Message);
                 }
             }
 #endif
@@ -443,10 +513,19 @@ namespace OnyxLens.WmrTrackingViture
 
         private void ReportGlassesModel()
         {
+            string model = "Unknown";
 #if WMR_VITURE_XR_SDK
-            string model = VitureGlasses.GetGlassesModel().ToString();
-#else
-            string model = "LumaUltra";
+            try
+            {
+                model = VitureGlasses.GetGlassesModel().ToString();
+            }
+            catch (Exception ex)
+            {
+                ReportError(
+                    "unavailable",
+                    "VitureXR.Glasses.GetGlassesModel() failed: " + ex.Message
+                );
+            }
 #endif
 #if UNITY_ANDROID && !UNITY_EDITOR
             try
@@ -463,7 +542,18 @@ namespace OnyxLens.WmrTrackingViture
         private void SendFrameToKotlin(string frameJson)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
-            GetPluginClass()?.CallStatic("onUnityFrame", frameJson);
+            try
+            {
+                GetPluginClass()?.CallStatic("onUnityFrame", frameJson);
+            }
+            catch (Exception ex)
+            {
+                if (!_relayErrorReported)
+                {
+                    _relayErrorReported = true;
+                    ReportError("unavailable", "Frame relay failed: " + ex.Message);
+                }
+            }
 #endif
         }
 
@@ -471,7 +561,14 @@ namespace OnyxLens.WmrTrackingViture
         {
             ErrorReported?.Invoke(code, message);
 #if UNITY_ANDROID && !UNITY_EDITOR
-            GetPluginClass()?.CallStatic("onUnityError", code, message);
+            try
+            {
+                GetPluginClass()?.CallStatic("onUnityError", code, message);
+            }
+            catch (Exception)
+            {
+                // Ignore when running outside the Flutter plugin host.
+            }
 #endif
         }
 
