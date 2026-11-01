@@ -140,6 +140,7 @@ void main() {
       source.capabilities.supports(TrackingFeature.controllerPose),
       isFalse,
     );
+    expect(source.capabilities.supports(TrackingFeature.originReset), isTrue);
     expect(source.permissions['camera'], 'granted');
   });
 
@@ -319,6 +320,38 @@ void main() {
       expect(platform.stopCalls, 0);
     },
   );
+
+  test('a staged platform error keeps the failing boundary', () async {
+    final platform = _FakeViturePlatform()
+      ..startError = PlatformException(
+        code: 'unavailable',
+        message: 'VITURE player was detached',
+        details: const {'stage': 'detach'},
+      );
+    final source = (await VitureNeckbandTrackingSource.create(
+      enabled: true,
+      platform: platform,
+    ))!;
+
+    await expectLater(
+      source.start(),
+      throwsA(
+        isA<TrackingException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TrackingExceptionKind.unavailable,
+            )
+            .having((error) => error.stage, 'stage', 'detach')
+            .having(
+              (error) => error.toString(),
+              'toString',
+              contains('stage: detach'),
+            ),
+      ),
+    );
+    expect(source.started, isFalse);
+  });
 
   test(
     'start, configure, recenter, stop, restart and dispose are idempotent',

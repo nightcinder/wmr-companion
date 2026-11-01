@@ -419,10 +419,15 @@ TrackingException _mapPlatformError(Object error) {
       'protocol' => TrackingExceptionKind.protocol,
       _ => TrackingExceptionKind.protocol,
     };
+    final details = error.details;
+    final stage = details is Map && details['stage'] is String
+        ? details['stage'] as String
+        : null;
     return TrackingException(
       kind,
       error.message ?? 'XREAL tracking failed (${error.code})',
       cause: error,
+      stage: stage,
     );
   }
   return TrackingException(

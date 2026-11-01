@@ -91,6 +91,11 @@ void main() {
     );
     expect(vitureUnity.capabilities.hasHandTracking, isTrue);
     expect(vitureUnity.capabilities.hasHead6Dof, isTrue);
+    expect(vitureUnity.capabilities.handJointCount, 26);
+    expect(
+      vitureUnity.capabilities.supports(TrackingFeature.originReset),
+      isTrue,
+    );
   });
 
   test('profile ids are unique and each declares its vendor', () {
