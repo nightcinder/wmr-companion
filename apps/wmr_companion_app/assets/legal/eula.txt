@@ -1,0 +1,33 @@
+WMR Companion — End User License Agreement
+
+WMR Companion includes the VITURE XR Glasses SDK for Android and components of
+the VITURE SDK (the "VITURE SDK"). By installing or using WMR Companion you
+agree to these terms.
+
+1. Licence. You are granted a personal, non-exclusive, non-transferable,
+   royalty-free licence to use WMR Companion for its intended purpose.
+
+2. No reverse engineering of the VITURE SDK. You may not reverse engineer,
+   decompile, disassemble, or otherwise attempt to discover the source code of
+   the VITURE SDK, VITURE file formats, VITURE protocols, or any part of them.
+   Nothing in this agreement restricts the rights granted to you by the MIT
+   licence that covers WMR Companion's own source code.
+
+3. Indemnity. To the maximum extent permitted by law, you agree to defend,
+   indemnify, and hold harmless VITURE, Inc., its affiliates, and their
+   respective directors, officers, employees, agents, and representatives from
+   and against any claims, actions, suits, or proceedings, and any losses,
+   liabilities, damages, costs, and expenses (including reasonable attorneys'
+   fees), arising out of or relating to your distribution or use of the VITURE
+   SDK components of WMR Companion.
+
+4. No warranty. WMR Companion is provided "as is", without warranty of any
+   kind, express or implied, including the warranties of merchantability,
+   fitness for a particular purpose, and non-infringement.
+
+5. Third-party notices. The copyright and third-party notices for the VITURE
+   SDK are reproduced on the Licences screen and in the application's
+   assets/notices/ directory.
+
+6. Governing law. These terms are governed by the laws of the State of
+   California, excluding its conflict-of-laws rules.

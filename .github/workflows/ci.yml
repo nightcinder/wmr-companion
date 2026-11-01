@@ -716,6 +716,29 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode \
             > apps/wmr_companion_app/android/wmr-release.keystore
 
+      # Gate 1, the checkerboard captures and Gate 9 call into the VITURE C
+      # SDK, so a release built without libglasses.so reports sdkUnavailable
+      # for all three (ONY-740). The SDK is proprietary and is neither
+      # committed nor published as an asset: it lives on the licensed
+      # self-hosted runner, pinned by size and digest. Failing here beats
+      # publishing another APK that cannot run the bench.
+      - name: Stage the VITURE C SDK
+        env:
+          VITURE_SDK_DIR: /home/liesa/.local/share/viture-sdk/2.4.1
+        run: |
+          set -euo pipefail
+          src="$VITURE_SDK_DIR/libglasses.so"
+          if [ ! -f "$src" ]; then
+            echo "::error::$src is missing; stage VITURE XR Glasses SDK for Android 2.4.1 on the runner."
+            exit 1
+          fi
+          test "$(stat -c%s "$src")" = "2076360" \
+            || { echo "::error::$src is not the 2,076,360-byte 2.4.1 build"; exit 1; }
+          echo "8ac615769b76cfe6fa05354b73048117f3d6ba2f54fef5b6ea6b128cbb2eb0a3  $src" \
+            | sha256sum --check --strict
+          mkdir -p apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a
+          cp "$src" apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a/libglasses.so
+
       # The export is a 272 MB release asset on a stable tag, never a file in
       # the repository or in this branch's history.
       - name: Download the approved Unity export
@@ -782,7 +805,10 @@ jobs:
       # libraries and the Monado config key are packaged in the APK.
       - name: Check the unified APK carries both vendors and the Monado key
         working-directory: apps/wmr_companion_app
-        run: python3 tool/check_unified_apk.py build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
+        run: >-
+          python3 tool/check_unified_apk.py
+          build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
+          --require-lib lib/arm64-v8a/libglasses.so
 
       - name: Verify every APK is signed with the project key
         working-directory: apps/wmr_companion_app
@@ -863,6 +889,15 @@ jobs:
       - name: Remove the decoded keystore
         if: ${{ always() }}
         run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
+
+      # The self-hosted workspace survives between runs, so the proprietary
+      # binary must not be left in the checkout for the next job (or for an
+      # accidental commit). The path is also gitignored.
+      - name: Remove the staged VITURE SDK
+        if: ${{ always() }}
+        run: |
+          rm -f apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a/libglasses.so
+          rmdir -p apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a 2>/dev/null || true
 
   release-checksums:
     # `release-unified` uploads the unified APKs; once it has finished, write

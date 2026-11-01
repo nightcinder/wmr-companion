@@ -252,6 +252,27 @@ class MainTest(unittest.TestCase):
         self.assertIn("android.permission.HAND_TRACKING", output)
         self.assertIn("android.permission.HEAD_TRACKING", output)
 
+    def test_require_lib_rejects_an_apk_without_the_viture_sdk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            apk = build_apk(Path(tmp), "false")
+            code, output = run_checker(apk)
+            self.assertEqual(code, 0, output)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = checker.main(
+                    [
+                        "check_unified_apk.py",
+                        str(apk),
+                        "--require-lib",
+                        "lib/arm64-v8a/libglasses.so",
+                    ]
+                )
+            output = out.getvalue()
+        self.assertEqual(code, 1, output)
+        self.assertIn("missing native libraries:", output)
+        self.assertIn("lib/arm64-v8a/libglasses.so", output)
+        self.assertIn("RESULT: FAIL", output)
+
     def test_missing_xr_permissions_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             code, output = run_checker(

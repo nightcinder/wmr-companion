@@ -42,3 +42,7 @@ flutter:
   assets:
     # Holds only .gitkeep in git; tool/fetch_wmr_config_key.dart adds the key.
     - assets/monado/
+    # VITURE C SDK 2.4.1 LICENSE + NOTICE, surfaced on the licence page.
+    - assets/notices/
+    # The EULA the VITURE SDK agreement requires (2.3.1), shown in-app.
+    - assets/legal/

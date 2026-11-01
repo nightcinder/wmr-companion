@@ -13,6 +13,9 @@ stay on the hardware gates.
 
     python3 tool/check_unified_apk.py path/to/wmr-companion-0.2.1-unified-debug.apk
 
+Add `--require-lib lib/arm64-v8a/libglasses.so` for a release that must carry
+the VITURE C SDK (the bench Gate 1, checkerboard and Gate 9 steps call into it).
+
 No Android SDK, Unity or third-party Python package needed. Exit codes:
 0 = all checks pass, 1 = a required check failed, 64 = bad usage.
 """
@@ -210,10 +213,26 @@ def is_required(value: str | None) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    require_libs: set[str] = set()
+    paths: list[str] = []
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--require-lib":
+            index += 1
+            if index >= len(argv):
+                print("--require-lib needs an APK entry name", file=sys.stderr)
+                return 64
+            require_libs.add(argv[index])
+        elif arg.startswith("--require-lib="):
+            require_libs.add(arg.split("=", 1)[1])
+        else:
+            paths.append(arg)
+        index += 1
+    if len(paths) != 1:
         print(__doc__.strip().splitlines()[0], file=sys.stderr)
         return 64
-    apk_path = Path(argv[1])
+    apk_path = Path(paths[0])
     if not apk_path.is_file():
         print(f"FAIL: not found: {apk_path}", file=sys.stderr)
         return 64
@@ -268,12 +287,13 @@ def main(argv: list[str]) -> int:
                     "usb.host(required=false)"
                 )
 
-        missing_libs = REQUIRED_LIBS - names
+        required_libs = REQUIRED_LIBS | require_libs
+        missing_libs = required_libs - names
         if missing_libs:
             fail(f"missing native libraries: {sorted(missing_libs)}")
             failures += 1
         else:
-            print(f"PASS native: {sorted(REQUIRED_LIBS)}")
+            print(f"PASS native: {sorted(required_libs)}")
         abis = sorted({name.split("/")[1] for name in names if name.startswith("lib/") and name.count("/") == 2})
         print(f"INFO ABIs: {abis}")
 
