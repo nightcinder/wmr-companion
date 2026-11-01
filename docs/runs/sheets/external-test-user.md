@@ -49,9 +49,9 @@ This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR C
 
 Do not run an older build for this pass. v0.3.10 carries two fixes that change results:
 selecting **AndroidXR** as the hand-tracking source on a Galaxy XR no longer
-crashes the app (v0.3.9), and the Luma Ultra + Pro Neckband 3D view now fills
+crashes the app (v0.3.10), and the Luma Ultra + Pro Neckband 3D view now fills
 both eyes (v0.3.9). A crash or a black right eye on v0.3.10 is a regression
-worth recording; on v0.3.7 or v0.3.8 it is the known older behaviour.
+worth recording; on v0.3.7 through v0.3.9 it is the known older behaviour.
 
 ## 2. Install
 
