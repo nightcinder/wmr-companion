@@ -356,6 +356,38 @@ void main() {
     },
   );
 
+  test('a staged platform error keeps the failing boundary', () async {
+    final platform = _FakeXrealPlatform()
+      ..startError = PlatformException(
+        code: 'unavailable',
+        message: 'XREAL player was detached',
+        details: const {'stage': 'detach'},
+      );
+    final source = (await XrealAir2UltraTrackingSource.create(
+      enabled: true,
+      platform: platform,
+    ))!;
+
+    await expectLater(
+      source.start(),
+      throwsA(
+        isA<TrackingException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TrackingExceptionKind.unavailable,
+            )
+            .having((error) => error.stage, 'stage', 'detach')
+            .having(
+              (error) => error.toString(),
+              'toString',
+              contains('stage: detach'),
+            ),
+      ),
+    );
+    expect(source.started, isFalse);
+  });
+
   test('start, stop, restart and dispose are idempotent', () async {
     final platform = _FakeXrealPlatform();
     final source = (await XrealAir2UltraTrackingSource.create(

@@ -63,6 +63,7 @@ enum VitureGlassesModel {
           TrackingFeature.handJoints,
           TrackingFeature.handGestures,
           TrackingFeature.passthroughCamera,
+          TrackingFeature.originReset,
         },
         handJointCount: 26,
         maxHandRateHz: 0,
@@ -268,6 +269,7 @@ class VitureNeckbandTrackingSource implements TrackingSource {
       TrackingFeature.handJoints,
       if (raw['handGestures'] != false) TrackingFeature.handGestures,
       if (raw['passthroughCamera'] != false) TrackingFeature.passthroughCamera,
+      TrackingFeature.originReset,
     };
 
     return VitureNeckbandTrackingSource._(
@@ -450,10 +452,15 @@ TrackingException _mapPlatformError(Object error) {
       'protocol' => TrackingExceptionKind.protocol,
       _ => TrackingExceptionKind.protocol,
     };
+    final details = error.details;
+    final stage = details is Map && details['stage'] is String
+        ? details['stage'] as String
+        : null;
     return TrackingException(
       kind,
       error.message ?? 'VITURE tracking failed (${error.code})',
       cause: error,
+      stage: stage,
     );
   }
   return TrackingException(
