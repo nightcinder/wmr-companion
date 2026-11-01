@@ -89,6 +89,6 @@ A native SwiftUI application is provided in `tool/ios_probe/` to serve as a late
 
 ## 5. Flutter iOS Integration & CI
 
-- `apps/wmr_companion_app/ios/Podfile`: Configured for iOS 18.0+, integrating Flutter plugins with modular headers.
+- `apps/wmr_companion_app/ios/Runner.xcodeproj`: Links the generated `Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage`, and every iOS plugin (`universal_ble`, `device_info_plus`, `package_info_plus`, `share_plus`) ships its own `Package.swift`. The project is therefore Swift-Package-only: there is no `Podfile` (and `example/ios` follows the same layout), so a build never runs CocoaPods. If a pod-only plugin is ever added, Flutter regenerates a standard `Podfile`; restore the iOS 18.0 `IPHONEOS_DEPLOYMENT_TARGET` pin in its `post_install` hook.
 - `apps/wmr_companion_app/ios/Runner/Info.plist`: Includes `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, and `UIBackgroundModes` (`bluetooth-central`).
 - `.github/workflows/ci.yml`: Includes a dedicated `ios` job running on `macos-latest` that validates `WMRCompanionKit` unit tests (`swift test`) and Flutter iOS project build configuration (`flutter build ios --config-only --no-codesign`).
