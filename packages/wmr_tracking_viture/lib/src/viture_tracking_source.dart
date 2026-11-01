@@ -160,6 +160,27 @@ class VitureTrackingPlatform {
 
   /// One JSON string (or map) per tracking frame, plus typed platform errors.
   Stream<Object?> frames() => events.receiveBroadcastStream();
+
+  /// Debug-only: opens the VITURE glasses and returns the USB fd metadata
+  /// (`session`, `fd`, `productId`) for the Carina native harness.
+  Future<Map<String, Object?>> openCarinaDiagnosticUsb() async {
+    final result = await methods.invokeMapMethod<String, Object?>(
+      'carinaDiagnosticUsb',
+    );
+    if (result == null) {
+      throw PlatformException(
+        code: 'protocol',
+        message: 'carinaDiagnosticUsb returned no map',
+      );
+    }
+    return result;
+  }
+
+  /// Closes the USB connection that owns the fd handed to the native harness.
+  Future<void> closeCarinaDiagnosticUsb(String session) =>
+      methods.invokeMethod<void>('carinaDiagnosticUsbClose', <String, Object?>{
+        'session': session,
+      });
 }
 
 /// Alias for [VitureNeckbandTrackingSource].

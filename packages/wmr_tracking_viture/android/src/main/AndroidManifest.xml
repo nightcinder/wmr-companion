@@ -5,4 +5,8 @@
          out devices or runtimes without hardware camera support. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Debug-only Carina diagnostic: opens the glasses' UsbDeviceConnection
+         and hands its fd to the native capture harness. Optional so the app
+         still installs on hosts without USB host support. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 </manifest>

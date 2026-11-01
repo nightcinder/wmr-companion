@@ -65,6 +65,48 @@ Failures are typed `TrackingException`s:
   VITURE slice can exclude it using `tools:node="remove"`.
 - `protocol`: a relay frame or capability handshake was malformed.
 
+## Carina C-SDK diagnostic spike (debug only)
+
+The Luma Ultra exposes four 8-bit grayscale stereo buffers through the C SDK's
+`XRCameraCallback`. `VitureCarinaDiagnostics` is a local spike for deciding
+whether that feed beats the hand-tracking route; it is not a product path.
+
+Build a debug app with both the flag and a debuggable APK:
+
+```sh
+flutter run --debug --dart-define=WMR_VITURE_CARINA_DIAG=true
+```
+
+Then trigger one 12 s capture and write it to a directory you can pull:
+
+```dart
+final report = await VitureCarinaDiagnostics.capture(
+  outputDirectory: '/data/user/0/com.onyxlens.wmr_companion/cache/carina-1',
+);
+```
+
+The native harness (`android/src/main/cpp/carina_diag.c`, built as
+`libcarina_diag.so`) hands the glasses' USB fd to
+`xr_device_provider_create`, registers the Carina camera callback, polls
+`xr_device_provider_get_gl_pose_carina` every 10 ms, and keeps one copied frame
+per rung for `left0`, `right0`, `left1` and `right1`. It applies the fixed
+ladder 0.1, 0.3, 1.0 and 3.0 ms at gain 6. Output is one PGM per channel per
+rung (`carina-rung<N>-<channel>-<ms>ms.pgm`) plus
+`carina-diagnostics.json` with width, height, fps, callback copy latency and
+pose rate.
+
+`libglasses.so` is proprietary and is not in this repository, so the harness
+`dlopen`s it. For a local run, stage it in the app's
+`android/unity/unified/unityLibrary/src/main/jniLibs/arm64-v8a/` (or any path
+in `WMR_CARINA_LIBGLASSES`). Without it the capture returns a typed
+`sdkUnavailable` error and never dereferences a missing symbol. Shipping the
+SDK still needs written VITURE permission (ONY-732 audit).
+
+The Kotlin side only requests USB permission and returns
+`UsbDeviceConnection.fileDescriptor`; it is rejected unless the app is
+debuggable. `flutter test` covers the ladder and telemetry decoding, not the
+native call.
+
 ## Unity smoke project
 
 `unity/` is a minimal Unity 6000.0 project with the relay bridge, a smoke scene

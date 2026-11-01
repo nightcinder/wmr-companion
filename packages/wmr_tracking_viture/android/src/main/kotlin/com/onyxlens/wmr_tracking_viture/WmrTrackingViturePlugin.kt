@@ -2,6 +2,7 @@ package com.onyxlens.wmr_tracking_viture
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
@@ -92,10 +93,14 @@ class WmrTrackingViturePlugin internal constructor(
     private var pendingFilterMode: String = "responsive"
     private var pendingAimSensitivity: String = "high"
 
+    /** Debug-only USB fd bridge for the Carina C-SDK diagnostic capture. */
+    private var carinaDiagnostics: CarinaDiagnosticUsb? = null
+
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         appContext = binding.applicationContext
         methods = MethodChannel(binding.binaryMessenger, "wmr_tracking_viture/methods")
         events = EventChannel(binding.binaryMessenger, "wmr_tracking_viture/frames")
+        carinaDiagnostics = CarinaDiagnosticUsb(binding.applicationContext)
         methods.setMethodCallHandler(this)
         events.setStreamHandler(this)
         runtime.register(GlassesVendor.VITURE, unityCallbacks)
@@ -104,6 +109,8 @@ class WmrTrackingViturePlugin internal constructor(
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         failPendingStart()
         stopTracking(reportError = false)
+        carinaDiagnostics?.release()
+        carinaDiagnostics = null
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
         eventSink = null
@@ -191,8 +198,43 @@ class WmrTrackingViturePlugin internal constructor(
                 }
                 result.success(null)
             }
+            "carinaDiagnosticUsb" -> {
+                if (!isDebuggable()) {
+                    result.error(
+                        ERROR_UNSUPPORTED,
+                        "Carina diagnostics require a debuggable build",
+                        null,
+                    )
+                    return
+                }
+                val diagnostics = carinaDiagnostics
+                if (diagnostics == null) {
+                    result.error(ERROR_UNAVAILABLE, "VITURE plugin is detached", null)
+                    return
+                }
+                diagnostics.open(result)
+            }
+            "carinaDiagnosticUsbClose" -> {
+                val args = call.arguments as? Map<*, *>
+                val session = args?.get("session") as? String
+                if (session.isNullOrBlank()) {
+                    result.error(
+                        ERROR_PROTOCOL,
+                        "carinaDiagnosticUsbClose requires a session id",
+                        null,
+                    )
+                    return
+                }
+                carinaDiagnostics?.close(session)
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
+    }
+
+    private fun isDebuggable(): Boolean {
+        val flags = (activity ?: appContext)?.applicationInfo?.flags ?: 0
+        return flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     }
 
     internal fun capabilities(): Map<String, Any?> {

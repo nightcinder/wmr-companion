@@ -28,6 +28,17 @@ android {
 
     compileSdk = 36
 
+    // The Carina diagnostic harness is C, built for the only ABI the VITURE
+    // SDK ships. CI pins the same NDK for the app's Unity export.
+    ndkVersion = "28.2.13676358"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -44,6 +55,9 @@ android {
 
     defaultConfig {
         minSdk = 24
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     testOptions {
