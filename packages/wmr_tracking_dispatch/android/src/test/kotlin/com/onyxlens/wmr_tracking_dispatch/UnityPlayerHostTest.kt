@@ -82,6 +82,49 @@ class UnityPlayerHostTest {
     }
 
     @Test
+    fun firstHostResumesAndFocusesThePlayer() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade)
+
+        host.hostTarget(Any())
+
+        assertEquals(1, facade.resumes)
+        assertEquals(listOf(true), facade.focusCalls)
+    }
+
+    @Test
+    fun hostingTheSameActivityTwiceIsAnIdempotentNoOp() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade)
+        val activity = Any()
+
+        host.hostTarget(activity)
+        host.hostTarget(activity)
+
+        assertEquals(1, facade.creates)
+        assertEquals(1, facade.resumes)
+        assertEquals(listOf(true), facade.focusCalls)
+    }
+
+    @Test
+    fun rehostingTheSameActivityAfterReleaseResumesAndFocusesAgain() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade)
+        val activity = Any()
+
+        host.hostTarget(activity)
+        host.release()
+        val reattached = host.hostTarget(activity)
+
+        assertTrue(reattached.hosted)
+        assertEquals(UnityPlayerHost.STAGE_PLAYER_HOSTED, reattached.stage)
+        assertEquals(2, facade.creates)
+        assertEquals(1, facade.detaches)
+        assertEquals(2, facade.resumes)
+        assertEquals(listOf(true, true), facade.focusCalls)
+    }
+
+    @Test
     fun aNewActivityReplacesTheAttachedView() {
         val facade = FakeViewHost()
         val host = UnityPlayerHost(facade)
@@ -93,6 +136,8 @@ class UnityPlayerHostTest {
 
         assertEquals(2, facade.creates)
         assertEquals(1, facade.detaches)
+        assertEquals(2, facade.resumes)
+        assertEquals(listOf(true, true), facade.focusCalls)
         assertEquals(second, facade.lastTarget)
         assertEquals(
             listOf(
@@ -172,8 +217,8 @@ class UnityPlayerHostTest {
         host.onWindowFocusChanged(true)
 
         assertEquals(1, facade.pauses)
-        assertEquals(1, facade.resumes)
-        assertEquals(listOf(false, true), facade.focusCalls)
+        assertEquals(2, facade.resumes)
+        assertEquals(listOf(true, false, true), facade.focusCalls)
         assertEquals(0, facade.destroys)
     }
 
