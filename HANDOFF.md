@@ -152,7 +152,7 @@ Reports are lost between the controller and the ESP32 (Classic Bluetooth), befor
 | wmr-companion | ONY-41 | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package merged (#45); phase 7b HID Android package merged (#48); release hygiene merged (#49/#50/#52/#54). Open: iOS device run (device gate waived for `0.1.0`) |
 | Both | ONY-56 | FF16 firmware version reporting | Firmware reports packaged version over FF16 (`WMR_Bridge` #38); app/facade `WmrProtocolVersion` and feature matrix landed in #46 |
 
-Parked ideas: 6DoF / camera fusion (`docs/CAMERAS.md`); single-ESP32 radio tuning (V1 stagger, coex flags); non-Flutter SDK products. (Note: ESP32 BLE HID gamepad / HOGP was implemented in WMR_Bridge v0.3.2; see WMR_Bridge `docs/HID_GAMEPAD.md`).
+Parked ideas: 6DoF / camera fusion (`docs/CAMERAS.md`); single-ESP32 radio tuning (V1 stagger, coex flags); non-Flutter SDK products. (Note: ESP32 BLE HID gamepad / HOGP was implemented in WMR_Bridge v0.3.0; see WMR_Bridge `docs/HID_GAMEPAD.md`).
 
 ## 7. Suggested next steps, in order
 
