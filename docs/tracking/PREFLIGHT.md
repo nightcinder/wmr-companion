@@ -1,6 +1,6 @@
 # 6DoF pre-flight: named path, current build, desk evidence
 
-Status: **desk work only, re-checked 2026-10-31 on v0.3.6.** No glasses, phone
+Status: **desk work only, re-checked 2026-11-01 on v0.3.7.** No glasses, phone
 or Unity runtime was started. The artifact checks below are real host-side results; every tracking
 figure and permission prompt remains a hardware gate.
 
@@ -36,9 +36,9 @@ purchases for the same unproven gates.
 
 | Item | Value |
 |---|---|
-| Artifact | `wmr-companion-0.3.6-unified-arm64-v8a.apk` |
-| Release | [`v0.3.6`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.6), commit `627d191` |
-| APK SHA-256 | `42a5b01992237a8b1c7da1fc711f11e848c362389f811c61d30a55bf22735407` |
+| Artifact | `wmr-companion-0.3.7-unified-arm64-v8a.apk` |
+| Release | [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7), commit `16f2218` |
+| APK SHA-256 | `d66f5147f85f76d8b4a7249b4cc7d29e969f06205599f04a5fb99825249d865c` |
 | Unity export SHA-256 | `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072` (`unity-export-1.1`, pinned in CI) |
 | Flavor | `unified`: VITURE 0.9.0 + XREAL 3.1.0 in one `unityLibrary`, vendor selected at runtime |
 | Signing | release key; tester build, not a store upload |
@@ -54,14 +54,14 @@ apps/wmr_companion_app/tool/build_flavor.sh unified --debug
 Validate any unified APK without a device before installing it:
 
 ```bash
-gh release download v0.3.6 -p 'wmr-companion-0.3.6-unified-arm64-v8a.apk'
-python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.6-unified-arm64-v8a.apk
+gh release download v0.3.7 -p 'wmr-companion-0.3.7-unified-arm64-v8a.apk'
+python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.7-unified-arm64-v8a.apk
 ```
 
 ## 3. Permission and session path (host-validated)
 
-`check_unified_apk.py` passed on the v0.3.6 release artifact with its recorded
-SHA-256, re-run 2026-10-31 against the downloaded release asset.
+`check_unified_apk.py` passed on the v0.3.7 release artifact with its recorded
+SHA-256, re-run 2026-11-01 against the downloaded release asset.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
 without `android:required` counts as required, as Android does : `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
