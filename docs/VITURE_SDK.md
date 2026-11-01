@@ -28,7 +28,9 @@ the licensed self-hosted release runner at:
 `apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a/` after checking
 the size and digest, and fails the job if the file is missing or different. A
 provisioned runner therefore needs those three files before it can publish a
-release. The debug flavor does not stage the SDK.
+release. The debug flavor does not stage the SDK. The job removes its copy in
+an `always()` step (the self-hosted workspace survives between runs), and the
+`jniLibs/` path is gitignored so a local staging step cannot be committed.
 
 ## Licence conditions
 

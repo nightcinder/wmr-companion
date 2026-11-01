@@ -890,6 +890,15 @@ jobs:
         if: ${{ always() }}
         run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
 
+      # The self-hosted workspace survives between runs, so the proprietary
+      # binary must not be left in the checkout for the next job (or for an
+      # accidental commit). The path is also gitignored.
+      - name: Remove the staged VITURE SDK
+        if: ${{ always() }}
+        run: |
+          rm -f apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a/libglasses.so
+          rmdir -p apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a 2>/dev/null || true
+
   release-checksums:
     # `release-unified` uploads the unified APKs; once it has finished, write
     # one SHA256SUMS file that covers every APK on the release. The build job
