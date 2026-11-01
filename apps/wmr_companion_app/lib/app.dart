@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ui/connect/connect_screen.dart';
+import 'ui/sbs/stereo_sbs.dart';
 
 class WmrCompanionApp extends StatelessWidget {
   const WmrCompanionApp({super.key});
@@ -14,7 +15,7 @@ class WmrCompanionApp extends StatelessWidget {
         colorSchemeSeed: Colors.indigo,
         brightness: Brightness.dark,
       ),
-      home: const ConnectScreen(),
+      home: const StereoSbsWrapper(child: ConnectScreen()),
     );
   }
 }

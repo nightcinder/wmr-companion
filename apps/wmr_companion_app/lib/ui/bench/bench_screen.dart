@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle_export.dart';
 import '../debug/debug_providers.dart';
+import '../sbs/stereo_sbs.dart';
 import 'bench_controller.dart';
 import 'bench_pose.dart';
 import 'bench_run.dart';
@@ -22,6 +23,7 @@ class BenchScreen extends ConsumerStatefulWidget {
 
 class _BenchScreenState extends ConsumerState<BenchScreen> {
   late final BenchBundleNotifier _bundles;
+  final FocusNode _primaryFocus = FocusNode(debugLabel: 'bench-primary');
   Timer? _poseTimer;
   int? _poseTimerSegment;
   int _poseRemaining = 0;
@@ -45,6 +47,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   @override
   void dispose() {
     _poseTimer?.cancel();
+    _primaryFocus.dispose();
     // A finished run must not attach itself to a later plain export.
     _bundles.clear();
     super.dispose();
@@ -119,120 +122,140 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         : null;
     _syncPoseCountdown(state, durations, plan, sequence);
 
-    return PopScope(
-      canPop: !state.busy,
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Guided bench run')),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text('Bench mode', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+    return StereoSbsWrapper(
+      child: PopScope(
+        canPop: !state.busy,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Guided bench run'),
+            actions: const [SbsToggleButton()],
+          ),
+          body: FocusTraversalGroup(
+            key: const Key('bench-focus-order'),
+            policy: OrderedTraversalPolicy(),
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                for (final mode in BenchMode.values)
-                  _modeButton(mode, state, controller, tracking),
+                Text('Bench mode', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final mode in BenchMode.values)
+                      _modeButton(mode, state, controller, tracking),
+                  ],
+                ),
+                if (!tracking.available) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    tracking.reason ?? 'No hand-tracking source is attached.',
+                    key: const Key('bench-6dof-reason'),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Text('Hand tracking source', style: theme.textTheme.labelLarge),
+                DropdownButton<DebugTrackingSource>(
+                  key: const Key('bench-tracking-source'),
+                  isExpanded: true,
+                  value: selection.choice,
+                  onChanged: state.started || state.busy
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            ref
+                                .read(debugTrackingSourceProvider.notifier)
+                                .set(value);
+                          }
+                        },
+                  items: [
+                    for (final choice in DebugTrackingSource.values)
+                      DropdownMenuItem(
+                        value: choice,
+                        child: Text(choice.label),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: finished / total),
+                const SizedBox(height: 12),
+                Text(
+                  poseSpec == null
+                      ? 'Step ${state.index + 1} of $total'
+                      : 'Step ${state.index + 1} of $total  ·  '
+                            'Pose ${state.poseSegment + 1} of '
+                            '${sequence.length}',
+                  style: theme.textTheme.labelLarge,
+                ),
+                Text(
+                  poseSpec == null
+                      ? step.title
+                      : '${poseSpec.segment.title} — ${poseSpec.handName}'
+                            '${poseSpec.diagnostic ? ' (diagnostic)' : ' · run ${poseSpec.run}'}',
+                  style: theme.textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  poseSpec == null
+                      ? step.instructions(durations)
+                      : '${RealBenchSession.handName(poseSpec.hand)}: '
+                            '${poseSpec.segment.prompt}',
+                  key: poseSpec == null
+                      ? null
+                      : const Key('bench-capture-prompt'),
+                ),
+                if (poseSpec != null &&
+                    result.status == BenchStatus.running) ...[
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: _poseProgress(durations, plan, poseSpec.segment),
+                  ),
+                  Text(
+                    '$_poseRemaining s left',
+                    key: const Key('bench-pose-countdown'),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _status(result, mono, theme),
+                const SizedBox(height: 16),
+                ..._actions(
+                  state,
+                  controller,
+                  durations,
+                  plan,
+                  sequence,
+                  theme,
+                  poseSpec,
+                ),
+                if (step == BenchStep.export && state.bundlePath != null)
+                  ..._bundle(state, theme, mono),
+                const SizedBox(height: 24),
+                Text('Steps', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                for (final item in state.steps)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(_icon(state.resultFor(item).status)),
+                    title: Text(item.title),
+                    subtitle: state.resultFor(item).summary == null
+                        ? null
+                        : Text(state.resultFor(item).summary!),
+                  ),
               ],
             ),
-            if (!tracking.available) ...[
-              const SizedBox(height: 4),
-              Text(
-                tracking.reason ?? 'No hand-tracking source is attached.',
-                key: const Key('bench-6dof-reason'),
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-            const SizedBox(height: 8),
-            Text('Hand tracking source', style: theme.textTheme.labelLarge),
-            DropdownButton<DebugTrackingSource>(
-              key: const Key('bench-tracking-source'),
-              isExpanded: true,
-              value: selection.choice,
-              onChanged: state.started || state.busy
-                  ? null
-                  : (value) {
-                      if (value != null) {
-                        ref
-                            .read(debugTrackingSourceProvider.notifier)
-                            .set(value);
-                      }
-                    },
-              items: [
-                for (final choice in DebugTrackingSource.values)
-                  DropdownMenuItem(value: choice, child: Text(choice.label)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(value: finished / total),
-            const SizedBox(height: 12),
-            Text(
-              poseSpec == null
-                  ? 'Step ${state.index + 1} of $total'
-                  : 'Step ${state.index + 1} of $total  ·  '
-                        'Pose ${state.poseSegment + 1} of '
-                        '${sequence.length}',
-              style: theme.textTheme.labelLarge,
-            ),
-            Text(
-              poseSpec == null
-                  ? step.title
-                  : '${poseSpec.segment.title} — ${poseSpec.handName}'
-                        '${poseSpec.diagnostic ? ' (diagnostic)' : ' · run ${poseSpec.run}'}',
-              style: theme.textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              poseSpec == null
-                  ? step.instructions(durations)
-                  : '${RealBenchSession.handName(poseSpec.hand)}: '
-                        '${poseSpec.segment.prompt}',
-              key: poseSpec == null ? null : const Key('bench-capture-prompt'),
-            ),
-            if (poseSpec != null && result.status == BenchStatus.running) ...[
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: _poseProgress(durations, plan, poseSpec.segment),
-              ),
-              Text(
-                '$_poseRemaining s left',
-                key: const Key('bench-pose-countdown'),
-                style: theme.textTheme.titleMedium,
-              ),
-            ],
-            const SizedBox(height: 16),
-            _status(result, mono, theme),
-            const SizedBox(height: 16),
-            ..._actions(
-              state,
-              controller,
-              durations,
-              plan,
-              sequence,
-              theme,
-              poseSpec,
-            ),
-            if (step == BenchStep.export && state.bundlePath != null)
-              ..._bundle(state, theme, mono),
-            const SizedBox(height: 24),
-            Text('Steps', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            for (final item in state.steps)
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(_icon(state.resultFor(item).status)),
-                title: Text(item.title),
-                subtitle: state.resultFor(item).summary == null
-                    ? null
-                    : Text(state.resultFor(item).summary!),
-              ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  /// The Start/Continue/Confirm/Export button is first in the D-pad order, so
+  /// it takes the initial focus the moment a step needs the tester.
+  Widget _primaryAction(Widget button) =>
+      FocusTraversalOrder(order: const NumericFocusOrder(1), child: button);
 
   Widget _modeButton(
     BenchMode mode,
@@ -270,15 +293,19 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final result = state.current;
     if (step == BenchStep.export) {
       return [
-        FilledButton(
-          key: const Key('bench-export'),
-          onPressed: state.exporting ? null : controller.exportBundle,
-          child: Text(
-            state.exporting
-                ? 'Writing...'
-                : state.bundlePath == null
-                ? 'Write test bundle'
-                : 'Write again',
+        _primaryAction(
+          FilledButton(
+            key: const Key('bench-export'),
+            focusNode: _primaryFocus,
+            autofocus: true,
+            onPressed: state.exporting ? null : controller.exportBundle,
+            child: Text(
+              state.exporting
+                  ? 'Writing...'
+                  : state.bundlePath == null
+                  ? 'Write test bundle'
+                  : 'Write again',
+            ),
           ),
         ),
         if (state.bundleError != null) ...[
@@ -292,11 +319,15 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     }
     if (step.isPrompt) {
       return [
-        FilledButton(
-          key: const Key('bench-confirm'),
-          onPressed: state.busy ? null : controller.confirmCurrent,
-          child: Text(
-            step == BenchStep.photo ? 'Photo taken' : 'Serial log saved',
+        _primaryAction(
+          FilledButton(
+            key: const Key('bench-confirm'),
+            focusNode: _primaryFocus,
+            autofocus: true,
+            onPressed: state.busy ? null : controller.confirmCurrent,
+            child: Text(
+              step == BenchStep.photo ? 'Photo taken' : 'Serial log saved',
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -309,10 +340,14 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     }
     if (result.status == BenchStatus.failed) {
       return [
-        FilledButton(
-          key: const Key('bench-start'),
-          onPressed: controller.runCurrent,
-          child: const Text('Retry'),
+        _primaryAction(
+          FilledButton(
+            key: const Key('bench-start'),
+            focusNode: _primaryFocus,
+            autofocus: true,
+            onPressed: controller.runCurrent,
+            child: const Text('Retry'),
+          ),
         ),
         const SizedBox(height: 8),
         TextButton(
@@ -341,15 +376,19 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
       ];
     }
     return [
-      FilledButton(
-        key: const Key('bench-start'),
-        onPressed: controller.runCurrent,
-        child: Text(
-          poseSpec == null
-              ? _startLabel(step, durations)
-              : 'Start '
-                    '${durations.poseRunDuration(poseSpec.segment, plan).inSeconds}'
-                    ' s',
+      _primaryAction(
+        FilledButton(
+          key: const Key('bench-start'),
+          focusNode: _primaryFocus,
+          autofocus: true,
+          onPressed: controller.runCurrent,
+          child: Text(
+            poseSpec == null
+                ? _startLabel(step, durations)
+                : 'Start '
+                      '${durations.poseRunDuration(poseSpec.segment, plan).inSeconds}'
+                      ' s',
+          ),
         ),
       ),
       const SizedBox(height: 8),

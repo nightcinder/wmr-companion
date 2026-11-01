@@ -13,10 +13,24 @@ import '../debug/debug_providers.dart';
 import '../debug/debug_screen.dart';
 import '../latency/latency_screen.dart';
 import '../legal/terms_screen.dart';
+import '../sbs/stereo_sbs.dart';
 import 'connect_providers.dart';
 
-class ConnectScreen extends StatelessWidget {
+class ConnectScreen extends ConsumerStatefulWidget {
   const ConnectScreen({super.key});
+
+  @override
+  ConsumerState<ConnectScreen> createState() => _ConnectScreenState();
+}
+
+class _ConnectScreenState extends ConsumerState<ConnectScreen> {
+  final FocusNode _scanFocus = FocusNode(debugLabel: 'connect-scan');
+
+  @override
+  void dispose() {
+    _scanFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,6 +38,7 @@ class ConnectScreen extends StatelessWidget {
       appBar: AppBar(
         title: const _AppTitle(),
         actions: [
+          const SbsToggleButton(),
           PopupMenuButton<String>(
             tooltip: 'About',
             onSelected: (value) {
@@ -48,13 +63,22 @@ class ConnectScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [RealPanel()],
+      body: FocusTraversalGroup(
+        key: const Key('connect-focus-order'),
+        policy: OrderedTraversalPolicy(),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [RealPanel(scanFocus: _scanFocus)],
+        ),
       ),
     );
   }
 }
+
+/// D-pad order for the action row: the primary action is reached first, the
+/// rest follow in reading order.
+Widget _actionOrder(double order, Widget child) =>
+    FocusTraversalOrder(order: NumericFocusOrder(order), child: child);
 
 /// The app name with the running build's version below it, so testers can
 /// quote the exact build in a bug report.
@@ -84,7 +108,11 @@ class _AppTitle extends ConsumerWidget {
 }
 
 class RealPanel extends ConsumerWidget {
-  const RealPanel({super.key});
+  const RealPanel({super.key, this.scanFocus});
+
+  /// The Connect screen owns this so the scan action can take initial D-pad
+  /// focus.
+  final FocusNode? scanFocus;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -168,58 +196,85 @@ class RealPanel extends ConsumerWidget {
           spacing: 8,
           children: [
             if (link == BridgeTransportKind.ble)
-              FilledButton.tonal(
-                onPressed: s.busy
-                    ? null
-                    : (s.scanning ? controller.stopScan : controller.startScan),
-                child: Text(s.scanning ? 'Stop scan' : 'Scan'),
+              _actionOrder(
+                1,
+                FilledButton.tonal(
+                  key: const Key('connect-scan'),
+                  focusNode: scanFocus,
+                  autofocus: true,
+                  onPressed: s.busy
+                      ? null
+                      : (s.scanning
+                            ? controller.stopScan
+                            : controller.startScan),
+                  child: Text(s.scanning ? 'Stop scan' : 'Scan'),
+                ),
               ),
             if (s.connected || status.phase == BleLinkPhase.connectionLost)
-              FilledButton(
-                onPressed: controller.disconnect,
-                child: Text(
-                  s.connectedDeviceIds.length > 1
-                      ? 'Disconnect all'
-                      : 'Disconnect',
+              _actionOrder(
+                2,
+                FilledButton(
+                  onPressed: controller.disconnect,
+                  child: Text(
+                    s.connectedDeviceIds.length > 1
+                        ? 'Disconnect all'
+                        : 'Disconnect',
+                  ),
                 ),
               ),
             if (status.phase == BleLinkPhase.connectionLost &&
                 s.deviceId != null)
-              FilledButton(
-                onPressed: () => controller.connect(s.deviceId!),
-                child: const Text('Reconnect'),
-              ),
-            if (s.connected)
-              FilledButton.tonal(
-                onPressed: () => _openCapture(context, controller),
-                child: const Text('Capture'),
-              ),
-            if (s.connected)
-              FilledButton.tonal(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const DebugScreen(source: DebugSource.real),
-                  ),
+              _actionOrder(
+                3,
+                FilledButton(
+                  onPressed: () => controller.connect(s.deviceId!),
+                  child: const Text('Reconnect'),
                 ),
-                child: const Text('Open 3D debug view'),
               ),
             if (s.connected)
-              FilledButton.tonal(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const LatencyScreen(),
-                  ),
+              _actionOrder(
+                4,
+                FilledButton.tonal(
+                  onPressed: () => _openCapture(context, controller),
+                  child: const Text('Capture'),
                 ),
-                child: const Text('Latency test'),
               ),
-            const _ExportBundleButton(),
+            if (s.connected)
+              _actionOrder(
+                5,
+                FilledButton.tonal(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const DebugScreen(source: DebugSource.real),
+                    ),
+                  ),
+                  child: const Text('Open 3D debug view'),
+                ),
+              ),
+            if (s.connected)
+              _actionOrder(
+                6,
+                FilledButton.tonal(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LatencyScreen(),
+                    ),
+                  ),
+                  child: const Text('Latency test'),
+                ),
+              ),
+            _actionOrder(7, const _ExportBundleButton()),
             // Also without a bridge: the 6DoF-only bench path needs no link.
-            FilledButton.tonal(
-              key: const Key('open-guided-bench'),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
+            _actionOrder(
+              8,
+              FilledButton.tonal(
+                key: const Key('open-guided-bench'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const BenchScreen()),
+                ),
+                child: const Text('Run guided bench'),
               ),
-              child: const Text('Run guided bench'),
             ),
           ],
         ),
@@ -431,9 +486,13 @@ class _WifiConnectPanelState extends ConsumerState<_WifiConnectPanel> {
           Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
         ],
         const SizedBox(height: 8),
-        FilledButton(
-          onPressed: widget.busy ? null : _connect,
-          child: const Text('Connect over Wi-Fi'),
+        _actionOrder(
+          1,
+          FilledButton(
+            autofocus: true,
+            onPressed: widget.busy ? null : _connect,
+            child: const Text('Connect over Wi-Fi'),
+          ),
         ),
       ],
     );

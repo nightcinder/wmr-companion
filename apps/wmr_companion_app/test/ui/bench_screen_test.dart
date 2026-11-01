@@ -221,6 +221,17 @@ void main() {
     fail('did not reach ${target.id}');
   }
 
+  testWidgets('the primary bench action takes the initial D-pad focus', (
+    tester,
+  ) async {
+    await open(tester, _FakeSession());
+    await tester.pump();
+    final start = tester.widget<FilledButton>(
+      find.byKey(const Key('bench-start')),
+    );
+    expect(start.focusNode?.hasFocus, isTrue);
+  });
+
   testWidgets('happy path: one step per screen through the bundle', (
     tester,
   ) async {
