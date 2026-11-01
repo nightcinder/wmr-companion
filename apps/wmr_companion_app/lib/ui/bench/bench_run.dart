@@ -705,6 +705,16 @@ class RealBenchSession implements BenchSession {
   }
 }
 
+/// The host clock for a capture with no controller service behind it.
+///
+/// A tracking-only session has no transport clock, but [benchSessionProvider]
+/// is resolved again for every pose segment: a fresh [MonotonicClock] per
+/// resolve would re-base `host_ns` near zero at each segment. Kept here so the
+/// fallback spans the whole session like a transport clock does.
+final benchFallbackClockProvider = Provider<MonotonicClock>(
+  (ref) => MonotonicClock(),
+);
+
 /// Resolves the session from the live connection or the attached hand-tracking
 /// source, or null when neither exists. The wizard calls it again on each step,
 /// so a bridge that comes back after a drop is picked up.
@@ -725,7 +735,8 @@ final benchSessionProvider = Provider<Future<BenchSession?> Function()>((ref) {
               id: service.protocolFor(id)?.firmwareVersion,
           })
         : null;
-    final clock = service?.transport.clock ?? MonotonicClock();
+    final MonotonicClock clock =
+        service?.transport.clock ?? ref.read(benchFallbackClockProvider);
     final poseRecorder = availability.available
         ? RealBenchPoseRecorder(
             ref: ref,

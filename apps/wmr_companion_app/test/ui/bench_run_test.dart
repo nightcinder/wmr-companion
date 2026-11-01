@@ -13,6 +13,11 @@ import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_companion_app/services/firmware_identity.dart';
+import 'package:wmr_companion_app/ui/capture/capture_providers.dart';
+import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
+import 'package:wmr_companion_app/ui/latency/latency_providers.dart';
+import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_ble/testing.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
@@ -579,4 +584,62 @@ void main() {
       }
     });
   });
+
+  group('session clock', () {
+    test('a tracking-only session keeps one clock across resolves', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final source = FakeTrackingSource();
+      await source.start();
+      final transport = UniversalBleTransport(adapter: FakeBleAdapter());
+      addTearDown(transport.dispose);
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          debugTrackingSourceProvider.overrideWith(
+            () => _FixedTracking(
+              DebugTrackingSelection(
+                choice: DebugTrackingSource.viture,
+                attachment: AsyncValue.data(
+                  DebugTrackingAttachment(
+                    choice: DebugTrackingSource.viture,
+                    source: source,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          benchPoseAvailabilityProvider.overrideWithValue(
+            const BenchPoseAvailability.unavailable('no 6DoF source'),
+          ),
+          captureStoreProvider.overrideWith(
+            (ref) async => CaptureStore(Directory('${dir.path}/captures')),
+          ),
+          latencyStoreProvider.overrideWith(
+            (ref) async => LatencyStore(Directory('${dir.path}/latency')),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(source.dispose);
+
+      final resolve = container.read(benchSessionProvider);
+      final first = await resolve() as RealBenchSession;
+      final second = await resolve() as RealBenchSession;
+      expect(first.service, isNull, reason: 'no controller service');
+      expect(
+        identical(first.clock, second.clock),
+        isTrue,
+        reason: 'host_ns must not restart at every pose segment',
+      );
+    });
+  });
+}
+
+class _FixedTracking extends DebugTrackingSourceNotifier {
+  _FixedTracking(this.selection);
+
+  final DebugTrackingSelection selection;
+
+  @override
+  DebugTrackingSelection build() => selection;
 }

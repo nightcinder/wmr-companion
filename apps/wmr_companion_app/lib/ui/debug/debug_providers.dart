@@ -568,11 +568,21 @@ class DebugPoses {
 ///
 /// Hoisted out of the stream provider so "Reset orientation" can drop the
 /// offsets learned under the old IMU heading. It is recreated with the tracking
-/// source, so switching sources never carries state across.
+/// source, and with the host clock behind the buffered frames: every
+/// `BleTransport` owns its own `MonotonicClock`, while the aligner re-bases the
+/// first frames of the new link near its origin. Frames kept from the old
+/// domain would sort ahead of every new one, so no controller sample would find
+/// a frame and the viewer would stay `orientationOnly` until the two clocks
+/// met.
 final debugFuserProvider = Provider.family<SixDofFuser?, DebugSource>((
   ref,
   source,
 ) {
+  if (source == DebugSource.fake) {
+    ref.watch(transportProvider);
+  } else {
+    ref.watch(realLinkTransportProvider);
+  }
   final tracking = ref
       .watch(debugTrackingSourceProvider)
       .attachment
