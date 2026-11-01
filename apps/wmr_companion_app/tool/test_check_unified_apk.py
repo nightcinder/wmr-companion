@@ -143,6 +143,162 @@ def _manifest_elements(
     return elements
 
 
+def _uleb128(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+NO_INDEX = 0xFFFFFFFF
+DEX_HEADER_SIZE = 112
+
+
+class DexBuilder:
+    """Builds a minimal DEX with the tables check_unified_apk.Dex reads.
+
+    The output is well formed for class descriptors, interfaces, protos and
+    method names; code items and checksums are omitted because the checker does
+    not read them (it runs before signing on the dex R8 produced).
+    """
+
+    def __init__(self) -> None:
+        # (descriptor, interfaces, [(name, [param descriptors], return)])
+        self._classes: list[tuple[str, list[str], list[tuple[str, list[str], str]]]] = []
+
+    def add_class(
+        self,
+        descriptor: str,
+        interfaces: list[str] | None = None,
+        methods: list[tuple[str, list[str], str]] | None = None,
+    ) -> "DexBuilder":
+        self._classes.append((descriptor, list(interfaces or []), list(methods or [])))
+        return self
+
+    def build(self) -> bytes:
+        strings: list[str] = []
+        string_index: dict[str, int] = {}
+        types: list[int] = []
+        type_index: dict[str, int] = {}
+        protos: list[tuple[int, list[int]]] = []
+        proto_index: dict[tuple[tuple[str, ...], str], int] = {}
+        methods: list[tuple[int, int, int]] = []
+
+        def intern(value: str) -> int:
+            if value not in string_index:
+                string_index[value] = len(strings)
+                strings.append(value)
+            return string_index[value]
+
+        def type_of(descriptor: str) -> int:
+            if descriptor not in type_index:
+                type_index[descriptor] = len(types)
+                types.append(intern(descriptor))
+            return type_index[descriptor]
+
+        def proto_of(params: list[str], returns: str) -> int:
+            key = (tuple(params), returns)
+            if key not in proto_index:
+                proto_index[key] = len(protos)
+                protos.append((type_of(returns), [type_of(p) for p in params]))
+            return proto_index[key]
+
+        class_rows = []
+        for descriptor, interfaces, class_methods in self._classes:
+            class_idx = type_of(descriptor)
+            interface_indices = [type_of(name) for name in interfaces]
+            method_indices = []
+            for name, params, returns in class_methods:
+                method_indices.append((len(methods), proto_of(params, returns), intern(name)))
+                methods.append((class_idx, proto_of(params, returns), intern(name)))
+            class_rows.append((class_idx, interface_indices, method_indices))
+
+        count_strings = len(strings)
+        count_types = len(types)
+        count_protos = len(protos)
+        count_methods = len(methods)
+        count_classes = len(class_rows)
+
+        string_ids_off = DEX_HEADER_SIZE
+        type_ids_off = string_ids_off + 4 * count_strings
+        proto_ids_off = type_ids_off + 4 * count_types
+        method_ids_off = proto_ids_off + 12 * count_protos
+        class_defs_off = method_ids_off + 8 * count_methods
+        data_off = class_defs_off + 32 * count_classes
+
+        data = bytearray()
+
+        def add_data(blob: bytes) -> int:
+            while len(data) % 4:
+                data.append(0)
+            offset = data_off + len(data)
+            data.extend(blob)
+            return offset
+
+        def type_list(indices: list[int]) -> bytes:
+            return struct.pack("<I", len(indices)) + b"".join(struct.pack("<H", i) for i in indices)
+
+        string_offsets = [
+            add_data(_uleb128(len(value)) + value.encode("utf-8") + b"\0") for value in strings
+        ]
+        proto_params = [add_data(type_list(params)) if params else 0 for _, params in protos]
+        class_data_offsets = []
+        for _, _, method_indices in class_rows:
+            body = _uleb128(0) + _uleb128(0) + _uleb128(len(method_indices)) + _uleb128(0)
+            previous = 0
+            for method_index, _, _ in method_indices:
+                body += _uleb128(method_index - previous) + _uleb128(0x1) + _uleb128(0)
+                previous = method_index
+            class_data_offsets.append(add_data(body) if method_indices else 0)
+
+        class_defs = b""
+        for (class_idx, interface_indices, _), class_data_off in zip(class_rows, class_data_offsets):
+            interfaces_off = add_data(type_list(interface_indices)) if interface_indices else 0
+            class_defs += struct.pack(
+                "<IIIIIIII",
+                class_idx,
+                0x1,
+                NO_INDEX,
+                interfaces_off,
+                NO_INDEX,
+                0,
+                class_data_off,
+                0,
+            )
+
+        header = bytearray(DEX_HEADER_SIZE)
+        header[0:8] = b"dex\n035\0"
+        struct.pack_into("<I", header, 0x38, count_strings)
+        struct.pack_into("<I", header, 0x3C, string_ids_off)
+        struct.pack_into("<I", header, 0x40, count_types)
+        struct.pack_into("<I", header, 0x44, type_ids_off)
+        struct.pack_into("<I", header, 0x48, count_protos)
+        struct.pack_into("<I", header, 0x4C, proto_ids_off)
+        struct.pack_into("<I", header, 0x58, count_methods)
+        struct.pack_into("<I", header, 0x5C, method_ids_off)
+        struct.pack_into("<I", header, 0x60, count_classes)
+        struct.pack_into("<I", header, 0x64, class_defs_off)
+        struct.pack_into("<I", header, 0x68, len(data))
+        struct.pack_into("<I", header, 0x6C, data_off)
+
+        string_ids = b"".join(struct.pack("<I", offset) for offset in string_offsets)
+        type_ids = b"".join(struct.pack("<I", index) for index in types)
+        proto_ids = b"".join(
+            struct.pack("<III", 0, returns, proto_params[slot])
+            for slot, (returns, _) in enumerate(protos)
+        )
+        method_ids = b"".join(
+            struct.pack("<HHI", class_idx, proto_idx, name_idx)
+            for class_idx, proto_idx, name_idx in methods
+        )
+        return bytes(header) + string_ids + type_ids + proto_ids + method_ids + class_defs + bytes(data)
+
+
 def build_apk(
     directory: Path,
     camera_required: str | None,
@@ -154,13 +310,35 @@ def build_apk(
     scene_fine: bool = False,
     usb_required: str | None = "false",
     unified_dispatch: bool = True,
+    consumer_accept: bool = True,
+    consumer_classes: int = 1,
 ) -> Path:
     path = directory / "unified.apk"
-    classes = list(checker.REQUIRED_DEX_CLASSES)
+    dex = DexBuilder()
+    for name in checker.REQUIRED_DEX_CLASSES:
+        dex.add_class(f"Lcom/onyxlens/wmr_tracking/{name};")
     if display_stub:
         # XREAL's GlassesDisplayPlugEvent AAR ships this as a program class;
         # the release build must keep it (ONY-557).
-        classes.append("android/hardware/display/DisplayManager")
+        dex.add_class("Landroid/hardware/display/DisplayManager;")
+    for index in range(consumer_classes):
+        # androidx.xr registers these with the device's XrExtensions; R8 must
+        # keep the callback methods (ONY-758).
+        dex.add_class(
+            f"Landroidx/xr/scenecore/spatial/core/ActivitySpaceImpl$consumer${index};",
+            interfaces=[checker.XR_REQUIRED_CALLBACK],
+            methods=[("accept", ["Ljava/lang/Object;"], "V")] if consumer_accept else [],
+        )
+    dex.add_class(
+        "Lcom/google/imp/splitengine/extensions/RequestCallback$1;",
+        interfaces=["Lcom/android/extensions/xr/splitengine/RequestCallback;"],
+        methods=[("onResult", ["[B"], "V")],
+    )
+    dex.add_class(
+        "Lcom/google/imp/splitengine/extensions/MessageGroupCallback$1;",
+        interfaces=["Lcom/android/extensions/xr/splitengine/MessageGroupCallback;"],
+        methods=[("onMessageGroupComplete", ["I"], "V")],
+    )
     with zipfile.ZipFile(path, "w") as apk:
         apk.writestr(
             "AndroidManifest.xml",
@@ -176,7 +354,7 @@ def build_apk(
         )
         apk.writestr(
             "classes.dex",
-            b"\x00".join(name.encode() for name in classes),
+            dex.build(),
         )
         for lib in checker.REQUIRED_LIBS:
             apk.writestr(lib, b"\x7fELF")
@@ -223,6 +401,57 @@ class AxmlTest(unittest.TestCase):
         self.assertEqual(manifest.of("uses-permission")[0]["name"], long_name)
 
 
+class DexTest(unittest.TestCase):
+    def test_reads_descriptors_interfaces_and_methods(self) -> None:
+        dex = checker.Dex(
+            DexBuilder()
+            .add_class(
+                "Lcom/example/Impl;",
+                interfaces=[checker.XR_REQUIRED_CALLBACK],
+                methods=[("accept", ["Ljava/lang/Object;"], "V")],
+            )
+            .build()
+        )
+        self.assertEqual(
+            dex.classes(),
+            [("Lcom/example/Impl;", [checker.XR_REQUIRED_CALLBACK], {("accept", "(Ljava/lang/Object;)V")})],
+        )
+
+    def test_callback_without_its_method_is_reported(self) -> None:
+        blob = (
+            DexBuilder()
+            .add_class("Lcom/example/Impl;", interfaces=[checker.XR_REQUIRED_CALLBACK])
+            .build()
+        )
+        failures = checker.xr_callback_failures([blob])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("without accept(Ljava/lang/Object;)V", failures[0])
+
+    def test_split_engine_callback_without_its_method_is_reported(self) -> None:
+        blob = (
+            DexBuilder()
+            .add_class(
+                "Lcom/example/Impl;",
+                interfaces=[checker.XR_REQUIRED_CALLBACK],
+                methods=[("accept", ["Ljava/lang/Object;"], "V")],
+            )
+            .add_class(
+                "Lcom/example/Split;",
+                interfaces=["Lcom/android/extensions/xr/splitengine/RequestCallback;"],
+            )
+            .build()
+        )
+        failures = checker.xr_callback_failures([blob])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("without onResult([B)V", failures[0])
+
+    def test_missing_consumer_implementor_is_reported(self) -> None:
+        blob = DexBuilder().add_class("Lcom/example/Other;").build()
+        failures = checker.xr_callback_failures([blob])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("no class implements", failures[0])
+
+
 class RequiredFlagTest(unittest.TestCase):
     def test_missing_required_attribute_is_required(self) -> None:
         self.assertTrue(checker.is_required(None))
@@ -251,6 +480,21 @@ class MainTest(unittest.TestCase):
         self.assertIn("android.permission.SCENE_UNDERSTANDING_COARSE", output)
         self.assertIn("android.permission.HAND_TRACKING", output)
         self.assertIn("android.permission.HEAD_TRACKING", output)
+        self.assertIn("PASS dex: Android XR callbacks keep their methods", output)
+
+    def test_consumer_without_accept_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", consumer_accept=False))
+        self.assertEqual(code, 1, output)
+        self.assertIn("without accept(Ljava/lang/Object;)V", output)
+        self.assertIn("RESULT: FAIL", output)
+
+    def test_missing_consumer_implementor_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(build_apk(Path(tmp), "false", consumer_classes=0))
+        self.assertEqual(code, 1, output)
+        self.assertIn("no class implements", output)
+        self.assertIn("RESULT: FAIL", output)
 
     def test_require_lib_rejects_an_apk_without_the_viture_sdk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

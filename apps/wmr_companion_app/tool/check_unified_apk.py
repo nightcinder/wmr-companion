@@ -88,6 +88,158 @@ REQUIRED_METADATA_LITERALS = (
     "VendorRelayDispatch",
 )
 UNITY_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
+# The Android XR extension classes live in the device's shared library
+# (/system_ext/framework/com.android.extensions.xr.jar), not in the APK. R8
+# must still resolve the callback interfaces: when it cannot, it shrinks the
+# implementations to empty classes and the device kills the process with an
+# AbstractMethodError as soon as the Android XR session starts (ONY-758).
+# `:xr_extensions_stubs` supplies the compile-only interfaces.
+XR_CALLBACKS = {
+    "Lcom/android/extensions/xr/function/Consumer;": ("accept", "(Ljava/lang/Object;)V"),
+    "Lcom/android/extensions/xr/splitengine/RequestCallback;": ("onResult", "([B)V"),
+    "Lcom/android/extensions/xr/splitengine/MessageGroupCallback;": (
+        "onMessageGroupComplete",
+        "(I)V",
+    ),
+}
+# Consumer is the callback the Android XR session registers, so at least one
+# implementation must survive every release build.
+XR_REQUIRED_CALLBACK = "Lcom/android/extensions/xr/function/Consumer;"
+
+
+class Dex:
+    """Minimal DEX reader: class descriptors, interfaces and method signatures.
+
+    Only the tables the XR callback check needs are decoded. Parsing every
+    method of every class is not needed, so code items and annotations are
+    skipped.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        if data[:4] != b"dex\n":
+            raise ValueError("not a dex file")
+        self.data = data
+        self.string_ids_size = struct.unpack_from("<I", data, 0x38)[0]
+        self.string_ids_off = struct.unpack_from("<I", data, 0x3C)[0]
+        self.type_ids_off = struct.unpack_from("<I", data, 0x44)[0]
+        self.proto_ids_off = struct.unpack_from("<I", data, 0x4C)[0]
+        self.method_ids_off = struct.unpack_from("<I", data, 0x5C)[0]
+        self.class_defs_size = struct.unpack_from("<I", data, 0x60)[0]
+        self.class_defs_off = struct.unpack_from("<I", data, 0x64)[0]
+        self._strings: dict[int, str] = {}
+
+    def string(self, index: int) -> str:
+        cached = self._strings.get(index)
+        if cached is not None:
+            return cached
+        at = struct.unpack_from("<I", self.data, self.string_ids_off + 4 * index)[0]
+        _, at = _uleb128(self.data, at)
+        end = self.data.index(b"\0", at)
+        value = self.data[at:end].decode("utf-8", "replace")
+        self._strings[index] = value
+        return value
+
+    def type_name(self, index: int) -> str:
+        return self.string(struct.unpack_from("<I", self.data, self.type_ids_off + 4 * index)[0])
+
+    def proto(self, index: int) -> str:
+        at = self.proto_ids_off + 12 * index
+        returns = self.type_name(struct.unpack_from("<I", self.data, at + 4)[0])
+        params_off = struct.unpack_from("<I", self.data, at + 8)[0]
+        params: list[str] = []
+        if params_off:
+            size = struct.unpack_from("<I", self.data, params_off)[0]
+            params = [
+                self.type_name(struct.unpack_from("<H", self.data, params_off + 4 + 2 * i)[0])
+                for i in range(size)
+            ]
+        return f"({''.join(params)}){returns}"
+
+    def method(self, index: int) -> tuple[str, str]:
+        at = self.method_ids_off + 8 * index
+        name = self.string(struct.unpack_from("<I", self.data, at + 4)[0])
+        return name, self.proto(struct.unpack_from("<H", self.data, at + 2)[0])
+
+    def classes(self) -> list[tuple[str, list[str], set[tuple[str, str]]]]:
+        """(descriptor, interface descriptors, {(method name, proto)})."""
+        found = []
+        for slot in range(self.class_defs_size):
+            at = self.class_defs_off + 32 * slot
+            interfaces_off = struct.unpack_from("<I", self.data, at + 12)[0]
+            interfaces: list[str] = []
+            if interfaces_off:
+                size = struct.unpack_from("<I", self.data, interfaces_off)[0]
+                interfaces = [
+                    self.type_name(struct.unpack_from("<H", self.data, interfaces_off + 4 + 2 * i)[0])
+                    for i in range(size)
+                ]
+            class_data_off = struct.unpack_from("<I", self.data, at + 24)[0]
+            methods = self._methods(class_data_off) if class_data_off else set()
+            found.append((self.type_name(struct.unpack_from("<I", self.data, at)[0]), interfaces, methods))
+        return found
+
+    def _methods(self, class_data_off: int) -> set[tuple[str, str]]:
+        data = self.data
+        static_fields, at = _uleb128(data, class_data_off)
+        instance_fields, at = _uleb128(data, at)
+        direct_methods, at = _uleb128(data, at)
+        virtual_methods, at = _uleb128(data, at)
+        for _ in range(static_fields + instance_fields):
+            _, at = _uleb128(data, at)  # field_idx_diff
+            _, at = _uleb128(data, at)  # access_flags
+        methods: set[tuple[str, str]] = set()
+        for count in (direct_methods, virtual_methods):
+            index = 0
+            for _ in range(count):
+                diff, at = _uleb128(data, at)
+                index += diff
+                _, at = _uleb128(data, at)  # access_flags
+                _, at = _uleb128(data, at)  # code_off
+                methods.add(self.method(index))
+        return methods
+
+
+def _uleb128(data: bytes, at: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while True:
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, at
+        shift += 7
+
+
+def xr_callback_failures(dex_files: list[bytes]) -> list[str]:
+    """Empty callback implementations look fine in the dex strings alone.
+
+    ONY-758: the device's XrExtensions calls these methods on the callbacks the
+    app registered. R8 removed them when the interfaces were missing from its
+    classpath, and the call died with an AbstractMethodError. Reject an APK
+    whose implementations lost their callback method.
+    """
+    implementors: dict[str, list[tuple[str, set[tuple[str, str]]]]] = {name: [] for name in XR_CALLBACKS}
+    for data in dex_files:
+        for name, interfaces, methods in Dex(data).classes():
+            for interface in XR_CALLBACKS:
+                if interface in interfaces:
+                    implementors[interface].append((name, methods))
+    failures = []
+    if not implementors[XR_REQUIRED_CALLBACK]:
+        failures.append(
+            f"no class implements {XR_REQUIRED_CALLBACK}; "
+            "the Android XR session callbacks were shrunk away"
+        )
+    for interface, (method, proto) in XR_CALLBACKS.items():
+        failures.extend(
+            f"{name} implements {interface} without {method}{proto}; "
+            "the Android XR session will crash on start"
+            for name, methods in implementors[interface]
+            if (method, proto) not in methods
+        )
+    return failures
+
 
 
 class Axml:
@@ -324,7 +476,8 @@ def main(argv: list[str]) -> int:
             else:
                 print(f"PASS metadata: {list(required)}")
 
-        dex = b"".join(apk.read(name) for name in names if name.startswith("classes") and name.endswith(".dex"))
+        dex_files = [apk.read(name) for name in sorted(names) if name.startswith("classes") and name.endswith(".dex")]
+        dex = b"".join(dex_files)
         missing_classes = {name for name in REQUIRED_DEX_CLASSES if name.encode() not in dex}
         if missing_classes:
             fail(f"missing tracking classes: {sorted(missing_classes)}")
@@ -336,6 +489,14 @@ def main(argv: list[str]) -> int:
             for name in sorted(OPTIONAL_DEX_CLASSES)
         )
         print(f"INFO dex (release may rename): {optional}")
+
+        consumer_failures = xr_callback_failures(dex_files)
+        if consumer_failures:
+            for message in consumer_failures:
+                fail(message)
+            failures += 1
+        else:
+            print("PASS dex: Android XR callbacks keep their methods")
 
         # XREAL's glasses AAR bundles android.hardware.display.DisplayManager
         # as a stub. R8 must keep it: when it is shrunk, R8 rewrites the SDK's

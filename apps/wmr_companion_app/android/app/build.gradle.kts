@@ -123,6 +123,16 @@ android {
     }
 }
 
+dependencies {
+    // The Android XR extension classes come from the device's shared library,
+    // so they are not on the R8 classpath. Without a resolvable
+    // `Consumer` interface R8 emits the androidx.xr callbacks as empty classes
+    // and the device kills the process with an AbstractMethodError when the
+    // Android XR session starts (ONY-758). `compileOnly` keeps the stubs out of
+    // the APK; the device copy still wins at run time.
+    compileOnly(project(":xr_extensions_stubs"))
+}
+
 // A release build must never silently fall back to the debug key. Debug builds
 // keep working without any project keystore (ONY-492).
 gradle.taskGraph.whenReady {
