@@ -63,10 +63,10 @@ final benchHandTrackingProvider = Provider<BenchHandTracking>((ref) {
     reason = 'Starting ${choice.label}...';
   } else if (attachment?.error != null) {
     reason = '${choice.label} failed to start: ${attachment!.error!.message}';
-  } else if (attachment?.message != null) {
-    reason = attachment!.message!;
   } else if (attachment?.source != null) {
     reason = '${choice.label} does not report hand joints.';
+  } else if (attachment?.message != null) {
+    reason = attachment!.message!;
   } else {
     reason = 'Starting ${choice.label}...';
   }

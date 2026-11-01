@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -111,6 +113,23 @@ class _FixedDetector implements GlassesDetector {
   Future<GlassesDetection> detect() async => detection;
 }
 
+class _CountingDetector implements GlassesDetector {
+  int calls = 0;
+
+  @override
+  Future<GlassesDetection> detect() async {
+    calls++;
+    return GlassesDetection.none;
+  }
+}
+
+class _DeferredDetector implements GlassesDetector {
+  final completer = Completer<GlassesDetection>();
+
+  @override
+  Future<GlassesDetection> detect() => completer.future;
+}
+
 void main() {
   test('the default factory returns null for every vendor flag off without '
       'touching a platform channel', () async {
@@ -201,6 +220,68 @@ void main() {
       ),
       findsOneWidget,
     );
+    await close(tester);
+  });
+
+  testWidgets('a flag-off build never probes the neckband detector', (
+    tester,
+  ) async {
+    final detector = _CountingDetector();
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(),
+      ),
+    );
+    await settle(tester);
+
+    expect(detector.calls, 0);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DebugScreen)),
+    );
+    expect(
+      container.read(debugTrackingSourceProvider).choice,
+      DebugTrackingSource.none,
+    );
+    await close(tester);
+  });
+
+  testWidgets('a manual selection made during the neckband probe wins', (
+    tester,
+  ) async {
+    final detector = _DeferredDetector();
+    var vitureCreated = false;
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async {
+          vitureCreated = true;
+          return FakeTrackingSource();
+        },
+      ),
+    );
+
+    select(tester, DebugTrackingSource.simulated);
+    await settle(tester);
+    detector.completer.complete(
+      const GlassesDetection(
+        vendor: GlassesVendor.viture,
+        host: GlassesHost.neckband,
+      ),
+    );
+    await settle(tester);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DebugScreen)),
+    );
+    expect(
+      container.read(debugTrackingSourceProvider).choice,
+      DebugTrackingSource.simulated,
+    );
+    expect(vitureCreated, isFalse);
     await close(tester);
   });
 
