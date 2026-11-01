@@ -15,8 +15,9 @@
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <!-- MainActivity asks for a transparent background so Flutter renders
              through a texture view and the shared Unity surface behind it keeps
-             compositing (ONY-767). -->
+             compositing (ONY-767). An opaque window background would paint over
+             that surface even with a translucent window. -->
         <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
     </style>
 </resources>

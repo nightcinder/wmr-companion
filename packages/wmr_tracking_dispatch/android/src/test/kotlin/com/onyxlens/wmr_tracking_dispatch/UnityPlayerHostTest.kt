@@ -93,7 +93,7 @@ class UnityPlayerHostTest {
     }
 
     @Test
-    fun reattachingTheSameActivityKeepsTheInitialLifecycleCalls() {
+    fun hostingTheSameActivityTwiceIsAnIdempotentNoOp() {
         val facade = FakeViewHost()
         val host = UnityPlayerHost(facade)
         val activity = Any()
@@ -104,6 +104,24 @@ class UnityPlayerHostTest {
         assertEquals(1, facade.creates)
         assertEquals(1, facade.resumes)
         assertEquals(listOf(true), facade.focusCalls)
+    }
+
+    @Test
+    fun rehostingTheSameActivityAfterReleaseResumesAndFocusesAgain() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade)
+        val activity = Any()
+
+        host.hostTarget(activity)
+        host.release()
+        val reattached = host.hostTarget(activity)
+
+        assertTrue(reattached.hosted)
+        assertEquals(UnityPlayerHost.STAGE_PLAYER_HOSTED, reattached.stage)
+        assertEquals(2, facade.creates)
+        assertEquals(1, facade.detaches)
+        assertEquals(2, facade.resumes)
+        assertEquals(listOf(true, true), facade.focusCalls)
     }
 
     @Test
