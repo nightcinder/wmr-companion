@@ -1,4 +1,4 @@
-# External tester quickstart : WMR Companion v0.3.7 (unified APK)
+# External tester quickstart : WMR Companion v0.3.10 (unified APK)
 
 Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
@@ -41,11 +41,17 @@ regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.7/wmr-companion-0.3.7-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.10/wmr-companion-0.3.10-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.7/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.10/SHA256SUMS
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
+
+Do not run an older build for this pass. v0.3.10 carries two fixes that change results:
+selecting **AndroidXR** as the hand-tracking source on a Galaxy XR no longer
+crashes the app (v0.3.9), and the Luma Ultra + Pro Neckband 3D view now fills
+both eyes (v0.3.9). A crash or a black right eye on v0.3.10 is a regression
+worth recording; on v0.3.7 or v0.3.8 it is the known older behaviour.
 
 ## 2. Install
 
@@ -121,7 +127,7 @@ PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_B
 
 ### 6D : Luma Ultra + Pro Neckband: 3D SBS launch triage
 
-On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half.
+On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes; if v0.3.10 still shows a black right eye, record it as a regression with the diagnostics below.
 
 Immediate workaround for v0.3.7/v0.3.8 testers:
 
@@ -163,7 +169,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.3
-- App: 0.3.7 unified (signed release)
+- App: 0.3.10 unified (signed release)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
