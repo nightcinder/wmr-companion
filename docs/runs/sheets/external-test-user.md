@@ -1,4 +1,4 @@
-# External tester quickstart : WMR Companion v0.3.6 (unified APK)
+# External tester quickstart : WMR Companion v0.3.7 (unified APK)
 
 Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
@@ -15,7 +15,7 @@ Say which one you ran in the intake block.
 ## Prerequisites
 
 - Android 13 or newer (minSdk 33 for the unified flavor).
-- For setups A and C, the board must be flashed to v0.3.0. Flasher: https://nightcinder.github.io/WMR_Bridge/. A pre-flashed board is fine; say so in the intake block. If you are unsure of the version, reflash : flashing erases stored pairings (expected), so the first pairing after a flash is normal.
+- For setups A and C, the board must be flashed to v0.3.3. Flasher: https://nightcinder.github.io/WMR_Bridge/. A pre-flashed board is fine; say so in the intake block. If you are unsure of the version, reflash : flashing erases stored pairings (expected), so the first pairing after a flash is normal.
 
 ### LED legend
 
@@ -41,9 +41,9 @@ regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.6/wmr-companion-0.3.6-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.7/wmr-companion-0.3.7-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.6/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.7/SHA256SUMS
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
@@ -63,7 +63,7 @@ Skip this in setup B.
 4. Confirm the screen says **connected, streaming** with negotiated **MTU** 517 (>= 61 is usable). Record the MTU shown.
 5. Tap **Open 3D debug view**; stay on the debug screen.
 
-> **HID / Gamepad Coexistence Warning:** Firmware 0.3.0+ exposes a standard BLE HID gamepad (HOGP) directly to Android upon pairing. Do not enable app-level HID output (`BluetoothHidDevice`) in WMR Companion at the same time: registering the app HID peripheral disables Android's HID Host service (stopping bridge HOGP input reception) and degrades latency across the phone's shared radio. Keep Companion app HID output disabled.
+> **HID / Gamepad Coexistence Warning:** Firmware 0.3.3 exposes a standard BLE HID gamepad (HOGP) directly to Android upon pairing. Do not enable app-level HID output (`BluetoothHidDevice`) in WMR Companion at the same time: registering the app HID peripheral disables Android's HID Host service (stopping bridge HOGP input reception) and degrades latency across the phone's shared radio. Keep Companion app HID output disabled.
 
 ## 4. Pair controllers : setups A and C only
 
@@ -110,7 +110,7 @@ with `unavailable` instead of stalling.
 
 ### 6C : PSVR2 Sense (experimental)
 
-PSVR2 Sense support is on by default and compiled into every v0.3.0 image (WMR_Bridge docs/PSVR2.md §1), but it has **never been run on a controller**. Treat everything here as data collection, not as pass/fail.
+PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_Bridge docs/PSVR2.md §1), but it has **never been run on a controller**. Treat everything here as data collection, not as pass/fail.
 
 - Use the same pairing steps as section 4, with the pairing method you use with a PC. The app labels the controller `PSVR2`; if it says `WMR`, that is a result worth reporting.
 - PSVR2 is **raw-only** in this build: FF11 carries `0xA1 0x31` frames (up to 79 bytes). There is no PSVR2 decoder for FF12/FF14, FF13 is not read for a PSVR2 hand, and the 3D debug view can show nothing. That is expected. Use FF11 raw and the serial log.
@@ -140,8 +140,8 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Path: A (bridge + WMR) / B (6DoF only) / C (bridge + PSVR2)
 - Handle:
 - Date/timezone:
-- Firmware: 0.3.0
-- App: 0.3.6 unified (signed release)
+- Firmware: 0.3.3
+- App: 0.3.7 unified (signed release)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none

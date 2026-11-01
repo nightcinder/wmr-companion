@@ -1,6 +1,6 @@
 ﻿# Project status
 
-Last updated: 2026-10-31 (records the v0.3.6 signed unified release APK (ONY-695): VITURE Unity player host + stereo stage, Android XR full permission set, Unity export pin; see tracking changes below): project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
+Last updated: 2026-11-01 (records the v0.3.7 signed unified release APK (ONY-713): XREAL player host & boundary guards, fail-closed Unity loader gates, tracking stage fixes, and fusion yaw reset / bench pose recorder; see tracking changes below: project-key signing, debug builds on the `.debug` package, launch-crash and flavor fixes, and the security posture matching firmware 0.3.0 LESC+bonding). This page is the entry point: what the project is, what works, what has actually been checked on hardware, what is open, and what comes next. Anything not marked "checked" has not been run on hardware.
 
 ## What this project is
 
@@ -26,21 +26,21 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ## Current state
 
-### Current release (v0.3.6, 2026-10-31)
+### Current release (v0.3.7, 2026-11-01)
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.3.6` (release tag) at `627d1912ce2cf511fcecaaf0a36c22378cddf017` |
-| App version | `0.3.6+11` (`versionName 0.3.6`, `versionCode 2011` for `arm64-v8a`); the Dart packages remain at `0.2.2` |
-| Android artifact | `wmr-companion-0.3.6-unified-arm64-v8a.apk`, size 428,243,881 B, SHA-256 `42a5b01992237a8b1c7da1fc711f11e848c362389f811c61d30a55bf22735407` (verified against the published release asset) |
+| Tag / commit | `v0.3.7` (release tag) at `16f2218c4984ee68da2a686413ef2c9ed5192f7b` |
+| App version | `0.3.7+12` (`versionName 0.3.7`, `versionCode 2012` for `arm64-v8a`); the Dart packages remain at `0.2.2` |
+| Android artifact | `wmr-companion-0.3.7-unified-arm64-v8a.apk`, size 428,243,881 B, SHA-256 `d66f5147f85f76d8b4a7249b4cc7d29e969f06205599f04a5fb99825249d865c` (verified against the published release asset) |
 | Flavor | `unified` : one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
 | Signing | Project release key (signed by CI on `v*` tags). Updates in place across release builds |
 | Install identity | Release APKs share `com.onyxlens.wmr_companion` and update in place. Debug builds carry the `.debug` suffix (`com.onyxlens.wmr_companion.debug`) since 0.3.3, so they no longer collide with the release APK. A phone holding a pre-0.3.3 debug or locally signed build must be uninstalled once first (`docs/RELEASE_SIGNING.md`) |
 | Launch-crash fixes (0.3.1–0.3.2) | XREAL display stub kept in the release dex; glasses model check deferred to the Unity start handshake; VITURE starts when the glasses model is not reported and requires stereo 3D; one launcher icon on Unity flavors |
-| Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified; the 0.3.6 signed APK has only passed CI/export checks |
+| Hardware | **Not run on a VITURE or XREAL device.** Tracking rates, Android permissions and runtime vendor dispatch are unverified; the 0.3.7 signed APK has only passed CI/export checks |
 | Licence gate | Pinned `unity-export-1.1` (SHA-256 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072`); owner approved SDK redistribution (ONY-354 with historical 1.0 export `945bd425…`) |
 
-Release notes: [`v0.3.6`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.6). This release is the signed (project-key) cut at commit `627d191`, carrying the VITURE stereo Unity player host (ONY-612), Android XR full permission set (ONY-614), pinned unity-export-1.1 (ONY-617), and the self-hosted Liesa release build (ONY-605). The debug-build `.debug` package suffix and install/uninstall recovery for pre-0.3.3 builds remain documented in `docs/RELEASE_SIGNING.md`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
+Release notes: [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7). This release is the signed (project-key) cut at commit `16f2218`, carrying the XREAL player host and boundary guards (ONY-706), fail-closed Unity bridge loader gates (ONY-707), tracking stage fixes and OpenXR fixtures (ONY-708), and fusion yaw reset with bench pose recording and USB auto-detect (ONY-709). The debug-build `.debug` package suffix and install/uninstall recovery for pre-0.3.3 builds remain documented in `docs/RELEASE_SIGNING.md`. Build matrix and the export installer: [`tracking/BUILDS.md`](tracking/BUILDS.md) and [`apps/wmr_companion_app/android/unity/README.md`](../apps/wmr_companion_app/android/unity/README.md).
 
 ### Milestones (see [PLAN.md](PLAN.md))
 
@@ -51,7 +51,7 @@ Work is planned across milestones M10–M15 (governed by ONY-50; see `HANDOFF.md
 | **M10: Library v1 & API freeze** | Package extraction, FF16 version reporting, reference app move to `apps/`, publish readiness | Seven Dart packages (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit` extracted; FF16 version reading landed (#46); reference app moved to `apps/wmr_companion_app` (#53); pub workspace, strict publish dry-run, and export boundary tests landed (#54; `docs/PUBLISHING.md`). `0.2.2` is publish-ready but not on pub.dev (owner hold), and the phase-5 iOS 18 device gate was waived for `0.1.0` : iOS is CI-compiled but not hardware-verified. **Open:** Publish readiness / final owner authorization to publish to pub.dev (M10.6). |
 | **M11: Two bridges as a product** | Flasher variants, browser installer, per-bridge attribution, auto-reconnect | Multi-bridge support landed in `ControllerService` (#34). Per-bridge attribution on records, stats, links, and latency CSV export landed (#51 / ONY-70). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60 / ONY-101). **Open:** Hardware bench verification (Sitting B′ / Sitting B) remains open. |
 | **M12: The verification campaign** | Empirical hardware verification across campaign index | **Open.** Campaign index (`WMR_Bridge` `docs/runs/README.md`, #42): Sitting A (latency v2 + tracking quality), Sitting P (Pi bridge, Pi being bought), Sitting R (RIGHT-alone asymmetry, `right-asymmetry.md` #41), Sitting B′ (one board `--variant left`), Sitting C (robustness + PC HID), Close-out, and Sitting B (two bridges : parked, no second Classic ESP32). |
-| **M13: Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion signed release APKs on `v*` tags since 0.3.0; current cut `v0.3.6` (`wmr-companion-0.3.6-unified-arm64-v8a.apk`, project-key signed, debug builds on the `.debug` package; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.6)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.3 (LESC+bonding, matching firmware 0.3.0; see above). **Open:** M13.4 README rewrite around M12 results. |
+| **M13: Release and distribution** | Tagged release, compatibility matrix, bridge security, documentation | Companion signed release APKs on `v*` tags since 0.3.0; current cut `v0.3.7` (`wmr-companion-0.3.7-unified-arm64-v8a.apk`, project-key signed, debug builds on the `.debug` package; [release notes](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7)). Firmware `v0.1.0-rc1` prerelease and hosted browser flasher are live (M13.1 prerelease done; plain `v0.1.0` waits on M12); compatibility matrix is merged in both repos (#59, `WMR_Bridge` #45 & #49, M13.2 done); M13.3 security decision recorded for 0.3 (LESC+bonding, matching firmware 0.3.0; see above). **Open:** M13.4 README rewrite around M12 results. |
 | **M14: Raspberry Pi Wi-Fi host bridge** | WebSocket transport (`wmr_ws`), companion app Wi-Fi entry, Wi-Fi compatibility row, P-campaign | `wmr_ws` package (#61 / M14.1) and app host:port connection UI with TLS/token support (#62 / M14.3) landed. Wi-Fi bridge is host-tested/loopback-only until the Pi hardware sitting (P6). `BleTransport` is GATT-shaped but keeps its name for `0.1.0` (owner decision on ONY-146, no rename). |
 | **M15: PSVR2 Sense controller framework** | PSVR2 Sense support in firmware, opt-in DRAM guard | Firmware framework merged in `WMR_Bridge` #46 (opt-in `WMR_CFG_PSVR2_SUPPORT=0` by default to preserve DRAM headroom). M15.2–15.4 parked (owner has no PSVR2 controllers). |
 
@@ -198,7 +198,7 @@ Neckband** as the Android host (wireless ADB) and **Luma Ultra** glasses;
 3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`,
 `LumaCyber`, `Beast`) are rejected by the adapter. An unreported model is
 not an error: `create()` succeeds and the Unity `start` handshake reports the
-real model. `v0.3.6` ships this path.
+real model. `v0.3.7` ships this path.
 
 - **Host requirement:** the app runs on the Neckband, not on a paired phone.
   The glasses must report `LumaUltra`; otherwise the path is `unsupported`.
@@ -240,7 +240,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 
 - The **0.2.1 unified APK** on a VITURE or XREAL device: runtime vendor selection, the vendor tracking rate/permissions, and both SDKs coexisting in one process. The artifact passed export-level and host checks only; it is debug-signed.
 - The **0.3.3 signed unified APK** on a VITURE or XREAL device: project-key signing, the debug `.debug` package coexisting with the release package, runtime vendor selection, tracking rates, permissions, and both SDKs coexisting in one process. The artifact passed CI/export checks only; no hardware run.
-- The **0.3.6 signed unified APK** on a VITURE or XREAL device: project-key signing, the debug `.debug` package coexisting with the release package, runtime vendor selection, tracking rates, permissions, stereo 3D Unity player hosting, and both SDKs coexisting in one process. The artifact passed CI/export checks only; no hardware run.
+- The **0.3.7 signed unified APK** on a VITURE or XREAL device: project-key signing, the debug `.debug` package coexisting with the release package, runtime vendor selection, tracking rates, permissions, stereo 3D Unity player hosting, and both SDKs coexisting in one process. The artifact passed CI/export checks only; no hardware run.
 - Bluetooth HID output on a phone and a host (skipped).
 - FF14 checks B4 (phone-side sequence gaps) and B9, and B6-B8, B10, B11.
 - A round-trip rerun at a fixed position, and on FF12, FF11 and with no stream (the screen now supports all four via PR #28 no-stream latency mode and stream selector; not yet run).

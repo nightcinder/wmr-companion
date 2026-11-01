@@ -181,8 +181,8 @@ tool/test_release_notes.py` runs in the normal `build` job.
 A dry-run tag renders the same body without building or publishing:
 
 ```sh
-git tag v0.3.6-dryrun <commit>
-git push origin v0.3.6-dryrun
+git tag v0.3.7-dryrun <commit>
+git push origin v0.3.7-dryrun
 ```
 
 `release-notes-dryrun` prints the body to the run summary and uploads it as the
@@ -191,7 +191,7 @@ tag containing `-dryrun`, so a dry run cannot create a release. Delete the tag
 when done:
 
 ```sh
-git push origin :refs/tags/v0.3.6-dryrun
+git push origin :refs/tags/v0.3.7-dryrun
 ```
 
 ## Offline backup
@@ -227,11 +227,11 @@ Android requires a strictly increasing `versionCode` for every distributed APK.
 The app version lives in `apps/wmr_companion_app/pubspec.yaml`:
 
 ```yaml
-version: 0.3.6+11   # versionName 0.3.6, versionCode 11
+version: 0.3.7+12   # versionName 0.3.7, versionCode 12
 ```
 
 Before building a new tester APK, increment the build number after `+`
-(`0.3.6+11` → `0.3.6+12`) and commit that change with the release PR. Also bump
+(`0.3.7+12` → `0.3.7+13`) and commit that change with the release PR. Also bump
 `versionName` when the user-facing version changes. `flutter build` maps these
 to Android `versionName`/`versionCode`; confirm with:
 
