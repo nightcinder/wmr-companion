@@ -13,6 +13,7 @@ environment:
 resolution: workspace
 
 dependencies:
+  ffi: ^2.1.0
   flutter:
     sdk: flutter
   wmr_tracking: ^0.2.2
