@@ -441,8 +441,10 @@ class WmrTrackingViturePlugin internal constructor(
         // A new session must not report the previous session's stage.
         runtime.clearStage(GlassesVendor.VITURE)
         // The player has to exist before UnitySendMessage can reach the scene.
-        // Host it in the foreground activity and attach its view full-screen,
-        // then claim the shared runtime only after it reports an attached player.
+        // Host it in the foreground activity behind the Flutter content, so the
+        // attached surface initialises the XR loader without hiding the UI,
+        // then claim the shared runtime only after it reports an attached
+        // player.
         val host = playerHost.host(activity)
         if (!host.hosted) {
             reply.error(
