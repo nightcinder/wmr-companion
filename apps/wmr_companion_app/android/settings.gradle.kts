@@ -28,6 +28,12 @@ plugins {
 
 include(":app")
 
+// Compile-only stubs of the Android XR extension API. The device supplies the
+// real classes at run time; the app only needs them on the R8 classpath so the
+// androidx.xr callbacks survive shrinking (ONY-758).
+include(":xr_extensions_stubs")
+project(":xr_extensions_stubs").projectDir = file("xr_extensions_stubs")
+
 // Optional Unity-as-a-Library module (ONY-271, ONY-355). Export `unityLibrary`
 // from `packages/wmr_tracking_unity/unity` and copy it to the gitignored
 // `android/unity/unified/unityLibrary` path. A missing export is not an error:

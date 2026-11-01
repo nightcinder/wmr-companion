@@ -73,6 +73,7 @@ parser (UTF-16 and UTF-8 pools) and that camera gate.
 | Features | `bluetooth_le`, `usb.host`, and `camera` declared `required=false` |
 | Both runtimes | `libVitureUnityXR.so`, `libXREALXRPlugin.so`, one `libunity.so`; Unity subsystems 0.9.0 and 3.1.0 |
 | Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 can rename them in a release build |
+| Android XR callbacks | Every dex class that implements a device `com.android.extensions.xr` callback interface (`function.Consumer`, `splitengine.RequestCallback`, `splitengine.MessageGroupCallback`) keeps its method. When R8 cannot resolve those interfaces it shrinks the callbacks to empty classes and the device kills the process with an `AbstractMethodError` as soon as the session starts (ONY-758) |
 | Activities | Flutter `MainActivity`, `UnityPlayerActivity`, XREAL `NRXRActivity` |
 | Vendor metadata | VITURE `sdk 0.9.0`, `dof 6dof`; XREAL `supportDevices` present |
 
