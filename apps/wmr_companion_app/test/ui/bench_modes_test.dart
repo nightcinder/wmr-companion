@@ -46,6 +46,26 @@ class _FakeSession implements BenchSession {
       BenchStepOutcome.done('8000 rows saved');
 
   @override
+  Future<BenchStepOutcome> handTracking({
+    required bool gripping,
+    required Duration duration,
+  }) async => BenchStepOutcome.done(
+    gripping ? 'Grip dropout 2.0%' : 'Empty-hand baseline 29.0 Hz',
+  );
+
+  @override
+  Future<BenchStepOutcome> carinaLeds() async =>
+      BenchStepOutcome.done('4 LED captures saved');
+
+  @override
+  Future<BenchStepOutcome> carinaCheckerboard() async =>
+      BenchStepOutcome.done('10 checkerboard stereo captures saved');
+
+  @override
+  Future<BenchStepOutcome> carinaPose() async =>
+      BenchStepOutcome.done('Pose 99.0 Hz');
+
+  @override
   Future<BenchStepOutcome> poseSegment(
     int hand,
     PoseSegment segment,
@@ -172,6 +192,10 @@ void main() {
     }
 
     await tap(tester, 'bench-start');
+    expect(container.read(benchControllerProvider).step, BenchStep.handEmpty);
+    await tap(tester, 'bench-start');
+    expect(container.read(benchControllerProvider).step, BenchStep.handGrip);
+    await tap(tester, 'bench-start');
     expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
     expect(find.byKey(const Key('bench-capture-prompt')), findsOneWidget);
     expect(find.textContaining('Pose 1 of 42'), findsOneWidget);
@@ -204,6 +228,9 @@ void main() {
 
     await tap(tester, 'bench-skip');
 
+    expect(container.read(benchControllerProvider).step, BenchStep.handEmpty);
+    await tap(tester, 'bench-skip');
+    await tap(tester, 'bench-skip');
     expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
   });
 
@@ -235,7 +262,7 @@ void main() {
     );
   });
 
-  test('3DoF only keeps the old twelve-step flow', () {
+  test('3DoF only keeps the bridge flow and adds the Carina gates', () {
     expect(BenchMode.threeDofOnly.steps.map((step) => step.id), [
       'connect',
       'both_hands',
@@ -248,6 +275,9 @@ void main() {
       'latency',
       'photo',
       'serial_log',
+      'carina_leds',
+      'carina_checkerboard',
+      'carina_pose',
       'export',
     ]);
   });

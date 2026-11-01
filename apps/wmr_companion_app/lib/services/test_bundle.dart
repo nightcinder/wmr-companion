@@ -356,6 +356,43 @@ Future<TestBundle> writeTestBundle(
     );
   }
 
+  final carinaNames = <String>[];
+  for (final directoryPath in _carinaDirectories(input.benchRun)) {
+    final directory = Directory(directoryPath);
+    if (!await directory.exists()) {
+      missing.add(
+        'Carina output directory `${_baseName(directoryPath)}` — the saved '
+        'directory was missing.',
+      );
+      continue;
+    }
+    final prefix = 'carina/${_baseName(directoryPath)}';
+    await for (final entity in directory.list(
+      recursive: true,
+      followLinks: false,
+    )) {
+      if (entity is! File) continue;
+      final relative = entity.path
+          .substring(directory.path.length + 1)
+          .replaceAll('\\', '/');
+      final name = '$prefix/$relative';
+      final bytes = await _read(entity.path);
+      if (bytes == null) {
+        missing.add('Carina file `$name` — the saved file was missing.');
+        continue;
+      }
+      if (files.containsKey(name)) continue;
+      files[name] = bytes;
+      carinaNames.add(name);
+    }
+  }
+  if (carinaNames.isNotEmpty) {
+    present.add(
+      'Carina captures: ${carinaNames.length} file(s) '
+      '(${carinaNames.join(', ')})',
+    );
+  }
+
   final firmware = _firmwareSummary(input.bridges);
   if (firmware == null) {
     missing.add('Firmware version (FF16) — ${_firmwareReason(input.bridges)}');
@@ -593,6 +630,26 @@ Map<String, Object?>? _poseStepData(BenchBundleRun? bench) {
     return step.data;
   }
   return null;
+}
+
+/// Every Carina output directory the bench recorded, in step order.
+List<String> _carinaDirectories(BenchBundleRun? bench) {
+  if (bench == null) return const [];
+  final seen = <String>{};
+  final paths = <String>[];
+  for (final step in bench.steps) {
+    if (step.id != 'carina_leds' &&
+        step.id != 'carina_checkerboard' &&
+        step.id != 'carina_pose') {
+      continue;
+    }
+    final directories = step.data['directories'];
+    if (directories is! List) continue;
+    for (final value in directories) {
+      if (value is String && seen.add(value)) paths.add(value);
+    }
+  }
+  return paths;
 }
 
 String _readme(

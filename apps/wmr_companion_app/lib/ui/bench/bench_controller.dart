@@ -169,6 +169,15 @@ class BenchController extends Notifier<BenchRunState> {
       await confirmCurrent();
       return;
     }
+    final unavailable = _unavailableReason(step);
+    if (unavailable != null) {
+      _setResult(
+        step,
+        BenchStepResult(status: BenchStatus.skipped, summary: unavailable),
+      );
+      _advance();
+      return;
+    }
     final tracking = ref.read(benchHandTrackingProvider);
     if (step == BenchStep.poseCapture && !tracking.available) {
       _setResult(
@@ -183,7 +192,12 @@ class BenchController extends Notifier<BenchRunState> {
     }
     _setResult(step, const BenchStepResult(status: BenchStatus.running));
     try {
-      final session = await ref.read(benchSessionProvider)();
+      var session = await ref.read(benchSessionProvider)();
+      // The Carina gates need only the glasses over USB, so they run without
+      // a bridge or a tracking source attached.
+      if (session == null && _isCarinaStep(step)) {
+        session = await ref.read(carinaOnlySessionProvider)();
+      }
       if (session == null) {
         _setResult(
           step,
@@ -242,11 +256,45 @@ class BenchController extends Notifier<BenchRunState> {
         BenchStep.moveRight => session.move(1),
         BenchStep.capture => session.capture(),
         BenchStep.latency => session.latency(),
+        BenchStep.handEmpty => session.handTracking(
+          gripping: false,
+          duration: ref.read(benchDurationsProvider).handEmpty,
+        ),
+        BenchStep.handGrip => session.handTracking(
+          gripping: true,
+          duration: ref.read(benchDurationsProvider).handGrip,
+        ),
+        BenchStep.carinaLeds => session.carinaLeds(),
+        BenchStep.carinaCheckerboard => session.carinaCheckerboard(),
+        BenchStep.carinaPose => session.carinaPose(),
         BenchStep.poseCapture ||
         BenchStep.photo ||
         BenchStep.serialLog ||
         BenchStep.export => throw StateError('Step $step does not run'),
       };
+
+  /// Why a step cannot run in this build or attachment, or null when it can.
+  String? _unavailableReason(BenchStep step) {
+    if (step == BenchStep.handEmpty || step == BenchStep.handGrip) {
+      if (!ref.read(benchPoseAvailabilityProvider).available) {
+        return 'No hand-tracking source with hand joints is attached.';
+      }
+      return null;
+    }
+    if (step == BenchStep.carinaLeds ||
+        step == BenchStep.carinaCheckerboard ||
+        step == BenchStep.carinaPose) {
+      if (ref.read(carinaCaptureProvider) == null) {
+        return 'This build has no WMR_VITURE_CARINA_DIAG diagnostic.';
+      }
+    }
+    return null;
+  }
+
+  static bool _isCarinaStep(BenchStep step) =>
+      step == BenchStep.carinaLeds ||
+      step == BenchStep.carinaCheckerboard ||
+      step == BenchStep.carinaPose;
 
   /// Runs one segment of the 6DoF step. Each segment keeps the step current so
   /// the screen can show its own prompt and countdown; the step ends after the
@@ -576,6 +624,15 @@ class BenchController extends Notifier<BenchRunState> {
     while (next < steps.length) {
       final step = steps[next];
       if (state.resultFor(step).finished) {
+        next++;
+        continue;
+      }
+      final unavailable = _unavailableReason(step);
+      if (unavailable != null) {
+        _setResult(
+          step,
+          BenchStepResult(status: BenchStatus.skipped, summary: unavailable),
+        );
         next++;
         continue;
       }

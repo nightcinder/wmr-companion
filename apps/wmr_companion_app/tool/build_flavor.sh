@@ -34,6 +34,9 @@ case "$flavor" in
       --dart-define=WMR_ANDROID_XR_TRACKING=true
       --dart-define=WMR_VITURE_TRACKING=true
       --dart-define=WMR_XREAL_TRACKING=true
+      # The guided bench's Carina gate must be reachable on a signed tester
+      # build, not only a debug APK (ONY-740). It is still bench-only.
+      --dart-define=WMR_VITURE_CARINA_DIAG=true
     )
     ;;
   *)

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add a debug-only Carina C-SDK diagnostic spike
+- Add a bench-only Carina C-SDK diagnostic spike
   (`--dart-define=WMR_VITURE_CARINA_DIAG=true`): opens the glasses USB fd,
   polls `xr_device_provider_get_gl_pose_carina`, walks a fixed 0.1/0.3/1.0/3.0
   ms exposure ladder at one gain, and dumps 8-bit stereo PGM frames plus JSON

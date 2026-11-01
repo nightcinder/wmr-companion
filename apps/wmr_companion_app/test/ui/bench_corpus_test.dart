@@ -170,6 +170,8 @@ void main() {
     final controller = container.read(benchControllerProvider.notifier);
     controller.selectMode(BenchMode.sixDofOnly);
     controller.skipCurrent(); // the capability summary is not a corpus run
+    controller.skipCurrent(); // ONY-733 empty-hand baseline
+    controller.skipCurrent(); // ONY-733 grip run
 
     var tick = 0;
     final feed = Timer.periodic(const Duration(milliseconds: 1), (_) {

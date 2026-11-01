@@ -11,6 +11,7 @@ import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
+import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 
 class _FakeSession implements BenchSession {
   _FakeSession({
@@ -112,6 +113,39 @@ class _FakeSession implements BenchSession {
   @override
   Future<BenchStepOutcome> latency() =>
       _outcome(BenchStep.latency, '8000 rows saved');
+
+  @override
+  Future<BenchStepOutcome> handTracking({
+    required bool gripping,
+    required Duration duration,
+  }) => _outcome(
+    gripping ? BenchStep.handGrip : BenchStep.handEmpty,
+    gripping ? 'Grip dropout 2.0%' : 'Empty-hand baseline 29.0 Hz',
+  );
+
+  @override
+  Future<BenchStepOutcome> carinaLeds() =>
+      _outcome(BenchStep.carinaLeds, '4 LED captures saved');
+
+  @override
+  Future<BenchStepOutcome> carinaCheckerboard() =>
+      _outcome(BenchStep.carinaCheckerboard, '10 captures saved');
+
+  @override
+  Future<BenchStepOutcome> carinaPose() =>
+      _outcome(BenchStep.carinaPose, 'Pose 99.0 Hz');
+}
+
+class _FakeCarinaRunner implements CarinaCaptureRunner {
+  @override
+  Future<CarinaDiagnosticReport> capture({
+    required Duration duration,
+    required String outputDirectory,
+  }) async => CarinaDiagnosticReport.fromJson(const {
+    'schema': 'wmr.carina.diagnostics.v1',
+    'ok': true,
+    'pose': {'polls': 100, 'successes': 99, 'rateHz': 99.0, 'valid': true},
+  });
 }
 
 void main() {
@@ -129,6 +163,7 @@ void main() {
       'viture',
     ),
     BenchMode mode = BenchMode.threeDofOnly,
+    bool withCarina = true,
   }) async {
     final documents = Directory.systemTemp.createTempSync('bench_screen_docs');
     addTearDown(() => documents.deleteSync(recursive: true));
@@ -139,6 +174,8 @@ void main() {
         poseRecordingStoreProvider.overrideWith(
           (ref) async => PoseRecordingStore(documents),
         ),
+        if (withCarina)
+          carinaCaptureProvider.overrideWithValue(_FakeCarinaRunner()),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) async => bundle(),
         ),
@@ -193,7 +230,7 @@ void main() {
       mode: BenchMode.combined,
     );
 
-    expect(find.text('Step 2 of 13'), findsOneWidget);
+    expect(find.text('Step 2 of 18'), findsOneWidget);
     expect(find.text('Both hands seen'), findsWidgets);
 
     // Walk the measured steps, including all ten pose segments, until the
@@ -204,14 +241,17 @@ void main() {
       }
       await tap(tester, 'bench-start');
     }
-    expect(find.text('Step 10 of 13'), findsOneWidget);
+    expect(find.text('Step 10 of 18'), findsOneWidget);
     expect(find.text('LED photo'), findsOneWidget);
 
     await tap(tester, 'bench-confirm');
-    expect(find.text('Step 11 of 13'), findsOneWidget);
+    expect(find.text('Step 11 of 18'), findsOneWidget);
     await tap(tester, 'bench-confirm');
-    expect(find.textContaining('Step 12 of 13'), findsOneWidget);
+    expect(find.textContaining('Step 12 of 18'), findsOneWidget);
 
+    // ONY-733 Gate 4, then the 6DoF corpus.
+    await tap(tester, 'bench-start');
+    await tap(tester, 'bench-start');
     for (var i = 0; i < benchPoseSequence.length; i++) {
       await tap(tester, 'bench-start');
     }
@@ -222,7 +262,13 @@ void main() {
           .status,
       BenchStatus.done,
     );
-    expect(find.text('Step 13 of 13'), findsOneWidget);
+    expect(find.text('Step 15 of 18'), findsOneWidget);
+
+    // ONY-735: LED, checkerboard, head pose.
+    await tap(tester, 'bench-start');
+    await tap(tester, 'bench-start');
+    await tap(tester, 'bench-start');
+    expect(find.text('Step 18 of 18'), findsOneWidget);
 
     await tap(tester, 'bench-export');
 
@@ -251,7 +297,7 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
 
     await tap(tester, 'bench-skip');
-    expect(find.text('Step 4 of 12'), findsOneWidget);
+    expect(find.text('Step 4 of 15'), findsOneWidget);
 
     final state = container.read(benchControllerProvider);
     expect(
@@ -273,7 +319,7 @@ void main() {
 
     await tap(tester, 'bench-start');
     expect(find.textContaining('both_hands exploded'), findsOneWidget);
-    expect(find.text('Step 2 of 12'), findsOneWidget);
+    expect(find.text('Step 2 of 15'), findsOneWidget);
 
     final state = container.read(benchControllerProvider);
     expect(state.resultFor(BenchStep.bothHands).status, BenchStatus.failed);
@@ -289,6 +335,7 @@ void main() {
         'unavailable: no 6DoF hand-tracking source',
       ),
       mode: BenchMode.combined,
+      withCarina: false,
     );
 
     for (var i = 0; i < 10; i++) {
@@ -319,6 +366,7 @@ void main() {
       tester,
       _FakeSession(),
       mode: BenchMode.combined,
+      withCarina: false,
     );
     await walkTo(tester, container, BenchStep.poseCapture);
 
@@ -391,6 +439,7 @@ void main() {
       tester,
       _FakeSession(failingSegments: {PoseSegment.still}),
       mode: BenchMode.combined,
+      withCarina: false,
     );
     await walkTo(tester, container, BenchStep.poseCapture);
     await tap(tester, 'bench-start'); // the failing still segment
