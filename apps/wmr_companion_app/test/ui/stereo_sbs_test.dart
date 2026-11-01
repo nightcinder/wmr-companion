@@ -175,6 +175,31 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('scrolling one eye moves the other in step', (tester) async {
+    // A short viewport forces the Connect list to overflow.
+    await openApp(tester, const Size(3840, 200));
+
+    double offset(int pane) => tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byType(ListView).at(pane),
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position
+        .pixels;
+
+    expect(offset(0), 0);
+    expect(offset(1), 0);
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -400));
+    await tester.pump();
+
+    expect(offset(0), greaterThan(0));
+    expect(offset(1), offset(0));
+    await close(tester);
+  });
+
   testWidgets('a 32:9 bench shares one focused primary action', (tester) async {
     await openApp(tester, const Size(3840, 1080));
 

@@ -133,8 +133,11 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
               onSelected: (value) {
                 switch (value) {
                   case 'terms':
-                    Navigator.of(context)
-                        .push(stereoRoute((_) => const TermsScreen()));
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const TermsScreen(),
+                      ),
+                    );
                   case 'licences':
                     showLicensePage(
                       context: context,
@@ -336,8 +339,9 @@ class RealPanel extends ConsumerWidget {
                 FilledButton.tonal(
                   focusNode: ui.debugFocus,
                   onPressed: () => Navigator.of(context).push(
-                    stereoRoute(
-                      (_) => const DebugScreen(source: DebugSource.real),
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const DebugScreen(source: DebugSource.real),
                     ),
                   ),
                   child: const Text('Open 3D debug view'),
@@ -348,9 +352,11 @@ class RealPanel extends ConsumerWidget {
                 6,
                 FilledButton.tonal(
                   focusNode: ui.latencyFocus,
-                  onPressed: () =>
-                      Navigator.of(context)
-                          .push(stereoRoute((_) => const LatencyScreen())),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LatencyScreen(),
+                    ),
+                  ),
                   child: const Text('Latency test'),
                 ),
               ),
@@ -425,7 +431,8 @@ class RealPanel extends ConsumerWidget {
     await controller.setStreamMode(StreamMode.raw);
     if (!context.mounted) return;
     if (controller.service?.fault != null) return; // shown by the banner
-    await Navigator.of(context).push(stereoRoute((_) => const CaptureScreen()));
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const CaptureScreen()));
   }
 
   /// Entry for a Pi Wi-Fi bridge: host, port and the optional shared token.

@@ -65,6 +65,11 @@ class StereoSbs extends InheritedWidget {
 /// A [FocusNode] owned above the wrapper is attached to both halves; Flutter
 /// keeps one attachment live but every `Focus` widget listening to the node
 /// still paints the focus ring, so both eyes show the highlight.
+///
+/// Scope: the wrapper only mirrors screens that hoist their mutable state like
+/// this — currently Connect and Bench. Pushed screens that still keep local
+/// state (debug view, latency, capture, terms) are not wrapped, so they render
+/// once at full viewport width.
 class StereoSbsWrapper extends ConsumerWidget {
   const StereoSbsWrapper({super.key, required this.child});
 
@@ -168,9 +173,3 @@ class StereoSbsScrollController extends ScrollController {
     }
   }
 }
-
-/// A pushed route that keeps the stereo mirroring: the root [Navigator] is
-/// above the home screen's wrapper, so a pushed screen has to wrap itself.
-Route<T> stereoRoute<T>(WidgetBuilder builder) => MaterialPageRoute<T>(
-  builder: (context) => StereoSbsWrapper(child: builder(context)),
-);
