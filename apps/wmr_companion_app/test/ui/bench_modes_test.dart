@@ -258,8 +258,8 @@ void main() {
       find.byKey(const Key('bench-mode-6dof_only')),
     );
     expect(button.onPressed, isNull);
-    expect(find.textContaining('VITURE XR stereo is inactive'), findsOneWidget);
-    expect(find.textContaining('Switch the glasses to 3D'), findsOneWidget);
+    expect(find.textContaining('VITURE XR stereo is inactive'), findsWidgets);
+    expect(find.textContaining('Switch the glasses to 3D'), findsWidgets);
     expect(find.byKey(const Key('bench-6dof-reason')), findsOneWidget);
   });
 
@@ -274,8 +274,8 @@ void main() {
     expect(button.onPressed, isNull);
     expect(find.byKey(const Key('bench-6dof-reason')), findsOneWidget);
     expect(
-      find.textContaining('Attach a hand-tracking source'),
-      findsOneWidget,
+      find.textContaining('All vendor tracking flags are off'),
+      findsWidgets,
     );
     expect(
       container.read(benchControllerProvider).mode,

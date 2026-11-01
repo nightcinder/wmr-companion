@@ -113,6 +113,15 @@ class _FixedDetector implements GlassesDetector {
   Future<GlassesDetection> detect() async => detection;
 }
 
+class _MutableDetector implements GlassesDetector {
+  _MutableDetector(this.detection);
+
+  GlassesDetection detection;
+
+  @override
+  Future<GlassesDetection> detect() async => detection;
+}
+
 class _CountingDetector implements GlassesDetector {
   int calls = 0;
 
@@ -156,21 +165,22 @@ void main() {
     expect(calls, isEmpty);
   });
 
-  testWidgets('the selector offers None, Simulated and the three vendors', (
-    tester,
-  ) async {
+  testWidgets('the screen shows a read-only detection banner, not a vendor '
+      'dropdown', (tester) async {
     await open(tester);
-    await tester.tap(find.byKey(const ValueKey('tracking-source-selector')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await settle(tester);
 
-    for (final choice in DebugTrackingSource.values) {
-      expect(find.text(choice.label), findsWidgets);
-    }
+    expect(
+      find.byKey(const ValueKey('tracking-source-selector')),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('tracking-source-banner')), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-redetect')), findsOneWidget);
+    expect(find.text('Glasses detection'), findsOneWidget);
     await close(tester);
   });
 
-  testWidgets('Auto (USB) attaches the natively detected vendor source', (
+  testWidgets('startup attaches the detected vendor on any host', (
     tester,
   ) async {
     FakeTrackingSource? source;
@@ -180,19 +190,20 @@ void main() {
         detector: const _FixedDetector(
           GlassesDetection(
             vendor: GlassesVendor.viture,
-            host: GlassesHost.neckband,
+            host: GlassesHost.phone,
+            usbPermissionGranted: true,
           ),
         ),
         flags: const TrackingSourceFlags(viture: true),
         vitureSource: () async => source = FakeTrackingSource(),
       ),
     );
-
-    select(tester, DebugTrackingSource.auto);
     await settle(tester);
 
     expect(source?.started, isTrue);
+    expect(find.textContaining('Detected VITURE on phone'), findsOneWidget);
     expect(find.textContaining('Attached viture tracking'), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsNothing);
 
     source!.addFrame(_handFrame(1));
     await settle(tester);
@@ -200,7 +211,7 @@ void main() {
     await close(tester);
   });
 
-  testWidgets('Auto (USB) reports when no glasses are detected', (
+  testWidgets('no glasses leaves 0DoF and offers the Simulated fallback', (
     tester,
   ) async {
     await open(
@@ -210,8 +221,6 @@ void main() {
         flags: const TrackingSourceFlags(viture: true),
       ),
     );
-
-    select(tester, DebugTrackingSource.auto);
     await settle(tester);
 
     expect(
@@ -220,12 +229,81 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tracking-source-simulated')));
+    await settle(tester);
+    expect(
+      find.textContaining('FakeTrackingSource trajectory'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('source handAnchor'), findsNWidgets(2));
     await close(tester);
   });
 
-  testWidgets('a flag-off build never probes the neckband detector', (
+  testWidgets('ambiguous USB devices leave 0DoF and offer Simulated', (
     tester,
   ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.none,
+            host: GlassesHost.phone,
+            reason: GlassesDetectionReason.usbAmbiguous,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true, xreal: true),
+      ),
+    );
+    await settle(tester);
+
+    expect(find.textContaining('refusing to guess'), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('Re-detect attaches glasses connected after startup', (
+    tester,
+  ) async {
+    final detector = _MutableDetector(GlassesDetection.none);
+    FakeTrackingSource? source;
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(xreal: true),
+        xrealSource: () async => source = FakeTrackingSource(),
+      ),
+    );
+    await settle(tester);
+    expect(
+      find.textContaining(
+        'No VITURE, XREAL or Android XR glasses were detected',
+      ),
+      findsOneWidget,
+    );
+
+    detector.detection = const GlassesDetection(
+      vendor: GlassesVendor.xreal,
+      host: GlassesHost.beamPro,
+      usbPermissionGranted: true,
+    );
+    await tester.tap(find.byKey(const Key('tracking-source-redetect')));
+    await settle(tester);
+
+    expect(source?.started, isTrue);
+    expect(
+      find.textContaining('Detected XREAL on XREAL Beam Pro'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Attached xreal tracking'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('a flag-off build never probes the detector', (tester) async {
     final detector = _CountingDetector();
     await open(
       tester,
@@ -240,14 +318,13 @@ void main() {
     final container = ProviderScope.containerOf(
       tester.element(find.byType(DebugScreen)),
     );
-    expect(
-      container.read(debugTrackingSourceProvider).choice,
-      DebugTrackingSource.none,
-    );
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.choice, DebugTrackingSource.auto);
+    expect(selection.attachment.value?.source, isNull);
     await close(tester);
   });
 
-  testWidgets('a manual selection made during the neckband probe wins', (
+  testWidgets('a manual selection made during the startup probe wins', (
     tester,
   ) async {
     final detector = _DeferredDetector();

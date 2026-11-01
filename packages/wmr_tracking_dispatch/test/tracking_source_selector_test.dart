@@ -78,6 +78,24 @@ void main() {
     expect(source.started, isTrue);
   });
 
+  test('a superseded detection never creates a vendor source', () async {
+    var created = false;
+    final selector = TrackingSourceSelector(
+      detector: _FakeDetector(_viture),
+      flags: flags(viture: true),
+      vitureSource: () async {
+        created = true;
+        return FakeTrackingSource();
+      },
+    );
+
+    final selection = await selector.select(isCancelled: () => true);
+
+    expect(selection.status, TrackingSelectionStatus.none);
+    expect(selection.source, isNull);
+    expect(created, isFalse);
+  });
+
   test('detected XREAL with its flag on attaches the XREAL source', () async {
     final detector = _FakeDetector(_xreal);
     final source = FakeTrackingSource();

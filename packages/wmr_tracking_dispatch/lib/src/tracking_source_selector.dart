@@ -91,7 +91,7 @@ class TrackingSourceSelector {
   final Future<TrackingSource?> Function()? xrealSource;
   final Future<TrackingSource?> Function()? androidXrSource;
 
-  Future<TrackingSelection> select() async {
+  Future<TrackingSelection> select({bool Function()? isCancelled}) async {
     if (!flags.any) {
       return const TrackingSelection(
         status: TrackingSelectionStatus.none,
@@ -106,6 +106,15 @@ class TrackingSourceSelector {
       return TrackingSelection(
         status: TrackingSelectionStatus.unavailable,
         message: 'Native glasses detection failed: $error',
+      );
+    }
+    // A newer selection may have landed while the detector ran. Check before
+    // creating a vendor source so a superseded auto probe never starts Unity.
+    if (isCancelled?.call() ?? false) {
+      return TrackingSelection(
+        status: TrackingSelectionStatus.none,
+        detection: detection,
+        message: 'Detection was superseded by a newer selection',
       );
     }
     if (!detection.hasVendor) {
