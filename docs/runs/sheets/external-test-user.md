@@ -1,4 +1,4 @@
-# External tester quickstart : WMR Companion v0.3.12 (unified APK)
+# External tester quickstart : WMR Companion v0.3.13 (unified APK)
 
 Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
@@ -41,34 +41,30 @@ regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.12/wmr-companion-0.3.12-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.13/wmr-companion-0.3.13-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.12/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.13/SHA256SUMS
 
-Confirm the v0.3.12 release exists and the installed APK reports `versionName` 0.3.12 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.11, the tag was not cut from a bumped tree: record the value and stop.
+Confirm the v0.3.13 release exists and the installed APK reports `versionName` 0.3.13 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.12, the tag was not cut from a bumped tree: record the value and stop.
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
-Do not run an older build for this pass. v0.3.12 carries fixes that change results:
-the Unity player is pinned to OpenGL ES 3, so VITURE's display provider no
-longer takes the Vulkan stop path that crashed the guided bench on a Pro
-Neckband, with the loader gate starting only VITURE's hand subsystem on a
-player that is not GLES3 as a fallback (ONY-802); the hosted Unity view no
-longer takes D-pad focus, and Volume Up/Down move focus, hold Volume Down
-selects and hold Volume Up goes back, with or without headgaze (ONY-802); plus
-the v0.3.11 fixes: selecting **AndroidXR** as the hand-tracking source on a
-Galaxy XR no longer crashes the app (v0.3.10), the Luma Ultra + Pro Neckband
-3D view now fills both eyes (v0.3.9), the Unity player resumes and focuses on
-first host so the Neckband no longer drops to 0DoF with a greyed 6DoF button
-(v0.3.11), and on a Neckband host the app auto-selects `Auto (USB)` (which
-resolves to the VITURE runtime) and shows a 0DoF/6DoF status line (v0.3.11).
-None of the ONY-802 changes have been verified on hardware yet. A crash, a
-black right eye, or a 0DoF drop on v0.3.12 is a regression worth recording.
-Known older behaviour: a crash on v0.3.7 through v0.3.11 in
-`VitureDisplayProvider::GfxThread_Stop` when hand tracking starts on a
-non-GLES3 player, a black right eye on v0.3.7 or v0.3.8, and a 0DoF drop with
-greyed 6DoF button on v0.3.7 through v0.3.10. A black right eye on v0.3.9 is a
-regression.
+Do not run an older build for this pass. v0.3.13 carries fixes that change results:
+in embedded UaaL the Unity bridge is hand-only, so VITURE's display provider
+can no longer take over the Flutter host activity, and the unshaded marker
+cubes are gone (ONY-840), shipped through the pinned `unity-export-1.3`;
+Unity and vendor player activities are no longer exported, so `MainActivity`
+is the only entry point (ONY-842); plus the v0.3.12 fixes: the Unity player
+is pinned to OpenGL ES 3, the loader gate starts only VITURE's hand subsystem
+on a non-GLES3 player, and the hosted Unity view no longer takes D-pad focus
+with Volume Up/Down moving focus (ONY-802); plus the v0.3.11 fixes: automatic
+glasses detection, the XREAL cold-start fix, and the Unity player resume/focus
+on first host so the Neckband no longer drops to 0DoF. None of the ONY-840 or
+ONY-842 changes have been verified on hardware yet. A crash, a black right eye,
+a pink cube, or a 0DoF drop on v0.3.13 is a regression worth recording.
+Known older behaviour: a Vulkan crash on v0.3.7 through v0.3.9, a black right
+eye on v0.3.7 or v0.3.8, a 0DoF drop with greyed 6DoF button on v0.3.7
+through v0.3.10, and the pink cube / display takeover on v0.3.12.
 
 ## 2. Install
 
@@ -163,7 +159,7 @@ If the Neckband is connected over wireless ADB, connect first: `adb connect <nec
 
 Record the values in the intake block. Do not reconstruct them from memory.
 
-### 6E : Neckband 0DoF / 6DoF triage (v0.3.12)
+### 6E : Neckband 0DoF / 6DoF triage (v0.3.13)
 
 On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side
 viewport (3840x1080). In v0.3.10 and earlier the app could open and then drop
@@ -197,7 +193,7 @@ status line shows the current state:
 - `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
 - `0DoF: <message>.` for any other failure.
 
-If the app still shows 0DoF on v0.3.12, capture logs and record the status line.
+If the app still shows 0DoF on v0.3.13, capture logs and record the status line.
 
 **Launch crash and input (ONY-802).** v0.3.12 is the first release on
 `unity-export-1.2`: the Unity player is pinned to OpenGL ES 3 so VITURE's
@@ -222,6 +218,39 @@ nothing, capture the log and the tombstone.
 
 Record the status line and the highest `stage=` / `stereoMode` reached. Do not reconstruct them from memory.
 
+### 6H : Pro Neckband 6DoF launch and recovery (v0.3.13)
+
+Use only the controls that exist on the Pro Neckband. There is no D-pad. The
+controls are: Power, Volume Up/Down, Settings, the pointer/air-mouse, hand
+gestures, the Neckband Remote app, or a paired Bluetooth controller.
+
+Launch into 6DoF:
+
+1. Put the glasses in 3D mode (SpaceWalker). A 2D/mono player fails closed with `unavailable`.
+2. Power on the Neckband and open WMR Companion. The app auto-detects VITURE and shows a status line.
+3. If the status line shows 0DoF, tap Re-detect. Wait for `6DoF: Auto (USB) hand tracking attached`.
+4. Use the volume rocker to move focus: short Volume Up/Down presses move the focus ring, hold Volume Down selects, hold Volume Up goes back. With headgaze on (Settings + Power), Volume Down selects and Volume Up goes back.
+5. Start the guided bench 6DoF only path, or open Capture 6DoF pose.
+
+Recovery if the app drops to 0DoF or shows a black screen:
+
+1. Check the status line. If it says `VITURE XR stereo is inactive`, switch the glasses to 3D and tap Re-detect.
+2. If the Unity player crashed (black screen, then close), reopen the app. The hand-only UaaL path in v0.3.13 keeps the display provider from taking over the host activity, so a reopen should recover.
+3. If 6DoF stays greyed, capture the highest `stage=` and `stereoMode` from the debug overlay and the logcat below.
+4. Do not use ADB to inject touches as a control path.
+
+Logcat request for ONY-838 (crash mid-bench, then stuck in 0DoF with a pink cube):
+
+Run these and include the output in the zip:
+
+- `adb connect <neckband-ip>:5555` (if wireless)
+- `adb shell dumpsys package com.onyxlens.wmr_companion | grep -E "versionName|versionCode"`
+- `adb shell wm size`
+- `adb logcat -v threadtime -d > wmr-neckband-ony838-<YYYYMMDD-HHMMSS>.log`
+- Filter: `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted|0DoF|6DoF|spacewalker|running in 2d|pink|cube|VitureDisplayProvider|GfxThread" wmr-neckband-ony838-*.log`
+
+Record the status line, the highest `stage=` / `stereoMode`, and whether a pink cube or black screen appeared. Do not reconstruct them from memory.
+
 ## 7.5. Log capture (all setups)
 
 Capture logs for every run and include them in the zip:
@@ -245,7 +274,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.3
-- App: <versionName from ADB> unified (signed release) (expected 0.3.12; confirm the release exists and the installed APK reports it before testing)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.13; confirm the release exists and the installed APK reports it before testing)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
