@@ -584,7 +584,7 @@ jobs:
     # it and keeps the APK as evidence. It is not a required check and
     # publishes nothing.
     needs: changes
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.r8_dex == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.r8_dex == 'true' }}
     runs-on: [self-hosted, liesa, android]
     timeout-minutes: 40
     # A new push to the same PR cancels the older run: only the newest head's
