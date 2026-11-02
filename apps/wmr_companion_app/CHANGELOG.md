@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.12+17
 
 - Keep the hosted Unity player out of the Android focus tree so the Flutter
   UI keeps its own focus.
