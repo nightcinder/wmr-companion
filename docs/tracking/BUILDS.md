@@ -39,8 +39,8 @@ versionCode bump are documented in [RELEASE_SIGNING.md](../RELEASE_SIGNING.md).
 
 | Flavor | `--dart-define` | Unity export linked | What it ships |
 |---|---|---|---|
-| `base` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | none | Android XR, emulator, BLE/3DoF; every Dart adapter exists, but VITURE/XREAL `start()` reports typed `unavailable` with no Unity runtime linked |
-| `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (required for a real unified APK) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, both report typed `unavailable` |
+| `base` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | none | Android XR, emulator, BLE/3DoF; every Dart adapter exists, but with no Unity runtime linked VITURE reports the 3DoF fallback and XREAL reports typed `unavailable` |
+| `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (required for a real unified APK) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, VITURE reports the 3DoF fallback and XREAL reports typed `unavailable` |
 
 The per-vendor `viture` and `xreal` flavors are retired (ONY-565); only the
 unified APK ships and there is no per-vendor flavor to build.
@@ -60,8 +60,8 @@ unified APK ships and there is no per-vendor flavor to build.
 - Each vendor SDK contributes its own native libraries, XR loader and manifest
   entries; the supported way to get both vendors into one APK is the unified export.
 
-A missing Unity export is not an error: `unified` still builds and
-the Dart sources report `unavailable` when asked to start.
+A missing Unity export is not an error: `unified` still builds; VITURE reports
+the 3DoF fallback and XREAL reports `unavailable` when asked to start.
 
 ## Unified Unity library (ONY-273, ONY-355, ONY-388)
 
@@ -96,8 +96,8 @@ The `unified` app flavor links that shared export from
    tool/build_flavor.sh unified --debug
    ```
 
-No export is needed for CI: `tool/build_flavor.sh unified` still builds and the
-VITURE/XREAL sources report `unavailable`. The 0.2.1 release installed the owner export
+No export is needed for CI: `tool/build_flavor.sh unified` still builds; VITURE
+reports the 3DoF fallback and XREAL reports `unavailable`. The 0.2.1 release installed the owner export
 (SHA-256 `945bd42…`, ONY-354), which carried both vendor runtimes in one `unityLibrary`.
 
 ## Commands

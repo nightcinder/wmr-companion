@@ -123,7 +123,7 @@ runtime or vendor SDK is required.
   a grant, host markers, single creation, reuse, routing).
 - `packages/wmr_tracking_dispatch/test` - Dart detection parsing, selector
   outcomes (`attached`, `unsupported`, `unavailable`, `permissionDenied`,
-  `none`), and a flag-off test asserting zero channel calls.
+  `fallback`, `none`), and a flag-off test asserting zero channel calls.
 - `flutter analyze` and `flutter test` in the workspace.
 - Existing VITURE/XREAL Dart and Kotlin suites remain green; no BLE/3DoF code was
   touched.
