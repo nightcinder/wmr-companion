@@ -19,6 +19,11 @@
 -dontwarn com.android.extensions.xr.splitengine.RequestCallback
 -dontwarn com.android.extensions.xr.splitengine.SystemRendererConnection
 -dontwarn com.android.extensions.xr.subspace.Subspace
+# VITURE's SDK annotates `viture.xr.XR` with the framework-internal
+# `@GuardedBy` (CLASS retention, never read at run time). Once the vendor keep
+# rules below keep that class live, R8 fails the release build on the missing
+# annotation unless it is exempted (ONY-776).
+-dontwarn com.android.internal.annotations.GuardedBy
 
 # XREAL's GlassesDisplayPlugEvent AAR bundles stub classes in the android.*
 # namespace (android.hardware.display.DisplayManager and its listener types)
@@ -30,3 +35,22 @@
 # class still wins at runtime, the cast succeeds, and the SDK's display
 # listener attaches as on any other phone.
 -keep class android.hardware.display.** { *; }
+
+# Vendor SDKs and the Unity player are reflection/JNI entry points, not code we
+# link statically. R8 cannot see their callers inside libunity.so or the vendor
+# libraries, so a release build shrank them away (ONY-776).
+-keep class com.xreal.** { *; }
+-keep class ai.nreal.** { *; }
+-keep class com.viture.** { *; }
+-keep class com.unity3d.player.** { *; }
+
+# The Unity C# bridges call these static methods by hard-coded class and method
+# name through AndroidJavaClass.CallStatic. R8 renamed both the plugin classes
+# and their @JvmStatic methods in 0.3.10, so frames and stage reports never
+# reached Dart. Keep the names for the JNI contract (ONY-776).
+-keep class com.onyxlens.wmr_tracking_xreal.WmrTrackingXrealPlugin {
+    public static <methods>;
+}
+-keep class com.onyxlens.wmr_tracking_viture.WmrTrackingViturePlugin {
+    public static <methods>;
+}
