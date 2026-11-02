@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle_export.dart';
-import '../debug/debug_providers.dart';
 import '../debug/tracking_source_banner.dart';
 import '../sbs/stereo_sbs.dart';
 import 'bench_controller.dart';
+import 'bench_hud.dart';
 import 'bench_pose.dart';
 import 'bench_run.dart';
 import 'bench_tracking.dart';
@@ -50,8 +50,13 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final state = ref.read(benchControllerProvider);
-      if (state.step == BenchStep.connect &&
-          state.current.status == BenchStatus.pending) {
+      final defaultMode = ref.read(benchDefaultModeProvider);
+      if (state.mode != defaultMode) {
+        ref.read(benchControllerProvider.notifier).selectMode(defaultMode);
+      }
+      final next = ref.read(benchControllerProvider);
+      if (next.step == BenchStep.connect &&
+          next.current.status == BenchStatus.pending) {
         ref.read(benchControllerProvider.notifier).runCurrent();
       }
     });
@@ -124,12 +129,6 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final plan = ref.watch(benchPosePlanProvider);
     final sequence = ref.watch(benchPoseSequenceProvider);
     final tracking = ref.watch(benchHandTrackingProvider);
-    final selection = ref.watch(debugTrackingSourceProvider);
-    // The simulated source is fed by the debug pose viewer; keep that pump
-    // alive so a 6DoF capture can run without hardware.
-    if (selection.choice == DebugTrackingSource.simulated) {
-      ref.watch(debugPosesProvider(DebugSource.real));
-    }
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace');
     final step = state.step;
@@ -182,6 +181,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   key: const Key('bench-tracking-status'),
                   style: theme.textTheme.bodySmall,
                 ),
+                const SizedBox(height: 8),
+                const BenchTrackingHud(),
                 const SizedBox(height: 8),
                 LinearProgressIndicator(value: finished / total),
                 const SizedBox(height: 12),

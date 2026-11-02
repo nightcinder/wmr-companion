@@ -137,6 +137,10 @@ void main() {
     bool withHandJoints = false,
     TrackingSourceSelector? selector,
   }) async {
+    // Keep the HUD and the primary action on screen together.
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final documents = Directory.systemTemp.createTempSync('bench_modes_docs');
     addTearDown(() => documents.deleteSync(recursive: true));
     final container = ProviderContainer(
