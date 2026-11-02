@@ -28,6 +28,7 @@ void main() {
     WidgetTester tester,
     Size size, {
     Pose? pose,
+    Stream<Pose?>? poses,
     Pose? origin,
   }) async {
     tester.view.physicalSize = size;
@@ -42,7 +43,9 @@ void main() {
         overrides: [
           realTransportProvider.overrideWithValue(transport),
           appVersionProvider.overrideWith((ref) => '0.3.8+13'),
-          if (pose != null)
+          if (poses != null)
+            stereoHeadPoseProvider.overrideWith((ref) => poses)
+          else if (pose != null)
             stereoHeadPoseProvider.overrideWith((ref) => Stream.value(pose)),
           if (origin != null)
             stereoHeadOriginProvider.overrideWith(() => _FixedOrigin(origin)),
@@ -355,6 +358,29 @@ void main() {
         expect(translation.x, 0);
         expect(translation.y, 0);
       }
+      await close(tester);
+    });
+
+    testWidgets('the first live pose becomes the origin for later motion', (
+      tester,
+    ) async {
+      await openApp(
+        tester,
+        viewport,
+        poses: Stream.fromIterable([
+          Pose.identity,
+          headPose(yawRight: 0.1, pitchUp: 0.05),
+        ]),
+      );
+      await tester.pump();
+
+      final left = tester
+          .widget<Transform>(find.byKey(const Key('sbs-eye-left')))
+          .transform
+          .getTranslation();
+
+      expect(left.x, lessThan(0));
+      expect(left.y, greaterThan(0));
       await close(tester);
     });
 
