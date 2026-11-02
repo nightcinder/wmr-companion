@@ -566,6 +566,9 @@ void main() {
   testWidgets('notes an unconnected session instead of crashing', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => null),

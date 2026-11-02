@@ -8,6 +8,7 @@ import '../debug/debug_providers.dart';
 import '../debug/tracking_source_banner.dart';
 import '../sbs/stereo_sbs.dart';
 import 'bench_controller.dart';
+import 'bench_hud.dart';
 import 'bench_pose.dart';
 import 'bench_run.dart';
 import 'bench_tracking.dart';
@@ -41,20 +42,42 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   int? _poseTimerSegment;
   int _poseRemaining = 0;
 
+  /// Set once the opening mode has been taken from a settled tracking source.
+  bool _openingModeApplied = false;
+
   @override
   void initState() {
     super.initState();
     _bundles = ref.read(benchBundleProvider.notifier);
-    // The first step only checks the link, so run it as the screen opens. A
-    // 6DoF-only run starts at the capability summary and waits for the tester.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final state = ref.read(benchControllerProvider);
-      if (state.step == BenchStep.connect &&
-          state.current.status == BenchStatus.pending) {
-        ref.read(benchControllerProvider.notifier).runCurrent();
-      }
+      _applyOpeningMode();
     });
+  }
+
+  /// Applies [benchDefaultModeProvider] once the startup probe has settled.
+  ///
+  /// On a cold start the first frame arrives while the source is still an
+  /// [AsyncLoading] attachment, so the default reads as 3DoF only. Applying it
+  /// then would leave a Neckband tester on the bridge path. The first step only
+  /// checks the link, so it also waits for the settled default instead of
+  /// running against a bridge that is not there.
+  void _applyOpeningMode() {
+    if (_openingModeApplied) return;
+    if (ref.read(debugTrackingSourceProvider).attachment.isLoading) return;
+    _openingModeApplied = true;
+    final controller = ref.read(benchControllerProvider.notifier);
+    var state = ref.read(benchControllerProvider);
+    if (state.started || state.busy) return;
+    final defaultMode = ref.read(benchDefaultModeProvider);
+    if (state.mode != defaultMode) {
+      controller.selectMode(defaultMode);
+      state = ref.read(benchControllerProvider);
+    }
+    if (state.step == BenchStep.connect &&
+        state.current.status == BenchStatus.pending) {
+      controller.runCurrent();
+    }
   }
 
   @override
@@ -119,17 +142,16 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(benchControllerProvider);
+    // The startup probe settles after the first frame; re-apply the default
+    // when it does, while the wizard is still untouched.
+    ref.listen(debugTrackingSourceProvider, (previous, next) {
+      _applyOpeningMode();
+    });
     final controller = ref.read(benchControllerProvider.notifier);
     final durations = ref.watch(benchDurationsProvider);
     final plan = ref.watch(benchPosePlanProvider);
     final sequence = ref.watch(benchPoseSequenceProvider);
     final tracking = ref.watch(benchHandTrackingProvider);
-    final selection = ref.watch(debugTrackingSourceProvider);
-    // The simulated source is fed by the debug pose viewer; keep that pump
-    // alive so a 6DoF capture can run without hardware.
-    if (selection.choice == DebugTrackingSource.simulated) {
-      ref.watch(debugPosesProvider(DebugSource.real));
-    }
     final theme = Theme.of(context);
     final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace');
     final step = state.step;
@@ -182,6 +204,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   key: const Key('bench-tracking-status'),
                   style: theme.textTheme.bodySmall,
                 ),
+                const SizedBox(height: 8),
+                const BenchTrackingHud(),
                 const SizedBox(height: 8),
                 LinearProgressIndicator(value: finished / total),
                 const SizedBox(height: 12),

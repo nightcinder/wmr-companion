@@ -108,7 +108,7 @@ Pick **3DoF only** for the controller-only path, or **Combined** if you have bot
 
 ### 6B : 6DoF only (no bridge)
 
-Pick **6DoF only**. The bridge steps are skipped, the run is shorter, and that is expected : it is not a broken install. You need glasses with hand tracking active; there are no controllers to pair.
+Pick **6DoF only**; on a VITURE Neckband with no bridge it is already selected. The bridge steps are skipped, the run is shorter, and that is expected : it is not a broken install. You need glasses with hand tracking active; there are no controllers to pair.
 
 **Special note for 6DoF-only testers:** this path uses no bridge and no controllers. Do not attempt to pair controllers or connect to `WMR Bridge`. If your glasses do not report hand tracking, the **Capture 6DoF pose** step is unavailable and that is a valid result : record it as skipped. For deeper tracking observation (VITURE/XREAL hand-joint counts, recenter, etc.) see the WMR_Bridge internal runbook (https://github.com/nightcinder/WMR_Bridge/blob/main/docs/runs/sheets/internal-runbook.md) §7.4 and §7.5.
 

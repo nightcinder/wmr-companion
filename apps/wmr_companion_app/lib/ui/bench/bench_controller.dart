@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import '../../services/test_bundle.dart';
 import '../../services/test_bundle_export.dart';
+import '../connect/connect_providers.dart';
+import '../debug/debug_providers.dart';
 import '../debug/pose_recording_store.dart';
 import 'bench_pose.dart';
 import 'bench_run.dart';
@@ -117,6 +120,29 @@ final benchControllerProvider =
     NotifierProvider.autoDispose<BenchController, BenchRunState>(
       BenchController.new,
     );
+
+/// The mode the wizard opens in.
+///
+/// A VITURE Pro Neckband with no bridge is the hand-tracking-only case: the
+/// Unity runtime supplies hands, and every bridge step would skip. Opening in
+/// 3DoF only there makes the tester think hand tracking never started. A
+/// connected bridge, another host, or no attached hand source keeps 3DoF only.
+final benchDefaultModeProvider = Provider<BenchMode>((ref) {
+  if (ref.watch(realDeviceProvider.select((s) => s.connected))) {
+    return BenchMode.threeDofOnly;
+  }
+  final detection = ref
+      .watch(debugTrackingSourceProvider)
+      .attachment
+      .value
+      ?.detection;
+  if (detection?.host != GlassesHost.neckband) {
+    return BenchMode.threeDofOnly;
+  }
+  return ref.watch(benchHandTrackingProvider).available
+      ? BenchMode.sixDofOnly
+      : BenchMode.threeDofOnly;
+});
 
 /// Drives one step at a time. Measurements run through [BenchSession] so the
 /// machine is testable against the fake bridge without any UI.
