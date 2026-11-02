@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.3.14+19
 
 - VITURE Pro Neckband in embedded UaaL: the displayless gate now starts
   `XRInputSubsystem` alongside the hand subsystem, so `Camera.main` receives
   6DoF head poses instead of (0,0,0) (ONY-856). Reaches devices only through
   the new pinned `unity-export-1.4`, which the export gate requires.
+- The Bench screen shows the live hand-joint skeleton and a 6DoF head-pose
+  travel indicator; a Neckband with hand tracking selects 6DoF only
+  automatically once the startup tracking probe settles (ONY-857).
+- Stereo side-by-side panes shift opposite live 6DoF head motion, with a
+  recenter action and a zero-pose fallback (ONY-858).
 
 ## 0.3.13+18
 
