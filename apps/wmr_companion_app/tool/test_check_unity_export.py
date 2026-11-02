@@ -129,6 +129,20 @@ class MainTest(unittest.TestCase):
         self.assertIn("DisplaylessHandTracking", output)
         self.assertIn("displayless hand path", output)
 
+    def test_pre_ony_840_export_fails(self) -> None:
+        # The hand-only UaaL gate is what stops VITURE's display provider
+        # taking over the Flutter host; an export built before it still starts
+        # the display, so it must not pass the release gate.
+        symbols = tuple(
+            name for name in checker.REQUIRED_METADATA if name != "_embeddedUaaL"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_export(Path(tmp), metadata=build_metadata(symbols=symbols))
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("_embeddedUaaL", output)
+
     def test_missing_unified_dispatch_export_fails(self) -> None:
         symbols = tuple(
             name

@@ -127,10 +127,11 @@ selects the vendor at runtime. The export is never committed or built in CI;
 release (a prerelease on purpose, so the export never takes the repository's
 "Latest release" flag), refuses it unless its SHA-256 is
 `49480d5a50122aa18e941c690412e0371f5edf424f3656892f539ea9eeff2025` (the ONY-840
-export, built from the ONY-840 merge commit `8526b11`, graphics APIs pinned to
+export, built from PR head `1a1c67a` whose `packages/wmr_tracking_unity` subtree
+is identical to the ONY-840 merge commit `8526b11`, graphics APIs pinned to
 OpenGL ES 3), runs `tool/check_unity_export.py`
 on the zip to reject a stale export, one that still emits the `mono` stereo
-mode, or one built before the ONY-840 hand-only embedded UaaL path, and runs
+mode, or one built before the ONY-840 hand-only UaaL gate (`_embeddedUaaL`), and runs
 `tool/check_unified_apk.py` on the arm64-v8a APK before
 publishing. The Monado config key fetch is not optional: the job fails unless
 the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that

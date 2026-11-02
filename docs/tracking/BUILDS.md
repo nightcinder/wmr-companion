@@ -83,8 +83,9 @@ The `unified` app flavor links that shared export from
    The unified bridge is embedded in Flutter, so the runtime gate always starts
    VITURE hand tracking without the display subsystem, because the display
    provider would take over the host activity (ONY-840). The pinned
-   `unity-export-1.3` is built from the ONY-840 merge commit and carries that
-   gate; `unity-export-1.2` and earlier still start the display. A non-GLES3
+   `unity-export-1.3` was built from PR head `1a1c67a` (subtree identical to the
+   ONY-840 merge commit `8526b11`) and carries that gate; `unity-export-1.2` and
+   earlier still start the display. A non-GLES3
    player also runs hand-only instead of taking the Vulkan stop path.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 

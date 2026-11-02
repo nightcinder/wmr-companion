@@ -16,6 +16,7 @@ the 120-minute release build:
     VendorLoaderGate, VendorRelayDispatch), so an export that still ships the
     separate vendor relays cannot pass;
   - the metadata carries the ONY-802 displayless hand path
+  - the metadata carries the ONY-840 hand-only UaaL gate (`_embeddedUaaL`)
     (DisplaylessHandTracking), so an export built before the Vulkan crash fix
     is rejected even when everything else matches;
   - StereoMode no longer emits `mono`, so an export built from the mono source
@@ -77,6 +78,11 @@ REQUIRED_METADATA = (
     # one. An export built before that fix has no such member and would crash
     # on the Neckband, so a stale unityLibrary must not pass the release gate.
     "DisplaylessHandTracking",
+    # ONY-840: in embedded UaaL the bridge is always hand-only, and the flag is
+    # what selects that path. An export built before it still starts VITURE's
+    # display provider, which takes over the Flutter host activity.
+    "_embeddedUaaL",
+    "NeedsVitureHandOnly",
 )
 # IL2CPP keeps C# string literals in a delimiter-free `stringLiteralData` blob,
 # indexed by an `Il2CppStringLiteral` table of (length, dataIndex) pairs. The
@@ -147,7 +153,7 @@ def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
     if missing:
         fail(
             "IL2CPP metadata is stale, missing the stereo, unified dispatch "
-            f"or displayless hand path: {missing}"
+            f"or displayless hand path or the ONY-840 hand-only UaaL gate: {missing}"
         )
         return 1
     print(
