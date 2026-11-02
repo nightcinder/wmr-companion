@@ -3,7 +3,7 @@
 
 Builds small synthetic unityLibrary zips so the export checks run without the
 272 MB artifact. The real `unity-export-1.0` (stale), `unity-export-1.1`
-(Vulkan player) and `unity-export-1.2` (current) were also run by hand; they
+(Vulkan player) and `unity-export-1.2` (superseded) were also run by hand; they
 are not fixtures here because of size.
 
     python3 -m unittest -v tool/test_check_unity_export.py
@@ -128,6 +128,20 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1, output)
         self.assertIn("DisplaylessHandTracking", output)
         self.assertIn("displayless hand path", output)
+
+    def test_pre_ony_840_export_fails(self) -> None:
+        # The hand-only UaaL gate is what stops VITURE's display provider
+        # taking over the Flutter host; an export built before it still starts
+        # the display, so it must not pass the release gate.
+        symbols = tuple(
+            name for name in checker.REQUIRED_METADATA if name != "_embeddedUaaL"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_export(Path(tmp), metadata=build_metadata(symbols=symbols))
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("_embeddedUaaL", output)
 
     def test_missing_unified_dispatch_export_fails(self) -> None:
         symbols = tuple(

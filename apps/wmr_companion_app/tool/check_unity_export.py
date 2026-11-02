@@ -18,12 +18,15 @@ the 120-minute release build:
   - the metadata carries the ONY-802 displayless hand path
     (DisplaylessHandTracking), so an export built before the Vulkan crash fix
     is rejected even when everything else matches;
+  - the metadata carries the ONY-840 hand-only UaaL gate (`_embeddedUaaL`,
+    `NeedsVitureHandOnly`), so an export built before it still starts VITURE's
+    display provider and is rejected;
   - StereoMode no longer emits `mono`, so an export built from the mono source
     is rejected even if the rest matches.
 
 `unity-export-1.0` (the ONY-354 export) predates the rig and fails on the stage
 names; `unity-export-1.1` predates the ONY-802 hand path and fails on
-`DisplaylessHandTracking`; the pinned `unity-export-1.2` passes. The script
+`DisplaylessHandTracking`; the pinned `unity-export-1.3` passes. The script
 reads only the zip central directory plus `global-metadata.dat`, so it costs
 seconds.
 
@@ -77,6 +80,11 @@ REQUIRED_METADATA = (
     # one. An export built before that fix has no such member and would crash
     # on the Neckband, so a stale unityLibrary must not pass the release gate.
     "DisplaylessHandTracking",
+    # ONY-840: in embedded UaaL the bridge is always hand-only, and the flag is
+    # what selects that path. An export built before it still starts VITURE's
+    # display provider, which takes over the Flutter host activity.
+    "_embeddedUaaL",
+    "NeedsVitureHandOnly",
 )
 # IL2CPP keeps C# string literals in a delimiter-free `stringLiteralData` blob,
 # indexed by an `Il2CppStringLiteral` table of (length, dataIndex) pairs. The
@@ -147,7 +155,7 @@ def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
     if missing:
         fail(
             "IL2CPP metadata is stale, missing the stereo, unified dispatch "
-            f"or displayless hand path: {missing}"
+            f"or displayless hand path or the ONY-840 hand-only UaaL gate: {missing}"
         )
         return 1
     print(

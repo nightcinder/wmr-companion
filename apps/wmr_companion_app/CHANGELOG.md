@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- VITURE Pro Neckband in embedded UaaL: the Unity bridge is hand-only, so the
+  display provider can no longer take over the Flutter host activity, and the
+  unshaded marker cubes are gone (ONY-840). Shipped through the pinned
+  `unity-export-1.3`.
+
 ## 0.3.12+17
 
 - Keep the hosted Unity player out of the Android focus tree so the Flutter

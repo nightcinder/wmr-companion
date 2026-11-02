@@ -17,7 +17,7 @@ hardware; these are compile/packaging facts only.
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
-| Licence gate | Pinned `unity-export-1.2` (SHA-256 `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8`); owner approved SDK redistribution (ONY-354) |
+| Licence gate | Pinned `unity-export-1.3` (SHA-256 `49480d5a50122aa18e941c690412e0371f5edf424f3656892f539ea9eeff2025`); owner approved SDK redistribution (ONY-354) |
 
 Release notes: [`v0.3.12`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.12).
 Carrying the first release on `unity-export-1.2`: the Unity player pinned to OpenGL ES 3 so VITURE's display provider no longer takes the Vulkan stop path, the loader gate starting only VITURE's hand subsystem on a non-GLES3 player as a fallback, and the hosted Unity view no longer taking D-pad focus with the Volume rocker controlling the UI (ONY-802); retains automatic glasses detection (ONY-777) and the XREAL cold-start fix plus R8 keep rules (ONY-776).
@@ -81,11 +81,12 @@ The `unified` app flavor links that shared export from
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
    `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
    The unified bridge is embedded in Flutter, so the runtime gate always starts
-   VITURE hand tracking without the display subsystem: the display provider
-   would take over the host activity (ONY-840). The pinned `unity-export-1.2`
-   predates that gate and still starts the display, so only a rebuilt export
-   carries the change. A non-GLES3 player also runs hand-only instead of taking
-   the Vulkan stop path.
+   VITURE hand tracking without the display subsystem, because the display
+   provider would take over the host activity (ONY-840). The pinned
+   `unity-export-1.3` was built from PR head `1a1c67a` (subtree identical to the
+   ONY-840 merge commit `8526b11`) and carries that gate; `unity-export-1.2` and
+   earlier still start the display. A non-GLES3
+   player also runs hand-only instead of taking the Vulkan stop path.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 
    ```sh
