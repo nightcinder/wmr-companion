@@ -17,6 +17,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.XR.Management;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
 using Viture.XR;
 
@@ -104,12 +105,23 @@ namespace OnyxLens.WmrTrackingViture.Editor
             vitureSettings.ActivateHandTrackingOnStartup = false;
             EditorUtility.SetDirty(vitureSettings);
 
+            // The VITURE display provider is OpenGL ES (EGL) only. A Unity
+            // 6000 Android player defaults to Vulkan, where the display gfx
+            // thread cannot acquire the Unity EGL context and the vendor stop
+            // path null-derefs (ONY-802).
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+            PlayerSettings.SetGraphicsAPIs(
+                BuildTarget.Android,
+                new[] { GraphicsDeviceType.OpenGLES3 }
+            );
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
             Debug.Log(
                 "[WMR] VITURE Android XR configured: loader assigned, initialize " +
-                "on startup enabled, hand tracking activation left to the host."
+                "on startup enabled, graphics API pinned to OpenGL ES 3, hand " +
+                "tracking activation left to the host."
             );
         }
 

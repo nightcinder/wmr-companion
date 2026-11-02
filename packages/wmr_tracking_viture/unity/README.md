@@ -26,13 +26,17 @@ missing.
 3. Confirm the runtime assembly picked up the defines: select
    `Assets/WmrTrackingViture/Runtime/WmrTrackingViture.Runtime.asmdef` and check
    **Version Defines** for `WMR_UNITY_XR_HANDS` and `WMR_VITURE_XR_SDK`.
-4. **Player > Android**: minimum API 24, ARM64, IL2CPP (the export script also
-   applies these). The export then configures **XR Plug-in Management > Android**
-   through `WMR > Configure VITURE XR`: the VITURE loader is assigned and
-   **Initialize XR on Startup** is on, so the exported player renders in stereo
-   3D from launch. VITURE hand tracking only produces frames in stereo
-   (SpaceWalker) mode; a mono 2D player reports `unavailable` from `start`
-   instead of stalling. Run the menu item manually after changing XR settings.
+4. **Player > Android**: minimum API 24, ARM64, IL2CPP, and **Graphics APIs =
+   OpenGLES3 only** (remove Vulkan; do not leave Auto). The export script applies
+   these and `WMR > Configure VITURE XR` pins the graphics API. VITURE's display
+   provider is EGL/OpenGL ES only; on Vulkan its gfx thread cannot get the Unity
+   EGL context and `VitureDisplayProvider::GfxThread_Stop` null-derefs (ONY-802).
+   The same menu item also configures **XR Plug-in Management > Android**: the
+   VITURE loader is assigned and **Initialize XR on Startup** is on, so the
+   exported player renders in stereo 3D from launch. VITURE hand tracking only
+   produces frames in stereo (SpaceWalker) mode; a mono 2D player reports
+   `unavailable` from `start` instead of stalling. Run the menu item manually
+   after changing XR settings.
 5. Open `Assets/Scenes/WmrTrackingSmoke.unity` and enter Play mode to see the
    relay's local logs. Without a Luma Ultra the bridge reports `unsupported`
    through `onUnityError`; that is the expected fail-closed result.

@@ -23,6 +23,15 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
+**Vulkan exports are hand-only at runtime (ONY-802).** The pinned
+`unity-export-1.1` was built with Unity's default Vulkan API. The loader gate
+detects that, initialises the VITURE loader, and starts only its hand subsystem
+instead of the display subsystem. Hand tracking still runs (the VITURE hand
+service is independent of the display provider), the glasses stay in Android
+mirror mode so the Flutter UI remains visible and the Neckband D-pad keeps
+working, and the vendor's crashing display stop path is never reached. A GLES3
+re-export restores the stereo display ladder.
+
 ## Layout
 
 ```
@@ -158,8 +167,12 @@ Import both proprietary SDKs into the same project first:
    turns off `automaticLoading`/`automaticRunning` before it initialises manually.
    `WMR > Export unified unityLibrary` runs `WMR > Configure unified XR`
    automatically, so this is only needed when inspecting the project by hand.
-5. Player > Android: minimum API 24, ARM64, IL2CPP, script backends per each
-   SDK's requirements (the export script sets the first three).
+5. Player > Android: minimum API 24, ARM64, IL2CPP, and **Graphics APIs =
+   OpenGLES3 only** (remove Vulkan; do not leave Auto). VITURE's Unity display
+   provider is EGL/OpenGL ES only: on a Vulkan player its gfx thread cannot
+   acquire the Unity EGL context, stops, and null-derefs inside
+   `VitureDisplayProvider::GfxThread_Stop` (ONY-802). `WMR > Configure unified
+   XR` pins GLES3, so the menu and batch export both write it.
 
 Then use **WMR > Export unified unityLibrary** or:
 

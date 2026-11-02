@@ -4,6 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.XR.Management;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
 using Unity.XR.XREAL;
 using Viture.XR;
@@ -107,12 +108,23 @@ namespace OnyxLens.WmrTrackingUnity.Editor
                 XREALSettings.k_SettingsKey
             );
 
+            // VITURE's Unity display provider is OpenGL ES (EGL) only. Unity
+            // 6000 defaults an Android player to Vulkan, where its gfx thread
+            // cannot acquire the Unity EGL context and its stop path null-derefs
+            // on UnityGfxDeviceW (ONY-802). Pin the unified export to GLES3.
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+            PlayerSettings.SetGraphicsAPIs(
+                BuildTarget.Android,
+                new[] { GraphicsDeviceType.OpenGLES3 }
+            );
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
             Debug.Log(
                 "[WMR] Android XR configured: VITURE + XREAL loaders assigned, " +
-                "startup initialisation disabled, vendor settings assets present."
+                "startup initialisation disabled, vendor settings assets present, " +
+                "graphics API pinned to OpenGL ES 3."
             );
         }
 

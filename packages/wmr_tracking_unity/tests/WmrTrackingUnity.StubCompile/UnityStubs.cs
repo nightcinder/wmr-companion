@@ -5,8 +5,27 @@
 using System;
 using System.Collections;
 
+namespace UnityEngine.Rendering
+{
+    public enum GraphicsDeviceType
+    {
+        OpenGLES2 = 8,
+        OpenGLES3 = 11,
+        Vulkan = 21,
+    }
+}
+
 namespace UnityEngine
 {
+    public static class SystemInfo
+    {
+        public static UnityEngine.Rendering.GraphicsDeviceType graphicsDeviceType
+        {
+            get;
+            set;
+        } = UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3;
+    }
+
     public class Object
     {
         public string name { get; set; }
@@ -283,9 +302,24 @@ namespace UnityEngine.XR.Management
     {
     }
 
+    /// <summary>
+    /// Models the one XRLoaderHelper member the loader gate uses to start the
+    /// VITURE hand subsystem without starting the display subsystem.
+    /// </summary>
+    public class XRLoaderHelper : XRLoader
+    {
+        public object loadedSubsystem { get; set; }
+
+        public T GetLoadedSubsystem<T>() where T : class => loadedSubsystem as T;
+    }
+
     public class XRManagerSettings
     {
         public XRLoader activeLoader { get; set; }
+
+        public int startSubsystemsCalls { get; private set; }
+
+        public int stopSubsystemsCalls { get; private set; }
 
         public bool automaticLoading { get; set; }
 
@@ -313,10 +347,12 @@ namespace UnityEngine.XR.Management
 
         public void StartSubsystems()
         {
+            startSubsystemsCalls += 1;
         }
 
         public void StopSubsystems()
         {
+            stopSubsystemsCalls += 1;
         }
 
         public void DeinitializeLoader()

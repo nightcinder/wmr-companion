@@ -5,6 +5,7 @@
     "WmrTrackingUnity.Dispatch",
     "WmrTrackingViture.Runtime",
     "WmrTrackingXreal.Runtime",
+    "Unity.XR.Hands",
     "Unity.XR.Management"
   ],
   "includePlatforms": [

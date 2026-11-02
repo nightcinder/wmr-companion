@@ -76,7 +76,13 @@ The `unified` app flavor links that shared export from
 
 1. In `packages/wmr_tracking_unity/unity`, with both proprietary SDKs imported, choose
    **WMR > Export unified unityLibrary**. Exporting needs Unity 6000.0.27f1 and the
-   vendors' SDK terms; the export is gitignored and is never committed.
+   vendors' SDK terms; the export is gitignored and is never committed. The
+   configuration step pins **Graphics APIs = OpenGLES3 only**: VITURE's display
+   provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
+   `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
+   The pinned `unity-export-1.1` predates that pin, so the runtime starts VITURE
+   hand tracking without the display subsystem on it; a GLES3 re-export restores
+   the stereo display path.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 
    ```sh

@@ -191,6 +191,14 @@ status line shows the current state:
 
 If the app still shows 0DoF on v0.3.11, capture logs and record the status line.
 
+**Launch crash and input (ONY-802).** On the Vulkan `unity-export-1.1`
+player, VITURE now starts hand tracking without its XR display subsystem: the
+vendor display provider cannot use Vulkan, and starting it crashed the process
+in `VitureDisplayProvider::GfxThread_Stop`. The Unity view no longer takes the
+glasses display or the input focus, so the Flutter UI stays visible and the
+Neckband D-pad (up, down, left, right, OK) drives the app. If it still crashes
+or the D-pad does nothing, capture the log and the tombstone.
+
 **ADB triage for this case.** Connect first if wireless: `adb connect <neckband-ip>:5555`. Then run:
 
 - APK version: `adb shell dumpsys package com.onyxlens.wmr_companion | grep -E "versionName|versionCode"`

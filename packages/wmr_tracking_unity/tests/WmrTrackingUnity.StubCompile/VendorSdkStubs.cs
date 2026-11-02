@@ -82,6 +82,22 @@ namespace UnityEngine.XR.Hands
     {
         public bool running { get; set; }
 
+        public int startCalls { get; private set; }
+
+        public int stopCalls { get; private set; }
+
+        public void Start()
+        {
+            startCalls += 1;
+            running = true;
+        }
+
+        public void Stop()
+        {
+            stopCalls += 1;
+            running = false;
+        }
+
         public XRHand leftHand { get; set; }
 
         public XRHand rightHand { get; set; }
