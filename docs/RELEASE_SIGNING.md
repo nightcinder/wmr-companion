@@ -123,22 +123,24 @@ CI publishes only the `unified` flavor. `base` remains buildable locally with
 `unified` is the artifact testers with VITURE or XREAL glasses install: one
 APK links a single `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0 and
 selects the vendor at runtime. The export is never committed or built in CI;
-`release-unified` downloads `unityLibrary.zip` from the `unity-export-1.1`
+`release-unified` downloads `unityLibrary.zip` from the `unity-export-1.2`
 release (a prerelease on purpose, so the export never takes the repository's
 "Latest release" flag), refuses it unless its SHA-256 is
-`29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072` (the ONY-613
-export, built from the ONY-612 merge commit), runs `tool/check_unity_export.py`
-on the zip to reject a stale export or one that still emits the `mono` stereo
-mode, and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
+`2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8` (the ONY-802
+export, built from the ONY-802 merge commit `0ef33c9`, graphics APIs pinned to
+OpenGL ES 3), runs `tool/check_unity_export.py`
+on the zip to reject a stale export, one that still emits the `mono` stereo
+mode, or one built before the ONY-802 displayless hand path, and runs
+`tool/check_unified_apk.py` on the arm64-v8a APK before
 publishing. The Monado config key fetch is not optional: the job fails unless
 the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that
 asset is a one-off from a machine holding the zip:
 
 ```sh
-gh release create unity-export-1.1 --prerelease \
-  --title unity-export-1.1 \
-  --notes "Approved Unity UaaL export (VITURE 0.9.0 + XREAL 3.1.0, ONY-612 stereo stage) used by the unified release job."
-gh release upload unity-export-1.1 /paperclip/unity-export/unityLibrary.zip
+gh release create unity-export-1.2 --prerelease --target <merge-commit> \
+  --title unity-export-1.2 \
+  --notes "Approved Unity UaaL export (VITURE 0.9.0 + XREAL 3.1.0, ONY-802 GLES3 player) used by the unified release job."
+gh release upload unity-export-1.2 unityLibrary.zip unityLibrary.zip.sha256
 ```
 
 Repository secrets (`Settings → Secrets and variables → Actions`):

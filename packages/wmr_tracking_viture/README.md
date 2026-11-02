@@ -13,9 +13,10 @@ is fixed by the loader when its display subsystem initialises; Unity exposes
 `XRSettings.stereoRenderingMode` read-only, so the player cannot switch modes at
 runtime. A Vulkan player cannot host the GLES-only display provider at all; the
 unified loader gate then starts only the hand subsystem, and hand tracking runs
-without the stereo display (ONY-802). That gate reaches a device only through a
-rebuilt export: the pinned `unity-export-1.1` predates it and still crashes on
-Vulkan. The 2D gate is covered by the on-device check only: the stub-compile
+without the stereo display (ONY-802). The pinned `unity-export-1.2` is built from
+the ONY-802 merge commit with the player pinned to OpenGL ES 3, so the display
+subsystem starts normally; the hand-only path is the fallback for a player that
+is not GLES3. The 2D gate is covered by the on-device check only: the stub-compile
 project proves the bridge compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:

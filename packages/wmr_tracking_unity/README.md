@@ -27,11 +27,9 @@ vendor selection and the coexistence points below are still unverified.
 VITURE's hand subsystem on a player whose graphics API cannot host the GLES-only
 display provider, and `ConfigureUnifiedXr` pins OpenGLES3 so a new export never
 ships Vulkan again. Both live in `unity/Assets`, so they reach a device only
-through a rebuilt export. The pinned `unity-export-1.1` predates them: an APK
-built from it still runs the old gate, still starts the display subsystem on
-Vulkan, and still crashes in `VitureDisplayProvider::GfxThread_Stop`. Building
-and pinning a new export (see the export steps below) is what makes the fix
-effective.
+through a rebuilt export. The pinned `unity-export-1.2` is built from the ONY-802
+merge commit with that pin, so its player starts the display normally; the hand-only
+gate remains the fallback for a player that is not GLES3.
 
 ## Layout
 

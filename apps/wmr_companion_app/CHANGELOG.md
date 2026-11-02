@@ -10,9 +10,10 @@
   Volume Up for back.
 - VITURE Pro Neckband hand tracking: the Unity source now starts only the hand
   subsystem when the player's graphics API cannot host VITURE's GLES-only
-  display provider, and the export configuration pins OpenGL ES 3. These
-  changes reach a device only through a rebuilt Unity export; the pinned
-  `unity-export-1.1` predates them and still crashes when hand tracking starts.
+  display provider, and the export configuration pins OpenGL ES 3. The pinned
+  `unity-export-1.2` is built from the ONY-802 merge commit with that pin, so its
+  player starts the display normally; the hand-only path is the fallback for a
+  player that is not GLES3.
 
 ## 0.3.11+16
 
