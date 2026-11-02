@@ -21,45 +21,9 @@ import 'controller_panel.dart';
 import 'debug_providers.dart';
 import 'pose_recorder_panel.dart';
 import 'stream_settings.dart';
+import 'tracking_source_banner.dart';
 
 const _handNames = ['LEFT', 'RIGHT'];
-
-/// Human-readable state of the selected tracking source.
-///
-/// A failed source keeps its [TrackingException] details, including the typed
-/// `unavailable` case when a Unity relay is not linked in the build.
-String _trackingStatus(
-  DebugTrackingSource choice,
-  AsyncValue<DebugTrackingAttachment> attachment,
-) {
-  if (choice == DebugTrackingSource.none) {
-    return 'Off: 3DoF orientation only';
-  }
-  return attachment.when(
-    loading: () => 'Starting ${choice.label}...',
-    error: (error, _) => 'TrackingException(unavailable): $error',
-    data: (value) {
-      if (value.disabled) {
-        return '${choice.label} is off: rebuild with '
-            '--dart-define=${choice.buildFlag}=true';
-      }
-      final error = value.error;
-      if (error != null) {
-        return 'TrackingException(${error.kind.name}): ${error.message}';
-      }
-      final message = value.message;
-      if (message != null) {
-        return message;
-      }
-      if (value.running) {
-        return choice == DebugTrackingSource.simulated
-            ? 'FakeTrackingSource trajectory (no hardware)'
-            : '${choice.label} tracking attached';
-      }
-      return 'Off: 3DoF orientation only';
-    },
-  );
-}
 
 /// The ModeState of [source]'s service, current value first.
 final modeStateProvider = StreamProvider.family<ModeState, DebugSource>((
@@ -114,9 +78,6 @@ class DebugScreen extends ConsumerWidget {
     final q = synthetic ? removeYaw(raw, yawOffset) : raw;
     final euler = eulerFromQuaternion(q);
     final poses = ref.watch(debugPosesProvider(source)).value;
-    final trackingSelection = ref.watch(debugTrackingSourceProvider);
-    final trackingChoice = trackingSelection.choice;
-    final tracking = trackingSelection.attachment;
     final trackedHand = hand == 0 ? TrackedHand.left : TrackedHand.right;
     final viewerPose = poses?.forHand(hand);
     // The synthetic viewer pose carries the same yaw offset as the numbers
@@ -177,34 +138,7 @@ class DebugScreen extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: 8),
-          InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Tracking source',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<DebugTrackingSource>(
-                key: const ValueKey('tracking-source-selector'),
-                isExpanded: true,
-                value: trackingChoice,
-                items: [
-                  for (final choice in DebugTrackingSource.values)
-                    DropdownMenuItem(value: choice, child: Text(choice.label)),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    ref.read(debugTrackingSourceProvider.notifier).set(value);
-                  }
-                },
-              ),
-            ),
-          ),
-          Text(
-            _trackingStatus(trackingChoice, tracking),
-            key: const ValueKey('tracking-source-status'),
-            style: theme.textTheme.bodySmall,
-          ),
+          const TrackingSourceBanner(),
           SizedBox(
             height: 320,
             child: ControllerPoseView(

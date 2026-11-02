@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/test_bundle_export.dart';
 import '../debug/debug_providers.dart';
+import '../debug/tracking_source_banner.dart';
 import '../sbs/stereo_sbs.dart';
 import 'bench_controller.dart';
 import 'bench_pose.dart';
@@ -31,7 +32,6 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   final FocusNode _skipRemainingFocus = FocusNode(
     debugLabel: 'bench-skip-remaining',
   );
-  final FocusNode _trackingFocus = FocusNode(debugLabel: 'bench-tracking');
   final Map<BenchMode, FocusNode> _modeFocus = {
     for (final mode in BenchMode.values)
       mode: FocusNode(debugLabel: 'bench-mode-${mode.id}'),
@@ -63,7 +63,6 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     _primaryFocus.dispose();
     _skipFocus.dispose();
     _skipRemainingFocus.dispose();
-    _trackingFocus.dispose();
     for (final node in _modeFocus.values) {
       node.dispose();
     }
@@ -176,29 +175,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   ),
                 ],
                 const SizedBox(height: 8),
-                Text('Hand tracking source', style: theme.textTheme.labelLarge),
-                DropdownButton<DebugTrackingSource>(
-                  key: const Key('bench-tracking-source'),
-                  focusNode: _trackingFocus,
-                  isExpanded: true,
-                  value: selection.choice,
-                  onChanged: state.started || state.busy
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            ref
-                                .read(debugTrackingSourceProvider.notifier)
-                                .set(value);
-                          }
-                        },
-                  items: [
-                    for (final choice in DebugTrackingSource.values)
-                      DropdownMenuItem(
-                        value: choice,
-                        child: Text(choice.label),
-                      ),
-                  ],
-                ),
+                TrackingSourceBanner(enabled: !state.started && !state.busy),
                 const SizedBox(height: 4),
                 Text(
                   tracking.status,
