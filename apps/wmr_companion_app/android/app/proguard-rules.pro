@@ -54,3 +54,4 @@
 -keep class com.onyxlens.wmr_tracking_viture.WmrTrackingViturePlugin {
     public static <methods>;
 }
+# dex-check trigger: ONY-782
