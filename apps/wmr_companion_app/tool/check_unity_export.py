@@ -15,6 +15,9 @@ the 120-minute release build:
   - the metadata carries the unified dispatch types (WmrTrackingUnifiedBridge,
     VendorLoaderGate, VendorRelayDispatch), so an export that still ships the
     separate vendor relays cannot pass;
+  - the metadata carries the ONY-802 displayless hand path
+    (DisplaylessHandTracking), so an export built before the Vulkan crash fix
+    is rejected even when everything else matches;
   - StereoMode no longer emits `mono`, so an export built from the mono source
     is rejected even if the rest matches.
 
@@ -68,6 +71,10 @@ REQUIRED_METADATA = (
     "WmrTrackingUnifiedBridge",
     "VendorLoaderGate",
     "VendorRelayDispatch",
+    # ONY-802: a Vulkan player starts the hand subsystem without the display
+    # one. An export built before that fix has no such member and would crash
+    # on the Neckband, so a stale unityLibrary must not pass the release gate.
+    "DisplaylessHandTracking",
 )
 # IL2CPP keeps C# string literals in a delimiter-free `stringLiteralData` blob,
 # indexed by an `Il2CppStringLiteral` table of (length, dataIndex) pairs. The
@@ -136,11 +143,15 @@ def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
     metadata = archive.read(METADATA_PATH)
     missing = [name for name in REQUIRED_METADATA if name.encode() not in metadata]
     if missing:
-        fail(f"IL2CPP metadata is stale, missing the stereo or unified dispatch path: {missing}")
+        fail(
+            "IL2CPP metadata is stale, missing the stereo, unified dispatch "
+            f"or displayless hand path: {missing}"
+        )
         return 1
     print(
         "PASS metadata: WmrStereoCameraRig, StereoStage/StereoMode, "
-        "WmrTrackingUnifiedBridge, VendorLoaderGate, VendorRelayDispatch"
+        "WmrTrackingUnifiedBridge, VendorLoaderGate, VendorRelayDispatch, "
+        "DisplaylessHandTracking"
     )
     try:
         literals = string_literals(metadata)
