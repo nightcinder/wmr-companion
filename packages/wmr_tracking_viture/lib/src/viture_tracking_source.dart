@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 /// The default-off build flag for the VITURE Pro Neckband vertical slice.
 ///
@@ -227,6 +228,13 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     final Map<String, Object?> raw;
     try {
       raw = await platform.capabilities();
+    } on MissingPluginException {
+      throw const TrackingException(
+        TrackingExceptionKind.unavailable,
+        'This APK does not include the VITURE tracking plugin. Install the '
+        'unified release APK to enable 6DoF hand tracking.',
+        stage: unityRuntimeLinkStage,
+      );
     } on PlatformException catch (error) {
       throw _mapPlatformError(error);
     }
@@ -234,11 +242,11 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     final unityAvailable = raw['unityAvailable'];
     final reason = raw['reason'];
     if (unityAvailable == false) {
-      throw TrackingException(
+      throw const TrackingException(
         TrackingExceptionKind.unavailable,
-        reason is String && reason.isNotEmpty
-            ? reason
-            : 'VITURE Unity UaaL relay is not linked in this build',
+        'This APK was built without the VITURE Unity runtime (unityLibrary). '
+        'Install the unified release APK to enable 6DoF hand tracking.',
+        stage: unityRuntimeLinkStage,
       );
     }
 
