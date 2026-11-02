@@ -1,4 +1,4 @@
-# External tester quickstart : WMR Companion v0.3.11 (unified APK)
+# External tester quickstart : WMR Companion v0.3.12 (unified APK)
 
 Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
@@ -41,24 +41,32 @@ regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.11/wmr-companion-0.3.11-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.12/wmr-companion-0.3.12-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.11/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.12/SHA256SUMS
 
-Confirm the v0.3.11 release exists and the installed APK reports `versionName` 0.3.11 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.10, the tag was not cut from a bumped tree: record the value and stop.
+Confirm the v0.3.12 release exists and the installed APK reports `versionName` 0.3.12 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.11, the tag was not cut from a bumped tree: record the value and stop.
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
-Do not run an older build for this pass. v0.3.11 carries fixes that change results:
-selecting **AndroidXR** as the hand-tracking source on a Galaxy XR no longer
-crashes the app (v0.3.10), the Luma Ultra + Pro Neckband 3D view now fills
-both eyes (v0.3.9), the Unity player resumes and focuses on first host so the
-Neckband no longer drops to 0DoF with a greyed 6DoF button (v0.3.11), and on a
-Neckband host the app auto-selects `Auto (USB)` (which resolves to the VITURE
-runtime) and shows a 0DoF/6DoF
-status line (v0.3.11). A crash, a black right eye, or a 0DoF drop on v0.3.11
-is a regression worth recording. Known older behaviour: a crash on v0.3.7
-through v0.3.9, a black right eye on v0.3.7 or v0.3.8, and a 0DoF drop with
+Do not run an older build for this pass. v0.3.12 carries fixes that change results:
+the Unity player is pinned to OpenGL ES 3, so VITURE's display provider no
+longer takes the Vulkan stop path that crashed the guided bench on a Pro
+Neckband, with the loader gate starting only VITURE's hand subsystem on a
+player that is not GLES3 as a fallback (ONY-802); the hosted Unity view no
+longer takes D-pad focus, and Volume Up/Down move focus, hold Volume Down
+selects and hold Volume Up goes back, with or without headgaze (ONY-802); plus
+the v0.3.11 fixes: selecting **AndroidXR** as the hand-tracking source on a
+Galaxy XR no longer crashes the app (v0.3.10), the Luma Ultra + Pro Neckband
+3D view now fills both eyes (v0.3.9), the Unity player resumes and focuses on
+first host so the Neckband no longer drops to 0DoF with a greyed 6DoF button
+(v0.3.11), and on a Neckband host the app auto-selects `Auto (USB)` (which
+resolves to the VITURE runtime) and shows a 0DoF/6DoF status line (v0.3.11).
+None of the ONY-802 changes have been verified on hardware yet. A crash, a
+black right eye, or a 0DoF drop on v0.3.12 is a regression worth recording.
+Known older behaviour: a crash on v0.3.7 through v0.3.11 in
+`VitureDisplayProvider::GfxThread_Stop` when hand tracking starts on a
+non-GLES3 player, a black right eye on v0.3.7 or v0.3.8, and a 0DoF drop with
 greyed 6DoF button on v0.3.7 through v0.3.10. A black right eye on v0.3.9 is a
 regression.
 
@@ -136,7 +144,7 @@ PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_B
 
 ### 6D : Luma Ultra + Pro Neckband: 3D SBS launch triage
 
-On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes; if v0.3.11 still shows a black right eye, record it as a regression with the diagnostics below.
+On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes; if v0.3.12 still shows a black right eye, record it as a regression with the diagnostics below.
 
 Immediate workaround for v0.3.7/v0.3.8 testers:
 
@@ -155,7 +163,7 @@ If the Neckband is connected over wireless ADB, connect first: `adb connect <nec
 
 Record the values in the intake block. Do not reconstruct them from memory.
 
-### 6E : Neckband 0DoF / 6DoF triage (v0.3.11)
+### 6E : Neckband 0DoF / 6DoF triage (v0.3.12)
 
 On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side
 viewport (3840x1080). In v0.3.10 and earlier the app could open and then drop
@@ -189,20 +197,20 @@ status line shows the current state:
 - `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
 - `0DoF: <message>.` for any other failure.
 
-If the app still shows 0DoF on v0.3.11, capture logs and record the status line.
+If the app still shows 0DoF on v0.3.12, capture logs and record the status line.
 
-**Launch crash and input (ONY-802).** The Unity source now starts VITURE hand
-tracking without its XR display subsystem when the player cannot host the
-GLES-only display provider, and a new export pins OpenGL ES 3. The pinned
-`unity-export-1.1` player predates both, so a build that still links it crashes
-in `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts. The Unity
-view no longer takes the input focus, so the Flutter UI keeps its own focus and
-stays visible. A Pro Neckband has no D-pad, so use its volume rocker instead:
-short Volume Up and Volume Down presses move the focus ring, holding Volume
-Down selects the focused control, and holding Volume Up goes back. With
-headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. Do
-not use ADB to inject touches as a control path. If the app still crashes or
-the rocker does nothing, capture the log and the tombstone.
+**Launch crash and input (ONY-802).** v0.3.12 is the first release on
+`unity-export-1.2`: the Unity player is pinned to OpenGL ES 3 so VITURE's
+display provider no longer takes the Vulkan stop path, and the loader gate
+starts only VITURE's hand subsystem on a player that is not GLES3 as a
+fallback. The hosted Unity view no longer takes input focus, so the Flutter UI
+keeps its own focus and stays visible. A Pro Neckband has no D-pad, so use its
+volume rocker instead: short Volume Up and Volume Down presses move the focus
+ring, holding Volume Down selects the focused control, and holding Volume Up
+goes back. With headgaze on (Settings + Power), Volume Down selects and Volume
+Up goes back. Do not use ADB to inject touches as a control path. None of this
+has been verified on hardware yet. If the app still crashes or the rocker does
+nothing, capture the log and the tombstone.
 
 **ADB triage for this case.** Connect first if wireless: `adb connect <neckband-ip>:5555`. Then run:
 
@@ -237,7 +245,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.3
-- App: <versionName from ADB> unified (signed release) (expected 0.3.11; confirm the release exists and the installed APK reports it before testing)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.12; confirm the release exists and the installed APK reports it before testing)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none

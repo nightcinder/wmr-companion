@@ -1,4 +1,4 @@
-# Build matrix : tracking flavors (v0.3.7)
+# Build matrix : tracking flavors (v0.3.12)
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
 `apps/wmr_companion_app/tool/install_unity_export.sh`,
@@ -6,25 +6,25 @@ Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.
 `apps/wmr_companion_app/android/settings.gradle.kts`. No build here has been run on
 hardware; these are compile/packaging facts only.
 
-## Current release: v0.3.7 unified APK
+## Current release: v0.3.12 unified APK
 
 | Item | Value |
 |---|---|
-| Tag / commit | `v0.3.7` (release tag) at `16f2218` |
-| App version | `0.3.7+12` (`versionName 0.3.7`, `versionCode 2012` for `arm64-v8a`) |
-| Artifact | `wmr-companion-0.3.7-unified-arm64-v8a.apk`, 428,243,881 B, SHA-256 `d66f5147f85f76d8b4a7249b4cc7d29e969f06205599f04a5fb99825249d865c` |
+| Tag / commit | `v0.3.12` (release tag) at `2a7e176` |
+| App version | `0.3.12+17` (`versionName 0.3.12`, `versionCode 2017` for `arm64-v8a`) |
+| Artifact | `wmr-companion-0.3.12-unified-arm64-v8a.apk`, 430,490,182 B, SHA-256 `93647e6f63191581bebcdc54f7e4d3bbd9caa8d84475db43cd86b2387a575458` |
 | Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
 | Licence gate | Pinned `unity-export-1.2` (SHA-256 `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8`); owner approved SDK redistribution (ONY-354) |
 
-Release notes: [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7).
-Carrying the XREAL player host and boundary guards (ONY-706), fail-closed Unity bridge loader gates (ONY-707), tracking stage fixes and OpenXR fixtures (ONY-708), and fusion yaw reset with bench pose recorder and USB auto-detect (ONY-709).
+Release notes: [`v0.3.12`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.12).
+Carrying the first release on `unity-export-1.2`: the Unity player pinned to OpenGL ES 3 so VITURE's display provider no longer takes the Vulkan stop path, the loader gate starting only VITURE's hand subsystem on a non-GLES3 player as a fallback, and the hosted Unity view no longer taking D-pad focus with the Volume rocker controlling the UI (ONY-802); retains automatic glasses detection (ONY-777) and the XREAL cold-start fix plus R8 keep rules (ONY-776).
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
-metadata and the tracking/session classes in the dex. It passed on the v0.3.7
+metadata and the tracking/session classes in the dex. It passed on the v0.3.12
 artifact; the open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
 
 ## Release signing
