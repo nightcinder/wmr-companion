@@ -31,6 +31,18 @@ class _FixedRealDevice extends RealDeviceController {
   RealDeviceState build() => value;
 }
 
+/// Holds the attachment at [AsyncLoading] until [settle], like a cold start
+/// where the USB probe resolves after the first frame.
+class _DeferredTracking extends DebugTrackingSourceNotifier {
+  @override
+  DebugTrackingSelection build() => const DebugTrackingSelection(
+    choice: DebugTrackingSource.auto,
+    attachment: AsyncValue.loading(),
+  );
+
+  void settle(DebugTrackingSelection selection) => state = selection;
+}
+
 const _availableTracking = BenchHandTracking(
   available: true,
   runtime: 'viture',
@@ -184,6 +196,56 @@ void main() {
     expect(state.mode, BenchMode.sixDofOnly);
     expect(state.step, BenchStep.deviceSummary);
   });
+
+  testWidgets(
+    'a Neckband detected after the first frame still opens 6DoF only',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final tracking = _DeferredTracking();
+      final container = ProviderContainer(
+        overrides: [
+          debugTrackingSourceProvider.overrideWith(() => tracking),
+          realDeviceProvider.overrideWith(
+            () => _FixedRealDevice(const RealDeviceState()),
+          ),
+          benchHandTrackingProvider.overrideWithValue(_availableTracking),
+          benchPoseAvailabilityProvider.overrideWithValue(
+            const BenchPoseAvailability.available('viture'),
+          ),
+          benchLivePosesProvider.overrideWithValue(
+            AsyncValue.data(const DebugPoses()),
+          ),
+          benchSessionProvider.overrideWithValue(() async => null),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: BenchScreen()),
+        ),
+      );
+      await tester.pump();
+
+      // The probe has not settled: no bridge step may auto-run yet.
+      expect(
+        container.read(benchControllerProvider).mode,
+        BenchMode.threeDofOnly,
+      );
+      expect(container.read(benchControllerProvider).step, BenchStep.connect);
+
+      tracking.settle(_neckbandSelection());
+      await tester.pump();
+      await tester.pump();
+
+      final state = container.read(benchControllerProvider);
+      expect(state.mode, BenchMode.sixDofOnly);
+      expect(state.step, BenchStep.deviceSummary);
+    },
+  );
 
   test('a connected bridge keeps the 3DoF default', () {
     final container = ProviderContainer(

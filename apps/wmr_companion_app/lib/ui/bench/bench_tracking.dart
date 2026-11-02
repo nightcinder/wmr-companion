@@ -199,8 +199,10 @@ class BenchHeadMotion {
 /// A short sliding window of head translations.
 ///
 /// The window is measured in samples rather than wall time so widget tests do
-/// not depend on the host clock. At the debug viewer's 30 Hz, 90 samples cover
-/// the last three seconds.
+/// not depend on the host clock. Its span therefore depends on the source's
+/// frame rate: 90 samples is about three seconds at the debug viewer's 30 Hz,
+/// and shorter on the vendor path, which bypasses that viewer and reports no
+/// hand rate. Read [windowSamples] as "recent samples", not a fixed duration.
 class BenchHeadMotionTracker {
   BenchHeadMotionTracker({this.windowSamples = 90});
 
