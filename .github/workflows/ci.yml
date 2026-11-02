@@ -54,6 +54,7 @@ jobs:
             r8_dex:
               - 'apps/wmr_companion_app/android/app/proguard-rules.pro'
               - 'apps/wmr_companion_app/android/**'
+              - 'packages/wmr_tracking_dispatch/android/**'
               - 'packages/wmr_tracking_viture/android/**'
               - 'packages/wmr_tracking_xreal/android/**'
               - 'packages/wmr_tracking_unity/**'
