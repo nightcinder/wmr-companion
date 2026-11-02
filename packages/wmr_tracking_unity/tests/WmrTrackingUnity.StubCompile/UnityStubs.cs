@@ -195,6 +195,8 @@ namespace UnityEngine
             this.y = y;
             this.z = z;
         }
+
+        public static Vector3 zero => new Vector3(0f, 0f, 0f);
     }
 
     public struct Quaternion
@@ -211,6 +213,8 @@ namespace UnityEngine
             this.z = z;
             this.w = w;
         }
+
+        public static Quaternion identity => new Quaternion(0f, 0f, 0f, 1f);
 
         public static Quaternion Euler(float x, float y, float z) =>
             new Quaternion(0f, 0f, 0f, 1f);
@@ -294,6 +298,78 @@ namespace UnityEngine.XR
         // Read-only in Unity 6000.0: a setter here would hide CS0200.
         public static StereoRenderingMode stereoRenderingMode { get; }
     }
+
+    public enum XRNode
+    {
+        Head = 0,
+    }
+
+    public struct InputFeatureUsage<T>
+    {
+    }
+
+    public struct InputDevice
+    {
+        public bool isValid { get; set; }
+
+        public bool TryGetFeatureValue(
+            InputFeatureUsage<Vector3> usage,
+            out Vector3 value
+        )
+        {
+            value = Vector3.zero;
+            return false;
+        }
+
+        public bool TryGetFeatureValue(
+            InputFeatureUsage<Quaternion> usage,
+            out Quaternion value
+        )
+        {
+            value = Quaternion.identity;
+            return false;
+        }
+    }
+
+    public static class CommonUsages
+    {
+        public static InputFeatureUsage<Vector3> devicePosition { get; }
+
+        public static InputFeatureUsage<Quaternion> deviceRotation { get; }
+    }
+
+    public static class InputDevices
+    {
+        public static InputDevice GetDeviceAtXRNode(XRNode node) => default(InputDevice);
+    }
+
+    /// <summary>
+    /// Models the loader's head-tracking subsystem so the gate can start it
+    /// without the display subsystem.
+    /// </summary>
+    public class XRInputSubsystem
+    {
+        public bool running { get; set; }
+
+        public int startCalls { get; private set; }
+
+        public int stopCalls { get; private set; }
+
+        /// <summary>Test hook: a start that leaves the subsystem stopped.</summary>
+        public bool failOnStart { get; set; }
+
+        public void Start()
+        {
+            startCalls += 1;
+            running = !failOnStart;
+        }
+
+        public void Stop()
+        {
+            stopCalls += 1;
+            running = false;
+        }
+    }
 }
 
 namespace UnityEngine.XR.Management
@@ -303,14 +379,22 @@ namespace UnityEngine.XR.Management
     }
 
     /// <summary>
-    /// Models the one XRLoaderHelper member the loader gate uses to start the
-    /// VITURE hand subsystem without starting the display subsystem.
+    /// Models the XRLoaderHelper members the loader gate uses to start the
+    /// VITURE input (head) and hand subsystems without starting the display
+    /// subsystem.
     /// </summary>
     public class XRLoaderHelper : XRLoader
     {
-        public object loadedSubsystem { get; set; }
+        public object handSubsystem { get; set; }
 
-        public T GetLoadedSubsystem<T>() where T : class => loadedSubsystem as T;
+        public object inputSubsystem { get; set; }
+
+        public T GetLoadedSubsystem<T>() where T : class
+        {
+            if (handSubsystem is T hand) return hand;
+            if (inputSubsystem is T input) return input;
+            return null;
+        }
     }
 
     public class XRManagerSettings

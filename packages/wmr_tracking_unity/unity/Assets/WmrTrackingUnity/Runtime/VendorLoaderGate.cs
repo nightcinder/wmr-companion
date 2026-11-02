@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using OnyxLens.WmrTrackingUnity.Dispatch;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.XR;
 using UnityEngine.XR.Management;
 #if WMR_UNITY_XR_HANDS
 using UnityEngine.XR.Hands;
@@ -30,10 +31,21 @@ namespace OnyxLens.WmrTrackingUnity
         // later switch find it.
         private List<XRLoader> _assignedLoaders;
 
-        // Set when VITURE runs without its XR display subsystem. The display
-        // provider is OpenGL ES only, so a Vulkan player must start the hand
-        // subsystem on its own (ONY-802).
+        // True when this gate is driving the embedded UaaL player. The
+        // companion hosts Unity as a library inside MainActivity; the display
+        // provider creates its own mXRSurfaceView and takes the Activity
+        // surface, which hijacks or crashes the Flutter host. The embedded
+        // player therefore starts the input (head) and hand subsystems on
+        // their own (ONY-840).
+        private readonly bool _embeddedPlayer;
+
+        // Set when VITURE runs without its XR display subsystem.
         private bool _vitureHandOnly;
+
+        public VendorLoaderGate(bool embeddedPlayer = false)
+        {
+            _embeddedPlayer = embeddedPlayer;
+        }
 
         public enum Result
         {
@@ -48,9 +60,9 @@ namespace OnyxLens.WmrTrackingUnity
         }
 
         /// <summary>
-        /// True when VITURE's hand subsystem was started without the display
-        /// subsystem because the Unity player cannot host the GLES display
-        /// provider.
+        /// True when VITURE's head and hand subsystems were started without
+        /// the display subsystem, so the vendor provider never creates its
+        /// own Android surface.
         /// </summary>
         public bool VitureHandOnly => _vitureHandOnly;
 
@@ -84,9 +96,9 @@ namespace OnyxLens.WmrTrackingUnity
                 if (_vitureHandOnly && vendor == VendorBackend.Viture)
                 {
 #if WMR_UNITY_XR_HANDS
-                    // A dispose stops the hand subsystem but keeps the loader
-                    // so the never-started display is never stopped; a later
-                    // start must bring the hand subsystem back.
+                    // A dispose stops the input and hand subsystems but keeps
+                    // the loader so the never-started display is never
+                    // stopped; a later start must bring tracking back.
                     return StartVitureHandOnly(manager.activeLoader)
                         ? Result.InitialisedHandOnly
                         : Result.InitFailed;
@@ -150,9 +162,9 @@ namespace OnyxLens.WmrTrackingUnity
             {
 #if WMR_UNITY_XR_HANDS
                 // Record the displayless session before the start attempt: the
-                // display subsystem was never started, so even a failed hand
-                // start must keep StopSubsystems() off the vendor stop path,
-                // which null-derefs on a display it never started (ONY-802).
+                // display subsystem was never started, so even a failed
+                // tracking start must keep StopSubsystems() off the vendor
+                // stop path, which null-derefs on a display it never started.
                 _vitureHandOnly = true;
                 if (!StartVitureHandOnly(manager.activeLoader))
                 {
@@ -205,9 +217,9 @@ namespace OnyxLens.WmrTrackingUnity
                 case Result.Initialised:
                     return "Initialised the " + name + " XR loader";
                 case Result.InitialisedHandOnly:
-                    return "Started " + name + " hand tracking without the XR " +
-                        "display subsystem (" + SystemInfo.graphicsDeviceType +
-                        " cannot host the VITURE display provider)";
+                    return "Started " + name + " head and hand tracking without " +
+                        "the XR display subsystem (the embedded player must not " +
+                        "create the VITURE display surface)";
                 case Result.MissingLoader:
                     return "No " + name + " XR loader is assigned in XR Plug-in Management";
                 case Result.InitFailed:
@@ -226,13 +238,21 @@ namespace OnyxLens.WmrTrackingUnity
             }
         }
 
-        private static bool NeedsVitureHandOnly()
+        private bool NeedsVitureHandOnly()
         {
 #if UNITY_EDITOR
-            // The editor's graphics device is not the exported Android one;
-            // the player export is pinned to OpenGL ES in ConfigureUnifiedXr.
+            // The editor's graphics device is not the exported Android one,
+            // and the editor smoke scene has no host Activity to hijack.
             return false;
 #else
+            if (_embeddedPlayer)
+            {
+                // Starting the display provider in the host Activity creates
+                // mXRSurfaceView and takes its surface, which crashes or
+                // blanks the Flutter host on every graphics API (ONY-840).
+                // Head and hand tracking do not need it.
+                return true;
+            }
             return SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES3;
 #endif
         }
@@ -246,6 +266,14 @@ namespace OnyxLens.WmrTrackingUnity
                 if (helper == null) return false;
                 XRHandSubsystem hand = helper.GetLoadedSubsystem<XRHandSubsystem>();
                 if (hand == null) return false;
+
+                // Head pose comes from the loader's input subsystem; without
+                // it the player stays in 0DoF even though hands start.
+                XRInputSubsystem input = helper.GetLoadedSubsystem<XRInputSubsystem>();
+                if (input != null && !input.running)
+                {
+                    input.Start();
+                }
                 if (!hand.running)
                 {
                     hand.Start();
@@ -255,7 +283,7 @@ namespace OnyxLens.WmrTrackingUnity
             catch (Exception ex)
             {
                 Debug.LogError(
-                    "[WmrTrackingUnity] VITURE hand-only start failed: " + ex.Message
+                    "[WmrTrackingUnity] VITURE displayless start failed: " + ex.Message
                 );
                 return false;
             }
@@ -272,11 +300,16 @@ namespace OnyxLens.WmrTrackingUnity
                 {
                     hand.Stop();
                 }
+                XRInputSubsystem input = helper.GetLoadedSubsystem<XRInputSubsystem>();
+                if (input != null && input.running)
+                {
+                    input.Stop();
+                }
             }
             catch (Exception ex)
             {
                 Debug.LogError(
-                    "[WmrTrackingUnity] VITURE hand-only stop failed: " + ex.Message
+                    "[WmrTrackingUnity] VITURE displayless stop failed: " + ex.Message
                 );
             }
         }

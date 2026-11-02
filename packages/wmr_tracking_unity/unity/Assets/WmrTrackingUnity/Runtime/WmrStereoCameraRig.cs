@@ -1,8 +1,8 @@
 // The minimal stereo scene for the VITURE UaaL player (ONY-612).
 //
 // Attach to the Main Camera of the exported scene. It assumes the camera is
-// already the XR/stereo target, keeps it targeting both eyes, builds a small
-// depth ladder so a tester can see one coherent 3D image, and reports the
+// already the XR/stereo target, keeps it targeting both eyes, optionally
+// builds a small depth ladder for the stereo smoke scene, and reports the
 // startup stages to Kotlin through the selected vendor plugin's
 // `onUnityStage` entry point (VITURE by default, XREAL when configured).
 //
@@ -47,6 +47,12 @@ namespace OnyxLens.WmrTrackingUnity
         [SerializeField, Min(1f)] private float loaderTimeoutSeconds = 10f;
 
         [SerializeField, Min(1f)] private float firstFrameTimeoutSeconds = 20f;
+
+        // The primitives use Unity's built-in default material, which renders
+        // unshaded pink in the UaaL player when the built-in shaders are
+        // stripped. Off by default so a tester never sees the error markers;
+        // the stereo smoke scene can opt in for a visible depth ladder.
+        [SerializeField] private bool buildDepthMarkers;
 
         private Camera _camera;
         private bool _contentBuilt;
@@ -97,9 +103,11 @@ namespace OnyxLens.WmrTrackingUnity
         }
 
         /// <summary>
-        /// Three cubes on the forward axis. Their separation at different
-        /// depths is the visible proof that each eye gets its own image; an
-        /// empty clear-colour frame would look the same in mono.
+        /// The minimal scene never adds error-shader markers to the hosted
+        /// player. The optional depth ladder is off by default: its unshaded
+        /// PrimitiveType.Cube markers render pink when the built-in shaders
+        /// are stripped from the UaaL export, which testers read as a fault
+        /// (ONY-840).
         /// </summary>
         private void BuildMinimalScene()
         {
@@ -112,9 +120,12 @@ namespace OnyxLens.WmrTrackingUnity
             light.intensity = 1f;
             lightObject.transform.rotation = Quaternion.Euler(45f, -30f, 0f);
 
-            CreateDepthMarker("WmrStereoNear", 1.5f);
-            CreateDepthMarker("WmrStereoMid", 2.5f);
-            CreateDepthMarker("WmrStereoFar", 3.5f);
+            if (buildDepthMarkers)
+            {
+                CreateDepthMarker("WmrStereoNear", 1.5f);
+                CreateDepthMarker("WmrStereoMid", 2.5f);
+                CreateDepthMarker("WmrStereoFar", 3.5f);
+            }
         }
 
         private static void CreateDepthMarker(string name, float depth)
@@ -194,10 +205,9 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void Update()
         {
-            // A Vulkan player cannot host VITURE's GLES-only display provider,
-            // so the unified bridge starts hand tracking without the display
-            // subsystem. There is no stereo stage ladder to report in that
-            // mode (ONY-802).
+            // The embedded player starts head and hand tracking without the
+            // VITURE display subsystem, so there is no stereo stage ladder to
+            // report in that mode (ONY-840).
             if (unifiedBridge != null && unifiedBridge.IsVitureDisplayless)
             {
                 _vitureSession = false;

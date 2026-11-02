@@ -23,13 +23,15 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
-**Vulkan players need a re-export (ONY-802).** The loader gate starts only
-VITURE's hand subsystem on a player whose graphics API cannot host the GLES-only
-display provider, and `ConfigureUnifiedXr` pins OpenGLES3 so a new export never
-ships Vulkan again. Both live in `unity/Assets`, so they reach a device only
-through a rebuilt export. The pinned `unity-export-1.2` is built from the ONY-802
-merge commit with that pin, so its player starts the display normally; the hand-only
-gate remains the fallback for a player that is not GLES3.
+**The embedded player never starts the VITURE display provider (ONY-840).** The
+unified bridge is always the UaaL host inside `MainActivity`, where the display
+provider creates `mXRSurfaceView` over the Flutter view and crashes or blanks
+it. The loader gate therefore starts VITURE's input (head) and hand subsystems
+without the display subsystem on every graphics API; the displayless state skips
+the stereo preflight and the stereo stage ladder. A player that is not the
+embedded host still uses the displayless path only when its graphics API cannot
+host the GLES-only provider. This lives in `unity/Assets`, so it reaches a device
+only through a rebuilt Unity export.
 
 ## Layout
 

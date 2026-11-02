@@ -11,13 +11,15 @@ export assigns the loader and enables startup initialisation, and `start`
 reports `unavailable` from a mono 2D player instead of stalling. The stereo mode
 is fixed by the loader when its display subsystem initialises; Unity exposes
 `XRSettings.stereoRenderingMode` read-only, so the player cannot switch modes at
-runtime. A Vulkan player cannot host the GLES-only display provider at all; the
-unified loader gate then starts only the hand subsystem, and hand tracking runs
-without the stereo display (ONY-802). The pinned `unity-export-1.2` is built from
-the ONY-802 merge commit with the player pinned to OpenGL ES 3, so the display
-subsystem starts normally; the hand-only path is the fallback for a player that
-is not GLES3. The 2D gate is covered by the on-device check only: the stub-compile
-project proves the bridge compiles, not that the gate fires.
+runtime. The unified loader gate always starts only VITURE's input (head) and hand
+subsystems in the embedded UaaL player, because the display provider would
+create `mXRSurfaceView` over `MainActivity` and crash or blank the Flutter host
+(ONY-840). Head tracking then comes from the loader's XR input device and hands
+from the hand subsystem; the stereo preflight and stage ladder are skipped. A
+player that is not the embedded host still starts the display when its graphics
+API can host the GLES-only provider, and falls back to the displayless path on
+Vulkan (ONY-802). The 2D gate is covered by the on-device check only: the
+stub-compile project proves the bridge compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 

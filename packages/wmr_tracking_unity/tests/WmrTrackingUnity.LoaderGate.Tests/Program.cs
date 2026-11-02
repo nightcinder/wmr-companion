@@ -2,6 +2,7 @@ using System;
 using OnyxLens.WmrTrackingUnity.Dispatch;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.XR;
 using UnityEngine.XR.Hands;
 using UnityEngine.XR.Management;
 
@@ -22,9 +23,9 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
             SwitchesVendorAfterAStartedStop();
             KeepsAlreadyActiveLoader();
             ReportsMissingLoaderAndUnavailableSettings();
-            StartsVitureHandOnlyOnVulkan();
+            StartsDisplaylessVitureOnVulkan();
             KeepsDisplaylessSessionWhenHandStartFails();
-            StartsFullVitureLoaderOnOpenGles3();
+            StartsDisplaylessVitureOnOpenGles3InUaaL();
 
             Console.WriteLine(
                 _failures == 0
@@ -111,7 +112,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
             );
         }
 
-        private static void StartsVitureHandOnlyOnVulkan()
+        private static void StartsDisplaylessVitureOnVulkan()
         {
             GraphicsDeviceType previous = SystemInfo.graphicsDeviceType;
             SystemInfo.graphicsDeviceType = GraphicsDeviceType.Vulkan;
@@ -120,18 +121,21 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                 XRManagerSettings manager = FreshManager();
                 var viture = new VitureLoader();
                 var hand = new XRHandSubsystem();
-                viture.loadedSubsystem = hand;
+                var input = new XRInputSubsystem();
+                viture.handSubsystem = hand;
+                viture.inputSubsystem = input;
                 manager.activeLoaders.Add(viture);
                 manager.activeLoaders.Add(new XrealLoader());
 
-                var gate = new VendorLoaderGate();
+                var gate = new VendorLoaderGate(embeddedPlayer: true);
                 Check(
                     gate.EnsureOnly(VendorBackend.Viture) ==
                         VendorLoaderGate.Result.InitialisedHandOnly,
-                    "Vulkan VITURE start uses the hand-only path"
+                    "Vulkan VITURE start uses the displayless path"
                 );
                 Check(gate.VitureHandOnly, "the gate reports displayless VITURE");
                 Check(hand.running && hand.startCalls == 1, "the hand subsystem starts");
+                Check(input.running && input.startCalls == 1, "the head subsystem starts");
                 Check(
                     manager.startSubsystemsCalls == 0,
                     "the display subsystem is never started on Vulkan"
@@ -144,6 +148,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                     "a repeat VITURE start reuses the hand-only session"
                 );
                 Check(hand.startCalls == 1, "a repeat start does not restart the hand subsystem");
+                Check(input.startCalls == 1, "a repeat start does not restart head tracking");
 
                 Check(
                     gate.EnsureOnly(VendorBackend.Xreal) ==
@@ -157,6 +162,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
 
                 gate.Deinitialise();
                 Check(!hand.running && hand.stopCalls == 1, "dispose stops hand tracking");
+                Check(!input.running && input.stopCalls == 1, "dispose stops head tracking");
                 Check(
                     manager.stopSubsystemsCalls == 0 && manager.activeLoader == viture,
                     "dispose keeps the loader so the display is never stopped"
@@ -168,6 +174,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                     "a start after dispose restarts the hand subsystem"
                 );
                 Check(hand.running && hand.startCalls == 2, "the hand subsystem restarts");
+                Check(input.running && input.startCalls == 2, "head tracking restarts");
             }
             finally
             {
@@ -184,10 +191,12 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                 XRManagerSettings manager = FreshManager();
                 var viture = new VitureLoader();
                 var hand = new XRHandSubsystem { failOnStart = true };
-                viture.loadedSubsystem = hand;
+                var input = new XRInputSubsystem();
+                viture.handSubsystem = hand;
+                viture.inputSubsystem = input;
                 manager.activeLoaders.Add(viture);
 
-                var gate = new VendorLoaderGate();
+                var gate = new VendorLoaderGate(embeddedPlayer: true);
                 Check(
                     gate.EnsureOnly(VendorBackend.Viture) ==
                         VendorLoaderGate.Result.InitFailed,
@@ -202,7 +211,10 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                     "a failed hand-only start never starts the display subsystem"
                 );
 
+                Check(input.running, "head tracking still starts when hands fail");
+
                 gate.Deinitialise();
+                Check(!input.running, "dispose after a failed hand start stops head tracking");
                 Check(
                     manager.stopSubsystemsCalls == 0,
                     "dispose after a failed hand-only start never stops the display"
@@ -231,7 +243,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
             }
         }
 
-        private static void StartsFullVitureLoaderOnOpenGles3()
+        private static void StartsDisplaylessVitureOnOpenGles3InUaaL()
         {
             GraphicsDeviceType previous = SystemInfo.graphicsDeviceType;
             SystemInfo.graphicsDeviceType = GraphicsDeviceType.OpenGLES3;
@@ -240,21 +252,24 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                 XRManagerSettings manager = FreshManager();
                 var viture = new VitureLoader();
                 var hand = new XRHandSubsystem();
-                viture.loadedSubsystem = hand;
+                var input = new XRInputSubsystem();
+                viture.handSubsystem = hand;
+                viture.inputSubsystem = input;
                 manager.activeLoaders.Add(viture);
 
-                var gate = new VendorLoaderGate();
+                var gate = new VendorLoaderGate(embeddedPlayer: true);
                 Check(
                     gate.EnsureOnly(VendorBackend.Viture) ==
-                        VendorLoaderGate.Result.Initialised,
-                    "OpenGL ES keeps the normal stereo display path"
+                        VendorLoaderGate.Result.InitialisedHandOnly,
+                    "the embedded OpenGL ES player still uses the displayless path"
                 );
-                Check(!gate.VitureHandOnly, "the gate is not displayless on OpenGL ES");
+                Check(gate.VitureHandOnly, "the gate reports displayless VITURE on GLES");
                 Check(
-                    manager.startSubsystemsCalls == 1,
-                    "the full loader starts the display subsystem"
+                    manager.startSubsystemsCalls == 0,
+                    "the GLES embedded player never starts the display provider"
                 );
-                Check(!hand.running, "the hand-only path does not run on OpenGL ES");
+                Check(hand.running, "hand tracking runs on GLES");
+                Check(input.running, "head tracking runs on GLES");
             }
             finally
             {

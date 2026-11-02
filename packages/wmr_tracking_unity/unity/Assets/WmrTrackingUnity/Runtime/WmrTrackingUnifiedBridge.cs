@@ -47,9 +47,10 @@ namespace OnyxLens.WmrTrackingUnity
         private bool _vitureDisplayless;
 
         /// <summary>
-        /// True while VITURE hand tracking runs without its XR display
-        /// subsystem. A Vulkan player cannot host the GLES-only VITURE display
-        /// provider, so only the hand subsystem is started (ONY-802).
+        /// True while VITURE head and hand tracking run without its XR display
+        /// subsystem. The embedded UaaL player must not let the display
+        /// provider create mXRSurfaceView over MainActivity, so only the
+        /// input and hand subsystems are started (ONY-840).
         /// </summary>
         public bool IsVitureDisplayless => _vitureDisplayless;
 
@@ -120,7 +121,7 @@ namespace OnyxLens.WmrTrackingUnity
             vitureBackend.ErrorReported += OnVendorError;
             xrealBackend.ErrorReported += OnVendorError;
 
-            _loaderGate = new VendorLoaderGate();
+            _loaderGate = new VendorLoaderGate(embeddedPlayer: true);
             SetBackendEnabled(VendorBackend.Viture, false);
             SetBackendEnabled(VendorBackend.Xreal, false);
         }
@@ -265,8 +266,9 @@ namespace OnyxLens.WmrTrackingUnity
                 }
             }
 
-            // A Vulkan player starts only VITURE's hand subsystem; the vendor
-            // bridge must skip its stereo-3D preflight in that mode.
+            // The embedded player starts only VITURE's input and hand
+            // subsystems; the vendor bridge must skip its stereo-3D preflight
+            // in that mode.
             _vitureDisplayless = decision.Target == VendorBackend.Viture &&
                 _loaderGate != null && _loaderGate.VitureHandOnly;
             if (vitureBackend != null)

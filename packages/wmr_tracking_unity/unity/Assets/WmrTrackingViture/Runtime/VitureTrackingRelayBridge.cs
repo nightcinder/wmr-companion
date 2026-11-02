@@ -50,9 +50,10 @@ namespace OnyxLens.WmrTrackingViture
 
         /// <summary>
         /// Set by the unified bridge when the XR display subsystem is not
-        /// running. A Vulkan player cannot host the GLES-only VITURE display
-        /// provider, so hand tracking is started on its own and the 2D/stereo
-        /// preflight does not apply (ONY-802).
+        /// running. The companion embeds Unity inside MainActivity, where the
+        /// VITURE display provider would create its own mXRSurfaceView and
+        /// take the host surface, so head and hand tracking are started on
+        /// their own and the 2D/stereo preflight does not apply (ONY-840).
         /// </summary>
         public bool DisplaylessHandTracking { get; set; }
 
@@ -202,12 +203,13 @@ namespace OnyxLens.WmrTrackingViture
 #if !UNITY_EDITOR
             if (DisplaylessHandTracking)
             {
-                // The display subsystem is deliberately not running: a Vulkan
-                // player cannot host VITURE's GLES-only display provider.
-                // HandTracking.Start() is the whole session on that path.
+                // The display subsystem is deliberately not running: the
+                // embedded player must not let VITURE's display provider
+                // create mXRSurfaceView over MainActivity. The loader's input
+                // and hand subsystems are the whole session on that path.
                 Debug.Log(
-                    "[WmrTrackingViture] starting hand tracking without the XR " +
-                    "display subsystem"
+                    "[WmrTrackingViture] starting head and hand tracking without " +
+                    "the XR display subsystem"
                 );
             }
             else
@@ -397,6 +399,32 @@ namespace OnyxLens.WmrTrackingViture
             );
         }
 
+        /// <summary>
+        /// Reads the head pose for the relay. On the displayless path the
+        /// display subsystem does not drive the camera, so the pose comes from
+        /// the loader's XR input device; the camera transform is the fallback
+        /// for a stereo player and the editor smoke scene.
+        /// </summary>
+        private bool TryReadHeadPose(out Vector3 position, out Quaternion rotation)
+        {
+            position = Vector3.zero;
+            rotation = Quaternion.identity;
+            if (DisplaylessHandTracking)
+            {
+                InputDevice device = InputDevices.GetDeviceAtXRNode(XRNode.Head);
+                if (device.isValid &&
+                    device.TryGetFeatureValue(CommonUsages.devicePosition, out position) &&
+                    device.TryGetFeatureValue(CommonUsages.deviceRotation, out rotation))
+                {
+                    return true;
+                }
+            }
+            if (_headTransform == null) return false;
+            position = _headTransform.position;
+            rotation = _headTransform.rotation;
+            return true;
+        }
+
         private void EmitCurrentFrame()
         {
             long timeNs = MonotonicTimeNs();
@@ -408,11 +436,11 @@ namespace OnyxLens.WmrTrackingViture
               .Append(JointTable.Length.ToString(CultureInfo.InvariantCulture));
 #endif
 
-            if (_headTransform != null)
+            if (TryReadHeadPose(out var headPosition, out var headRotation))
             {
                 UnityToOpenXr(
-                    _headTransform.position,
-                    _headTransform.rotation,
+                    headPosition,
+                    headRotation,
                     out var headPos,
                     out var headRot
                 );
