@@ -311,9 +311,9 @@ final debugTrackingSelectorProvider = Provider<TrackingSourceSelector>((ref) {
   );
 });
 
-/// The source selected in the debug screen. [DebugTrackingSource.none] by
-/// default: the viewer shows the controller's 3DoF orientation with an
-/// `orientationOnly` badge.
+/// The source selected in the debug screen. Detection runs automatically and
+/// the viewer falls back to the controller's 3DoF orientation with an
+/// `orientationOnly` badge when no glasses are attached.
 final debugTrackingSourceProvider =
     NotifierProvider<DebugTrackingSourceNotifier, DebugTrackingSelection>(
       DebugTrackingSourceNotifier.new,
@@ -372,6 +372,7 @@ class DebugTrackingAttachment {
     this.error,
     this.disabled = false,
     this.message,
+    this.detection,
   });
 
   final DebugTrackingSource choice;
@@ -389,6 +390,13 @@ class DebugTrackingAttachment {
   /// Extra status text, such as the selector's detection result for
   /// [DebugTrackingSource.auto].
   final String? message;
+
+  /// The native detection behind an [DebugTrackingSource.auto] attachment.
+  ///
+  /// Null for a manual selection or before the first probe finishes. The
+  /// status banner uses it to name the detected vendor and host and to decide
+  /// whether the Simulated fallback applies.
+  final GlassesDetection? detection;
 
   bool get running => source != null;
 }
@@ -425,38 +433,23 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       _owned = null;
       if (source != null) unawaited(releaseDebugTrackingSource(source));
     });
-    // A VITURE Pro Neckband is the vendor's own compute unit, so the glasses
-    // are already known: attach the detected source as the screens open
-    // instead of leaving the tester on `none` (0DoF, `6DoF only` greyed out).
-    // The probe only runs once this build returns.
-    unawaited(_autoSelectOnNeckband());
+    // Detection is the only selection path now: the tester does not choose a
+    // vendor. The probe starts after this build returns; a manual Simulated
+    // toggle made meanwhile wins through the generation check in [select].
+    unawaited(_autoSelectOnStartup());
     return const DebugTrackingSelection(
-      choice: DebugTrackingSource.none,
-      attachment: AsyncValue.data(
-        DebugTrackingAttachment(choice: DebugTrackingSource.none),
-      ),
+      choice: DebugTrackingSource.auto,
+      attachment: AsyncValue.loading(),
     );
   }
 
-  /// Selects [DebugTrackingSource.auto] when the native detector reports a
-  /// VITURE Pro Neckband host.
-  ///
-  /// The detector is only called when a vendor flag is built in, so a
-  /// flag-off build stays channel-free. A manual selection made while the
-  /// probe runs wins: [select] is only called from [DebugTrackingSource.none].
-  Future<void> _autoSelectOnNeckband() async {
-    final selector = ref.read(debugTrackingSelectorProvider);
-    if (!selector.flags.any) return;
-    final GlassesHost host;
-    try {
-      host = (await selector.detector.detect()).host;
-    } catch (_) {
-      // Detection is best-effort; the dropdown still offers Auto.
-      return;
-    }
-    if (host != GlassesHost.neckband) return;
-    if (state.choice != DebugTrackingSource.none ||
-        state.attachment.isLoading) {
+  Future<void> _autoSelectOnStartup() async {
+    // The notifier cannot read its own state until build() returns.
+    await Future<void>.microtask(() {});
+    if (!ref.mounted) return;
+    // A manual choice made before the probe starts wins.
+    if (state.choice != DebugTrackingSource.auto ||
+        !state.attachment.isLoading) {
       return;
     }
     await select(DebugTrackingSource.auto);
@@ -464,12 +457,17 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
 
   void set(DebugTrackingSource choice) => unawaited(select(choice));
 
+  /// Runs native detection again after the tester plugs in or removes glasses.
+  Future<void> redetect() => select(DebugTrackingSource.auto, force: true);
+
   /// Detaches the current source before creating and starting [choice].
   ///
   /// [choice] is ignored when it arrives after a newer selection; its source,
   /// if it was already created, is released rather than left running.
-  Future<void> select(DebugTrackingSource choice) async {
-    if (choice == state.choice && !state.attachment.isLoading) return;
+  Future<void> select(DebugTrackingSource choice, {bool force = false}) async {
+    if (!force && choice == state.choice && !state.attachment.isLoading) {
+      return;
+    }
     final generation = ++_generation;
     final previous = _owned;
     _owned = null;
@@ -487,7 +485,9 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       return;
     }
     if (choice == DebugTrackingSource.auto) {
-      final selected = await ref.read(debugTrackingSelectorProvider).select();
+      final selected = await ref
+          .read(debugTrackingSelectorProvider)
+          .select(isCancelled: () => generation != _generation);
       if (generation != _generation) {
         final created = selected.source;
         if (created != null) await releaseDebugTrackingSource(created);
@@ -500,6 +500,7 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
           choice: choice,
           source: selected.source,
           message: selected.message,
+          detection: selected.detection,
           // Auto carries the detection/start failure in [message]; surface it
           // as the typed error the bench and the debug viewer read, so a 2D
           // (XR stereo inactive) player is actionable instead of "Starting
@@ -575,7 +576,7 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
   /// The typed error for a failed [DebugTrackingSource.auto] selection.
   ///
   /// "No glasses detected" stays a message rather than an error: nothing
-  /// failed, and the dropdown still lets the tester pick a vendor by hand.
+  /// failed, and the status banner offers the Simulated fallback instead.
   static TrackingException? _selectionError(TrackingSelection selection) {
     if (selection.status == TrackingSelectionStatus.none) return null;
     final kind = switch (selection.status) {

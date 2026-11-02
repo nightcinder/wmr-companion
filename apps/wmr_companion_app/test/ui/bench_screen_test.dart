@@ -12,6 +12,7 @@ import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
 import 'package:wmr_companion_app/ui/bench/bench_screen.dart';
 import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
+import 'package:wmr_companion_app/ui/debug/tracking_source_banner.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 
 class _FakeSession implements BenchSession {
@@ -166,6 +167,11 @@ void main() {
     BenchMode mode = BenchMode.threeDofOnly,
     bool withCarina = true,
   }) async {
+    // The detection banner adds a Simulated fallback; keep every control on
+    // screen so the tests do not depend on a particular scroll position.
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final documents = Directory.systemTemp.createTempSync('bench_screen_docs');
     addTearDown(() => documents.deleteSync(recursive: true));
     final container = ProviderContainer(
@@ -221,6 +227,19 @@ void main() {
     }
     fail('did not reach ${target.id}');
   }
+
+  testWidgets('the tracking-source banner is disabled once a run starts', (
+    tester,
+  ) async {
+    await open(tester, _FakeSession());
+    await tester.pump();
+    TrackingSourceBanner banner() =>
+        tester.widget<TrackingSourceBanner>(find.byType(TrackingSourceBanner));
+    expect(banner().enabled, isTrue);
+
+    await tap(tester, 'bench-start');
+    expect(banner().enabled, isFalse);
+  });
 
   testWidgets('the primary bench action takes the initial D-pad focus', (
     tester,

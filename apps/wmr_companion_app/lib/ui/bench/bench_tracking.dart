@@ -53,8 +53,8 @@ final benchHandTrackingProvider = Provider<BenchHandTracking>((ref) {
   String reason;
   if (choice == DebugTrackingSource.none) {
     reason =
-        'Attach a hand-tracking source below to enable 6DoF only. '
-        'Without it, a tester can still run 3DoF only.';
+        'Connect glasses and tap Re-detect to enable 6DoF only. '
+        'Without them, a tester can still run 3DoF only.';
   } else if (attachment?.disabled ?? false) {
     reason =
         '${choice.label} is not built in. Rebuild with '
@@ -91,8 +91,7 @@ String _status(
   if (error != null) {
     if (_stereoInactive(error.message)) {
       return '0DoF: VITURE XR stereo is inactive, so hand tracking cannot '
-          'start. Switch the glasses to 3D (SpaceWalker) and select the '
-          'source again.';
+          'start. Switch the glasses to 3D (SpaceWalker) and tap Re-detect.';
     }
     return '0DoF: ${choice.label} failed to start (${error.kind.name}).';
   }
