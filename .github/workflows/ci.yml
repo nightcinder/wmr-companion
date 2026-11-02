@@ -820,14 +820,15 @@ jobs:
       contents: write
     env:
       VERSION: ${{ github.ref_name }}
-      # ONY-613's replacement export, built from the ONY-612 merge commit
-      # 71e4c815. It is a prerelease on purpose: the export is not an app
-      # release and must never take the repository's "Latest release" flag.
+      # ONY-802's export, built from the ONY-802 merge commit 0ef33c9 with the
+      # Android graphics APIs pinned to OpenGL ES 3. It is a prerelease on
+      # purpose: the export is not an app release and must never take the
+      # repository's "Latest release" flag.
       UNITY_EXPORT_TAG: unity-export-1.2
       # `install_unity_export.sh` pins the export's `ndkVersion` at this value.
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
-      # ONY-613's approved export. A different digest is not the artifact the
+      # ONY-802's approved export. A different digest is not the artifact the
       # owner approved, so the job refuses to build from it.
       UNITY_EXPORT_SHA256: 2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8
     steps:
@@ -992,10 +993,10 @@ jobs:
             | sha256sum --check --strict
 
       # The digest only proves the bytes match the pin. This proves the content
-      # is the ONY-613 export: both vendor runtimes, and the ONY-612 stereo rig
-      # with playerHosted/loaderStarted/firstFrame and no `mono` mode. A stale
-      # unity-export-1.0 or a mono export fails here, before the 120-minute
-      # build rather than in the published APK.
+      # is the ONY-802 export: both vendor runtimes, the ONY-612 stereo rig with
+      # playerHosted/loaderStarted/firstFrame and no `mono` mode, and the ONY-802
+      # displayless hand path. A stale unity-export-1.0/1.1 or a mono export
+      # fails here, before the 120-minute build rather than in the published APK.
       - name: Check the export carries both vendors and the VITURE stereo path
         working-directory: apps/wmr_companion_app
         run: python3 tool/check_unity_export.py "$RUNNER_TEMP/unity-export/unityLibrary.zip"
