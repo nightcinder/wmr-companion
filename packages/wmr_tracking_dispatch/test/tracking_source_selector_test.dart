@@ -27,6 +27,18 @@ class _ThrowOnStartSource extends FakeTrackingSource {
   }
 }
 
+class _UnlinkedRuntimeOnStartSource extends FakeTrackingSource {
+  @override
+  Future<void> start() async {
+    throw const TrackingException(
+      TrackingExceptionKind.unavailable,
+      'This APK was built without the VITURE Unity runtime (unityLibrary). '
+      'Install the unified release APK to enable 6DoF hand tracking.',
+      stage: unityRuntimeLinkStage,
+    );
+  }
+}
+
 TrackingSourceFlags flags({
   bool viture = false,
   bool xreal = false,
@@ -196,6 +208,42 @@ void main() {
     final selection = await selector.select();
 
     expect(selection.status, TrackingSelectionStatus.unavailable);
+  });
+
+  test('a source without a linked Unity runtime falls back to 3DoF', () async {
+    final selector = TrackingSourceSelector(
+      detector: _FakeDetector(_viture),
+      flags: flags(viture: true),
+      vitureSource: () async => throw const TrackingException(
+        TrackingExceptionKind.unavailable,
+        'This APK was built without the VITURE Unity runtime (unityLibrary). '
+        'Install the unified release APK to enable 6DoF hand tracking.',
+        stage: unityRuntimeLinkStage,
+      ),
+    );
+
+    final selection = await selector.select();
+
+    expect(selection.status, TrackingSelectionStatus.fallback);
+    expect(selection.source, isNull);
+    expect(selection.message, contains('continuing with controller 3DoF'));
+    expect(selection.message, contains('unified release APK'));
+  });
+
+  test('a start-time missing Unity runtime falls back and disposes', () async {
+    final source = _UnlinkedRuntimeOnStartSource();
+    final selector = TrackingSourceSelector(
+      detector: _FakeDetector(_viture),
+      flags: flags(viture: true),
+      vitureSource: () async => source,
+    );
+
+    final selection = await selector.select();
+
+    expect(selection.status, TrackingSelectionStatus.fallback);
+    expect(selection.source, isNull);
+    expect(selection.message, contains('continuing with controller 3DoF'));
+    expect(source.disposed, isTrue);
   });
 
   test('a factory returning null reports unavailable', () async {

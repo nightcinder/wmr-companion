@@ -252,6 +252,70 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('neckband USB permission is not reported as a tracking fault', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.viture,
+            host: GlassesHost.neckband,
+            usbPermissionGranted: false,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => FakeTrackingSource(),
+      ),
+    );
+    await settle(tester);
+
+    expect(
+      find.textContaining(
+        'USB camera access not granted (hand tracking does not need it)',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('USB permission not granted'), findsNothing);
+    await close(tester);
+  });
+
+  testWidgets('an unlinked Unity runtime falls back to 3DoF, not a failure', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.viture,
+            host: GlassesHost.neckband,
+            usbPermissionGranted: true,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => throw const TrackingException(
+          TrackingExceptionKind.unavailable,
+          'This APK was built without the VITURE Unity runtime '
+          '(unityLibrary). Install the unified release APK to enable 6DoF '
+          'hand tracking.',
+          stage: unityRuntimeLinkStage,
+        ),
+      ),
+    );
+    await settle(tester);
+
+    expect(
+      find.textContaining('continuing with controller 3DoF'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('unified release APK'), findsOneWidget);
+    expect(find.textContaining('TrackingException'), findsNothing);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
   testWidgets('no glasses leaves 0DoF and offers the Simulated fallback', (
     tester,
   ) async {

@@ -15,13 +15,16 @@ flavors and their exports are retired (ONY-565).
 the export declares `minSdk 33`. `base` keeps Flutter's default minimum.
 
 `base` links no Unity code. With every flag on, `VitureNeckbandTrackingSource`
-and `XrealAir2UltraTrackingSource` still build; asking either to start returns
-the typed `unavailable` failure instead of a missing-class crash.
+and `XrealAir2UltraTrackingSource` still build; asking XREAL to start returns
+the typed `unavailable` failure instead of a missing-class crash, while VITURE
+reports the same 3DoF fallback as `unified` without an export.
 
 `unified` compiles the same Dart adapters and links one `unityLibrary` exported
 from `packages/wmr_tracking_unity`, which selects VITURE or XREAL at runtime.
-With no export linked it builds exactly like `base`: both sources exist and
-`start()` reports `unavailable`.
+With no export linked it builds exactly like `base`: both sources exist. For a
+detected VITURE host, Auto reports a controller 3DoF fallback that names the
+missing Unity runtime and points at the unified release APK; XREAL still reports
+typed `unavailable`.
 
 ## One launcher icon
 
@@ -129,9 +132,9 @@ under `android/unity/viture` or `android/unity/xreal` is retired and fails
 configuration with "retired per-vendor Unity export" instead of being ignored;
 delete it.
 
-Without an export, `unified` still builds and the Unity-backed sources report
-`unavailable`. That is the supported fallback for CI and for developers who do
-not have the proprietary SDKs.
+Without an export, `unified` still builds: XREAL reports `unavailable` and
+VITURE reports the 3DoF fallback. That is the supported path for CI and for
+developers who do not have the proprietary SDKs.
 
 `tool/test_flavor_wiring.sh` exercises this path without Unity: it writes a
 throwaway `unityLibrary` stub into the gitignored unified location, checks that
