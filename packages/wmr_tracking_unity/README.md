@@ -31,10 +31,11 @@ what feeds 6DoF head poses to the player camera. `ConfigureUnifiedXr` still
 pins OpenGLES3 so a standalone or stale player cannot take the Vulkan stop
 path, and a non-GLES3 player also falls back to hand-only. Both live in
 `unity/Assets`, so they reach a device only through a rebuilt export. The
-pinned `unity-export-1.3` was built from PR head `1a1c67a` and carries the
-unconditional hand-only gate without the input subsystem; its
-`packages/wmr_tracking_unity` subtree matches the ONY-840 merge commit
-`8526b11`, so ONY-856 needs a newer export to reach a device.
+pinned `unity-export-1.4` was built from merge commit `35d8015` (ONY-856) and
+carries both the hand-only gate and the input-subsystem start; its
+`packages/wmr_tracking_unity` subtree matches `main` at `94573b2`. The earlier
+`unity-export-1.3` carries the gate but starts only the hand subsystem, so
+6DoF needs the 1.4 export to reach a device.
 
 ## Layout
 

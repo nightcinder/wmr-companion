@@ -39,7 +39,7 @@ purchases for the same unproven gates.
 | Artifact | `wmr-companion-0.3.12-unified-arm64-v8a.apk` |
 | Release | [`v0.3.12`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.12), commit `2a7e176` |
 | APK SHA-256 | `93647e6f63191581bebcdc54f7e4d3bbd9caa8d84475db43cd86b2387a575458` |
-| Unity export SHA-256 | `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8` (`unity-export-1.2`, the export this release was built from; CI now pins `unity-export-1.3`) |
+| Unity export SHA-256 | `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8` (`unity-export-1.2`, the export this release was built from; CI now pins `unity-export-1.4`) |
 | Flavor | `unified`: VITURE 0.9.0 + XREAL 3.1.0 in one `unityLibrary`, vendor selected at runtime |
 | Signing | release key; tester build, not a store upload |
 

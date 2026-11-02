@@ -17,7 +17,7 @@ hardware; these are compile/packaging facts only.
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
-| Licence gate | Pinned `unity-export-1.3` (SHA-256 `49480d5a50122aa18e941c690412e0371f5edf424f3656892f539ea9eeff2025`); owner approved SDK redistribution (ONY-354) |
+| Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution (ONY-354) |
 
 Release notes: [`v0.3.12`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.12).
 Carrying the first release on `unity-export-1.2`: the Unity player pinned to OpenGL ES 3 so VITURE's display provider no longer takes the Vulkan stop path, the loader gate starting only VITURE's hand subsystem on a non-GLES3 player as a fallback, and the hosted Unity view no longer taking D-pad focus with the Volume rocker controlling the UI (ONY-802); retains automatic glasses detection (ONY-777) and the XREAL cold-start fix plus R8 keep rules (ONY-776).
@@ -84,9 +84,10 @@ The `unified` app flavor links that shared export from
    VITURE's input and hand subsystems without the display subsystem, because the
    display provider would take over the host activity (ONY-840); the input
    subsystem is what drives 6DoF head pose (ONY-856). The pinned
-   `unity-export-1.3` was built from PR head `1a1c67a` (subtree identical to the
-   ONY-840 merge commit `8526b11`) and carries that gate but predates the input
-   start, so 6DoF needs a newer export; `unity-export-1.2` and earlier still
+   `unity-export-1.4` was built from merge commit `35d8015` (ONY-856; Unity
+   subtree identical to `main` at `94573b2`) and carries both the hand-only gate
+   and the input start; `unity-export-1.3` carries the gate but predates the
+   input start, so it stays at 0DoF; `unity-export-1.2` and earlier still
    start the display. A non-GLES3
    player also runs hand-only instead of taking the Vulkan stop path.
 2. Install and normalise the export from `apps/wmr_companion_app`:

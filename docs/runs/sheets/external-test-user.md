@@ -51,7 +51,7 @@ This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR C
 
 Do not run an older build for this pass. v0.3.13 carries fixes that change results.
 
-In embedded UaaL the Unity bridge is hand-only. VITURE's display provider can no longer take over the Flutter host activity. The unshaded marker cubes are gone (ONY-840). These ship through the pinned `unity-export-1.3`.
+In embedded UaaL the Unity bridge is hand-only. VITURE's display provider can no longer take over the Flutter host activity. The unshaded marker cubes are gone (ONY-840). These ship through the pinned `unity-export-1.3`; the next build moves to `unity-export-1.4`, which also starts VITURE's input subsystem so 6DoF head pose reaches the player camera (ONY-856).
 
 Unity and vendor player activities are no longer exported. `MainActivity` is the only entry point (ONY-842).
 

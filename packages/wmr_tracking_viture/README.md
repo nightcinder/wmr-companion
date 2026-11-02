@@ -16,10 +16,11 @@ Flutter, so it never starts the display provider: it starts the input and hand
 subsystems, and hand tracking runs without the stereo display (ONY-840); the
 input subsystem is what drives 6DoF head pose (ONY-856). A Vulkan
 player also cannot host the GLES-only display provider and takes the same
-hand-only path (ONY-802). The pinned `unity-export-1.3` was built from PR
-head `1a1c67a` (subtree identical to the ONY-840 merge commit `8526b11`) and
-carries the embedded hand-only gate but predates the input-subsystem start, so
-6DoF needs a newer export; `unity-export-1.2` and earlier still start
+hand-only path (ONY-802). The pinned `unity-export-1.4` was built from merge
+commit `35d8015` (ONY-856; subtree identical to `main` at `94573b2`) and carries
+both the embedded hand-only gate and the input-subsystem start; the earlier
+`unity-export-1.3` predates the input start, so 6DoF needs 1.4;
+`unity-export-1.2` and earlier still start
 the display. The 2D gate is
 covered by the on-device check only: the stub-compile project proves the bridge
 compiles, not that the gate fires.
