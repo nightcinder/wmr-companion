@@ -30,10 +30,22 @@ namespace OnyxLens.WmrTrackingUnity
         // later switch find it.
         private List<XRLoader> _assignedLoaders;
 
-        // Set when VITURE runs without its XR display subsystem. The display
-        // provider is OpenGL ES only, so a Vulkan player must start the hand
-        // subsystem on its own (ONY-802).
+        // Set when VITURE runs without its XR display subsystem. An embedded
+        // UaaL player must never start the display provider, and a Vulkan
+        // player cannot host it either, so both start the hand subsystem on
+        // its own (ONY-802, ONY-840).
         private bool _vitureHandOnly;
+
+        // True for the unified player hosted inside the Flutter app. VITURE's
+        // display provider owns an Android surface view that conflicts with
+        // the host activity, so an embedded session always uses the hand
+        // subsystem instead (ONY-840).
+        private readonly bool _embeddedUaaL;
+
+        public VendorLoaderGate(bool embeddedUaaL = false)
+        {
+            _embeddedUaaL = embeddedUaaL;
+        }
 
         public enum Result
         {
@@ -206,8 +218,9 @@ namespace OnyxLens.WmrTrackingUnity
                     return "Initialised the " + name + " XR loader";
                 case Result.InitialisedHandOnly:
                     return "Started " + name + " hand tracking without the XR " +
-                        "display subsystem (" + SystemInfo.graphicsDeviceType +
-                        " cannot host the VITURE display provider)";
+                        "display subsystem (embedded player, or " +
+                        SystemInfo.graphicsDeviceType + " cannot host the " +
+                        "VITURE display provider)";
                 case Result.MissingLoader:
                     return "No " + name + " XR loader is assigned in XR Plug-in Management";
                 case Result.InitFailed:
@@ -226,14 +239,16 @@ namespace OnyxLens.WmrTrackingUnity
             }
         }
 
-        private static bool NeedsVitureHandOnly()
+        private bool NeedsVitureHandOnly()
         {
 #if UNITY_EDITOR
-            // The editor's graphics device is not the exported Android one;
-            // the player export is pinned to OpenGL ES in ConfigureUnifiedXr.
+            // The editor's graphics device is not the exported Android one,
+            // and an embedded UaaL player is the only host that conflicts
+            // with the vendor display provider.
             return false;
 #else
-            return SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES3;
+            return _embeddedUaaL ||
+                SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES3;
 #endif
         }
 

@@ -111,7 +111,9 @@ namespace OnyxLens.WmrTrackingUnity.Editor
             // VITURE's Unity display provider is OpenGL ES (EGL) only. Unity
             // 6000 defaults an Android player to Vulkan, where its gfx thread
             // cannot acquire the Unity EGL context and its stop path null-derefs
-            // on UnityGfxDeviceW (ONY-802). Pin the unified export to GLES3.
+            // on UnityGfxDeviceW (ONY-802). The embedded UaaL gate never starts
+            // the display provider regardless (ONY-840); keep the pin so a
+            // standalone or stale player cannot take the Vulkan crash path.
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
             PlayerSettings.SetGraphicsAPIs(
                 BuildTarget.Android,

@@ -48,8 +48,10 @@ namespace OnyxLens.WmrTrackingUnity
 
         /// <summary>
         /// True while VITURE hand tracking runs without its XR display
-        /// subsystem. A Vulkan player cannot host the GLES-only VITURE display
-        /// provider, so only the hand subsystem is started (ONY-802).
+        /// subsystem. This bridge is the embedded UaaL dispatcher, so VITURE
+        /// never starts the display provider that would take over the host
+        /// activity, and the vendor bridge must skip the stereo-3D preflight
+        /// (ONY-840).
         /// </summary>
         public bool IsVitureDisplayless => _vitureDisplayless;
 
@@ -120,7 +122,10 @@ namespace OnyxLens.WmrTrackingUnity
             vitureBackend.ErrorReported += OnVendorError;
             xrealBackend.ErrorReported += OnVendorError;
 
-            _loaderGate = new VendorLoaderGate();
+            // The unified player is always embedded in the Flutter host, so
+            // VITURE must use its hand subsystem only: the display provider
+            // would take over the host activity's surface (ONY-840).
+            _loaderGate = new VendorLoaderGate(embeddedUaaL: true);
             SetBackendEnabled(VendorBackend.Viture, false);
             SetBackendEnabled(VendorBackend.Xreal, false);
         }
@@ -265,8 +270,9 @@ namespace OnyxLens.WmrTrackingUnity
                 }
             }
 
-            // A Vulkan player starts only VITURE's hand subsystem; the vendor
-            // bridge must skip its stereo-3D preflight in that mode.
+            // The embedded UaaL player starts only VITURE's hand subsystem;
+            // the vendor bridge must skip its stereo-3D preflight in that
+            // mode. The loader gate also does this on a non-GLES3 player.
             _vitureDisplayless = decision.Target == VendorBackend.Viture &&
                 _loaderGate != null && _loaderGate.VitureHandOnly;
             if (vitureBackend != null)
@@ -276,8 +282,9 @@ namespace OnyxLens.WmrTrackingUnity
             if (_vitureDisplayless)
             {
                 Debug.Log(
-                    "[WmrTrackingUnity] VITURE hand tracking without the XR " +
-                    "display subsystem (" + SystemInfo.graphicsDeviceType + ")"
+                    "[WmrTrackingUnity] embedded UaaL VITURE hand tracking " +
+                    "without the XR display subsystem (" +
+                    SystemInfo.graphicsDeviceType + ")"
                 );
             }
 

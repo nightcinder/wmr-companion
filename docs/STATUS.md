@@ -221,9 +221,11 @@ real model. `v0.3.12` ships this path.
   `unavailable` error carrying `stage=... stereo=... playerHosted=...`.
   The `start` reply and `capabilities` carry `playerHosted`,
   `stereoMode` and the last `stage`. The stereo camera rig keeps
-  `stereoTargetEye = Both` with depth markers at 1.5/2.5/3.5 m and
-  reports the first frame only after the loader started, so a recorded
-  `firstFrame` proves stereo frames flow. Nothing here has run on hardware;
+  `stereoTargetEye = Both`, can build opt-in depth markers at
+  1.5/2.5/3.5 m (off by default, because the embedded export can render
+  their built-in material as the magenta error shader), and reports the
+  first frame only after the loader started, so a recorded `firstFrame`
+  proves stereo frames flow. Nothing here has run on hardware;
   all of it is unverified.
 
 ### Hand-anchor pose filter (ONY-502, 2026-10-29)
