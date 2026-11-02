@@ -86,10 +86,13 @@ namespace UnityEngine.XR.Hands
 
         public int stopCalls { get; private set; }
 
+        /// <summary>Test hook: a start that leaves the subsystem stopped.</summary>
+        public bool failOnStart { get; set; }
+
         public void Start()
         {
             startCalls += 1;
-            running = true;
+            running = !failOnStart;
         }
 
         public void Stop()

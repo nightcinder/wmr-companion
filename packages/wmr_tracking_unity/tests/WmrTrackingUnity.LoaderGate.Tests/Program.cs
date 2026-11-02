@@ -23,6 +23,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
             KeepsAlreadyActiveLoader();
             ReportsMissingLoaderAndUnavailableSettings();
             StartsVitureHandOnlyOnVulkan();
+            KeepsDisplaylessSessionWhenHandStartFails();
             StartsFullVitureLoaderOnOpenGles3();
 
             Console.WriteLine(
@@ -167,6 +168,62 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                     "a start after dispose restarts the hand subsystem"
                 );
                 Check(hand.running && hand.startCalls == 2, "the hand subsystem restarts");
+            }
+            finally
+            {
+                SystemInfo.graphicsDeviceType = previous;
+            }
+        }
+
+        private static void KeepsDisplaylessSessionWhenHandStartFails()
+        {
+            GraphicsDeviceType previous = SystemInfo.graphicsDeviceType;
+            SystemInfo.graphicsDeviceType = GraphicsDeviceType.Vulkan;
+            try
+            {
+                XRManagerSettings manager = FreshManager();
+                var viture = new VitureLoader();
+                var hand = new XRHandSubsystem { failOnStart = true };
+                viture.loadedSubsystem = hand;
+                manager.activeLoaders.Add(viture);
+
+                var gate = new VendorLoaderGate();
+                Check(
+                    gate.EnsureOnly(VendorBackend.Viture) ==
+                        VendorLoaderGate.Result.InitFailed,
+                    "a failed hand-only start reports InitFailed"
+                );
+                Check(
+                    gate.VitureHandOnly,
+                    "a failed hand-only start still marks the session displayless"
+                );
+                Check(
+                    manager.startSubsystemsCalls == 0,
+                    "a failed hand-only start never starts the display subsystem"
+                );
+
+                gate.Deinitialise();
+                Check(
+                    manager.stopSubsystemsCalls == 0,
+                    "dispose after a failed hand-only start never stops the display"
+                );
+                Check(
+                    gate.EnsureOnly(VendorBackend.Xreal) ==
+                        VendorLoaderGate.Result.SwitchRequiresRestart,
+                    "a vendor switch after a failed hand-only start needs a restart"
+                );
+                Check(
+                    manager.stopSubsystemsCalls == 0,
+                    "a vendor switch after a failed hand-only start stops nothing"
+                );
+
+                hand.failOnStart = false;
+                Check(
+                    gate.EnsureOnly(VendorBackend.Viture) ==
+                        VendorLoaderGate.Result.InitialisedHandOnly,
+                    "a later start retries the hand subsystem on the same loader"
+                );
+                Check(hand.running, "the retried hand subsystem runs");
             }
             finally
             {

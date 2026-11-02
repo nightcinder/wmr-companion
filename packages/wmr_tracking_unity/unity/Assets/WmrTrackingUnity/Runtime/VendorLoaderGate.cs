@@ -149,11 +149,15 @@ namespace OnyxLens.WmrTrackingUnity
             if (vendor == VendorBackend.Viture && NeedsVitureHandOnly())
             {
 #if WMR_UNITY_XR_HANDS
+                // Record the displayless session before the start attempt: the
+                // display subsystem was never started, so even a failed hand
+                // start must keep StopSubsystems() off the vendor stop path,
+                // which null-derefs on a display it never started (ONY-802).
+                _vitureHandOnly = true;
                 if (!StartVitureHandOnly(manager.activeLoader))
                 {
                     return Result.InitFailed;
                 }
-                _vitureHandOnly = true;
                 return Result.InitialisedHandOnly;
 #else
                 // No hand subsystem to start instead of the display. Fail
