@@ -29,8 +29,8 @@ and never its display provider: the provider owns a surface view that conflicts
 with the Flutter host activity. `ConfigureUnifiedXr` still pins OpenGLES3 so a
 standalone or stale player cannot take the Vulkan stop path, and a non-GLES3
 player also falls back to hand-only. Both live in `unity/Assets`, so they reach
-a device only through a rebuilt export. The pinned `unity-export-1.2` predates
-the unconditional UaaL gate and still starts the display.
+a device only through a rebuilt export. The pinned `unity-export-1.3` is built from the
+ONY-840 merge commit and carries the unconditional hand-only gate.
 
 ## Layout
 

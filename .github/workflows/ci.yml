@@ -612,10 +612,10 @@ jobs:
       # Same approved export and pins as `release-unified`. The export is
       # downloaded per run rather than read from a host directory, because a
       # mounted copy can drift from the checksum-verified asset.
-      UNITY_EXPORT_TAG: unity-export-1.2
+      UNITY_EXPORT_TAG: unity-export-1.3
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
-      UNITY_EXPORT_SHA256: 2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8
+      UNITY_EXPORT_SHA256: 49480d5a50122aa18e941c690412e0371f5edf424f3656892f539ea9eeff2025
     steps:
       - uses: actions/checkout@v7
 
@@ -824,13 +824,13 @@ jobs:
       # Android graphics APIs pinned to OpenGL ES 3. It is a prerelease on
       # purpose: the export is not an app release and must never take the
       # repository's "Latest release" flag.
-      UNITY_EXPORT_TAG: unity-export-1.2
+      UNITY_EXPORT_TAG: unity-export-1.3
       # `install_unity_export.sh` pins the export's `ndkVersion` at this value.
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
       # ONY-802's approved export. A different digest is not the artifact the
       # owner approved, so the job refuses to build from it.
-      UNITY_EXPORT_SHA256: 2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8
+      UNITY_EXPORT_SHA256: 49480d5a50122aa18e941c690412e0371f5edf424f3656892f539ea9eeff2025
     steps:
       # The ancestry guard below compares the tagged commit with origin/main;
       # the default depth-1 checkout has no history to compare against.

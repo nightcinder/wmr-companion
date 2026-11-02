@@ -3,7 +3,7 @@
 
 Builds small synthetic unityLibrary zips so the export checks run without the
 272 MB artifact. The real `unity-export-1.0` (stale), `unity-export-1.1`
-(Vulkan player) and `unity-export-1.2` (current) were also run by hand; they
+(Vulkan player) and `unity-export-1.2` (superseded) were also run by hand; they
 are not fixtures here because of size.
 
     python3 -m unittest -v tool/test_check_unity_export.py
