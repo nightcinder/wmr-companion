@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -127,6 +128,13 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
         appBar: AppBar(
           title: const _AppTitle(),
           actions: [
+            if (defaultTargetPlatform == TargetPlatform.android)
+              IconButton(
+                key: const Key('neckband-controls'),
+                tooltip: 'Neckband controls',
+                icon: const Icon(Icons.touch_app_outlined),
+                onPressed: () => _showNeckbandControls(context),
+              ),
             const SbsToggleButton(),
             PopupMenuButton<String>(
               tooltip: 'About',
@@ -196,6 +204,31 @@ class _AppTitle extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// The Neckband has no directional pad. Show its real controls before hand
+/// tracking takes the camera.
+void _showNeckbandControls(BuildContext context) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      key: const Key('neckband-controls-hint'),
+      title: const Text('Neckband controls'),
+      content: const Text(
+        'No touch screen or cursor? Volume Up and Volume Down move focus.\n\n'
+        'Hold Volume Down to select the focused control. Hold Volume Up to '
+        'go back.\n\n'
+        'With headgaze on (Settings + Power), Volume Down selects and '
+        'Volume Up goes back.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
 }
 
 class RealPanel extends ConsumerWidget {

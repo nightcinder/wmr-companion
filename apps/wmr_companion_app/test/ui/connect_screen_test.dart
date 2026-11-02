@@ -252,4 +252,18 @@ void main() {
     expect(find.text('State: Bluetooth permission denied'), findsOneWidget);
     await close(tester);
   });
+
+  testWidgets('opens the Neckband controls hint', (tester) async {
+    await open(tester);
+
+    await tester.tap(find.byKey(const Key('neckband-controls')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('neckband-controls-hint')), findsOneWidget);
+    expect(
+      find.textContaining('Volume Up and Volume Down move focus'),
+      findsOneWidget,
+    );
+    await close(tester);
+  });
 }

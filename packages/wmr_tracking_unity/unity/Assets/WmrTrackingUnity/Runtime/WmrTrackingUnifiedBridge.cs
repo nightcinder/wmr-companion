@@ -44,6 +44,14 @@ namespace OnyxLens.WmrTrackingUnity
         private readonly VendorRelayDispatch _dispatch = new VendorRelayDispatch();
         private VendorBackend _activeBackend = VendorBackend.None;
         private VendorLoaderGate _loaderGate;
+        private bool _vitureDisplayless;
+
+        /// <summary>
+        /// True while VITURE hand tracking runs without its XR display
+        /// subsystem. A Vulkan player cannot host the GLES-only VITURE display
+        /// provider, so only the hand subsystem is started (ONY-802).
+        /// </summary>
+        public bool IsVitureDisplayless => _vitureDisplayless;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
         private AndroidJavaClass _viturePlugin;
@@ -240,7 +248,8 @@ namespace OnyxLens.WmrTrackingUnity
             {
                 VendorLoaderGate.Result result = _loaderGate.EnsureOnly(decision.Target);
                 if (result != VendorLoaderGate.Result.AlreadyActive &&
-                    result != VendorLoaderGate.Result.Initialised)
+                    result != VendorLoaderGate.Result.Initialised &&
+                    result != VendorLoaderGate.Result.InitialisedHandOnly)
                 {
                     string message = VendorLoaderGate.Describe(decision.Target, result);
 #if UNITY_EDITOR
@@ -254,6 +263,22 @@ namespace OnyxLens.WmrTrackingUnity
                     return;
 #endif
                 }
+            }
+
+            // A Vulkan player starts only VITURE's hand subsystem; the vendor
+            // bridge must skip its stereo-3D preflight in that mode.
+            _vitureDisplayless = decision.Target == VendorBackend.Viture &&
+                _loaderGate != null && _loaderGate.VitureHandOnly;
+            if (vitureBackend != null)
+            {
+                vitureBackend.DisplaylessHandTracking = _vitureDisplayless;
+            }
+            if (_vitureDisplayless)
+            {
+                Debug.Log(
+                    "[WmrTrackingUnity] VITURE hand tracking without the XR " +
+                    "display subsystem (" + SystemInfo.graphicsDeviceType + ")"
+                );
             }
 
             if (!Activate(decision.Target, out string failure))

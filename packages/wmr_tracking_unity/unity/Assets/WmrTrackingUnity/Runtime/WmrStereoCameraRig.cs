@@ -194,6 +194,15 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void Update()
         {
+            // A Vulkan player cannot host VITURE's GLES-only display provider,
+            // so the unified bridge starts hand tracking without the display
+            // subsystem. There is no stereo stage ladder to report in that
+            // mode (ONY-802).
+            if (unifiedBridge != null && unifiedBridge.IsVitureDisplayless)
+            {
+                _vitureSession = false;
+                return;
+            }
             if (!IsVitureSession())
             {
                 _vitureSession = false;

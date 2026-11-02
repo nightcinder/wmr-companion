@@ -6,12 +6,16 @@ Default-off VITURE Pro Neckband head and 26-joint hand tracking relay source for
 VITURE hand tracking is available only through the VITURE XR SDK for Unity
 (v0.9.0, Unity 6000.0+) running on the VITURE Pro Neckband with Luma Ultra
 glasses; the cross-platform C glasses SDK exposes head pose and cameras only.
-The VITURE XR loader must render the player in stereo 3D (SpaceWalker mode):
-the export assigns it and enables startup initialisation, and `start` reports
-`unavailable` from a mono 2D player instead of stalling. The stereo mode is
-fixed by the loader when its display subsystem initialises; Unity exposes
+The intended export renders the player in stereo 3D (SpaceWalker mode): the
+export assigns the loader and enables startup initialisation, and `start`
+reports `unavailable` from a mono 2D player instead of stalling. The stereo mode
+is fixed by the loader when its display subsystem initialises; Unity exposes
 `XRSettings.stereoRenderingMode` read-only, so the player cannot switch modes at
-runtime. The 2D gate is covered by the on-device check only: the stub-compile
+runtime. A Vulkan player cannot host the GLES-only display provider at all; the
+unified loader gate then starts only the hand subsystem, and hand tracking runs
+without the stereo display (ONY-802). That gate reaches a device only through a
+rebuilt export: the pinned `unity-export-1.1` predates it and still crashes on
+Vulkan. The 2D gate is covered by the on-device check only: the stub-compile
 project proves the bridge compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
@@ -52,8 +56,11 @@ controller IMU and 3DoF output are unchanged.
 Failures are typed `TrackingException`s:
 - `unavailable`: the Unity UaaL runtime (`com.unity3d.player.UnityPlayer`) or
   VITURE XR SDK bridge is not linked, the host activity is detached, or `start`
-  runs while the VITURE XR loader is not rendering in stereo 3D (SpaceWalker
-  mode) : a 2D player cannot deliver hand joints.
+  runs while the VITURE XR loader is rendering in mono 2D (SpaceWalker off) and
+  no displayless hand session was selected: a mono player cannot deliver hand
+  joints. The unified loader gate selects that mode on a Vulkan export once the
+  player is rebuilt from these sources; the per-vendor VITURE project pins
+  OpenGL ES 3 instead.
 - `unsupported`: the reported glasses model is not a `LumaUltra` (`One`,
   `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`, or an
   unclassifiable name), or the host is not a VITURE Pro Neckband. An unreported

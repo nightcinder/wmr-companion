@@ -49,6 +49,14 @@ namespace OnyxLens.WmrTrackingViture
         public bool IsRunning => _running;
 
         /// <summary>
+        /// Set by the unified bridge when the XR display subsystem is not
+        /// running. A Vulkan player cannot host the GLES-only VITURE display
+        /// provider, so hand tracking is started on its own and the 2D/stereo
+        /// preflight does not apply (ONY-802).
+        /// </summary>
+        public bool DisplaylessHandTracking { get; set; }
+
+        /// <summary>
         /// Raised on the Unity main thread with the exact JSON frame that is
         /// sent to Kotlin. The editor smoke scene subscribes to log frames;
         /// production hosts may ignore it.
@@ -192,27 +200,42 @@ namespace OnyxLens.WmrTrackingViture
         {
             ReportGlassesModel();
 #if !UNITY_EDITOR
-            // VITURE hand tracking requires the VITURE XR loader to render in
-            // stereo 3D (SpaceWalker mode). A mono 2D player yields no joints,
-            // and HandTracking.Start() can stall the launch instead of failing.
-            // Fail closed with a typed error so the host can surface it.
-            if (!XRSettings.isDeviceActive)
+            if (DisplaylessHandTracking)
             {
-                ReportError(
-                    "unavailable",
-                    "VITURE hand tracking needs the VITURE XR loader rendering in " +
-                    "stereo 3D (SpaceWalker mode); this Unity player is running in 2D. " +
-                    "Enable VITURE XR Plug-in Management and Initialize XR on Startup."
+                // The display subsystem is deliberately not running: a Vulkan
+                // player cannot host VITURE's GLES-only display provider.
+                // HandTracking.Start() is the whole session on that path.
+                Debug.Log(
+                    "[WmrTrackingViture] starting hand tracking without the XR " +
+                    "display subsystem"
                 );
-                return;
             }
-            // The stereo mode is chosen by the VITURE loader when its display
-            // subsystem initialises (XR Plug-in Management); Unity exposes
-            // XRSettings.stereoRenderingMode read-only, so the bridge cannot
-            // switch a mono player to Single Pass Instanced at runtime.
-            if (Camera.main != null)
+            else
             {
-                Camera.main.stereoTargetEye = StereoTargetEyeMask.Both;
+                // VITURE hand tracking requires the VITURE XR loader to render
+                // in stereo 3D (SpaceWalker mode). A mono 2D player yields no
+                // joints, and HandTracking.Start() can stall the launch instead
+                // of failing. Fail closed with a typed error so the host can
+                // surface it.
+                if (!XRSettings.isDeviceActive)
+                {
+                    ReportError(
+                        "unavailable",
+                        "VITURE hand tracking needs the VITURE XR loader rendering in " +
+                        "stereo 3D (SpaceWalker mode); this Unity player is running in 2D. " +
+                        "Enable VITURE XR Plug-in Management and Initialize XR on Startup."
+                    );
+                    return;
+                }
+                // The stereo mode is chosen by the VITURE loader when its
+                // display subsystem initialises (XR Plug-in Management); Unity
+                // exposes XRSettings.stereoRenderingMode read-only, so the
+                // bridge cannot switch a mono player to Single Pass Instanced
+                // at runtime.
+                if (Camera.main != null)
+                {
+                    Camera.main.stereoTargetEye = StereoTargetEyeMask.Both;
+                }
             }
 #endif
 #if WMR_VITURE_XR_SDK

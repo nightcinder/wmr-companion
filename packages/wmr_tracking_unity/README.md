@@ -23,6 +23,16 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
+**Vulkan players need a re-export (ONY-802).** The loader gate starts only
+VITURE's hand subsystem on a player whose graphics API cannot host the GLES-only
+display provider, and `ConfigureUnifiedXr` pins OpenGLES3 so a new export never
+ships Vulkan again. Both live in `unity/Assets`, so they reach a device only
+through a rebuilt export. The pinned `unity-export-1.1` predates them: an APK
+built from it still runs the old gate, still starts the display subsystem on
+Vulkan, and still crashes in `VitureDisplayProvider::GfxThread_Stop`. Building
+and pinning a new export (see the export steps below) is what makes the fix
+effective.
+
 ## Layout
 
 ```
@@ -158,8 +168,12 @@ Import both proprietary SDKs into the same project first:
    turns off `automaticLoading`/`automaticRunning` before it initialises manually.
    `WMR > Export unified unityLibrary` runs `WMR > Configure unified XR`
    automatically, so this is only needed when inspecting the project by hand.
-5. Player > Android: minimum API 24, ARM64, IL2CPP, script backends per each
-   SDK's requirements (the export script sets the first three).
+5. Player > Android: minimum API 24, ARM64, IL2CPP, and **Graphics APIs =
+   OpenGLES3 only** (remove Vulkan; do not leave Auto). VITURE's Unity display
+   provider is EGL/OpenGL ES only: on a Vulkan player its gfx thread cannot
+   acquire the Unity EGL context, stops, and null-derefs inside
+   `VitureDisplayProvider::GfxThread_Stop` (ONY-802). `WMR > Configure unified
+   XR` pins GLES3, so the menu and batch export both write it.
 
 Then use **WMR > Export unified unityLibrary** or:
 
