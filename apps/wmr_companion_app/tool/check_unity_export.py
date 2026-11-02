@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host-side content check for the pinned unified Unity UaaL export.
 
-The release job downloads one 272 MB `unityLibrary.zip` from a release tag and
+The release job downloads one 258 MB `unityLibrary.zip` from a release tag and
 builds the signed unified APK from it. The SHA-256 pin proves the bytes are the
 approved ones, but a tag or digest edited by mistake can still point at an
 older export that builds a different app. This check refuses such a zip before
@@ -21,14 +21,18 @@ the 120-minute release build:
   - the metadata carries the ONY-840 hand-only UaaL gate (`_embeddedUaaL`,
     `NeedsVitureHandOnly`), so an export built before it still starts VITURE's
     display provider and is rejected;
+  - the metadata carries the ONY-856 input start
+    (`VITURE input subsystem did not start`), so an export built before it
+    leaves `Camera.main` at (0,0,0) and is rejected;
   - StereoMode no longer emits `mono`, so an export built from the mono source
     is rejected even if the rest matches.
 
 `unity-export-1.0` (the ONY-354 export) predates the rig and fails on the stage
 names; `unity-export-1.1` predates the ONY-802 hand path and fails on
-`DisplaylessHandTracking`; the pinned `unity-export-1.3` passes. The script
-reads only the zip central directory plus `global-metadata.dat`, so it costs
-seconds.
+`DisplaylessHandTracking`; `unity-export-1.2` predates the ONY-840 hand-only
+gate and `unity-export-1.3` predates the ONY-856 input start; the pinned
+`unity-export-1.4` passes. The script reads only the zip central directory plus
+`global-metadata.dat`, so it costs seconds.
 
     python3 tool/check_unity_export.py path/to/unityLibrary.zip
 
@@ -85,6 +89,11 @@ REQUIRED_METADATA = (
     # display provider, which takes over the Flutter host activity.
     "_embeddedUaaL",
     "NeedsVitureHandOnly",
+    # ONY-856: without the XR input subsystem the displayless VITURE session
+    # starts hand tracking but never feeds 6DoF head pose, so Camera.main stays
+    # at (0,0,0) and the app locks to 0DoF. The literal is the gate's own
+    # failure message; an export built before the input start lacks it.
+    "VITURE input subsystem did not start",
 )
 # IL2CPP keeps C# string literals in a delimiter-free `stringLiteralData` blob,
 # indexed by an `Il2CppStringLiteral` table of (length, dataIndex) pairs. The
@@ -155,13 +164,13 @@ def check_metadata(archive: zipfile.ZipFile, names: set[str]) -> int:
     if missing:
         fail(
             "IL2CPP metadata is stale, missing the stereo, unified dispatch "
-            f"or displayless hand path or the ONY-840 hand-only UaaL gate: {missing}"
+            f"or displayless hand path, the ONY-840 hand-only UaaL gate or the "
+            f"ONY-856 input start: {missing}"
         )
         return 1
     print(
-        "PASS metadata: WmrStereoCameraRig, StereoStage/StereoMode, "
-        "WmrTrackingUnifiedBridge, VendorLoaderGate, VendorRelayDispatch, "
-        "DisplaylessHandTracking"
+        "PASS metadata: stereo rig, unified dispatch, displayless hand path, "
+        "hand-only UaaL gate, input start"
     )
     try:
         literals = string_literals(metadata)
