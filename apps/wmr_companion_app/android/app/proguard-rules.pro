@@ -19,6 +19,11 @@
 -dontwarn com.android.extensions.xr.splitengine.RequestCallback
 -dontwarn com.android.extensions.xr.splitengine.SystemRendererConnection
 -dontwarn com.android.extensions.xr.subspace.Subspace
+# VITURE's SDK annotates `viture.xr.XR` with the framework-internal
+# `@GuardedBy` (CLASS retention, never read at run time). Once the vendor keep
+# rules below keep that class live, R8 fails the release build on the missing
+# annotation unless it is exempted (ONY-776).
+-dontwarn com.android.internal.annotations.GuardedBy
 
 # XREAL's GlassesDisplayPlugEvent AAR bundles stub classes in the android.*
 # namespace (android.hardware.display.DisplayManager and its listener types)
