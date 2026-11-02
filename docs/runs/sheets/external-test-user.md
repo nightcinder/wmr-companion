@@ -49,22 +49,19 @@ Confirm the v0.3.13 release exists and the installed APK reports `versionName` 0
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
-Do not run an older build for this pass. v0.3.13 carries fixes that change results:
-in embedded UaaL the Unity bridge is hand-only, so VITURE's display provider
-can no longer take over the Flutter host activity, and the unshaded marker
-cubes are gone (ONY-840), shipped through the pinned `unity-export-1.3`;
-Unity and vendor player activities are no longer exported, so `MainActivity`
-is the only entry point (ONY-842); plus the v0.3.12 fixes: the Unity player
-is pinned to OpenGL ES 3, the loader gate starts only VITURE's hand subsystem
-on a non-GLES3 player, and the hosted Unity view no longer takes D-pad focus
-with Volume Up/Down moving focus (ONY-802); plus the v0.3.11 fixes: automatic
-glasses detection, the XREAL cold-start fix, and the Unity player resume/focus
-on first host so the Neckband no longer drops to 0DoF. None of the ONY-840 or
-ONY-842 changes have been verified on hardware yet. A crash, a black right eye,
-a pink cube, or a 0DoF drop on v0.3.13 is a regression worth recording.
-Known older behaviour: a Vulkan crash on v0.3.7 through v0.3.9, a black right
-eye on v0.3.7 or v0.3.8, a 0DoF drop with greyed 6DoF button on v0.3.7
-through v0.3.10, and the pink cube / display takeover on v0.3.12.
+Do not run an older build for this pass. v0.3.13 carries fixes that change results.
+
+In embedded UaaL the Unity bridge is hand-only. VITURE's display provider can no longer take over the Flutter host activity. The unshaded marker cubes are gone (ONY-840). These ship through the pinned `unity-export-1.3`.
+
+Unity and vendor player activities are no longer exported. `MainActivity` is the only entry point (ONY-842).
+
+The v0.3.12 fixes still apply. The Unity player is pinned to OpenGL ES 3. The loader gate starts only VITURE's hand subsystem on a non-GLES3 player. The hosted Unity view no longer takes D-pad focus, so Volume Up and Volume Down move focus (ONY-802).
+
+The v0.3.11 fixes still apply. Automatic glasses detection, the XREAL cold-start fix, and the Unity player resume and focus on first host keep the Neckband from dropping to 0DoF.
+
+None of the ONY-840 or ONY-842 changes have been verified on hardware yet. A crash, a black right eye, a pink cube, or a 0DoF drop on v0.3.13 is a regression worth recording.
+
+Known older behavior: a Vulkan crash on v0.3.7 through v0.3.11, a black right eye on v0.3.7 or v0.3.8, a 0DoF drop with a greyed 6DoF button on v0.3.7 through v0.3.10, and the pink cube or display takeover on v0.3.12.
 
 ## 2. Install
 
@@ -76,7 +73,7 @@ through v0.3.10, and the pink cube / display takeover on v0.3.12.
 
 Skip this in setup B.
 
-1. Power the board. Status LED should be **red** (no controllers).
+1. Power the board. Status LED is **red** (no controllers).
 2. Open the app; grant Bluetooth / Nearby-devices permission.
 3. On the **Connect** screen, scan for `WMR Bridge` and connect.
 4. Confirm the screen says **connected, streaming** with negotiated **MTU** 517 (>= 61 is usable). Record the MTU shown.
@@ -140,7 +137,7 @@ PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_B
 
 ### 6D : Luma Ultra + Pro Neckband: 3D SBS launch triage
 
-On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes; if v0.3.12 still shows a black right eye, record it as a regression with the diagnostics below.
+On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes. If v0.3.13 still shows a black right eye, record it as a regression with the diagnostics below.
 
 Immediate workaround for v0.3.7/v0.3.8 testers:
 
@@ -235,7 +232,7 @@ Launch into 6DoF:
 Recovery if the app drops to 0DoF or shows a black screen:
 
 1. Check the status line. If it says `VITURE XR stereo is inactive`, switch the glasses to 3D and tap Re-detect.
-2. If the Unity player crashed (black screen, then close), reopen the app. The hand-only UaaL path in v0.3.13 keeps the display provider from taking over the host activity, so a reopen should recover.
+2. If the Unity player crashed (black screen, then close), reopen the app. The hand-only UaaL path in v0.3.13 keeps the display provider from taking over the host activity. Reopening the app recovers.
 3. If 6DoF stays greyed, capture the highest `stage=` and `stereoMode` from the debug overlay and the logcat below.
 4. Do not use ADB to inject touches as a control path.
 
