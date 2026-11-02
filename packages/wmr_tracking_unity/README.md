@@ -28,9 +28,9 @@ vendor selection and the coexistence points below are still unverified.
 detects that, initialises the VITURE loader, and starts only its hand subsystem
 instead of the display subsystem. Hand tracking still runs (the VITURE hand
 service is independent of the display provider), the glasses stay in Android
-mirror mode so the Flutter UI remains visible and the Neckband D-pad keeps
-working, and the vendor's crashing display stop path is never reached. A GLES3
-re-export restores the stereo display ladder.
+mirror mode so the Flutter UI remains visible, and the Neckband volume rocker
+keeps working as the control path. The vendor's crashing display stop path is
+never reached. A GLES3 re-export restores the stereo display ladder.
 
 ## Layout
 

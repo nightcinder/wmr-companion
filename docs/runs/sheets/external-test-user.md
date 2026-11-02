@@ -141,7 +141,7 @@ On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewpor
 Immediate workaround for v0.3.7/v0.3.8 testers:
 
 1. Switch the glasses to 2D mode with the glasses 2D/3D mode toggle button. The viewport becomes single-screen, so the app fills the view and you can use it normally.
-2. If you stay in 3D mode, use the Neckband D-pad (up, down, left, right, OK) to move focus to "Run guided bench" on the Connect screen and select it. The right eye stays black, but the action runs.
+2. If you stay in 3D mode, use the Neckband instead of a D-pad (it has none). Short presses of Volume Up and Volume Down move the focus ring; hold Volume Down to select the focused control and hold Volume Up to go back. You can also turn on headgaze (press Settings and Power together), then Volume Down selects and Volume Up goes back. No ADB command is needed to control the app.
 3. If you used 2D mode to navigate, switch back to 3D mode before the Capture 6DoF pose step, since that step needs stereo rendering.
 
 Diagnostic capture for this case. Run these and include the output in the zip:
@@ -195,9 +195,13 @@ If the app still shows 0DoF on v0.3.11, capture logs and record the status line.
 player, VITURE now starts hand tracking without its XR display subsystem: the
 vendor display provider cannot use Vulkan, and starting it crashed the process
 in `VitureDisplayProvider::GfxThread_Stop`. The Unity view no longer takes the
-glasses display or the input focus, so the Flutter UI stays visible and the
-Neckband D-pad (up, down, left, right, OK) drives the app. If it still crashes
-or the D-pad does nothing, capture the log and the tombstone.
+glasses display or the input focus, so the Flutter UI stays visible. A Pro
+Neckband has no D-pad, so use its volume rocker instead: short Volume Up and
+Volume Down presses move the focus ring, holding Volume Down selects the
+focused control, and holding Volume Up goes back. With headgaze on (Settings +
+Power), Volume Down selects and Volume Up goes back. Do not use ADB to inject
+touches as a control path. If the app still crashes or the rocker does nothing,
+capture the log and the tombstone.
 
 **ADB triage for this case.** Connect first if wireless: `adb connect <neckband-ip>:5555`. Then run:
 

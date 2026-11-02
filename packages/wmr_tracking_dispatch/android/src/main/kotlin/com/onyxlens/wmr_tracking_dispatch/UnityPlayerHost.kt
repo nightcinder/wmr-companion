@@ -320,11 +320,11 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
      * Keeps the Unity player out of the Android focus tree.
      *
      * The player is only a tracking relay here: its embedded `SurfaceView` is
-     * focusable and, once attached or touched, takes D-pad and ENTER away from
-     * the Flutter view. On a VITURE Pro Neckband the D-pad is the only input
-     * when hand tracking is unavailable, so stealing focus leaves the app with
-     * no controls at all (ONY-802). The surface stays attached and still
-     * receives window focus; only view focus is blocked.
+     * focusable and, once attached or touched, takes key events away from the
+     * Flutter view. A VITURE Pro Neckband has no D-pad, so its only controls
+     * are the volume rocker and headgaze; if the player took focus the app
+     * would have no controls at all (ONY-802). The surface stays attached and
+     * still receives window focus; only view focus is blocked.
      */
     private fun releaseInputFocus(view: View) {
         view.clearFocus()
