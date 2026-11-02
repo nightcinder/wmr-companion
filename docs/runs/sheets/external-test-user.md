@@ -64,7 +64,7 @@ first host so the Neckband no longer drops to 0DoF with a greyed 6DoF button
 resolves to the VITURE runtime) and shows a 0DoF/6DoF status line (v0.3.11).
 None of the ONY-802 changes have been verified on hardware yet. A crash, a
 black right eye, or a 0DoF drop on v0.3.12 is a regression worth recording.
-Known older behaviour: a crash on v0.3.7 through v0.3.9 in
+Known older behaviour: a crash on v0.3.7 through v0.3.11 in
 `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts on a
 non-GLES3 player, a black right eye on v0.3.7 or v0.3.8, and a 0DoF drop with
 greyed 6DoF button on v0.3.7 through v0.3.10. A black right eye on v0.3.9 is a

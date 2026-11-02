@@ -55,7 +55,7 @@ Validate any unified APK without a device before installing it:
 
 ```bash
 gh release download v0.3.12 -p 'wmr-companion-0.3.12-unified-arm64-v8a.apk'
-python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.7-unified-arm64-v8a.apk
+python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.12-unified-arm64-v8a.apk
 ```
 
 ## 3. Permission and session path (host-validated)
