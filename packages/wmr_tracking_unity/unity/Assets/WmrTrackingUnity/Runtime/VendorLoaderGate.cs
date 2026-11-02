@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using OnyxLens.WmrTrackingUnity.Dispatch;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.XR;
 using UnityEngine.XR.Management;
 #if WMR_UNITY_XR_HANDS
 using UnityEngine.XR.Hands;
@@ -32,8 +33,8 @@ namespace OnyxLens.WmrTrackingUnity
 
         // Set when VITURE runs without its XR display subsystem. An embedded
         // UaaL player must never start the display provider, and a Vulkan
-        // player cannot host it either, so both start the hand subsystem on
-        // its own (ONY-802, ONY-840).
+        // player cannot host it either, so both start the input and hand
+        // subsystems on their own (ONY-802, ONY-840, ONY-856).
         private bool _vitureHandOnly;
 
         // True for the unified player hosted inside the Flutter app. VITURE's
@@ -217,8 +218,8 @@ namespace OnyxLens.WmrTrackingUnity
                 case Result.Initialised:
                     return "Initialised the " + name + " XR loader";
                 case Result.InitialisedHandOnly:
-                    return "Started " + name + " hand tracking without the XR " +
-                        "display subsystem (embedded player, or " +
+                    return "Started " + name + " hand and head tracking without " +
+                        "the XR display subsystem (embedded player, or " +
                         SystemInfo.graphicsDeviceType + " cannot host the " +
                         "VITURE display provider)";
                 case Result.MissingLoader:
@@ -253,19 +254,52 @@ namespace OnyxLens.WmrTrackingUnity
         }
 
 #if WMR_UNITY_XR_HANDS
+        // Starts the two subsystems a displayless VITURE session needs: the
+        // input subsystem feeds 6DoF head poses to Camera.main, and the hand
+        // subsystem feeds joints. The display subsystem stays stopped so the
+        // vendor provider cannot own a surface view in the Flutter host
+        // (ONY-840, ONY-856).
         private static bool StartVitureHandOnly(XRLoader loader)
         {
             try
             {
                 XRLoaderHelper helper = loader as XRLoaderHelper;
                 if (helper == null) return false;
+                XRInputSubsystem input = helper.GetLoadedSubsystem<XRInputSubsystem>();
                 XRHandSubsystem hand = helper.GetLoadedSubsystem<XRHandSubsystem>();
-                if (hand == null) return false;
+                if (input == null || hand == null)
+                {
+                    Debug.LogError(
+                        "[WmrTrackingUnity] VITURE loader is missing the " +
+                        (input == null ? "input" : "hand") +
+                        " subsystem; cannot start a displayless session"
+                    );
+                    return false;
+                }
+                if (!input.running)
+                {
+                    input.Start();
+                }
+                if (!input.running)
+                {
+                    Debug.LogError(
+                        "[WmrTrackingUnity] VITURE input subsystem did not " +
+                        "start; head pose would stay at 0DoF"
+                    );
+                    return false;
+                }
                 if (!hand.running)
                 {
                     hand.Start();
                 }
-                return hand.running;
+                if (hand.running) return true;
+                // Do not leave head tracking running for a session the gate
+                // reports as failed.
+                if (input.running)
+                {
+                    input.Stop();
+                }
+                return false;
             }
             catch (Exception ex)
             {
@@ -286,6 +320,11 @@ namespace OnyxLens.WmrTrackingUnity
                 if (hand != null && hand.running)
                 {
                     hand.Stop();
+                }
+                XRInputSubsystem input = helper.GetLoadedSubsystem<XRInputSubsystem>();
+                if (input != null && input.running)
+                {
+                    input.Stop();
                 }
             }
             catch (Exception ex)

@@ -12,12 +12,14 @@ initialisation, and `start` reports `unavailable` from a mono 2D player instead
 of stalling. The stereo mode is fixed by the loader when its display subsystem
 initialises; Unity exposes `XRSettings.stereoRenderingMode` read-only, so the
 player cannot switch modes at runtime. The unified bridge is embedded in
-Flutter, so it never starts the display provider: it starts only the hand
-subsystem and hand tracking runs without the stereo display (ONY-840). A Vulkan
+Flutter, so it never starts the display provider: it starts the input and hand
+subsystems, and hand tracking runs without the stereo display (ONY-840); the
+input subsystem is what drives 6DoF head pose (ONY-856). A Vulkan
 player also cannot host the GLES-only display provider and takes the same
 hand-only path (ONY-802). The pinned `unity-export-1.3` was built from PR
 head `1a1c67a` (subtree identical to the ONY-840 merge commit `8526b11`) and
-carries the embedded hand-only gate; `unity-export-1.2` and earlier still start
+carries the embedded hand-only gate but predates the input-subsystem start, so
+6DoF needs a newer export; `unity-export-1.2` and earlier still start
 the display. The 2D gate is
 covered by the on-device check only: the stub-compile project proves the bridge
 compiles, not that the gate fires.
