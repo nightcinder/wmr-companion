@@ -261,21 +261,33 @@ namespace OnyxLens.WmrTrackingUnity
         // (ONY-840, ONY-856).
         private static bool StartVitureHandOnly(XRLoader loader)
         {
+            XRLoaderHelper helper = loader as XRLoaderHelper;
+            if (helper == null) return false;
+            XRInputSubsystem input;
+            XRHandSubsystem hand;
             try
             {
-                XRLoaderHelper helper = loader as XRLoaderHelper;
-                if (helper == null) return false;
-                XRInputSubsystem input = helper.GetLoadedSubsystem<XRInputSubsystem>();
-                XRHandSubsystem hand = helper.GetLoadedSubsystem<XRHandSubsystem>();
-                if (input == null || hand == null)
-                {
-                    Debug.LogError(
-                        "[WmrTrackingUnity] VITURE loader is missing the " +
-                        (input == null ? "input" : "hand") +
-                        " subsystem; cannot start a displayless session"
-                    );
-                    return false;
-                }
+                input = helper.GetLoadedSubsystem<XRInputSubsystem>();
+                hand = helper.GetLoadedSubsystem<XRHandSubsystem>();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[WmrTrackingUnity] VITURE hand-only start failed: " + ex.Message
+                );
+                return false;
+            }
+            if (input == null || hand == null)
+            {
+                Debug.LogError(
+                    "[WmrTrackingUnity] VITURE loader is missing the " +
+                    (input == null ? "input" : "hand") +
+                    " subsystem; cannot start a displayless session"
+                );
+                return false;
+            }
+            try
+            {
                 if (!input.running)
                 {
                     input.Start();
@@ -293,35 +305,67 @@ namespace OnyxLens.WmrTrackingUnity
                     hand.Start();
                 }
                 if (hand.running) return true;
-                // Do not leave head tracking running for a session the gate
-                // reports as failed.
-                if (input.running)
-                {
-                    input.Stop();
-                }
-                return false;
             }
             catch (Exception ex)
             {
                 Debug.LogError(
                     "[WmrTrackingUnity] VITURE hand-only start failed: " + ex.Message
                 );
-                return false;
             }
+            // Do not leave head tracking running for a session the gate
+            // reports as failed, including when a start call throws.
+            try
+            {
+                if (input.running)
+                {
+                    input.Stop();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[WmrTrackingUnity] VITURE input rollback failed: " + ex.Message
+                );
+            }
+            return false;
         }
 
         private static void StopVitureHandOnly(XRLoader loader)
         {
+            XRLoaderHelper helper;
+            XRHandSubsystem hand;
+            XRInputSubsystem input;
             try
             {
-                XRLoaderHelper helper = loader as XRLoaderHelper;
+                helper = loader as XRLoaderHelper;
                 if (helper == null) return;
-                XRHandSubsystem hand = helper.GetLoadedSubsystem<XRHandSubsystem>();
+                hand = helper.GetLoadedSubsystem<XRHandSubsystem>();
+                input = helper.GetLoadedSubsystem<XRInputSubsystem>();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[WmrTrackingUnity] VITURE hand-only stop failed: " + ex.Message
+                );
+                return;
+            }
+            // Stop head tracking even if the hand stop throws; otherwise a
+            // disposed session would keep feeding 6DoF poses.
+            try
+            {
                 if (hand != null && hand.running)
                 {
                     hand.Stop();
                 }
-                XRInputSubsystem input = helper.GetLoadedSubsystem<XRInputSubsystem>();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[WmrTrackingUnity] VITURE hand subsystem stop failed: " + ex.Message
+                );
+            }
+            try
+            {
                 if (input != null && input.running)
                 {
                     input.Stop();
@@ -330,7 +374,7 @@ namespace OnyxLens.WmrTrackingUnity
             catch (Exception ex)
             {
                 Debug.LogError(
-                    "[WmrTrackingUnity] VITURE hand-only stop failed: " + ex.Message
+                    "[WmrTrackingUnity] VITURE input subsystem stop failed: " + ex.Message
                 );
             }
         }

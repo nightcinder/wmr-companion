@@ -89,15 +89,23 @@ namespace UnityEngine.XR.Hands
         /// <summary>Test hook: a start that leaves the subsystem stopped.</summary>
         public bool failOnStart { get; set; }
 
+        /// <summary>Test hook: a start that throws.</summary>
+        public bool throwOnStart { get; set; }
+
+        /// <summary>Test hook: a stop that throws.</summary>
+        public bool throwOnStop { get; set; }
+
         public void Start()
         {
             startCalls += 1;
+            if (throwOnStart) throw new System.Exception("hand start failed");
             running = !failOnStart;
         }
 
         public void Stop()
         {
             stopCalls += 1;
+            if (throwOnStop) throw new System.Exception("hand stop failed");
             running = false;
         }
 
