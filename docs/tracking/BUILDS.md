@@ -17,7 +17,7 @@ hardware; these are compile/packaging facts only.
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified |
-| Licence gate | Pinned `unity-export-1.1` (SHA-256 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072`); owner approved SDK redistribution (ONY-354) |
+| Licence gate | Pinned `unity-export-1.2` (SHA-256 `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8`); owner approved SDK redistribution (ONY-354) |
 
 Release notes: [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7).
 Carrying the XREAL player host and boundary guards (ONY-706), fail-closed Unity bridge loader gates (ONY-707), tracking stage fixes and OpenXR fixtures (ONY-708), and fusion yaw reset with bench pose recorder and USB auto-detect (ONY-709).
@@ -80,11 +80,11 @@ The `unified` app flavor links that shared export from
    configuration step pins **Graphics APIs = OpenGLES3 only**: VITURE's display
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
    `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
-   The pinned `unity-export-1.1` predates both the pin and the runtime gate that
-   starts VITURE hand tracking without the display subsystem, so an APK built
-   from it still crashes in `VitureDisplayProvider::GfxThread_Stop`. A GLES3
-   re-export is what makes the fix effective; until it is built and pinned, do
-   not describe a release as fixing the crash.
+   The pinned `unity-export-1.2` is built from the ONY-802 merge commit with that
+   pin, so its player starts the VITURE display normally. The runtime gate still
+   starts VITURE hand tracking without the display subsystem on a player that is
+   not GLES3, so an export that loses the pin degrades to hand-only instead of
+   crashing.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 
    ```sh

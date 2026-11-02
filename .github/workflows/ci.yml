@@ -612,10 +612,10 @@ jobs:
       # Same approved export and pins as `release-unified`. The export is
       # downloaded per run rather than read from a host directory, because a
       # mounted copy can drift from the checksum-verified asset.
-      UNITY_EXPORT_TAG: unity-export-1.1
+      UNITY_EXPORT_TAG: unity-export-1.2
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
-      UNITY_EXPORT_SHA256: 29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072
+      UNITY_EXPORT_SHA256: 2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8
     steps:
       - uses: actions/checkout@v7
 
@@ -823,13 +823,13 @@ jobs:
       # ONY-613's replacement export, built from the ONY-612 merge commit
       # 71e4c815. It is a prerelease on purpose: the export is not an app
       # release and must never take the repository's "Latest release" flag.
-      UNITY_EXPORT_TAG: unity-export-1.1
+      UNITY_EXPORT_TAG: unity-export-1.2
       # `install_unity_export.sh` pins the export's `ndkVersion` at this value.
       ANDROID_NDK_VERSION: 28.2.13676358
       ANDROID_CMAKE_VERSION: 3.22.1
       # ONY-613's approved export. A different digest is not the artifact the
       # owner approved, so the job refuses to build from it.
-      UNITY_EXPORT_SHA256: 29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072
+      UNITY_EXPORT_SHA256: 2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8
     steps:
       # The ancestry guard below compares the tagged commit with origin/main;
       # the default depth-1 checkout has no history to compare against.

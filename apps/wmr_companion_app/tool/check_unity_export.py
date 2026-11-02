@@ -22,8 +22,10 @@ the 120-minute release build:
     is rejected even if the rest matches.
 
 `unity-export-1.0` (the ONY-354 export) predates the rig and fails on the stage
-names; the pinned `unity-export-1.1` passes. The script reads only the zip
-central directory plus `global-metadata.dat`, so it costs seconds.
+names; `unity-export-1.1` predates the ONY-802 hand path and fails on
+`DisplaylessHandTracking`; the pinned `unity-export-1.2` passes. The script
+reads only the zip central directory plus `global-metadata.dat`, so it costs
+seconds.
 
     python3 tool/check_unity_export.py path/to/unityLibrary.zip
 
