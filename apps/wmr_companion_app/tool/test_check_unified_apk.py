@@ -95,6 +95,8 @@ def _manifest_elements(
     xr_permissions: bool = True,
     scene_fine: bool = False,
     usb_required: str | None = "false",
+    main_exported: str = "true",
+    vendor_exported: str = "false",
 ) -> list[tuple[str, dict[str, str]]]:
     camera = {"name": "android.hardware.camera"}
     if camera_required is not None:
@@ -126,12 +128,12 @@ def _manifest_elements(
         ("meta-data", {"name": "com.viture.xr.sdk_version", "value": "0.9.0"}),
         ("meta-data", {"name": "com.viture.xr.dof", "value": "6dof"}),
         ("meta-data", {"name": "com.nreal.supportDevices", "value": "1|XrealLight|2|XrealAir"}),
-        ("activity", {"name": "com.onyxlens.wmr_companion.MainActivity"}),
+        ("activity", {"name": "com.onyxlens.wmr_companion.MainActivity", "exported": main_exported}),
         ("intent-filter", {}),
         ("action", {"name": "android.intent.action.MAIN"}),
         ("category", {"name": "android.intent.category.LAUNCHER"}),
-        ("activity", {"name": "com.unity3d.player.UnityPlayerActivity"}),
-        ("activity", {"name": "ai.nreal.activitylife.NRXRActivity"}),
+        ("activity", {"name": "com.unity3d.player.UnityPlayerActivity", "exported": vendor_exported}),
+        ("activity", {"name": "ai.nreal.activitylife.NRXRActivity", "exported": vendor_exported}),
     ]
     if extra_launcher:
         elements += [
@@ -140,6 +142,9 @@ def _manifest_elements(
             ("category", {"name": "android.intent.category.LAUNCHER"}),
             ("category", {"name": "android.intent.category.LEANBACK_LAUNCHER"}),
         ]
+    elements.append(
+        ("activity", {"name": "ai.nreal.activitylife.UnityPlayerActivity", "exported": vendor_exported})
+    )
     return elements
 
 
@@ -314,6 +319,8 @@ def build_apk(
     consumer_classes: int = 1,
     r8_keep: bool = True,
     omit_r8_callback: tuple[str, str] | None = None,
+    main_exported: str = "true",
+    vendor_exported: str = "false",
 ) -> Path:
     path = directory / "unified.apk"
     dex = DexBuilder()
@@ -363,6 +370,8 @@ def build_apk(
                     xr_permissions,
                     scene_fine,
                     usb_required,
+                    main_exported,
+                    vendor_exported,
                 )
             ),
         )
@@ -499,6 +508,10 @@ class MainTest(unittest.TestCase):
             "PASS dex: vendor/Unity classes and plugin JNI callbacks kept",
             output,
         )
+        self.assertIn(
+            "PASS exported: only com.onyxlens.wmr_companion.MainActivity", output
+        )
+        self.assertIn("PASS VITURE XR binding", output)
 
     def test_missing_r8_kept_plugin_class_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -654,6 +667,26 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1, output)
         self.assertIn("launcher activities:", output)
         self.assertIn("ai.nreal.activitylife.NRXRActivity", output)
+
+    def test_exported_vendor_activity_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", vendor_exported="true")
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn("vendor/Unity activities must be exported=false", output)
+        self.assertIn("com.unity3d.player.UnityPlayerActivity", output)
+        self.assertIn("ai.nreal.activitylife.NRXRActivity", output)
+
+    def test_main_activity_must_be_the_only_exported_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(Path(tmp), "false", main_exported="false")
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn(
+            "expected only com.onyxlens.wmr_companion.MainActivity", output
+        )
 
 
 if __name__ == "__main__":

@@ -98,6 +98,14 @@ android {
     }
 }
 EOF
+  cat >"$library/src/main/AndroidManifest.xml" <<'EOF'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <activity android:name="com.unity3d.player.UnityPlayerActivity" android:exported="true" />
+    <activity android:name="ai.nreal.activitylife.NRXRActivity" android:exported="true" />
+  </application>
+</manifest>
+EOF
   printf 'not really an ELF\n' >"$library/src/main/jniLibs/arm64-v8a/libunity.so"
   cat >"$library/proguard-unity.txt" <<'EOF'
 -keep class com.unity3d.player.* { *; }
@@ -116,6 +124,7 @@ EOF
   cat >"$library/xrmanifest.androidlib/AndroidManifest.xml" <<'EOF'
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <application>
+    <activity android:name="com.unity3d.player.UnityPlayerActivity" />
     <meta-data android:name="nreal_sdk" android:value="true" />
   </application>
 </manifest>
@@ -172,6 +181,19 @@ check_normalised() {
   grep -q '^-keep class com.unity3d.player' "$proguard" ||
     fail "Unity keep rules were dropped from proguard-unity.txt"
 
+  local manifest="$target/unityLibrary/src/main/AndroidManifest.xml"
+  [ -f "$manifest" ] || fail "missing $manifest"
+  grep -q 'android:exported="true"' "$manifest" &&
+    fail "an exported player activity survived in $manifest"
+  [ "$(grep -o 'android:exported="false"' "$manifest" | wc -l)" -eq 2 ] ||
+    fail "both player activities were not unexported in $manifest"
+  local xr_manifest="$target/unityLibrary/xrmanifest.androidlib/AndroidManifest.xml"
+  [ -f "$xr_manifest" ] || fail "missing $xr_manifest"
+  grep -q 'android:name="com.unity3d.player.UnityPlayerActivity"' "$xr_manifest" ||
+    fail "xrmanifest lost the Unity player activity"
+  grep -q 'android:exported="false"' "$xr_manifest" ||
+    fail "xrmanifest Unity player activity was not unexported"
+
   local duplicate_package
   duplicate_package="$(unzip -p "$target/unityLibrary/libs/nr_loader.aar" \
     AndroidManifest.xml | sed -n 's/.*package="\([^"]*\)".*/\1/p')"
@@ -187,12 +209,14 @@ check_normalised() {
 echo "==> normalise a directory export"
 make_export "$tmp/source"
 source_before="$(cat "$tmp/source/unityLibrary/build.gradle" \
-  "$tmp/source/unityLibrary/proguard-unity.txt" | sha256sum)"
+  "$tmp/source/unityLibrary/proguard-unity.txt" \
+  "$tmp/source/unityLibrary/src/main/AndroidManifest.xml" | sha256sum)"
 "$installer" unified "$tmp/source" \
   --ndk-version 28.2.13676358 --target-root "$tmp/target-dir" >/dev/null
 check_normalised "$tmp/target-dir/unified"
 source_after="$(cat "$tmp/source/unityLibrary/build.gradle" \
-  "$tmp/source/unityLibrary/proguard-unity.txt" | sha256sum)"
+  "$tmp/source/unityLibrary/proguard-unity.txt" \
+  "$tmp/source/unityLibrary/src/main/AndroidManifest.xml" | sha256sum)"
 [ "$source_before" = "$source_after" ] ||
   fail "installer modified the source export"
 echo "PASS: directory export normalised; source untouched"
