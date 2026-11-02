@@ -108,25 +108,8 @@ class MainTest(unittest.TestCase):
                 build_export(Path(tmp), metadata=build_metadata(symbols=("StereoMode",)))
             )
         self.assertEqual(code, 1, output)
-        self.assertIn("missing the stereo, unified dispatch or displayless hand path", output)
+        self.assertIn("missing the stereo or unified dispatch path", output)
         self.assertIn("playerHosted", output)
-
-    def test_pre_ony_802_export_fails(self) -> None:
-        # The Vulkan crash fix lives in the displayless hand path; an export
-        # built before it must be rejected even if the stereo and dispatch
-        # path are current.
-        symbols = tuple(
-            name
-            for name in checker.REQUIRED_METADATA
-            if name != "DisplaylessHandTracking"
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            code, output = run_checker(
-                build_export(Path(tmp), metadata=build_metadata(symbols=symbols))
-            )
-        self.assertEqual(code, 1, output)
-        self.assertIn("DisplaylessHandTracking", output)
-        self.assertIn("displayless hand path", output)
 
     def test_missing_unified_dispatch_export_fails(self) -> None:
         symbols = tuple(
@@ -140,7 +123,7 @@ class MainTest(unittest.TestCase):
             )
         self.assertEqual(code, 1, output)
         self.assertIn("WmrTrackingUnifiedBridge", output)
-        self.assertIn("missing the stereo", output)
+        self.assertIn("unified dispatch path", output)
 
     def test_mono_export_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

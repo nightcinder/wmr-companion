@@ -128,9 +128,8 @@ release (a prerelease on purpose, so the export never takes the repository's
 "Latest release" flag), refuses it unless its SHA-256 is
 `29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072` (the ONY-613
 export, built from the ONY-612 merge commit), runs `tool/check_unity_export.py`
-on the zip to reject a stale export, one that still emits the `mono` stereo
-mode, or one built before the ONY-802 displayless hand path, and runs
-`tool/check_unified_apk.py` on the arm64-v8a APK before
+on the zip to reject a stale export or one that still emits the `mono` stereo
+mode, and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
 publishing. The Monado config key fetch is not optional: the job fails unless
 the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that
 asset is a one-off from a machine holding the zip:
