@@ -294,6 +294,35 @@ namespace UnityEngine.XR
         // Read-only in Unity 6000.0: a setter here would hide CS0200.
         public static StereoRenderingMode stereoRenderingMode { get; }
     }
+
+    /// <summary>
+    /// Models the subsystem XRLoaderHelper loads for device tracking. Starting
+    /// it is what feeds head poses to Camera.main when VITURE runs without its
+    /// display subsystem.
+    /// </summary>
+    public class XRInputSubsystem
+    {
+        public bool running { get; set; }
+
+        public int startCalls { get; private set; }
+
+        public int stopCalls { get; private set; }
+
+        /// <summary>Test hook: a start that leaves the subsystem stopped.</summary>
+        public bool failOnStart { get; set; }
+
+        public void Start()
+        {
+            startCalls += 1;
+            running = !failOnStart;
+        }
+
+        public void Stop()
+        {
+            stopCalls += 1;
+            running = false;
+        }
+    }
 }
 
 namespace UnityEngine.XR.Management
@@ -304,13 +333,16 @@ namespace UnityEngine.XR.Management
 
     /// <summary>
     /// Models the one XRLoaderHelper member the loader gate uses to start the
-    /// VITURE hand subsystem without starting the display subsystem.
+    /// VITURE input and hand subsystems without starting the display subsystem.
     /// </summary>
     public class XRLoaderHelper : XRLoader
     {
         public object loadedSubsystem { get; set; }
 
-        public T GetLoadedSubsystem<T>() where T : class => loadedSubsystem as T;
+        public object loadedInputSubsystem { get; set; }
+
+        public T GetLoadedSubsystem<T>() where T : class =>
+            (loadedInputSubsystem as T) ?? (loadedSubsystem as T);
     }
 
     public class XRManagerSettings

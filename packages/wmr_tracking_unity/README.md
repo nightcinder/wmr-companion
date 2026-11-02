@@ -23,16 +23,18 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
-**Embedded VITURE is hand-only (ONY-802, ONY-840).** The unified bridge only
-runs as a UaaL player, so the loader gate always starts VITURE's hand subsystem
-and never its display provider: the provider owns a surface view that conflicts
-with the Flutter host activity. `ConfigureUnifiedXr` still pins OpenGLES3 so a
-standalone or stale player cannot take the Vulkan stop path, and a non-GLES3
-player also falls back to hand-only. Both live in `unity/Assets`, so they reach
-a device only through a rebuilt export. The pinned `unity-export-1.3` was built
-from PR head `1a1c67a` and carries the unconditional hand-only gate; its
-`packages/wmr_tracking_unity` subtree is identical to the ONY-840 merge commit
-`8526b11`.
+**Embedded VITURE is hand-only (ONY-802, ONY-840, ONY-856).** The unified
+bridge only runs as a UaaL player, so the loader gate starts VITURE's input and
+hand subsystems and never its display provider: the provider owns a surface
+view that conflicts with the Flutter host activity, and the input subsystem is
+what feeds 6DoF head poses to the player camera. `ConfigureUnifiedXr` still
+pins OpenGLES3 so a standalone or stale player cannot take the Vulkan stop
+path, and a non-GLES3 player also falls back to hand-only. Both live in
+`unity/Assets`, so they reach a device only through a rebuilt export. The
+pinned `unity-export-1.3` was built from PR head `1a1c67a` and carries the
+unconditional hand-only gate without the input subsystem; its
+`packages/wmr_tracking_unity` subtree matches the ONY-840 merge commit
+`8526b11`, so ONY-856 needs a newer export to reach a device.
 
 ## Layout
 

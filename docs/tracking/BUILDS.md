@@ -81,11 +81,13 @@ The `unified` app flavor links that shared export from
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
    `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
    The unified bridge is embedded in Flutter, so the runtime gate always starts
-   VITURE hand tracking without the display subsystem, because the display
-   provider would take over the host activity (ONY-840). The pinned
+   VITURE's input and hand subsystems without the display subsystem, because the
+   display provider would take over the host activity (ONY-840); the input
+   subsystem is what drives 6DoF head pose (ONY-856). The pinned
    `unity-export-1.3` was built from PR head `1a1c67a` (subtree identical to the
-   ONY-840 merge commit `8526b11`) and carries that gate; `unity-export-1.2` and
-   earlier still start the display. A non-GLES3
+   ONY-840 merge commit `8526b11`) and carries that gate but predates the input
+   start, so 6DoF needs a newer export; `unity-export-1.2` and earlier still
+   start the display. A non-GLES3
    player also runs hand-only instead of taking the Vulkan stop path.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 
