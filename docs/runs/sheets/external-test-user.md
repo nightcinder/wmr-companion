@@ -1,4 +1,4 @@
-# External tester quickstart : WMR Companion v0.3.13 (unified APK)
+# External tester quickstart : WMR Companion v0.3.14 (unified APK)
 
 Three setups, 20–40 minutes depending on which one you are. Android 13+ host (phone, Neckband, or headset).
 
@@ -41,25 +41,25 @@ regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.13/wmr-companion-0.3.13-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.14/wmr-companion-0.3.14-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.13/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.14/SHA256SUMS
 
-Confirm the v0.3.13 release exists and the installed APK reports `versionName` 0.3.13 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.12, the tag was not cut from a bumped tree: record the value and stop.
+Confirm the v0.3.14 release exists and the installed APK reports `versionName` 0.3.14 before testing (see the ADB triage in sections 6D and 6E). If the installed build reports 0.3.13, the tag was not cut from a bumped tree: record the value and stop.
 
 This one APK carries VITURE and XREAL and runs on a Galaxy XR. If an older WMR Companion is installed, uninstall it first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
-Do not run an older build for this pass. v0.3.13 carries fixes that change results.
+Do not run an older build for this pass. v0.3.14 carries fixes that change results.
 
-In embedded UaaL the Unity bridge is hand-only. VITURE's display provider can no longer take over the Flutter host activity. The unshaded marker cubes are gone (ONY-840). These ship through the pinned `unity-export-1.3`; the next build moves to `unity-export-1.4`, which also starts VITURE's input subsystem so 6DoF head pose reaches the player camera (ONY-856).
+v0.3.14 ships on the pinned `unity-export-1.4`. In embedded UaaL the displayless gate now starts `XRInputSubsystem` alongside the hand subsystem. `Camera.main` receives 6DoF head poses instead of (0,0,0) (ONY-856). The Bench screen shows the live hand-joint skeleton and a 6DoF head-pose travel indicator. A Neckband with hand tracking selects 6DoF automatically only after the startup tracking probe settles (ONY-857). The stereo side-by-side panes shift against live 6DoF head motion, with a recenter action and a zero-pose fallback (ONY-858).
 
-Unity and vendor player activities are no longer exported. `MainActivity` is the only entry point (ONY-842).
+The v0.3.13 fixes still apply. In embedded UaaL the Unity bridge is hand-only. VITURE's display provider can no longer take over the Flutter host activity. The unshaded marker cubes are gone (ONY-840). Unity and vendor player activities are no longer exported, so `MainActivity` is the only entry point (ONY-842).
 
-The v0.3.12 fixes still apply. The Unity player is pinned to OpenGL ES 3. The loader gate starts only VITURE's hand subsystem on a non-GLES3 player. The hosted Unity view no longer takes D-pad focus, so Volume Up and Volume Down move focus (ONY-802).
+The v0.3.12 fixes still apply. The Unity player is pinned to OpenGL ES 3. The loader gate starts VITURE's hand and input subsystems on a non-GLES3 player, and the display subsystem stays stopped. The hosted Unity view no longer takes D-pad focus, so Volume Up and Volume Down move focus (ONY-802).
 
 The v0.3.11 fixes still apply. Automatic glasses detection, the XREAL cold-start fix, and the Unity player resume and focus on first host keep the Neckband from dropping to 0DoF.
 
-None of the ONY-840 or ONY-842 changes have been verified on hardware yet. A crash, a black right eye, a pink cube, or a 0DoF drop on v0.3.13 is a regression worth recording.
+None of the ONY-856, ONY-857, ONY-858, ONY-840 or ONY-842 changes have been verified on hardware yet. A crash, a black right eye, a pink cube, a 0DoF drop or a head pose stuck at (0,0,0) on v0.3.14 is a regression worth recording.
 
 Known older behavior: a Vulkan crash on v0.3.7 through v0.3.11, a black right eye on v0.3.7 or v0.3.8, a 0DoF drop with a greyed 6DoF button on v0.3.7 through v0.3.10, and the pink cube or display takeover on v0.3.12.
 
@@ -137,7 +137,7 @@ PSVR2 Sense support is on by default and compiled into every v0.3.3 image (WMR_B
 
 ### 6D : Luma Ultra + Pro Neckband: 3D SBS launch triage
 
-On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes. If v0.3.13 still shows a black right eye, record it as a regression with the diagnostics below.
+On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side viewport (3840x1080). On WMR Companion v0.3.7 and v0.3.8 the app draws only in the left eye: the right eye stays black and the launch screen can look stuck. The app is not crashed. The UI is there, but it fills one half. v0.3.9 and later mirror the viewport into both eyes. If v0.3.14 still shows a black right eye, record it as a regression with the diagnostics below.
 
 Immediate workaround for v0.3.7/v0.3.8 testers:
 
@@ -156,7 +156,7 @@ If the Neckband is connected over wireless ADB, connect first: `adb connect <nec
 
 Record the values in the intake block. Do not reconstruct them from memory.
 
-### 6E : Neckband 0DoF / 6DoF triage (v0.3.13)
+### 6E : Neckband 0DoF / 6DoF triage (v0.3.14)
 
 On a Luma Ultra with a Pro Neckband the app opens on a 32:9 side-by-side
 viewport (3840x1080). In v0.3.10 and earlier the app could open and then drop
@@ -190,14 +190,15 @@ status line shows the current state:
 - `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
 - `0DoF: <message>.` for any other failure.
 
-If the app still shows 0DoF on v0.3.13, capture logs and record the status line.
+If the app still shows 0DoF on v0.3.14, capture logs and record the status line.
 
 **Launch crash and input (ONY-802).** v0.3.12 is the first release on
 `unity-export-1.2`: the Unity player is pinned to OpenGL ES 3 so VITURE's
-display provider no longer takes the Vulkan stop path, and the loader gate
-starts only VITURE's hand subsystem on a player that is not GLES3 as a
-fallback. The hosted Unity view no longer takes input focus, so the Flutter UI
-keeps its own focus and stays visible. A Pro Neckband has no D-pad, so use its
+display provider no longer takes the Vulkan stop path. On v0.3.14 the loader
+gate starts VITURE's hand and input subsystems on a player that is not GLES3
+as a fallback, with the display subsystem stopped. The hosted Unity view no
+longer takes input focus, so the Flutter UI keeps its own focus and stays
+visible. A Pro Neckband has no D-pad, so use its
 volume rocker instead: short Volume Up and Volume Down presses move the focus
 ring, holding Volume Down selects the focused control, and holding Volume Up
 goes back. With headgaze on (Settings + Power), Volume Down selects and Volume
@@ -215,7 +216,7 @@ nothing, capture the log and the tombstone.
 
 Record the status line and the highest `stage=` / `stereoMode` reached. Do not reconstruct them from memory.
 
-### 6H : Pro Neckband 6DoF launch and recovery (v0.3.13)
+### 6H : Pro Neckband 6DoF launch and recovery (v0.3.14)
 
 Use only the controls that exist on the Pro Neckband. There is no D-pad. The
 controls are: Power, Volume Up/Down, Settings, the pointer/air-mouse, hand
@@ -232,7 +233,7 @@ Launch into 6DoF:
 Recovery if the app drops to 0DoF or shows a black screen:
 
 1. Check the status line. If it says `VITURE XR stereo is inactive`, switch the glasses to 3D and tap Re-detect.
-2. If the Unity player crashed (black screen, then close), reopen the app. The hand-only UaaL path in v0.3.13 keeps the display provider from taking over the host activity. Reopening the app recovers.
+2. If the Unity player crashed (black screen, then close), reopen the app. The hand-only UaaL path in v0.3.14 keeps the display provider from taking over the host activity. Reopening the app recovers.
 3. If 6DoF stays greyed, capture the highest `stage=` and `stereoMode` from the debug overlay and the logcat below.
 4. Do not use ADB to inject touches as a control path.
 
@@ -271,7 +272,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.3
-- App: <versionName from ADB> unified (signed release) (expected 0.3.13; confirm the release exists and the installed APK reports it before testing)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.14; confirm the release exists and the installed APK reports it before testing)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
