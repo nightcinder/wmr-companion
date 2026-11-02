@@ -181,9 +181,9 @@ the app stays on 3DoF and offers a **Simulated** 6DoF fallback. The button
 status line shows the current state:
 
 - `6DoF: <source> hand tracking attached (<runtime> runtime).` when 6DoF is available.
-- `0DoF: no hand-tracking source attached.` when nothing is detected.
+- `0DoF: No VITURE, XREAL or Android XR glasses were detected` when nothing is detected.
 - `0DoF: <source> is not built into this app.` when the flag is off.
-- `0DoF: Starting <source>...` while it starts.
+- `Starting <source>...` while it starts.
 - `0DoF: <source> failed to start (<kind>).` on a start failure.
 - `0DoF: VITURE XR stereo is inactive, so hand tracking cannot start. Switch the glasses to 3D (SpaceWalker) and tap Re-detect.` when the glasses are in 2D mode.
 - `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
@@ -233,7 +233,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - LED: red / yellow / blue / green
 - MTU shown: ____
 - Neckband SBS: black right eye / full screen / n/a
-- Hand tracking source: None / Auto (USB) / VITURE / XREAL / Android XR / Simulated
+- Hand tracking source: auto-detected (VITURE / XREAL / Android XR) / Simulated
 - 0DoF status line: ____
 - 6DoF only enabled: yes / no
 - ADB wm size: ____
