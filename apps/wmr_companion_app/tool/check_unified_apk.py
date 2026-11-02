@@ -129,6 +129,17 @@ R8_REQUIRED_CLASSES = {
     "Lai/nreal/activitylife/NRXRActivity;": "XREAL NREAL activity",
     "Lcom/xreal/glassesdisplayplugevent/provider/GlassesInitProvider;": "XREAL display provider",
 }
+# The Flutter activity is the only entry point. Unity and the XREAL SDK ship
+# their player activities exported for standalone use; when one stays exported,
+# the Neckband launcher can start the bare Unity scene after a crash, with no
+# Flutter UI and no loader command (ONY-842). VITURE's application-scope XR
+# metadata must therefore bind only to MainActivity.
+ENTRY_ACTIVITY = "com.onyxlens.wmr_companion.MainActivity"
+VENDOR_ACTIVITIES = (
+    "com.unity3d.player.UnityPlayerActivity",
+    "ai.nreal.activitylife.NRXRActivity",
+    "ai.nreal.activitylife.UnityPlayerActivity",
+)
 
 
 class Dex:
@@ -613,9 +624,10 @@ def main(argv: list[str]) -> int:
         else:
             print(f"INFO XREAL supportDevices: {support} (confirm Air 2 Ultra coverage on device)")
 
-        activities = {row.get("name") for row in manifest.of("activity")}
+        activity_rows = manifest.of("activity")
+        activities = {row.get("name") for row in activity_rows}
         required_activities = (
-            "com.onyxlens.wmr_companion.MainActivity",
+            ENTRY_ACTIVITY,
             "com.unity3d.player.UnityPlayerActivity",
             "ai.nreal.activitylife.NRXRActivity",
         )
@@ -626,12 +638,41 @@ def main(argv: list[str]) -> int:
         else:
             print("PASS sessions: Flutter MainActivity + UnityPlayerActivity + XREAL NREAL activities")
 
+        exported = {row.get("name"): row.get("exported") for row in activity_rows}
+        vendor_failures = [
+            f"{name} is exported={exported[name]!r}; vendor/Unity activities must be exported=false"
+            for name in VENDOR_ACTIVITIES
+            if name in exported and exported[name] != "false"
+        ]
+        if vendor_failures:
+            for message in vendor_failures:
+                fail(message)
+            failures += 1
+        else:
+            print("PASS exported: vendor/Unity activities are exported=false")
+
+        exported_activities = sorted(
+            name for name, value in exported.items() if name and value == "true"
+        )
+        if exported_activities != [ENTRY_ACTIVITY]:
+            fail(
+                f"exported activities: {exported_activities}; "
+                f"expected only {ENTRY_ACTIVITY}"
+            )
+            failures += 1
+        else:
+            print(f"PASS exported: only {ENTRY_ACTIVITY}")
+            print(
+                "PASS VITURE XR binding: application metadata reaches "
+                f"the sole exported activity {ENTRY_ACTIVITY}"
+            )
+
         # Only the Flutter activity may appear on the home screen. XREAL's
         # NRXRActivity ships a launcher filter for standalone Unity apps; if it
         # survives merging, the APK installs two icons and the extra one opens
         # a black Unity scene (ONY-561).
         launchers = manifest.launcher_activities()
-        expected_launcher = "com.onyxlens.wmr_companion.MainActivity"
+        expected_launcher = ENTRY_ACTIVITY
         if launchers != [expected_launcher]:
             fail(f"launcher activities: {launchers}; expected only {expected_launcher}")
             failures += 1

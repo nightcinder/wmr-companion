@@ -164,6 +164,34 @@ assert_one_launcher() {
   echo "PASS: $flavor APK has one launcher icon"
 }
 
+assert_only_main_exported() {
+  local flavor="$1"
+  local apk tree name
+  apk="$(apk_path "$flavor")"
+  tree="$("$aapt" dump xmltree "$apk" AndroidManifest.xml)"
+  for name in \
+    com.unity3d.player.UnityPlayerActivity \
+    ai.nreal.activitylife.NRXRActivity \
+    ai.nreal.activitylife.UnityPlayerActivity; do
+    if grep -A1 "android:name.*\"$name\"" <<<"$tree" |
+      grep -q 'android:exported.*0xffffffff'; then
+      echo "FAIL: $flavor APK exports $name (ONY-842)" >&2
+      exit 1
+    fi
+    if ! grep -A1 "android:name.*\"$name\"" <<<"$tree" |
+      grep -q 'android:exported.*0x0'; then
+      echo "FAIL: $flavor APK does not set exported=false on $name" >&2
+      exit 1
+    fi
+  done
+  if ! grep -A2 'android:name.*"com.onyxlens.wmr_companion.MainActivity"' <<<"$tree" |
+    grep -q 'android:exported.*0xffffffff'; then
+    echo "FAIL: $flavor APK does not export MainActivity" >&2
+    exit 1
+  fi
+  echo "PASS: $flavor APK has only MainActivity exported"
+}
+
 # settings.gradle.kts probes the export directories at configuration time, which
 # the configuration cache cannot track. The project disables the cache, but drop
 # any entry anyway so a forced `--configuration-cache` run still re-probes after
@@ -189,6 +217,7 @@ fi
 echo "PASS: unified linked the unified unityLibrary"
 
 assert_one_launcher unified
+assert_only_main_exported unified
 
 echo "==> unified with no export must still build"
 rm -rf "$unity_root/unified"
@@ -200,6 +229,7 @@ if has_permission "$(apk_path)" "$unified_permission"; then
   exit 1
 fi
 echo "PASS: unified built without a Unity export"
+assert_only_main_exported unified
 
 echo "==> a leftover per-vendor export must fail configuration"
 # ONY-565 retired android/unity/viture and android/unity/xreal. The guard runs

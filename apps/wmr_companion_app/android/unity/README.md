@@ -35,8 +35,12 @@ standalone Unity apps, and Unity can mark `UnityPlayerActivity` the same way.
 If those filters survive manifest merging, the APK installs two icons; the
 extra one opens the bare Unity scene, which shows the Unity splash and then a
 black screen (ONY-561). The `unified` flavor manifest in
-`android/app/src/unified/` removes those filters with `tools:node="remove"`.
-Keep it when upgrading a vendor SDK, and check the built APK:
+`android/app/src/unified/` removes those filters with `tools:node="remove"` and
+sets `android:exported="false"` (`tools:replace`) on the Unity and XREAL player
+activities. An exported player activity still lets the Neckband launcher start
+the bare Unity scene after a crash, with no Flutter UI and no loader command
+(ONY-842), so keep both overrides when upgrading a vendor SDK. Check the built
+APK:
 
 ```sh
 aapt dump badging build/app/outputs/flutter-apk/app-unified-debug.apk |
@@ -102,8 +106,9 @@ cp -R packages/wmr_tracking_unity/unity/Build/Android/unityLibrary \
 ```
 
 A manual copy needs the same edits the installer makes to
-`unityLibrary/build.gradle`, because Unity generates that file for a module
-named `:unityLibrary` on the exporting machine (ONY-388):
+`unityLibrary/build.gradle` and `unityLibrary/src/main/AndroidManifest.xml`,
+because Unity generates those files for a module named `:unityLibrary` on the
+exporting machine (ONY-388):
 
 - remove `apply from: '../shared/keepUnitySymbols.gradle'` (the zip has no
   sibling `shared/` directory);
@@ -120,7 +125,10 @@ named `:unityLibrary` on the exporting machine (ONY-388):
   `classes.jar` and `R.txt`) and refuses otherwise;
 - update Unity's `buildIl2Cpp` helper for Gradle 9: `providers.exec` instead of
   `Project.exec`, an explicit `this.BuildIl2CppImpl(...)` call and a qualified
-  `project.android.ndkDirectory`.
+  `project.android.ndkDirectory`;
+- set `android:exported="false"` on the Unity/XREAL player activities in
+  `unityLibrary/src/main/AndroidManifest.xml` and
+  `unityLibrary/xrmanifest.androidlib/AndroidManifest.xml` (ONY-842).
 
 The installer treats its zip/directory input as immutable and only rewrites the
 copy. `tool/test_unity_export_install.sh` checks that normalisation without
