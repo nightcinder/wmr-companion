@@ -50,14 +50,27 @@ jobs:
               - 'tool/gatt_probe/**'
               - '.github/workflows/ci.yml'
             # ONY-782: only paths that can change what R8 keeps, or that
-            # change this job, pay for a minified release build.
+            # change this job, pay for a minified release build. The whole
+            # `android/` tree is too broad: a README there (ONY-798, #189)
+            # and a Unity-only C# change (ONY-802, #190) each bought a full
+            # release build that could not possibly change the dex.
             r8_dex:
+              # R8 rules and the Gradle configuration that applies them.
               - 'apps/wmr_companion_app/android/app/proguard-rules.pro'
-              - 'apps/wmr_companion_app/android/**'
-              - 'packages/wmr_tracking_dispatch/android/**'
-              - 'packages/wmr_tracking_viture/android/**'
-              - 'packages/wmr_tracking_xreal/android/**'
-              - 'packages/wmr_tracking_unity/**'
+              - 'apps/wmr_companion_app/android/**/*.gradle.kts'
+              - 'apps/wmr_companion_app/android/gradle.properties'
+              - 'apps/wmr_companion_app/android/gradle/wrapper/gradle-wrapper.properties'
+              # Kotlin/Java that is packaged, plus every manifest that merges
+              # into the APK (AGP keeps manifest-referenced classes by default).
+              - 'apps/wmr_companion_app/android/app/src/main/**/*.kt'
+              - 'apps/wmr_companion_app/android/app/src/main/**/*.java'
+              - 'apps/wmr_companion_app/android/app/src/*/AndroidManifest.xml'
+              - 'apps/wmr_companion_app/android/xr_extensions_stubs/src/main/**/*.java'
+              - 'packages/*/android/**/*.gradle.kts'
+              - 'packages/*/android/src/main/**/*.kt'
+              - 'packages/*/android/src/main/**/*.java'
+              - 'packages/*/android/src/main/AndroidManifest.xml'
+              # Editing this job must exercise it.
               - '.github/workflows/ci.yml'
 
   build:
