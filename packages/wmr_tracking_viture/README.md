@@ -15,9 +15,10 @@ player cannot switch modes at runtime. The unified bridge is embedded in
 Flutter, so it never starts the display provider: it starts only the hand
 subsystem and hand tracking runs without the stereo display (ONY-840). A Vulkan
 player also cannot host the GLES-only display provider and takes the same
-hand-only path (ONY-802). The pinned `unity-export-1.3` is built from the ONY-840
-commit and carries the embedded hand-only gate; `unity-export-1.2` and earlier
-still start the display. The 2D gate is
+hand-only path (ONY-802). The pinned `unity-export-1.3` was built from PR
+head `1a1c67a` (subtree identical to the ONY-840 merge commit `8526b11`) and
+carries the embedded hand-only gate; `unity-export-1.2` and earlier still start
+the display. The 2D gate is
 covered by the on-device check only: the stub-compile project proves the bridge
 compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to

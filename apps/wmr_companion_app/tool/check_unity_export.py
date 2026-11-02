@@ -16,9 +16,11 @@ the 120-minute release build:
     VendorLoaderGate, VendorRelayDispatch), so an export that still ships the
     separate vendor relays cannot pass;
   - the metadata carries the ONY-802 displayless hand path
-  - the metadata carries the ONY-840 hand-only UaaL gate (`_embeddedUaaL`)
     (DisplaylessHandTracking), so an export built before the Vulkan crash fix
     is rejected even when everything else matches;
+  - the metadata carries the ONY-840 hand-only UaaL gate (`_embeddedUaaL`,
+    `NeedsVitureHandOnly`), so an export built before it still starts VITURE's
+    display provider and is rejected;
   - StereoMode no longer emits `mono`, so an export built from the mono source
     is rejected even if the rest matches.
 
