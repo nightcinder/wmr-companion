@@ -172,21 +172,20 @@ correct. Two causes, both fixed in v0.3.11:
    (SpaceWalker mode). Until that source starts, the app is 0DoF. A 2D /
    mono player fails closed with `unavailable` instead of stalling.
 
-**Hand tracking source behaviour.** The **Guided bench** screen has a
-**Hand tracking source** dropdown with these choices: `None`, `Simulated`,
-`Auto (USB)`, `Android XR`, `VITURE`, `XREAL`. On a Neckband host the app
-auto-selects `Auto (USB)` on screen open, so VITURE attaches without a manual
-pick; the detector only runs when a vendor flag is built in, so a flag-off
-build stays channel-free. A manual pick made while the probe runs wins. The
-button **6DoF only** is enabled only while a started source reports hand
-joints. A status line above the dropdown always shows the current state:
+**Hand tracking source behaviour.** Detection runs automatically on startup for
+every host: the app picks VITURE or XREAL from the device that is actually
+connected. There is no tracking-source dropdown. Tap **Re-detect** to run
+detection again. If nothing is detected, or both vendor USB IDs are attached,
+the app stays on 3DoF and offers a **Simulated** 6DoF fallback. The button
+**6DoF only** is enabled only while a started source reports hand joints. A
+status line shows the current state:
 
-- `6DoF: Auto (USB) hand tracking attached (viture runtime).` when 6DoF is available.
-- `0DoF: no hand-tracking source attached.` when the source is `None`.
+- `6DoF: <source> hand tracking attached (<runtime> runtime).` when 6DoF is available.
+- `0DoF: No VITURE, XREAL or Android XR glasses were detected` when nothing is detected.
 - `0DoF: <source> is not built into this app.` when the flag is off.
-- `0DoF: Starting <source>...` while it starts.
+- `Starting <source>...` while it starts.
 - `0DoF: <source> failed to start (<kind>).` on a start failure.
-- `0DoF: VITURE XR stereo is inactive, so hand tracking cannot start. Switch the glasses to 3D (SpaceWalker) and select the source again.` when the glasses are in 2D mode.
+- `0DoF: VITURE XR stereo is inactive, so hand tracking cannot start. Switch the glasses to 3D (SpaceWalker) and tap Re-detect.` when the glasses are in 2D mode.
 - `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
 - `0DoF: <message>.` for any other failure.
 
@@ -234,7 +233,7 @@ Zip the exported files + the intake block below. Send in the thread where you re
 - LED: red / yellow / blue / green
 - MTU shown: ____
 - Neckband SBS: black right eye / full screen / n/a
-- Hand tracking source: None / Auto (USB) / VITURE / XREAL / Android XR / Simulated
+- Hand tracking source: auto-detected (VITURE / XREAL / Android XR) / Simulated
 - 0DoF status line: ____
 - 6DoF only enabled: yes / no
 - ADB wm size: ____
