@@ -23,14 +23,15 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
-**Vulkan exports are hand-only at runtime (ONY-802).** The pinned
-`unity-export-1.1` was built with Unity's default Vulkan API. The loader gate
-detects that, initialises the VITURE loader, and starts only its hand subsystem
-instead of the display subsystem. Hand tracking still runs (the VITURE hand
-service is independent of the display provider), the glasses stay in Android
-mirror mode so the Flutter UI remains visible, and the Neckband volume rocker
-keeps working as the control path. The vendor's crashing display stop path is
-never reached. A GLES3 re-export restores the stereo display ladder.
+**Vulkan players need a re-export (ONY-802).** The loader gate starts only
+VITURE's hand subsystem on a player whose graphics API cannot host the GLES-only
+display provider, and `ConfigureUnifiedXr` pins OpenGLES3 so a new export never
+ships Vulkan again. Both live in `unity/Assets`, so they reach a device only
+through a rebuilt export. The pinned `unity-export-1.1` predates them: an APK
+built from it still runs the old gate, still starts the display subsystem on
+Vulkan, and still crashes in `VitureDisplayProvider::GfxThread_Stop`. Building
+and pinning a new export (see the export steps below) is what makes the fix
+effective.
 
 ## Layout
 

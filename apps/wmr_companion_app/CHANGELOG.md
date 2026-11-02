@@ -2,15 +2,17 @@
 
 ## Unreleased
 
-- Fix the VITURE Pro Neckband launch crash on the Vulkan `unity-export-1.1`
-  player: start only the hand subsystem when the XR display provider cannot use
-  the player's graphics API, and pin future Unity exports to OpenGL ES 3.
 - Keep the hosted Unity player out of the Android focus tree so the Flutter
   UI keeps its own focus.
 - Add a Neckband control path that needs no D-pad and no ADB: short Volume
   Up/Down presses move focus, holding Volume Down selects, and holding Volume
   Up goes back. With headgaze on, the system keeps Volume Down for select and
   Volume Up for back.
+- VITURE Pro Neckband hand tracking: the Unity source now starts only the hand
+  subsystem when the player's graphics API cannot host VITURE's GLES-only
+  display provider, and the export configuration pins OpenGL ES 3. These
+  changes reach a device only through a rebuilt Unity export; the pinned
+  `unity-export-1.1` predates them and still crashes when hand tracking starts.
 
 ## 0.3.11+16
 

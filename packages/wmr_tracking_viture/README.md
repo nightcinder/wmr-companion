@@ -13,9 +13,10 @@ is fixed by the loader when its display subsystem initialises; Unity exposes
 `XRSettings.stereoRenderingMode` read-only, so the player cannot switch modes at
 runtime. A Vulkan player cannot host the GLES-only display provider at all; the
 unified loader gate then starts only the hand subsystem, and hand tracking runs
-without the stereo display (ONY-802). The 2D gate is covered by the on-device
-check only: the stub-compile project proves the bridge compiles, not that the
-gate fires.
+without the stereo display (ONY-802). That gate reaches a device only through a
+rebuilt export: the pinned `unity-export-1.1` predates it and still crashes on
+Vulkan. The 2D gate is covered by the on-device check only: the stub-compile
+project proves the bridge compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 
@@ -57,8 +58,9 @@ Failures are typed `TrackingException`s:
   VITURE XR SDK bridge is not linked, the host activity is detached, or `start`
   runs while the VITURE XR loader is rendering in mono 2D (SpaceWalker off) and
   no displayless hand session was selected: a mono player cannot deliver hand
-  joints. The unified loader gate selects that mode on a Vulkan export; the
-  per-vendor VITURE project pins OpenGL ES 3 instead.
+  joints. The unified loader gate selects that mode on a Vulkan export once the
+  player is rebuilt from these sources; the per-vendor VITURE project pins
+  OpenGL ES 3 instead.
 - `unsupported`: the reported glasses model is not a `LumaUltra` (`One`,
   `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`, or an
   unclassifiable name), or the host is not a VITURE Pro Neckband. An unreported

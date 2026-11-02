@@ -80,9 +80,11 @@ The `unified` app flavor links that shared export from
    configuration step pins **Graphics APIs = OpenGLES3 only**: VITURE's display
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
    `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
-   The pinned `unity-export-1.1` predates that pin, so the runtime starts VITURE
-   hand tracking without the display subsystem on it; a GLES3 re-export restores
-   the stereo display path.
+   The pinned `unity-export-1.1` predates both the pin and the runtime gate that
+   starts VITURE hand tracking without the display subsystem, so an APK built
+   from it still crashes in `VitureDisplayProvider::GfxThread_Stop`. A GLES3
+   re-export is what makes the fix effective; until it is built and pinned, do
+   not describe a release as fixing the crash.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 
    ```sh

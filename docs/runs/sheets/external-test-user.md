@@ -191,17 +191,18 @@ status line shows the current state:
 
 If the app still shows 0DoF on v0.3.11, capture logs and record the status line.
 
-**Launch crash and input (ONY-802).** On the Vulkan `unity-export-1.1`
-player, VITURE now starts hand tracking without its XR display subsystem: the
-vendor display provider cannot use Vulkan, and starting it crashed the process
-in `VitureDisplayProvider::GfxThread_Stop`. The Unity view no longer takes the
-glasses display or the input focus, so the Flutter UI stays visible. A Pro
-Neckband has no D-pad, so use its volume rocker instead: short Volume Up and
-Volume Down presses move the focus ring, holding Volume Down selects the
-focused control, and holding Volume Up goes back. With headgaze on (Settings +
-Power), Volume Down selects and Volume Up goes back. Do not use ADB to inject
-touches as a control path. If the app still crashes or the rocker does nothing,
-capture the log and the tombstone.
+**Launch crash and input (ONY-802).** The Unity source now starts VITURE hand
+tracking without its XR display subsystem when the player cannot host the
+GLES-only display provider, and a new export pins OpenGL ES 3. The pinned
+`unity-export-1.1` player predates both, so a build that still links it crashes
+in `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts. The Unity
+view no longer takes the input focus, so the Flutter UI keeps its own focus and
+stays visible. A Pro Neckband has no D-pad, so use its volume rocker instead:
+short Volume Up and Volume Down presses move the focus ring, holding Volume
+Down selects the focused control, and holding Volume Up goes back. With
+headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. Do
+not use ADB to inject touches as a control path. If the app still crashes or
+the rocker does nothing, capture the log and the tombstone.
 
 **ADB triage for this case.** Connect first if wireless: `adb connect <neckband-ip>:5555`. Then run:
 
