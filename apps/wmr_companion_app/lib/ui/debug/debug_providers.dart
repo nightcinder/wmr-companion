@@ -575,16 +575,21 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
 
   /// The typed error for a failed [DebugTrackingSource.auto] selection.
   ///
-  /// "No glasses detected" stays a message rather than an error: nothing
-  /// failed, and the status banner offers the Simulated fallback instead.
+  /// "No glasses detected" and "this build has no Unity runtime" stay messages
+  /// rather than errors: nothing failed on the device, and the app keeps the
+  /// controller 3DoF path while the banner offers the Simulated fallback.
   static TrackingException? _selectionError(TrackingSelection selection) {
-    if (selection.status == TrackingSelectionStatus.none) return null;
+    if (selection.status == TrackingSelectionStatus.none ||
+        selection.status == TrackingSelectionStatus.fallback) {
+      return null;
+    }
     final kind = switch (selection.status) {
       TrackingSelectionStatus.unsupported => TrackingExceptionKind.unsupported,
       TrackingSelectionStatus.permissionDenied =>
         TrackingExceptionKind.permissionDenied,
       TrackingSelectionStatus.attached ||
       TrackingSelectionStatus.unavailable ||
+      TrackingSelectionStatus.fallback ||
       TrackingSelectionStatus.none => TrackingExceptionKind.unavailable,
     };
     return TrackingException(

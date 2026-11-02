@@ -37,7 +37,7 @@ flutter build apk --debug --dart-define=WMR_VITURE_TRACKING=true
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
 ```
 
-Confirm the flag is live: the debug overlay shows "VITURE tracking: available" when the plugin reports the AAR linked; otherwise it reports `unavailable`.
+Confirm the flag is live: the debug overlay shows "VITURE tracking: available" when the plugin reports the AAR linked; otherwise Auto keeps controller 3DoF and the status names the missing Unity runtime and the unified release APK to install.
 
 ## 2. Setup, once per sitting
 
@@ -76,7 +76,8 @@ dropdown always shows the current state:
 - `0DoF: no hand-tracking source attached.` when the source is `None`.
 - `0DoF: <source> is not built into this app.` when the flag is off.
 - `0DoF: Starting <source>...` while it starts.
-- `0DoF: <source> failed to start (<kind>).` on a start failure.
+- `0DoF: VITURE hand tracking is not available in this build; continuing with controller 3DoF.` when the APK has no Unity runtime; install the unified release APK.
+- `0DoF: <source> failed to start (<kind>).` on any other start failure.
 - `0DoF: VITURE XR stereo is inactive, so hand tracking cannot start. Switch the glasses to 3D (SpaceWalker) and select the source again.` when the glasses are in 2D mode.
 - `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
 - `0DoF: <message>.` for any other failure.

@@ -234,6 +234,40 @@ void main() {
     expect(container.read(benchControllerProvider).mode, BenchMode.sixDofOnly);
   });
 
+  testWidgets('a build without the Unity runtime reports a 3DoF fallback', (
+    tester,
+  ) async {
+    final container = await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _NeckbandDetector(),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => throw const TrackingException(
+          TrackingExceptionKind.unavailable,
+          'This APK was built without the VITURE Unity runtime '
+          '(unityLibrary). Install the unified release APK to enable 6DoF '
+          'hand tracking.',
+          stage: unityRuntimeLinkStage,
+        ),
+      ),
+    );
+    await settleTracking(tester, container);
+
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.attachment.value?.error, isNull);
+    expect(
+      find.textContaining('continuing with controller 3DoF'),
+      findsWidgets,
+    );
+    expect(find.textContaining('unified release APK'), findsWidgets);
+    expect(find.textContaining('failed to start'), findsNothing);
+
+    final button = tester.widget<OutlinedButton>(
+      find.byKey(const Key('bench-mode-6dof_only')),
+    );
+    expect(button.onPressed, isNull);
+  });
+
   testWidgets('inactive XR stereo shows a 0DoF status and an action', (
     tester,
   ) async {

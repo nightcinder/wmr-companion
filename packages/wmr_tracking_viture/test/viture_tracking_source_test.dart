@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 
 const _supportedLumaUltra = <String, Object?>{
@@ -271,26 +272,50 @@ void main() {
     );
   });
 
-  test(
-    'an unlinked Unity UaaL runtime maps to TrackingExceptionKind.unavailable',
-    () async {
-      final fixture = _fixture('viture_unity_unavailable.json');
+  test('an unlinked Unity UaaL runtime reports a build fallback, not a device fault', () async {
+    final fixture = _fixture('viture_unity_unavailable.json');
 
-      await expectLater(
-        VitureNeckbandTrackingSource.create(
-          enabled: true,
-          platform: _FakeViturePlatform(capabilities: fixture),
-        ),
-        throwsA(
-          isA<TrackingException>().having(
-            (error) => error.kind,
-            'kind',
-            TrackingExceptionKind.unavailable,
-          ),
-        ),
+    await expectLater(
+      VitureNeckbandTrackingSource.create(
+        enabled: true,
+        platform: _FakeViturePlatform(capabilities: fixture),
+      ),
+      throwsA(
+        isA<TrackingException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TrackingExceptionKind.unavailable,
+            )
+            .having((error) => error.stage, 'stage', unityRuntimeLinkStage)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('unified release APK'),
+            ),
+      ),
+    );
+  });
+
+  test('a missing VITURE plugin reports the same build fallback', () async {
+    final platform = _FakeViturePlatform()
+      ..capabilityError = MissingPluginException(
+        'No implementation found for method capabilities',
       );
-    },
-  );
+
+    await expectLater(
+      VitureNeckbandTrackingSource.create(enabled: true, platform: platform),
+      throwsA(
+        isA<TrackingException>()
+            .having((error) => error.stage, 'stage', unityRuntimeLinkStage)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('VITURE tracking plugin'),
+            ),
+      ),
+    );
+  });
 
   test(
     'camera permission denial from fixture maps to permissionDenied',

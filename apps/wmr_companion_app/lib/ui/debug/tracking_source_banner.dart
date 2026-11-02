@@ -7,8 +7,8 @@ import 'debug_providers.dart';
 
 /// Human-readable state of the automatically detected tracking source.
 ///
-/// A failed source keeps its [TrackingException] details, including the typed
-/// `unavailable` case when a Unity relay is not linked in the build.
+/// A failed source keeps its [TrackingException] details. Auto turns a missing
+/// Unity runtime into a 3DoF fallback message instead of a failed start.
 String trackingSourceStatusText(DebugTrackingSelection selection) {
   final choice = selection.choice;
   if (choice == DebugTrackingSource.none) {
@@ -57,9 +57,12 @@ String? _detectionSummary(GlassesDetection? detection) {
     GlassesHost.phone => 'phone',
     GlassesHost.unknown => 'this host',
   };
+  // USB permission only gates the VITURE C SDK raw camera feed. Unity hand
+  // tracking runs on the host, so a missing grant is not a tracking fault and
+  // must not read like one.
   final usb = detection.usbPermissionGranted
-      ? 'USB ready'
-      : 'USB permission not granted';
+      ? 'USB camera access ready'
+      : 'USB camera access not granted (hand tracking does not need it)';
   return 'Detected $vendor on $host · $usb';
 }
 

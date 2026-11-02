@@ -28,6 +28,13 @@ class TrackingSourceFlags {
   };
 }
 
+/// The `stage` a vendor plugin reports when its embedded Unity runtime is not
+/// linked into the APK.
+///
+/// The source cannot start on this build, so the selector keeps the controller
+/// 3DoF path instead of treating it as a device or permission fault.
+const String unityRuntimeLinkStage = 'link';
+
 /// The outcome of [TrackingSourceSelector.select].
 enum TrackingSelectionStatus {
   /// A source was created, started and returned.
@@ -41,6 +48,10 @@ enum TrackingSelectionStatus {
 
   /// A runtime permission needed by the detected source was denied.
   permissionDenied,
+
+  /// The detected source's Unity runtime is not linked into this APK, so the
+  /// app keeps the controller 3DoF path with a clear build message.
+  fallback,
 
   /// No glasses were detected, or every vendor flag is off.
   none,
@@ -151,6 +162,21 @@ class TrackingSourceSelector {
     TrackingSource? source;
     try {
       source = await factory();
+    } on TrackingException catch (error) {
+      if (error.stage == unityRuntimeLinkStage) {
+        return TrackingSelection(
+          status: TrackingSelectionStatus.fallback,
+          detection: detection,
+          message: _fallbackMessage(detection.vendor, error.message),
+        );
+      }
+      return TrackingSelection(
+        status: TrackingSelectionStatus.unavailable,
+        detection: detection,
+        message:
+            'Creating the ${detection.vendor.wireName} source failed: '
+            '$error',
+      );
     } catch (error) {
       return TrackingSelection(
         status: TrackingSelectionStatus.unavailable,
@@ -174,6 +200,13 @@ class TrackingSourceSelector {
       await source.start();
     } on TrackingException catch (error) {
       await _disposeQuietly(source);
+      if (error.stage == unityRuntimeLinkStage) {
+        return TrackingSelection(
+          status: TrackingSelectionStatus.fallback,
+          detection: detection,
+          message: _fallbackMessage(detection.vendor, error.message),
+        );
+      }
       return TrackingSelection(
         status: _statusFor(error.kind),
         detection: detection,
@@ -222,6 +255,19 @@ class TrackingSourceSelector {
               .trim(),
         _ => 'No VITURE, XREAL or Android XR glasses were detected',
       };
+
+  /// A missing Unity runtime is a build limitation, not a device or USB fault,
+  /// so name the fallback and the fix instead of reporting a failed start.
+  static String _fallbackMessage(GlassesVendor vendor, String detail) =>
+      '${_vendorLabel(vendor)} hand tracking is not available in this build; '
+      'continuing with controller 3DoF. $detail';
+
+  static String _vendorLabel(GlassesVendor vendor) => switch (vendor) {
+    GlassesVendor.viture => 'VITURE',
+    GlassesVendor.xreal => 'XREAL',
+    GlassesVendor.androidXr => 'Android XR',
+    GlassesVendor.none => 'Glasses',
+  };
 
   static Future<void> _disposeQuietly(TrackingSource source) async {
     try {

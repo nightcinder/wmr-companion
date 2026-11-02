@@ -80,6 +80,14 @@ Detection reads IDs only and does not request USB permission. Opening a
 platform USB permission flow, which is outside this issue. The host marker path
 never reads USB at all.
 
+USB permission is not a hand-tracking requirement. The Neckband and Beam Pro run
+the vendor tracking runtime on the compute unit itself, and the VITURE Unity
+relay starts without a USB grant. The grant only gates the VITURE C SDK raw
+camera feed in the guarded bench, which requests it when that step runs. The
+status banner therefore says `USB camera access not granted (hand tracking does
+not need it)` rather than `USB permission not granted`; a missing grant never
+stops Auto from attaching hand tracking.
+
 The `usbPermissionDenied` reason is retained in the Dart API for older native
 detectors, but the current Kotlin detector no longer produces it.
 

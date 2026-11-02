@@ -20,8 +20,9 @@ the typed `unavailable` failure instead of a missing-class crash.
 
 `unified` compiles the same Dart adapters and links one `unityLibrary` exported
 from `packages/wmr_tracking_unity`, which selects VITURE or XREAL at runtime.
-With no export linked it builds exactly like `base`: both sources exist and
-`start()` reports `unavailable`.
+With no export linked it builds exactly like `base`: both sources exist, and
+Auto reports a controller 3DoF fallback that names the missing Unity runtime and
+points at the unified release APK.
 
 ## One launcher icon
 
