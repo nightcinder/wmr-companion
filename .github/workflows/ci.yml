@@ -30,6 +30,7 @@ jobs:
     outputs:
       android_flavors: ${{ steps.filter.outputs.android_flavors }}
       gatt_probe: ${{ steps.filter.outputs.gatt_probe }}
+      r8_dex: ${{ steps.filter.outputs.r8_dex }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -47,6 +48,15 @@ jobs:
               - '.github/workflows/ci.yml'
             gatt_probe:
               - 'tool/gatt_probe/**'
+              - '.github/workflows/ci.yml'
+            # ONY-782: only paths that can change what R8 keeps, or that
+            # change this job, pay for a minified release build.
+            r8_dex:
+              - 'apps/wmr_companion_app/android/app/proguard-rules.pro'
+              - 'apps/wmr_companion_app/android/**'
+              - 'packages/wmr_tracking_viture/android/**'
+              - 'packages/wmr_tracking_xreal/android/**'
+              - 'packages/wmr_tracking_unity/**'
               - '.github/workflows/ci.yml'
 
   build:
@@ -565,6 +575,186 @@ jobs:
           path: release-notes.md
           if-no-files-found: error
           retention-days: 14
+
+  release-dex-check:
+    # ONY-782: an R8 `-keep` rule can only be proved on a minified unified
+    # APK. `release-unified` is tag-gated, so a PR touching the R8 rules or a
+    # JNI path had no artifact that proved the keep rules hold. This builds
+    # the same release APK on the self-hosted runner, runs the APK checker on
+    # it and keeps the APK as evidence. It is not a required check and
+    # publishes nothing.
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.r8_dex == 'true' }}
+    runs-on: [self-hosted, liesa, android]
+    timeout-minutes: 40
+    # A new push to the same PR cancels the older run: only the newest head's
+    # dex is worth building.
+    concurrency:
+      group: release-dex-check-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    env:
+      # Same approved export and pins as `release-unified`. The export is
+      # downloaded per run rather than read from a host directory, because a
+      # mounted copy can drift from the checksum-verified asset.
+      UNITY_EXPORT_TAG: unity-export-1.1
+      ANDROID_NDK_VERSION: 28.2.13676358
+      ANDROID_CMAKE_VERSION: 3.22.1
+      UNITY_EXPORT_SHA256: 29a9b9066d1b8dcee7b7acf5dddf7075dbd987c6dcbf29fde9216ed7084d2072
+    steps:
+      - uses: actions/checkout@v7
+
+      # `liesa` is a plain host, not the GitHub-hosted image: it exports no
+      # ANDROID_HOME and carries only the tools its owner installed. Fail here,
+      # before the build, naming exactly what is missing.
+      - name: Preflight the self-hosted runner
+        run: |
+          set -euo pipefail
+          missing=()
+          for tool in gh python3 git base64 sha256sum unzip; do
+            command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::liesa is missing ${missing[*]}; add them to the runner image. This job does not apt-install."
+            exit 1
+          fi
+
+      - name: Locate the Android SDK
+        id: android-sdk
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
+            for candidate in "$HOME/Android/Sdk" /usr/local/lib/android/sdk /opt/android-sdk /opt/android/sdk; do
+              if [ -d "$candidate" ]; then sdk="$candidate"; break; fi
+            done
+          fi
+          if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
+            echo "::error::No Android SDK on liesa: ANDROID_HOME/ANDROID_SDK_ROOT are unset and no SDK sits in the usual places. Install one on the runner image."
+            exit 1
+          fi
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "sdk=$sdk" >> "$GITHUB_OUTPUT"
+          echo "Android SDK: $sdk"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install the pinned NDK and CMake
+        run: |
+          # Not `pipefail`: `yes` exits with SIGPIPE once sdkmanager stops
+          # reading its licence prompts, which is not a failure here.
+          set -eu
+          ndk="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          cmake="$ANDROID_HOME/cmake/$ANDROID_CMAKE_VERSION"
+          if [ ! -d "$ndk" ] || [ ! -d "$cmake" ]; then
+            sdkmanager="$(command -v sdkmanager || true)"
+            if [ -z "$sdkmanager" ]; then
+              sdkmanager="$(find "$ANDROID_HOME" -maxdepth 5 -type f -name sdkmanager | head -n 1 || true)"
+            fi
+            if [ -z "$sdkmanager" ]; then
+              echo "::error::sdkmanager not found under $ANDROID_HOME; cannot install ndk;$ANDROID_NDK_VERSION and cmake;$ANDROID_CMAKE_VERSION."
+              exit 1
+            fi
+            [ -d "$ndk" ] || yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" "ndk;$ANDROID_NDK_VERSION"
+            [ -d "$cmake" ] || yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" "cmake;$ANDROID_CMAKE_VERSION"
+          fi
+          test -d "$ndk"
+          test -d "$cmake"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ndk" >> "$GITHUB_ENV"
+          echo "NDK: $ndk"
+          echo "CMake: $cmake"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: ./.github/actions/flutter-setup
+
+      - run: flutter pub get
+
+      # The APK checker requires the Monado config key. Same pinned download
+      # as `release-unified`; a failed download fails this job rather than
+      # producing an APK that cannot pass the checker.
+      - name: Fetch Monado config key
+        working-directory: apps/wmr_companion_app
+        run: |
+          set -euo pipefail
+          dart run ../../tool/fetch_wmr_config_key.dart \
+            --url https://gitlab.freedesktop.org/monado/monado/-/raw/01c6e4ed28dc6e85b84d4683831947862a64844c/src/xrt/drivers/wmr/wmr_config_key.h
+          test "$(stat -c%s assets/monado/wmr_config_key.bin)" = "1024"
+          echo "f0fbc70a916dbe0b87e9162ddee6b9fd768696354d9cd3cd0e7f9ddd90f6f1dc  assets/monado/wmr_config_key.bin" \
+            | sha256sum --check --strict
+
+      # A release build refuses to run without the project key (ONY-492), and
+      # same-repo pull requests receive repository secrets. The signature is
+      # incidental here: the dex is the artifact under test.
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.WMR_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::WMR_RELEASE_KEYSTORE_BASE64 is not set; nothing can be signed."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode \
+            > apps/wmr_companion_app/android/wmr-release.keystore
+
+      # The export is a 272 MB release asset on a stable tag, never a file in
+      # the repository or in this branch's history.
+      - name: Download the approved Unity export
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unity-export"
+          gh release download "$UNITY_EXPORT_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern unityLibrary.zip \
+            --dir "$RUNNER_TEMP/unity-export"
+          echo "$UNITY_EXPORT_SHA256  $RUNNER_TEMP/unity-export/unityLibrary.zip" \
+            | sha256sum --check --strict
+
+      - name: Check the export carries both vendors and the VITURE stereo path
+        working-directory: apps/wmr_companion_app
+        run: python3 tool/check_unity_export.py "$RUNNER_TEMP/unity-export/unityLibrary.zip"
+
+      - name: Install the export as the unified unityLibrary
+        working-directory: apps/wmr_companion_app
+        run: tool/install_unity_export.sh unified "$RUNNER_TEMP/unity-export/unityLibrary.zip"
+
+      - name: Build the unified release APK
+        working-directory: apps/wmr_companion_app
+        env:
+          WMR_RELEASE_STORE_FILE: ../wmr-release.keystore
+          WMR_RELEASE_STORE_PASSWORD: ${{ secrets.WMR_RELEASE_STORE_PASSWORD }}
+          WMR_RELEASE_KEY_ALIAS: wmr-companion
+          WMR_RELEASE_KEY_PASSWORD: ${{ secrets.WMR_RELEASE_KEY_PASSWORD }}
+        run: >-
+          tool/build_flavor.sh unified --release --split-per-abi
+          --target-platform android-arm64
+
+      - name: Check the unified APK carries both vendors and the Monado key
+        working-directory: apps/wmr_companion_app
+        run: >-
+          python3 tool/check_unified_apk.py
+          build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-dex-check-apk
+          path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-arm64-v8a-unified-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove the decoded keystore
+        if: ${{ always() }}
+        run: rm -f apps/wmr_companion_app/android/wmr-release.keystore
 
   release-unified:
     # The unified flavor links one shared unityLibrary that carries both VITURE

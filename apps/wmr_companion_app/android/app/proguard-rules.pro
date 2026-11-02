@@ -30,3 +30,5 @@
 # class still wins at runtime, the cast succeeds, and the SDK's display
 # listener attaches as on any other phone.
 -keep class android.hardware.display.** { *; }
+
+# dex-check trigger: ONY-782
