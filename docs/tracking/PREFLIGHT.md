@@ -1,6 +1,6 @@
 # 6DoF pre-flight: named path, current build, desk evidence
 
-Status: **desk work only, re-checked 2026-11-01 on v0.3.7.** No glasses, phone
+Status: **desk work only, re-checked 2026-11-02 on v0.3.12.** No glasses, phone
 or Unity runtime was started. The artifact checks below are real host-side results; every tracking
 figure and permission prompt remains a hardware gate.
 
@@ -36,9 +36,9 @@ purchases for the same unproven gates.
 
 | Item | Value |
 |---|---|
-| Artifact | `wmr-companion-0.3.7-unified-arm64-v8a.apk` |
-| Release | [`v0.3.7`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.7), commit `16f2218` |
-| APK SHA-256 | `d66f5147f85f76d8b4a7249b4cc7d29e969f06205599f04a5fb99825249d865c` |
+| Artifact | `wmr-companion-0.3.12-unified-arm64-v8a.apk` |
+| Release | [`v0.3.12`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.12), commit `2a7e176` |
+| APK SHA-256 | `93647e6f63191581bebcdc54f7e4d3bbd9caa8d84475db43cd86b2387a575458` |
 | Unity export SHA-256 | `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8` (`unity-export-1.2`, pinned in CI) |
 | Flavor | `unified`: VITURE 0.9.0 + XREAL 3.1.0 in one `unityLibrary`, vendor selected at runtime |
 | Signing | release key; tester build, not a store upload |
@@ -54,18 +54,16 @@ apps/wmr_companion_app/tool/build_flavor.sh unified --debug
 Validate any unified APK without a device before installing it:
 
 ```bash
-gh release download v0.3.7 -p 'wmr-companion-0.3.7-unified-arm64-v8a.apk'
+gh release download v0.3.12 -p 'wmr-companion-0.3.12-unified-arm64-v8a.apk'
 python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.7-unified-arm64-v8a.apk
 ```
 
 ## 3. Permission and session path (host-validated)
 
-`check_unified_apk.py` passed on the v0.3.7 release artifact with its recorded
-SHA-256, re-run 2026-11-01 against the downloaded release asset, except for the
-`Android XR callbacks` row: v0.3.7 predates that gate (ONY-758) and its callbacks
-are shrunk, so the checker reports `xr_callback_failures` on it. That failure is
-the crash the gate now catches; run the checker on a build from the first release
-containing ONY-758 (v0.3.9 and later) to reproduce the pass.
+`check_unified_apk.py` passed on the v0.3.12 release artifact with its recorded
+SHA-256, re-run 2026-11-02 against the downloaded release asset, including the
+`Android XR callbacks` row: v0.3.12 contains ONY-758 and later, so the
+callbacks survive R8. Older builds such as v0.3.7 and v0.3.8 still fail that row.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
 without `android:required` counts as required, as Android does : `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
