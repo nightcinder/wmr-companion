@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
 import com.onyxlens.wmr_tracking_dispatch.PlayerHost
 import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+import com.onyxlens.wmr_tracking_dispatch.StartCommandDispatch
 import com.onyxlens.wmr_tracking_dispatch.TrackingStartStage
 import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -79,14 +80,17 @@ class WmrTrackingXrealPlugin internal constructor(
         override fun onStage(stage: String, stereoMode: String?) {
             if (stage != UnityPlayerHost.STAGE_PLAYER_HOSTED) return
             if (Looper.myLooper() == Looper.getMainLooper()) {
-                flushPendingStart()
+                flushPendingStartFromUnity()
             } else {
-                mainHandler.post { flushPendingStart() }
+                mainHandler.post { flushPendingStartFromUnity() }
             }
         }
     }
 
     private var started = false
+
+    /** True only once the start command reached Unity; gates stop/dispose. */
+    private var startDelivered = false
     private var disposed = false
     private var pendingStartCommand: String? = null
 
@@ -155,8 +159,13 @@ class WmrTrackingXrealPlugin internal constructor(
                     "XREAL tracking source was disposed before the start completed",
                     TrackingStartStage.PENDING,
                 )
+                // Disposing a plugin whose cold start is still queued must not
+                // call UnitySendMessage during Unity player init (ONY-776).
+                val startWasDelivered = startDelivered
                 stopTracking(reportError = false)
-                bridge.sendCommand(XrealRelayCommandBuilder.dispose())
+                if (startWasDelivered) {
+                    bridge.sendCommand(XrealRelayCommandBuilder.dispose())
+                }
                 disposed = true
                 result.success(null)
             }
@@ -423,13 +432,16 @@ class WmrTrackingXrealPlugin internal constructor(
         }
         val commandJson = XrealRelayCommandBuilder.start()
         started = true
+        startDelivered = false
         // A player created by this start is still inside
         // UnityPlayerForActivityOrService init, where UnitySendMessage
         // SIGSEGVs the process (ONY-776). Queue the start until the scene
         // reports `playerHosted`; a warm scene already reported it, so it can
         // take the command immediately.
         pendingStartCommand = commandJson
-        if (runtime.hasHostedScene() && !flushPendingStart()) {
+        if (runtime.hasHostedScene() &&
+            flushPendingStart() == StartCommandDispatch.REFUSED
+        ) {
             started = false
             runtime.release(GlassesVendor.XREAL)
             playerHost.release()
@@ -444,17 +456,42 @@ class WmrTrackingXrealPlugin internal constructor(
     }
 
     /**
-     * Replays the start command once the hosted scene is alive. No-op when the
-     * command was consumed, the source stopped, or the scene reported late.
-     *
-     * @return true when a command was sent successfully; false when nothing was
-     *   pending or the bridge refused it.
+     * Replays the start command once the hosted scene is alive. Reports [NONE]
+     * when the command was consumed or the source stopped, [SENT] when Unity
+     * accepted it, and [REFUSED] when the bridge rejected it so the caller can
+     * fail a session that was already reported as running.
      */
-    internal fun flushPendingStart(): Boolean {
-        val command = pendingStartCommand ?: return false
+    internal fun flushPendingStart(): StartCommandDispatch {
+        val command = pendingStartCommand ?: return StartCommandDispatch.NONE
         pendingStartCommand = null
-        if (!started) return false
-        return bridge.sendCommand(command)
+        if (!started) return StartCommandDispatch.NONE
+        if (!bridge.sendCommand(command)) return StartCommandDispatch.REFUSED
+        startDelivered = true
+        return StartCommandDispatch.SENT
+    }
+
+    private fun flushPendingStartFromUnity() {
+        if (flushPendingStart() == StartCommandDispatch.REFUSED) {
+            failStartDispatch()
+        }
+    }
+
+    /**
+     * Fails a session whose start reply already reported success but whose
+     * queued command Unity refused once the scene hosted.
+     */
+    private fun failStartDispatch() {
+        started = false
+        startDelivered = false
+        pendingStartCommand = null
+        runtime.release(GlassesVendor.XREAL)
+        runtime.clearStage(GlassesVendor.XREAL)
+        playerHost.release()
+        eventSink?.error(
+            ERROR_UNAVAILABLE,
+            "Failed to dispatch start command to Unity relay",
+            mapOf("stage" to TrackingStartStage.COMMAND),
+        )
     }
 
     /** Test seam for the static `onUnityStage` entry point the C# rig calls. */
@@ -465,8 +502,11 @@ class WmrTrackingXrealPlugin internal constructor(
     private fun stopTracking(reportError: Boolean) {
         failPendingStart()
         pendingStartCommand = null
-        val wasStarted = started
+        // A start still queued for a cold player never reached Unity, so there
+        // is nothing to stop; sending one would hit the init SIGSEGV (ONY-776).
+        val wasStarted = started && startDelivered
         started = false
+        startDelivered = false
         if (wasStarted) {
             bridge.sendCommand(XrealRelayCommandBuilder.stop())
         }
@@ -499,6 +539,7 @@ class WmrTrackingXrealPlugin internal constructor(
     internal fun deliverUnityError(code: String, message: String) {
         if (!started) return
         started = false
+        startDelivered = false
         pendingStartCommand = null
         bridge.sendCommand(XrealRelayCommandBuilder.stop())
         runtime.release(GlassesVendor.XREAL)

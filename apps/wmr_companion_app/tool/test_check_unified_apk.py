@@ -313,6 +313,7 @@ def build_apk(
     consumer_accept: bool = True,
     consumer_classes: int = 1,
     r8_keep: bool = True,
+    omit_r8_callback: tuple[str, str] | None = None,
 ) -> Path:
     path = directory / "unified.apk"
     dex = DexBuilder()
@@ -324,7 +325,11 @@ def build_apk(
         for name, callbacks in checker.R8_JNI_CALLBACKS.items():
             dex.add_class(
                 name,
-                methods=[(method, list(params), returns) for method, params, returns in callbacks],
+                methods=[
+                    (method, list(params), returns)
+                    for method, params, returns in callbacks
+                    if (name, method) != omit_r8_callback
+                ],
             )
     if display_stub:
         # XREAL's GlassesDisplayPlugEvent AAR ships this as a program class;
@@ -501,6 +506,24 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1, output)
         self.assertIn("WmrTrackingXrealPlugin", output)
         self.assertIn("renamed or removed by R8", output)
+        self.assertIn("RESULT: FAIL", output)
+
+    def test_missing_r8_kept_plugin_callback_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, output = run_checker(
+                build_apk(
+                    Path(tmp),
+                    "false",
+                    omit_r8_callback=(
+                        "Lcom/onyxlens/wmr_tracking_xreal/WmrTrackingXrealPlugin;",
+                        "onUnityStage",
+                    ),
+                )
+            )
+        self.assertEqual(code, 1, output)
+        self.assertIn(
+            "lost onUnityStage(Ljava/lang/String;Ljava/lang/String;)V", output
+        )
         self.assertIn("RESULT: FAIL", output)
 
     def test_consumer_without_accept_fails(self) -> None:

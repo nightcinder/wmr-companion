@@ -35,6 +35,20 @@ object TrackingStartStage {
     const val START_FAILED = "startFailed"
 }
 
+/**
+ * Outcome of replaying a start command that was queued while the shared
+ * player was still initialising.
+ *
+ * [NONE] means there was nothing to replay (no queued command, or the session
+ * stopped first); [REFUSED] means the queued command must be treated as a
+ * failed start rather than silently reported as running.
+ */
+enum class StartCommandDispatch {
+    NONE,
+    SENT,
+    REFUSED,
+}
+
 /** The result of [SharedUnityRuntime.claim]. */
 data class UnityClaim(val state: UnityClaimState, val owner: GlassesVendor?) {
     val granted: Boolean = state != UnityClaimState.UNAVAILABLE

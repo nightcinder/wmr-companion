@@ -9,6 +9,7 @@ import com.onyxlens.wmr_tracking_dispatch.GlassesVendor
 import com.onyxlens.wmr_tracking_dispatch.PlayerHost
 import com.onyxlens.wmr_tracking_dispatch.PlayerHostResult
 import com.onyxlens.wmr_tracking_dispatch.SharedUnityRuntime
+import com.onyxlens.wmr_tracking_dispatch.StartCommandDispatch
 import com.onyxlens.wmr_tracking_dispatch.TrackingStartStage
 import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
 import io.flutter.plugin.common.EventChannel
@@ -247,7 +248,7 @@ class WmrTrackingXrealPluginTest {
         assertTrue(reply.errors.isEmpty())
         assertEquals(1, reply.reports.size)
         assertEquals(0, bridge.sentCommands.size)
-        assertTrue(plugin.flushPendingStart())
+        assertEquals(StartCommandDispatch.SENT, plugin.flushPendingStart())
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
     }
@@ -517,7 +518,7 @@ class WmrTrackingXrealPluginTest {
         plugin.startUnityRelay(RecordingReply())
         assertEquals(0, bridge.sentCommands.size)
 
-        assertTrue(plugin.flushPendingStart())
+        assertEquals(StartCommandDispatch.SENT, plugin.flushPendingStart())
 
         assertEquals(1, bridge.sentCommands.size)
         assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"start\""))
@@ -550,6 +551,73 @@ class WmrTrackingXrealPluginTest {
         plugin.flushPendingStart()
 
         assertEquals(sentAfterStop, bridge.sentCommands.size)
+    }
+
+    @Test
+    fun stopWhileTheStartIsQueuedSendsNothingToUnity() {
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val runtime = SharedUnityRuntime { true }
+        val plugin = xrealPlugin(bridge, runtime)
+        plugin.startUnityRelay(RecordingReply())
+
+        plugin.onMethodCall(MethodCall("stop", null), RecordingResult())
+
+        assertTrue(bridge.sentCommands.isEmpty())
+        assertNull(runtime.ownerVendor)
+        assertEquals(StartCommandDispatch.NONE, plugin.flushPendingStart())
+    }
+
+    @Test
+    fun disposeWhileTheStartIsQueuedSendsNothingToUnity() {
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val runtime = SharedUnityRuntime { true }
+        val plugin = xrealPlugin(bridge, runtime)
+        plugin.startUnityRelay(RecordingReply())
+
+        plugin.onMethodCall(MethodCall("dispose", null), RecordingResult())
+
+        assertTrue(bridge.sentCommands.isEmpty())
+        assertNull(runtime.ownerVendor)
+    }
+
+    @Test
+    fun stopAfterAHostedStartSendsStopToUnity() {
+        val bridge = FakeBridge(model = "Air2Ultra")
+        val plugin = xrealPlugin(bridge)
+        plugin.startUnityRelay(RecordingReply())
+        plugin.deliverUnityStage(UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
+        bridge.sentCommands.clear()
+
+        plugin.onMethodCall(MethodCall("stop", null), RecordingResult())
+
+        assertEquals(1, bridge.sentCommands.size)
+        assertTrue(bridge.sentCommands[0].contains("\"cmd\":\"stop\""))
+    }
+
+    @Test
+    fun aRefusedReplayFailsTheQueuedSession() {
+        val runtime = SharedUnityRuntime { true }
+        val host = FakePlayerHost()
+        val plugin = xrealPlugin(
+            FakeBridge(model = "Air2Ultra", sendSucceeds = false),
+            runtime,
+            host,
+        )
+        val sink = RecordingSink()
+        plugin.onListen(null, sink)
+        val reply = RecordingReply()
+        plugin.startUnityRelay(reply)
+        assertTrue(reply.errors.isEmpty())
+        assertEquals(1, reply.reports.size)
+
+        plugin.deliverUnityStage(UnityPlayerHost.STAGE_PLAYER_HOSTED, null)
+
+        assertEquals("unavailable", sink.errors.single().first)
+        val details = sink.errors.single().third as Map<*, *>
+        assertEquals(TrackingStartStage.COMMAND, details["stage"])
+        assertNull(runtime.ownerVendor)
+        assertEquals(1, host.releases)
+        assertEquals(StartCommandDispatch.NONE, plugin.flushPendingStart())
     }
 
     @Test
