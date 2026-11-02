@@ -6,18 +6,19 @@ Default-off VITURE Pro Neckband head and 26-joint hand tracking relay source for
 VITURE hand tracking is available only through the VITURE XR SDK for Unity
 (v0.9.0, Unity 6000.0+) running on the VITURE Pro Neckband with Luma Ultra
 glasses; the cross-platform C glasses SDK exposes head pose and cameras only.
-The intended export renders the player in stereo 3D (SpaceWalker mode): the
-export assigns the loader and enables startup initialisation, and `start`
-reports `unavailable` from a mono 2D player instead of stalling. The stereo mode
-is fixed by the loader when its display subsystem initialises; Unity exposes
-`XRSettings.stereoRenderingMode` read-only, so the player cannot switch modes at
-runtime. A Vulkan player cannot host the GLES-only display provider at all; the
-unified loader gate then starts only the hand subsystem, and hand tracking runs
-without the stereo display (ONY-802). The pinned `unity-export-1.2` is built from
-the ONY-802 merge commit with the player pinned to OpenGL ES 3, so the display
-subsystem starts normally; the hand-only path is the fallback for a player that
-is not GLES3. The 2D gate is covered by the on-device check only: the stub-compile
-project proves the bridge compiles, not that the gate fires.
+The vendor project's standalone export renders the player in stereo 3D
+(SpaceWalker mode): the export assigns the loader and enables startup
+initialisation, and `start` reports `unavailable` from a mono 2D player instead
+of stalling. The stereo mode is fixed by the loader when its display subsystem
+initialises; Unity exposes `XRSettings.stereoRenderingMode` read-only, so the
+player cannot switch modes at runtime. The unified bridge is embedded in
+Flutter, so it never starts the display provider: it starts only the hand
+subsystem and hand tracking runs without the stereo display (ONY-840). A Vulkan
+player also cannot host the GLES-only display provider and takes the same
+hand-only path (ONY-802). The pinned `unity-export-1.2` predates the embedded
+gate and still starts the display; a rebuilt export carries it. The 2D gate is
+covered by the on-device check only: the stub-compile project proves the bridge
+compiles, not that the gate fires.
 This plugin bridges an embedded Unity-as-a-Library (UaaL) tracking scene to
 Flutter:
 

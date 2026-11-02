@@ -23,13 +23,14 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
-**Vulkan players need a re-export (ONY-802).** The loader gate starts only
-VITURE's hand subsystem on a player whose graphics API cannot host the GLES-only
-display provider, and `ConfigureUnifiedXr` pins OpenGLES3 so a new export never
-ships Vulkan again. Both live in `unity/Assets`, so they reach a device only
-through a rebuilt export. The pinned `unity-export-1.2` is built from the ONY-802
-merge commit with that pin, so its player starts the display normally; the hand-only
-gate remains the fallback for a player that is not GLES3.
+**Embedded VITURE is hand-only (ONY-802, ONY-840).** The unified bridge only
+runs as a UaaL player, so the loader gate always starts VITURE's hand subsystem
+and never its display provider: the provider owns a surface view that conflicts
+with the Flutter host activity. `ConfigureUnifiedXr` still pins OpenGLES3 so a
+standalone or stale player cannot take the Vulkan stop path, and a non-GLES3
+player also falls back to hand-only. Both live in `unity/Assets`, so they reach
+a device only through a rebuilt export. The pinned `unity-export-1.2` predates
+the unconditional UaaL gate and still starts the display.
 
 ## Layout
 
@@ -129,9 +130,11 @@ host selects it. A host that puts a vendor bridge on the relay object itself
 loses that guarantee.
 
 The scene is also the minimal VITURE stereo screen (ONY-612): the Main Camera
-carries `WmrStereoCameraRig`, keeps `stereoTargetEye = Both`, and builds three
-depth markers at 1.5/2.5/3.5 m so a tester can see whether both eyes get a
-coherent 3D image. The rig never switches a mono player into stereo; it reads
+carries `WmrStereoCameraRig`, keeps `stereoTargetEye = Both`, and can build
+three depth markers at 1.5/2.5/3.5 m so a tester can see whether both eyes get
+a coherent 3D image. The markers are opt-in and off by default because their
+built-in material can render as the magenta error shader in the embedded UaaL
+export (ONY-840). The rig never switches a mono player into stereo; it reads
 the mode the VITURE loader chose and reports the startup stages to Kotlin
 through `WmrTrackingViturePlugin.onUnityStage(stage, stereoMode)`:
 

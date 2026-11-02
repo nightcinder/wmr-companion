@@ -80,11 +80,12 @@ The `unified` app flavor links that shared export from
    configuration step pins **Graphics APIs = OpenGLES3 only**: VITURE's display
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
    `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
-   The pinned `unity-export-1.2` is built from the ONY-802 merge commit with that
-   pin, so its player starts the VITURE display normally. The runtime gate still
-   starts VITURE hand tracking without the display subsystem on a player that is
-   not GLES3, so an export that loses the pin degrades to hand-only instead of
-   crashing.
+   The unified bridge is embedded in Flutter, so the runtime gate always starts
+   VITURE hand tracking without the display subsystem: the display provider
+   would take over the host activity (ONY-840). The pinned `unity-export-1.2`
+   predates that gate and still starts the display, so only a rebuilt export
+   carries the change. A non-GLES3 player also runs hand-only instead of taking
+   the Vulkan stop path.
 2. Install and normalise the export from `apps/wmr_companion_app`:
 
    ```sh

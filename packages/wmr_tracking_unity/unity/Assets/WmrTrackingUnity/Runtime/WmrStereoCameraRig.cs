@@ -48,6 +48,12 @@ namespace OnyxLens.WmrTrackingUnity
 
         [SerializeField, Min(1f)] private float firstFrameTimeoutSeconds = 20f;
 
+        // The depth markers only prove stereo in a standalone test scene. In
+        // an embedded UaaL export their built-in material can fall back to the
+        // magenta error shader, so they are opt-in and off by default
+        // (ONY-840).
+        [SerializeField] private bool buildDepthMarkers = false;
+
         private Camera _camera;
         private bool _contentBuilt;
         private bool _loaderReported;
@@ -99,12 +105,15 @@ namespace OnyxLens.WmrTrackingUnity
         /// <summary>
         /// Three cubes on the forward axis. Their separation at different
         /// depths is the visible proof that each eye gets its own image; an
-        /// empty clear-colour frame would look the same in mono.
+        /// empty clear-colour frame would look the same in mono. The markers
+        /// are opt-in because their built-in material renders magenta when the
+        /// embedded UaaL export strips it (ONY-840).
         /// </summary>
         private void BuildMinimalScene()
         {
             if (_contentBuilt) return;
             _contentBuilt = true;
+            if (!buildDepthMarkers) return;
 
             var lightObject = new GameObject("WmrStereoLight");
             var light = lightObject.AddComponent<Light>();
@@ -194,10 +203,9 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void Update()
         {
-            // A Vulkan player cannot host VITURE's GLES-only display provider,
-            // so the unified bridge starts hand tracking without the display
-            // subsystem. There is no stereo stage ladder to report in that
-            // mode (ONY-802).
+            // The embedded UaaL player never starts VITURE's display provider,
+            // so there is no stereo stage ladder to report in that mode. The
+            // same applies to a non-GLES3 player (ONY-840).
             if (unifiedBridge != null && unifiedBridge.IsVitureDisplayless)
             {
                 _vitureSession = false;

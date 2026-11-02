@@ -50,9 +50,10 @@ namespace OnyxLens.WmrTrackingViture
 
         /// <summary>
         /// Set by the unified bridge when the XR display subsystem is not
-        /// running. A Vulkan player cannot host the GLES-only VITURE display
-        /// provider, so hand tracking is started on its own and the 2D/stereo
-        /// preflight does not apply (ONY-802).
+        /// running. The embedded UaaL player never starts the VITURE display
+        /// provider (it would take over the host activity), and a Vulkan
+        /// player cannot host it, so hand tracking is started on its own and
+        /// the 2D/stereo preflight does not apply (ONY-840).
         /// </summary>
         public bool DisplaylessHandTracking { get; set; }
 
@@ -202,8 +203,9 @@ namespace OnyxLens.WmrTrackingViture
 #if !UNITY_EDITOR
             if (DisplaylessHandTracking)
             {
-                // The display subsystem is deliberately not running: a Vulkan
-                // player cannot host VITURE's GLES-only display provider.
+                // The display subsystem is deliberately not running: the
+                // embedded UaaL player must not let the display provider take
+                // over the host activity, and a Vulkan player cannot host it.
                 // HandTracking.Start() is the whole session on that path.
                 Debug.Log(
                     "[WmrTrackingViture] starting hand tracking without the XR " +

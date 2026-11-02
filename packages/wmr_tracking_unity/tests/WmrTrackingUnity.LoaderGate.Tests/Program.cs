@@ -25,6 +25,7 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
             StartsVitureHandOnlyOnVulkan();
             KeepsDisplaylessSessionWhenHandStartFails();
             StartsFullVitureLoaderOnOpenGles3();
+            StartsVitureHandOnlyInEmbeddedUaaLOnOpenGles3();
 
             Console.WriteLine(
                 _failures == 0
@@ -247,14 +248,56 @@ namespace OnyxLens.WmrTrackingUnity.LoaderGate.Tests
                 Check(
                     gate.EnsureOnly(VendorBackend.Viture) ==
                         VendorLoaderGate.Result.Initialised,
-                    "OpenGL ES keeps the normal stereo display path"
+                    "OpenGL ES keeps the normal stereo display path in a standalone player"
                 );
-                Check(!gate.VitureHandOnly, "the gate is not displayless on OpenGL ES");
+                Check(
+                    !gate.VitureHandOnly,
+                    "a standalone OpenGL ES gate is not displayless"
+                );
                 Check(
                     manager.startSubsystemsCalls == 1,
                     "the full loader starts the display subsystem"
                 );
                 Check(!hand.running, "the hand-only path does not run on OpenGL ES");
+            }
+            finally
+            {
+                SystemInfo.graphicsDeviceType = previous;
+            }
+        }
+
+        private static void StartsVitureHandOnlyInEmbeddedUaaLOnOpenGles3()
+        {
+            GraphicsDeviceType previous = SystemInfo.graphicsDeviceType;
+            SystemInfo.graphicsDeviceType = GraphicsDeviceType.OpenGLES3;
+            try
+            {
+                XRManagerSettings manager = FreshManager();
+                var viture = new VitureLoader();
+                var hand = new XRHandSubsystem();
+                viture.loadedSubsystem = hand;
+                manager.activeLoaders.Add(viture);
+                manager.activeLoaders.Add(new XrealLoader());
+
+                var gate = new VendorLoaderGate(embeddedUaaL: true);
+                Check(
+                    gate.EnsureOnly(VendorBackend.Viture) ==
+                        VendorLoaderGate.Result.InitialisedHandOnly,
+                    "an embedded UaaL VITURE start uses the hand-only path on OpenGL ES"
+                );
+                Check(
+                    gate.VitureHandOnly,
+                    "the embedded gate reports displayless VITURE"
+                );
+                Check(
+                    hand.running && hand.startCalls == 1,
+                    "the embedded hand subsystem starts"
+                );
+                Check(
+                    manager.startSubsystemsCalls == 0,
+                    "an embedded UaaL start never starts the display subsystem"
+                );
+                Check(manager.activeLoader == viture, "VITURE is the active loader");
             }
             finally
             {
