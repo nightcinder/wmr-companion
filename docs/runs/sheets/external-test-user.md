@@ -55,7 +55,7 @@ v0.3.14 ships on the pinned `unity-export-1.4`. In embedded UaaL the displayless
 
 The v0.3.13 fixes still apply. In embedded UaaL the Unity bridge is hand-only. VITURE's display provider can no longer take over the Flutter host activity. The unshaded marker cubes are gone (ONY-840). Unity and vendor player activities are no longer exported, so `MainActivity` is the only entry point (ONY-842).
 
-The v0.3.12 fixes still apply. The Unity player is pinned to OpenGL ES 3. The loader gate starts only VITURE's hand subsystem on a non-GLES3 player. The hosted Unity view no longer takes D-pad focus, so Volume Up and Volume Down move focus (ONY-802).
+The v0.3.12 fixes still apply. The Unity player is pinned to OpenGL ES 3. The loader gate starts VITURE's hand and input subsystems on a non-GLES3 player, and the display subsystem stays stopped. The hosted Unity view no longer takes D-pad focus, so Volume Up and Volume Down move focus (ONY-802).
 
 The v0.3.11 fixes still apply. Automatic glasses detection, the XREAL cold-start fix, and the Unity player resume and focus on first host keep the Neckband from dropping to 0DoF.
 
@@ -194,10 +194,11 @@ If the app still shows 0DoF on v0.3.14, capture logs and record the status line.
 
 **Launch crash and input (ONY-802).** v0.3.12 is the first release on
 `unity-export-1.2`: the Unity player is pinned to OpenGL ES 3 so VITURE's
-display provider no longer takes the Vulkan stop path, and the loader gate
-starts only VITURE's hand subsystem on a player that is not GLES3 as a
-fallback. The hosted Unity view no longer takes input focus, so the Flutter UI
-keeps its own focus and stays visible. A Pro Neckband has no D-pad, so use its
+display provider no longer takes the Vulkan stop path. On v0.3.14 the loader
+gate starts VITURE's hand and input subsystems on a player that is not GLES3
+as a fallback, with the display subsystem stopped. The hosted Unity view no
+longer takes input focus, so the Flutter UI keeps its own focus and stays
+visible. A Pro Neckband has no D-pad, so use its
 volume rocker instead: short Volume Up and Volume Down presses move the focus
 ring, holding Volume Down selects the focused control, and holding Volume Up
 goes back. With headgaze on (Settings + Power), Volume Down selects and Volume
