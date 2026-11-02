@@ -1,11 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.3.13+18
 
 - VITURE Pro Neckband in embedded UaaL: the Unity bridge is hand-only, so the
   display provider can no longer take over the Flutter host activity, and the
   unshaded marker cubes are gone (ONY-840). Shipped through the pinned
   `unity-export-1.3`.
+- Unity and vendor player activities are no longer exported: `MainActivity` is
+  the only entry point, so a stale vendor or Unity activity cannot be launched
+  over the Flutter host (ONY-842).
 
 ## 0.3.12+17
 
