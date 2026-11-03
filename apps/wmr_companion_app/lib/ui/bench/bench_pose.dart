@@ -179,9 +179,12 @@ class BenchPosePlan {
   }
 
   /// Written into the resume file so a changed plan starts a fresh corpus.
+  ///
+  /// The `x2` hand multiplier is only part of the full schedule; the short
+  /// protocol records its five scored runs on alternating hands.
   String get signature =>
       '${alternateHands ? 'short' : 'full'}:'
-      '${runsPerClass}x${poseCorpus.length}x2'
+      '${runsPerClass}x${poseCorpus.length}${alternateHands ? '' : 'x2'}'
       '+${occlusionRuns}occlusion@${minRunDuration.inMilliseconds}ms';
 }
 
@@ -193,8 +196,8 @@ final benchPoseSequenceProvider = Provider<List<BenchPoseSpec>>(
   (ref) => ref.watch(benchPosePlanProvider).sequence,
 );
 
-/// The default 6-run alternating-hand corpus plus one diagnostic occlusion
-/// run.
+/// The default six alternating-hand runs: five scored motion classes plus one
+/// diagnostic occlusion run.
 final List<BenchPoseSpec> benchPoseSequence = const BenchPosePlan().sequence;
 
 /// Whether the active tracking source can feed the pose recorder.

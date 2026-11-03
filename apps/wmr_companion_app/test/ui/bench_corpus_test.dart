@@ -98,6 +98,33 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
+  test(
+    'the default corpus signs without the full schedule hand multiplier',
+    () {
+      expect(const BenchPosePlan().signature, 'short:1x5+1occlusion@15000ms');
+    },
+  );
+
+  test('the lab plan keeps 42 runs, both hands and the 30 s floor', () {
+    const plan = BenchPosePlan.full();
+    final specs = plan.sequence;
+
+    expect(specs, hasLength(42));
+    expect(plan.minRunDuration, const Duration(seconds: 30));
+    expect(plan.signature, 'full:4x5x2+1occlusion@30000ms');
+    for (final segment in poseCorpus) {
+      expect(
+        specs.where((spec) => spec.segment == segment).map((spec) => spec.hand),
+        containsAll(<int>[0, 1]),
+      );
+    }
+    for (final spec in specs) {
+      final duration =
+          spec.segment.defaultDuration * plan.cyclesFor(spec.segment);
+      expect(duration, greaterThanOrEqualTo(plan.minRunDuration));
+    }
+  });
+
   test('the guided bench records the 6-run alternating-hand corpus', () async {
     const durations = BenchDurations(
       poseStill: Duration(milliseconds: 60),
