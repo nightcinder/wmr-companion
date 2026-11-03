@@ -489,6 +489,7 @@ class TuningRow {
     required this.lagSlowMedianMs,
     required this.lagMedianMs,
     required this.step90Ms,
+    this.scored = true,
   });
 
   final TuningPoint point;
@@ -498,7 +499,13 @@ class TuningRow {
   final double lagMedianMs;
   final double step90Ms;
 
+  /// Whether every scored motion class was present when this row was
+  /// evaluated. A partial corpus can compute some bars but not all, so its
+  /// rows must never read as passing.
+  final bool scored;
+
   bool get passes =>
+      scored &&
       jitterMm <= poseFilterJitterLimitMm &&
       jitterDriftMm <= poseFilterDriftJitterLimitMm &&
       lagMedianMs <= poseFilterLagLimitMs;
@@ -515,6 +522,7 @@ class TuningRow {
     'lag_slow_median_ms': _round(lagSlowMedianMs),
     'lag_median_ms': _round(lagMedianMs),
     'step90_ms': _round(step90Ms),
+    'scored': scored,
     'passes': passes,
     'slow_lag_regression_ok': slowLagRegressionOk,
   };
@@ -580,11 +588,16 @@ class TuningReport {
   bool get passed =>
       !inconclusive && missingMotions.isEmpty && (bypass || chosen != null);
 
+  /// Whether every scored motion class was present. A partial corpus is
+  /// reported for the classes it has, but never selects constants.
+  bool get complete => missingMotions.isEmpty;
+
   Map<String, Object?> toJson() => {
     'runtime': runtime.name,
     'captures': captureCount,
     'raw_jitter_mm': _round(rawJitterMm),
     'bypass': bypass,
+    'complete': complete,
     'missing_motions': missingMotions,
     'passed': passed,
     'inconclusive': inconclusive,
@@ -680,6 +693,7 @@ List<TuningReport> tunePoseFilter(
         ? double.nan
         : _worst([for (final capture in still) _rawJitterMm(capture)]);
     final bypass = rawJitter.isFinite && rawJitter <= poseFilterJitterLimitMm;
+    final complete = missing.isEmpty;
 
     final base = _evaluateGrid(
       grid: grid,
@@ -687,6 +701,7 @@ List<TuningReport> tunePoseFilter(
       drift: drift,
       slow: slow,
       moving: moving,
+      complete: complete,
       minDt: minDt,
     );
     var chosen = base.chosen;
@@ -706,6 +721,7 @@ List<TuningReport> tunePoseFilter(
             drift: drift,
             slow: slow,
             moving: moving,
+            complete: complete,
             minDt: minDt,
           );
           chosen = rerun.chosen;
@@ -719,6 +735,15 @@ List<TuningReport> tunePoseFilter(
           );
         }
       }
+    }
+
+    if (!complete) {
+      // A still-only or otherwise partial file set can satisfy some bars by
+      // accident (an absent class contributes zero lag and zero drift), so it
+      // must never publish a winner.
+      chosen = null;
+      extension = null;
+      inconclusive = false;
     }
 
     reports.add(
@@ -753,6 +778,7 @@ _Evaluation _evaluateGrid({
   required List<PoseCapture> drift,
   required List<PoseCapture> slow,
   required List<PoseCapture> moving,
+  required bool complete,
   required Duration minDt,
 }) {
   final rows = <TuningRow>[];
@@ -772,6 +798,7 @@ _Evaluation _evaluateGrid({
         lagSlowMedianMs: slowMetrics.lagMedianMs,
         lagMedianMs: movingMetrics.lagMedianMs,
         step90Ms: movingMetrics.step90Ms,
+        scored: complete,
       ),
     );
   }

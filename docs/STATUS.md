@@ -234,7 +234,7 @@ ONY-501 kept the One Euro structure and required a constant change. The structur
 
 **The tuning constants are unchanged and not chosen by reasoning.** `minCutoff = 1 Hz`, `beta = 0.02` and `dCutoff = 1 Hz` remain the published defaults until a hardware capture exists. The grid harness (`packages/wmr_tracking/tool/pose_filter_tune.dart`) evaluates all 4,264 points of `filter-spec` rev 4 section 7, selects the passing point with the lowest drift jitter `J_D`, and writes the full grid plus per-capture before/after metrics. A winner on a bar-limiting grid edge is inconclusive: the harness extends that axis 50 % and reruns both. Its committed test vectors are synthetic placeholders, clearly marked `kind: synthetic`; they exercise the harness and are not a tuning result.
 
-The task is blocked on four >=30 s hardware runs per motion class and hand (still, held drifting, slow 10 cm/s, medium 50 cm/s, fast 150 cm/s, plus an occlusion run) recorded with the ONY-249 recorder, with the app commit and firmware SHA attached. Procedure and acceptance: [runs/sheets/pose-filter.md](runs/sheets/pose-filter.md).
+The task remains blocked on a usable hardware corpus. One Android XR / Aura pilot on 2026-11-02 produced only left-hand still traces: two runs, one of them short of 30 s, and neither is a static hold (4.81 mm and 16.23 mm `J`; the best grid point is 16.22 mm against the 0.5 mm bar). All other classes are absent, so no constant was chosen. A pilot corpus of one accepted >=30 s run per scored class per hand is enough for a first decision (10 runs per runtime, `--runs-per-class 1`); four runs per class remains the confidence target. Procedure and acceptance: [runs/sheets/pose-filter.md](runs/sheets/pose-filter.md).
 
 ## Not yet run on hardware (as of 2026-10-30)
 
@@ -253,7 +253,7 @@ Close-out checks reported by the project owner on 2026-10-22 (user-reported, one
 - Wi-Fi bridge streaming on a physical Raspberry Pi (host-tested / loopback-only with `--replay` in PR #61 and PR #62; pending Pi hardware sitting P1–P10).
 - `BleTransport` name: settled. The owner decided on ONY-146 to keep `BleTransport` for `0.1.0` (it is GATT-shaped but wraps third-party libraries); the name is unchanged in `0.2.1`.
 - Headset head/hand tracking on any device, and every vendor adapter path in [TRACKING.md](TRACKING.md): Android XR permissions/session, XREAL Unity hand tracking, RayNeo ARDK head pose, Rokid UXR gestures, VITURE Carina pose/stereo frames and VITURE Neckband Unity hands. The framework itself is unit-tested only.
-- The ONY-502 pose-filter constants on real anchor traces. The tuner and structural fix are tested, but no hardware capture exists, so the constants are still the published defaults.
+- The ONY-502 pose-filter constants on real anchor traces. The tuner and structural fix are tested, and a first Android XR pilot exists, but no complete corpus does, so the constants are still the published defaults.
 
 ## Where things are
 

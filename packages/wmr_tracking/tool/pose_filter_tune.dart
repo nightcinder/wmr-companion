@@ -192,7 +192,12 @@ String _markdown(List<TuningReport> reports, int captureCount) {
       ..writeln('## ${report.runtime.name}')
       ..writeln()
       ..writeln(
-        report.bypass
+        report.missingMotions.isNotEmpty
+            ? '**Partial corpus:** missing '
+                  '${report.missingMotions.join(', ')}. The grid below is '
+                  'published for the classes present, but no constant is '
+                  'chosen and this is neither a pass nor a failure.'
+            : report.bypass
             ? 'Raw input already meets the jitter bound; bypass the filter.'
             : report.inconclusive
             ? '**Inconclusive:** the extended grid still selects a point on a '
@@ -204,11 +209,6 @@ String _markdown(List<TuningReport> reports, int captureCount) {
                   'J_D ${report.chosen!.jitterDriftMm.toStringAsFixed(3)} mm, '
                   'lag ${report.chosen!.lagMedianMs.toStringAsFixed(1)} ms.',
       );
-    if (report.missingMotions.isNotEmpty) {
-      buffer.writeln(
-        'Missing motion classes: ${report.missingMotions.join(', ')}.',
-      );
-    }
     _writeGridTable(buffer, report.rows);
     final extension = report.extension;
     if (extension != null) {

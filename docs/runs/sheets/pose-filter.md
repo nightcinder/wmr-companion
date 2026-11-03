@@ -1,10 +1,11 @@
 # Pose filter tuning against recorded captures (ONY-502)
 
-> **Status: blocked awaiting captures. No constants were chosen.** ONY-501
-> requires the grid search to run on recorded anchor traces, not on reasoning.
-> No such capture exists yet, so `minCutoff`, `beta` and `dCutoff` are still the
+> **Status: pilot captures only. No constants were chosen.** One external
+> Android XR run on 2026-11-02 produced left-hand still traces only; no held
+> drift, slow, medium, fast or occlusion class exists, and no grid point meets
+> the static jitter bound. `minCutoff`, `beta` and `dCutoff` stay at the
 > published defaults. The structural fix and the 4,264-point harness are
-> implemented and tested; the tables below are deliberately unfilled.
+> implemented and tested.
 >
 > Normative source: ONY-501's `filter-spec` **revision 4**. Where this sheet and
 > that document disagree, the document wins. Revision 1's grid, speeds and
@@ -82,14 +83,38 @@ The whole grid is published, not just the winner. The synthetic vectors under
 harness vectors, not captures: they say `kind: synthetic`, `app_commit: null`,
 `firmware_sha: null`, and must not be used to choose constants.
 
-## Before and after (pending captures)
+## Pilot capture, 2026-11-02 (Android XR / Aura)
 
-Every cell stays empty until the hardware runs exist. Fill one row group per
-runtime; the tuner writes the numbers in this shape.
+One external tester ran the benched pose step on a Google Aura with the
+Android XR runtime auto-detected, app 0.3.14 (2019) at commit `a9b0ddc`, no
+bridge attached (`firmware_sha` null). The tester stopped after a few left-hand
+passes instead of the 40-file section 8 corpus. Files are committed under
+`packages/wmr_tracking/test/fixtures/pose_filter_captures/hardware/`.
+
+| File | Segment | Samples | Anchor span | `J` at defaults | Note |
+|---|---|---:|---:|---:|---|
+| `androidXr/left/still/run1.json` | S | 4113 | 30.0 s | 4.814 mm | accepted |
+| `androidXr/left/still/run2.json` | S | 3978 | 28.0 s | 16.230 mm | short of the 30 s minimum |
+| `run4` (not committed) | S | 333 tracked of 4260 | 30.0 s | — | 3927 samples had no left hand; not a hold |
+
+The whole 4,264-point grid was replayed on the two traces; its best static
+jitter is **16.224 mm** against the 0.5 mm bar, and no point passes. The
+companion grid is [pose-filter-grid-androidXr-20261102.md](pose-filter-grid-androidXr-20261102.md).
+
+This is not a tuning result and not grounds to loosen the bar. Both runs move
+at 2.4-5.4 cm/s between samples at the 90th percentile, so they are not a
+static hold: the tester was still moving, and run 2 is also short. The four
+other classes are absent, so the harness refuses to choose constants even
+though it publishes the grid for the class present.
+
+## Before and after (pilot only)
+
+Only the one Android XR still row has data. The two numbers are the two pilot
+runs; neither reaches the 0.5 mm bar, and no other cell has a capture yet.
 
 | Runtime | Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Android XR | still | | | — | — | — | — | — | — | — | — |
+| Android XR | still | 4.814 / 16.230 | 4.814 / 16.230 | — | — | — | — | — | — | — | — |
 | Android XR | held, drifting | — | — | | | — | — | — | — | — | — |
 | Android XR | slow pan | — | — | — | — | | | | | — | — |
 | Android XR | medium pan | — | — | — | — | | | | | — | — |
@@ -128,6 +153,13 @@ separately (`TrackedHand.left` and `TrackedHand.right`). Include an occlusion
 run (hand-anchor motion with the hand briefly hidden) for diagnostics; rev 4 has
 no bar for that class.
 
+Four runs per class is the section 8 confidence target, not a precondition for
+a first decision. A **pilot corpus** of one accepted >=30 s run of each scored
+class per hand is enough for the tuner to evaluate every bar; that is 10 runs
+per runtime (about 5 minutes of motion) instead of 40. Prepare it with
+`--runs-per-class 1`. Do not trade away a class: one missing class leaves the
+harness unable to choose any constant.
+
 For every file record the runtime (`androidXr`, `viture`, `xreal`), the app
 commit, the firmware short SHA, the anchor rate and the run index in the
 `provenance` block. The guided bench below does this automatically; a
@@ -146,7 +178,9 @@ revisions.
    runs of each of the five scored motion classes for each hand, in this order:
    LEFT still x4, LEFT drifting x4, LEFT slow x4, LEFT medium x4, LEFT fast x4,
    then one LEFT occlusion diagnostic; then the same corpus and diagnostic for
-   RIGHT. That is **40 corpus files plus 2 diagnostic files**.
+   RIGHT. That is **40 corpus files plus 2 diagnostic files** for the full
+   confidence pass; a pilot may stop after the first accepted run of each class
+   and skip the repeats.
 3. Each run repeats the section 8 path until it is at least 30 s: still 30 s,
    held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s. The
    occlusion run is 30 s and diagnostic only.
@@ -200,6 +234,13 @@ wall-clock timer and stamps each sample when the frame arrives; the occlusion
 diagnostic has no duration bar, so a short occlusion recording still counts. A
 complete corpus is four runs of each scored class and one occlusion run, for
 both hands of each runtime present in the bundle.
+
+Two flags make a smaller pass usable without moving a bar:
+`--runs-per-class <n>` lowers the section 8 confidence target (use `1` for the
+pilot corpus above), and `--allow-incomplete` writes whatever cells exist and
+exits 3 for an interrupted bench. A partial corpus is for diagnosis only: the
+tuner publishes the grid for the classes present, marks every row unscored and
+chooses no constant.
 
 Controller-only
 recordings still do not close the gap: with no runtime anchor the fuser falls

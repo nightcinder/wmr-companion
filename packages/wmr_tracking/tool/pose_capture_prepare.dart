@@ -10,6 +10,12 @@
 // corpus that does not cover every runtime/hand/class cell with runs of at
 // least 30 s. Exit 0 means the corpus is complete and written, 1 means it was
 // refused as incomplete, 2 means bad arguments or unreadable input.
+//
+// `--runs-per-class <n>` lowers the section 8 confidence target for a pilot
+// corpus. `--allow-incomplete` writes whatever cells exist instead of refusing,
+// for a partial read of an interrupted bench; it exits 3. Neither flag changes
+// an acceptance bar: the tuner still refuses to choose constants unless every
+// scored motion class is present.
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,12 +24,15 @@ import 'src/pose_capture_prepare.dart';
 const String _defaultOutput = 'build/pose_corpus';
 const String _usage =
     'usage: dart run tool/pose_capture_prepare.dart '
-    '(--bundle <zip> | --captures <dir>) [--out <dir>]';
+    '(--bundle <zip> | --captures <dir>) [--out <dir>] '
+    '[--runs-per-class <n>] [--allow-incomplete]';
 
 void main(List<String> args) {
   String? bundle;
   String? captures;
   var output = _defaultOutput;
+  var runsPerClass = const PoseCorpusPlan().runsPerClass;
+  var allowIncomplete = false;
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
     if (arg == '--bundle' && i + 1 < args.length) {
@@ -38,6 +47,21 @@ void main(List<String> args) {
       output = args[++i];
     } else if (arg.startsWith('--out=')) {
       output = arg.substring('--out='.length);
+    } else if (arg == '--runs-per-class' && i + 1 < args.length) {
+      runsPerClass = int.tryParse(args[++i]) ?? 0;
+      if (runsPerClass < 1) {
+        _fail('--runs-per-class must be a positive integer', 2);
+        return;
+      }
+    } else if (arg.startsWith('--runs-per-class=')) {
+      runsPerClass =
+          int.tryParse(arg.substring('--runs-per-class='.length)) ?? 0;
+      if (runsPerClass < 1) {
+        _fail('--runs-per-class must be a positive integer', 2);
+        return;
+      }
+    } else if (arg == '--allow-incomplete') {
+      allowIncomplete = true;
     } else if (arg == '--help' || arg == '-h') {
       stdout.writeln(_usage);
       return;
@@ -62,14 +86,18 @@ void main(List<String> args) {
               'pose_capture_<runtime>_<hand>_<segment>[_runN].json',
             ),
           );
-    corpus = prepareCorpus(inputs);
+    corpus = prepareCorpus(
+      inputs,
+      plan: PoseCorpusPlan(runsPerClass: runsPerClass),
+    );
   } on PosePrepareException catch (error) {
     _fail(error.message, 2);
     return;
   }
 
   stdout.writeln(corpus.coverage.toMarkdown());
-  if (!corpus.isComplete) {
+  final complete = corpus.isComplete;
+  if (!complete && !allowIncomplete) {
     exitCode = 1;
     stderr.writeln(
       const JsonEncoder.withIndent('  ').convert({
@@ -86,6 +114,8 @@ void main(List<String> args) {
     const JsonEncoder.withIndent('  ').convert({
       'output': output,
       'coverage': '${output}/coverage.md',
+      'complete': complete,
+      'missing': corpus.missingCells,
       'captures': corpus.captures.length,
       'runtimes': [
         for (final runtime in corpus.coverage.runtimes) runtime.name,
@@ -98,6 +128,7 @@ void main(List<String> args) {
       ],
     }),
   );
+  if (!complete) exitCode = 3;
 }
 
 void _fail(String message, int code) {

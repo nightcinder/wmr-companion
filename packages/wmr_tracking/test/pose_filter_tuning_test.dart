@@ -211,6 +211,28 @@ void main() {
       expect(lowerDrift, isEmpty);
     });
 
+    test('a partial corpus never selects constants', () {
+      const grid = PoseGrid(
+        minCutoff: PoseAxis(min: 0.10, max: 1.00, step: 0.10),
+        beta: PoseAxis(min: 0.00, max: 0.20, step: 0.02),
+        dCutoff: PoseAxis(min: 0.5, max: 2.0, step: 0.5),
+      );
+      final still = _loadCaptures(
+        runtime: TrackingVendor.androidXr,
+        run: 1,
+      ).where((capture) => capture.motion == PoseMotion.still).toList();
+
+      final report = tunePoseFilter(still, grid: grid).single;
+
+      expect(report.complete, isFalse);
+      expect(report.chosen, isNull);
+      expect(report.passed, isFalse);
+      expect(report.missingMotions, isNot(contains(PoseMotion.still.name)));
+      expect(report.missingMotions, contains(PoseMotion.mediumPan.name));
+      expect(report.rows, isNotEmpty);
+      expect(report.rows.every((row) => !row.passes), isTrue);
+    });
+
     test('the slow-sweep bound is a regression metric, not a grid gate', () {
       const row = TuningRow(
         point: TuningPoint(minCutoffHz: 2.0, beta: 0.2, dCutoffHz: 2.0),

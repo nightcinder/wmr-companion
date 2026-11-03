@@ -14,6 +14,13 @@
   `<runtime>/<hand>/<motion>/run<N>.json`. It prints the `filter-spec` rev 4
   section 8 coverage matrix and refuses an incomplete corpus with exit 1,
   naming every missing cell. `pose_filter_tune.dart` reads the split tree.
+- ONY-502: ingestion for the first hardware pilot. `pose_capture_prepare.dart`
+  gains `--runs-per-class` (a one-run-per-class pilot instead of the four-run
+  section 8 target) and `--allow-incomplete` (write an interrupted corpus and
+  exit 3); the tuner marks rows from a partial corpus unscored and chooses no
+  constants. The two accepted Android XR left-hand still traces are committed
+  under `test/fixtures/pose_filter_captures/hardware/`; they are evidence, not
+  a tuning result.
 - ONY-502: the hand-anchor `OneEuroFilter` now runs on the anchor sample's own
   clock, once per new anchor sample, and the fuser holds the filtered value
   between samples. `minDt` follows the anchor rate (11 ms) instead of the

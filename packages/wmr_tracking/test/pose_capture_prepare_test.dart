@@ -157,6 +157,29 @@ void main() {
     expect(coverage, contains('4/4 | 1/1 |'));
   });
 
+  test('a pilot plan accepts one run per scored class per hand', () {
+    final pilot = [
+      for (final hand in TrackedHand.values)
+        for (final segment in _segments)
+          _input(
+            runtime: TrackingVendor.viture,
+            hand: hand,
+            segment: segment,
+            run: 1,
+          ),
+    ];
+
+    final corpus = prepareCorpus(
+      pilot,
+      plan: const PoseCorpusPlan(runsPerClass: 1),
+    );
+
+    expect(corpus.isComplete, isTrue);
+    expect(corpus.captures, hasLength(12));
+    expect(corpus.paths, contains('viture/left/fastFlick/run1.json'));
+    expect(corpus.paths, contains('viture/right/occlusion/run1.json'));
+  });
+
   test('refuses an incomplete corpus and names the missing cell', () async {
     final captures = Directory('${temp.path}/captures')..createSync();
     final corpus = [
