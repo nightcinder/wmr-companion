@@ -30,12 +30,12 @@ class BenchDurations {
     this.move = const Duration(seconds: 20),
     this.capture = const Duration(seconds: 60),
     this.latency = const Duration(seconds: 30),
-    this.poseStill = const Duration(seconds: 10),
-    this.poseDrifting = const Duration(seconds: 10),
+    this.poseStill = const Duration(seconds: 15),
+    this.poseDrifting = const Duration(seconds: 15),
     this.poseSlowPan = const Duration(seconds: 18),
-    this.poseMediumPan = const Duration(seconds: 10),
+    this.poseMediumPan = const Duration(seconds: 15),
     this.poseFastFlick = const Duration(seconds: 20),
-    this.poseOcclusion = const Duration(seconds: 30),
+    this.poseOcclusion = const Duration(seconds: 15),
     this.handTimeout = const Duration(seconds: 5),
     this.firmwareTimeout = const Duration(seconds: 3),
     this.handEmpty = const Duration(seconds: 60),
@@ -65,7 +65,7 @@ class BenchDurations {
     PoseSegment.occlusion => poseOcclusion,
   };
 
-  /// One corpus run: the section 8 path repeated until the plan's minimum is
+  /// One corpus run: the segment's path repeated until the plan's minimum is
   /// reached. The per-cycle durations stay injectable so tests can run short.
   Duration poseRunDuration(PoseSegment segment, BenchPosePlan plan) =>
       poseDuration(segment) * plan.cyclesFor(segment);
@@ -349,10 +349,10 @@ enum BenchStep {
           'passes, over 15% fails, and 5-15% is marginal. ONY-736 scores the '
           'recorded percentage.',
     BenchStep.poseCapture =>
-      'Records the filter-spec section 8 corpus: four runs of each of the five '
-          'motion classes per hand, then one occlusion diagnostic run per '
-          'hand. Every run is at least 30 s and is sampled at the anchor rate '
-          'with provenance. Each run has its own screen and can be skipped; an '
+      'Records the shortened 6DoF corpus: one run of each of the five motion '
+          'classes, alternating hands, then one occlusion diagnostic run. '
+          'Every run is 15-20 s and is sampled at the anchor rate with '
+          'provenance. Each run has its own screen and can be skipped; an '
           'interrupted run resumes where it stopped.',
     BenchStep.carinaLeds =>
       'ONY-735 Gate 1. Keep both controllers on, dim the room, and connect '

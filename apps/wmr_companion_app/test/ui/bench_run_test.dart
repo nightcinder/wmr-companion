@@ -359,7 +359,7 @@ void main() {
     expect(manifest, contains('- Bench mode: combined'));
     expect(manifest, contains('## 6DoF pose captures'));
     expect(manifest, contains('pose_capture_viture_left_still.json'));
-    expect(manifest, contains('pose_capture_viture_right_fast_flick.json'));
+    expect(manifest, contains('pose_capture_viture_left_fast_flick.json'));
     // The header commit is the app build, not the per-segment fallback.
     final header = manifest.split('## 6DoF').first;
     expect(header, contains('- App commit: abc1234'));
@@ -459,11 +459,11 @@ void main() {
       _resumeSession(dir, first),
     );
     final firstController = await _startResumeCorpus(firstContainer);
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 3; i++) {
       await firstController.runCurrent();
     }
-    expect(firstContainer.read(benchControllerProvider).poseSegment, 5);
-    expect(first.recorded, hasLength(5));
+    expect(firstContainer.read(benchControllerProvider).poseSegment, 3);
+    expect(first.recorded, hasLength(3));
     await firstController.poseProgressWritten;
     firstContainer.dispose();
 
@@ -475,10 +475,10 @@ void main() {
     final secondController = await _startResumeCorpus(secondContainer);
     await secondController.runCurrent();
     expect(second.recorded, hasLength(1), reason: 'only the next run records');
-    expect(second.recorded.single, '0:drifting:2');
-    expect(secondContainer.read(benchControllerProvider).poseSegment, 6);
+    expect(second.recorded.single, '1:medium_pan:1');
+    expect(secondContainer.read(benchControllerProvider).poseSegment, 4);
 
-    for (var i = 6; i < benchPoseSequence.length; i++) {
+    for (var i = 4; i < benchPoseSequence.length; i++) {
       await secondController.runCurrent();
     }
     final state = secondContainer.read(benchControllerProvider);
@@ -504,17 +504,17 @@ void main() {
       _resumeSession(dir, first),
     );
     final firstController = await _startResumeCorpus(firstContainer);
-    for (var i = 0; i < 8; i++) {
+    for (var i = 0; i < 4; i++) {
       await firstController.runCurrent();
     }
-    expect(first.recorded, hasLength(8));
+    expect(first.recorded, hasLength(4));
     await firstController.poseProgressWritten;
     firstContainer.dispose();
 
-    // LEFT still run 4 (sequence index 3) is gone; the later runs are on disk.
+    // LEFT slow pan (sequence index 2) is gone; the later runs are on disk.
     final missing = File(
       '${dir.path}/runs/'
-      '${poseCaptureFileName(runtime: 'viture', hand: 'left', segment: 'still', run: 4)}',
+      '${poseCaptureFileName(runtime: 'viture', hand: 'left', segment: 'slow_pan', run: 1)}',
     );
     expect(missing.existsSync(), isTrue);
     missing.deleteSync();
@@ -531,10 +531,10 @@ void main() {
       hasLength(1),
       reason: 'resume restarts at the missing run, not the first recorded one',
     );
-    expect(second.recorded.single, '0:still:4');
-    expect(secondContainer.read(benchControllerProvider).poseSegment, 4);
+    expect(second.recorded.single, '0:slow_pan:1');
+    expect(secondContainer.read(benchControllerProvider).poseSegment, 3);
 
-    for (var i = 4; i < benchPoseSequence.length; i++) {
+    for (var i = 3; i < benchPoseSequence.length; i++) {
       await secondController.runCurrent();
     }
     final state = secondContainer.read(benchControllerProvider);
@@ -547,8 +547,8 @@ void main() {
         '${segment['hand']}:${segment['segment']}:${segment['run']}',
     ];
     expect(keys.toSet(), hasLength(benchPoseSequence.length));
-    expect(second.recorded, hasLength(benchPoseSequence.length - 3));
-    expect(second.recorded.first, '0:still:4');
+    expect(second.recorded, hasLength(benchPoseSequence.length - 2));
+    expect(second.recorded.first, '0:slow_pan:1');
   });
 
   group('firmware SHA', () {
