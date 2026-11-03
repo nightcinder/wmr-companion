@@ -18,15 +18,16 @@ enum PoseSegment {
     'still',
     'Hold still',
     Duration(seconds: 15),
-    'Rest the controller in your hand and brace your arm. Keep it still; the '
-        'run repeats this hold until the timer ends.',
+    'Rest the hand or controller with your forearm braced on a table and keep '
+        'it still; the run repeats this hold until the timer ends.',
   ),
   drifting(
     'drifting',
     'Held, drifting',
     Duration(seconds: 15),
-    'Hold as if you were aiming, and let the controller wander slowly; the '
-        'run repeats this until the timer ends.',
+    'Hold as if you were aiming, and let your hand wander at 10-50 cm/s (about '
+        '10-50 cm per second), not a slow drift; the run repeats this until '
+        'the timer ends.',
   ),
   slowPan(
     'slow_pan',

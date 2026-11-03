@@ -22,13 +22,14 @@ alternating, 143 Hz and 26 joints:
 | `androidXr-20261103/right/occlusion/run1.json` | occlusion | 1359 | 15.0 s |
 
 `pose_capture_prepare.dart` accepts it as a complete default corpus (exit 0).
-The full 4,264-point grid was replayed on it: **no point passes.** Best `J_D` is
-1.702 mm against 0.75 mm, and `J` never falls below 7.641 mm against 0.5 mm.
-Lag passes (slow 10 ms, medium 1 ms, fast 7 ms). The failure is the palm
-anchor's low-frequency wander, not the grid; it is escalated to ONY-501. The
-grid is committed at
+The full 4,264-point grid was replayed under ONY-501's addendum: **no point
+passes.** `J` is 1.514 mm against 0.5 mm and `J_D` is 7.576 mm against
+0.75 mm; the grid spread is under 0.04 mm. Lag passes (slow 10 ms, medium
+1 ms, fast 7 ms). The still run was hand-held, not braced, and the drifting
+run's median speed was 2.9 cm/s, so only 43 samples were in segment D's
+10-50 cm/s band. The grid is committed at
 `docs/runs/sheets/pose-filter-grid-androidXr-20261103.md`. Do not choose
-constants from this corpus.
+constants from this corpus; recapture S braced and D in band first.
 
 ## Android XR / Google Aura, 2026-11-02
 

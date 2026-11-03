@@ -176,6 +176,66 @@ void main() {
     });
   });
 
+  group('ONY-501 addendum gating', () {
+    PoseCapture trace(
+      PoseMotion motion,
+      Vector3 Function(double seconds) position, {
+      double seconds = 15,
+      double rateHz = 100,
+    }) {
+      const origin = 1000000000;
+      final samples = <PoseCaptureSample>[];
+      for (var i = 0; i <= (seconds * rateHz).round(); i++) {
+        final t = i / rateHz;
+        samples.add(
+          PoseCaptureSample(
+            timeNs: origin + (t * 1000000000).round(),
+            position: position(t),
+          ),
+        );
+      }
+      return PoseCapture(
+        runtime: TrackingVendor.androidXr,
+        motion: motion,
+        run: 1,
+        provenance: const {'kind': 'test'},
+        samples: samples,
+      );
+    }
+
+    test('J drops the settle and samples above 2 cm/s', () {
+      // A 50 mm step in the first second, then still. The old full-window
+      // metric scored the step; the addendum starts at the last 10 s and
+      // gates the moving samples out.
+      final capture = trace(
+        PoseMotion.still,
+        (t) => Vector3(t < 1 ? 0.05 * t : 0.05, 0, 0),
+      );
+      final metrics = analyzeCapture(capture, const PoseFilterConfig());
+
+      expect(metrics.jitterSamples, greaterThan(0));
+      expect(metrics.jitterSamples, lessThan(capture.samples.length));
+      expect(metrics.jitterMm, lessThan(0.5));
+    });
+
+    test('J_D scores only samples in the 10-50 cm/s band', () {
+      final fast = analyzeCapture(
+        trace(PoseMotion.heldDrift, (t) => Vector3(0.20 * t, 0, 0)),
+        const PoseFilterConfig(),
+      );
+      final slow = analyzeCapture(
+        trace(PoseMotion.heldDrift, (t) => Vector3(0.02 * t, 0, 0)),
+        const PoseFilterConfig(),
+      );
+
+      expect(fast.driftSamples, greaterThan(0));
+      // The first second is the same warmup the quadratic fit has always used.
+      expect(fast.driftSamples, equals(fast.samples - 100));
+      expect(slow.driftSamples, 0);
+      expect(slow.jitterDriftMm, 0);
+    });
+  });
+
   group('tuning', () {
     test('the grid chooses the lowest-J_D passing point', () {
       // A narrow grid around the synthetic optimum so the check is fast and

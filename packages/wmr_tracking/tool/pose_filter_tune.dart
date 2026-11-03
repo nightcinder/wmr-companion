@@ -183,6 +183,12 @@ String _markdown(List<TuningReport> reports, int captureCount) {
     )
     ..writeln()
     ..writeln(
+      'ONY-501 addendum: J is scored on the last 10 s of S, drops the first '
+      '2 s settle and samples above 2 cm/s; J_D is scored only on samples in '
+      'the 10-50 cm/s D band. The bars and the grid are unchanged.',
+    )
+    ..writeln()
+    ..writeln(
       'A winner on a bar-limiting boundary is inconclusive. The tool '
       'extends that axis 50 % at the same step and reruns the whole grid.',
     );

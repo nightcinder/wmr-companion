@@ -1,14 +1,14 @@
 # Pose filter tuning against recorded captures (ONY-502)
 
-> **Status: blocked on ONY-501. No constants were chosen.** A complete 6-run
-> Android XR corpus was recorded on 2026-11-03 (app 0.3.15, commit `591ac18`,
-> no bridge). The full 4,264-point grid was replayed and **no point passes**:
-> the still trace gives `J = 7.644 mm` against the 0.5 mm bar and the drifting
-> trace gives `J_D = 1.703 mm` against 0.75 mm. Lag passes with margin. Under
-> `filter-spec` rev 4's failure rule this is the outcome that reopens the
-> error-state Kalman or fixed-lag options, so it is escalated to ONY-501 rather
-> than tuned around. The structural fix and the harness are implemented and
-> tested.
+> **Status: blocked awaiting captures. No constants were chosen.** A complete
+> 6-run Android XR corpus was recorded on 2026-11-03 (app 0.3.15, commit
+> `591ac18`, no bridge). ONY-501's addendum scores `J` on the last 10 s of S
+> with the first 2 s and samples above 2 cm/s dropped, and `J_D` only on the
+> 10-50 cm/s D band. The full 4,264-point grid still has **no passing point**:
+> `J = 1.514 mm` against 0.5 mm and `J_D = 7.576 mm` against 0.75 mm. The S run
+> was hand-held, not braced, and the D run's median speed was 2.9 cm/s, so only
+> 43 samples fell in band. A braced S and an in-band D are needed before the
+> bars can be judged. Lag passes with margin. Bars and grid are unchanged.
 >
 > Normative source: ONY-501's `filter-spec` **revision 4**, including its note on
 > the 6-run default. Where this sheet and that document disagree, the document
@@ -80,19 +80,39 @@ committed under
 `packages/wmr_tracking/test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`
 and passes `pose_capture_prepare.dart` coverage (6 of 6 cells, exit 0).
 
-The full 4,264-point grid was replayed. **No point passes.** The best `J_D` in
-the grid is 1.702 mm (at `minCutoff = 1.0`, `beta = 0.00`,
-`dCutoff = 0.5`), still above the 0.75 mm bar; `J` never falls below 7.641 mm.
-The tuner therefore chose no constant and exited 1. The whole grid is in
+The full 4,264-point grid was replayed twice. Under rev 4's original
+full-window score no point passes (`J = 7.644 mm`, `J_D = 1.703 mm`). Under
+ONY-501's addendum no point passes either: `J = 1.514 mm` and
+`J_D = 7.576 mm`. `J` ranges only 1.514-1.525 mm across the grid and `J_D`
+7.562-7.594 mm, so the filter is not the limiting factor. The tuner chose no
+constant and exited 1. The addendum grid is in
 [pose-filter-grid-androidXr-20261103.md](pose-filter-grid-androidXr-20261103.md).
 
 Lag is not the problem: median `L` is 10 ms on the slow sweep, 1 ms on medium
-and 7 ms on fast, all inside their bars. The failure is the palm anchor's own
-motion. The still trace moves 41 x 66 x 30 mm peak to peak over 15 s and its
-first three seconds are a settle transient (43.7 mm in the first second);
-after that it still wanders about 1.5 mm RMS over the last 10 s. The residual
-is low-frequency, so a One Euro cutoff of 1 Hz or higher cannot remove it.
-That is a property of the Android XR palm anchor, not of the grid.
+and 7 ms on fast, all inside their bars. The still trace moves 41 x 66 x 30 mm
+peak to peak over 15 s, with a 43.7 mm settle in the first second; the last
+10 s still wander about 1.5 mm RMS. That is the hand-held palm anchor, not a
+braced source-noise hold. The drifting trace's median speed is 2.9 cm/s, so
+only 43 of 2138 samples fall in segment D's 10-50 cm/s band; the gated `J_D`
+is therefore not representative of D.
+
+## ONY-501 addendum (2026-11-03)
+
+The design owner's decision after the first full-window failure:
+
+1. Score `J` only on S's last 10 s. Drop the first 2 s settle and any sample
+   whose measured speed is above 2 cm/s. Speed is a centred 0.5 s difference
+   of the raw anchor position.
+2. Capture S braced: forearm on a table and hand relaxed, so the run measures
+   source sigma, not tremor. D stays hand-held, but score `J_D` only on samples
+   at 10-50 cm/s.
+3. Rescore the existing corpus first; if braced S still exceeds 0.5 mm with
+   sigma well above 1 mm, escalate again with the measured sigma.
+4. The bars and the section 7 grid stay as they are.
+
+The EKF or fixed-lag branch reopens only if a braced, gated capture fails and
+the grid spread is wider than 0.1 mm. This corpus is not that test: S was
+hand-held and D was below its speed band. The next capture must fix both.
 
 ## Acceptance
 
@@ -114,13 +134,14 @@ harness vectors, not captures: they say `kind: synthetic`, `app_commit: null`,
 
 No tuned point exists, so the `after` column repeats the published defaults
 (`minCutoff = 1 Hz`, `beta = 0.02`, `dCutoff = 1 Hz`). `before` is the pre-ONY-502
-paper default (`minDt = 4.167 ms`). The table is evidence of the failure, not a
-tuning result.
+paper default (`minDt = 4.167 ms`). The still and drifting rows use the
+addendum gates: 1425 still samples and 43 drifting samples were scored. The
+table is evidence of the failure, not a tuning result.
 
 | Runtime | Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Android XR | still | 7.644 | 7.644 | — | — | — | — | — | — | — | — |
-| Android XR | held, drifting | — | — | 1.703 | 1.703 | — | — | — | — | — | — |
+| Android XR | still | 1.514 | 1.514 | — | — | — | — | — | — | — | — |
+| Android XR | held, drifting | — | — | 7.576 | 7.576 | — | — | — | — | — | — |
 | Android XR | slow pan | — | — | — | — | 10 | 10 | 10 | 10 | — | — |
 | Android XR | medium pan | — | — | — | — | 1 | 1 | 7 | 7 | — | — |
 | Android XR | fast flick | — | — | — | — | 7 | 7 | 9 | 9 | 91.6 | 91.6 |
@@ -152,8 +173,8 @@ Hands alternate so both hands appear in the bundle.
 
 | # | Hand | Segment | Sheet name | Nominal speed | How to perform | Duration | Scores |
 |---|---|---|---|---|---|---|---|
-| 1 | LEFT | S | still | 0 | Rest the hand with the arm braced | 15 s | J |
-| 2 | RIGHT | D | held, drifting | 10-50 cm/s | Hold as if aiming, let it wander slowly | 15 s | J_D |
+| 1 | LEFT | S | still | 0 | Rest the hand with the forearm braced on a table; hand relaxed | 15 s | J |
+| 2 | RIGHT | D | held, drifting | 10-50 cm/s | Hold as if aiming; let the hand wander at 10-50 cm/s, not a slow drift | 15 s | J_D |
 | 3 | LEFT | slow | slow pan | 10 cm/s | Move the hand 30 cm sideways in 3 s, back and forth; keep the body still | 18 s | L <= 160 ms |
 | 4 | RIGHT | M | medium pan | 50 cm/s | Move the hand 50 cm sideways in 1 s, back and forth; keep the body still | 15 s | L <= 20 ms |
 | 5 | LEFT | F | fast flick | 150 cm/s | Flick the hand 45 cm in 0.3 s, pause, return; keep the body still | 20 s | L <= 20 ms |

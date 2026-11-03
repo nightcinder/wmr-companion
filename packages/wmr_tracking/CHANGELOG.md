@@ -4,12 +4,14 @@
 
 - ONY-502: the first complete 6-run hardware corpus (Android XR / Google Aura,
   2026-11-03, app commit `591ac18`) is committed under
-  `test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`. The full
-  4,264-point grid replayed with no passing point (`J = 7.644 mm`,
-  `J_D = 1.703 mm`), so no constant is chosen and the result is escalated to
-  ONY-501. Also fixes the guided-bench device summary reporting "up to 0 Hz"
-  when a runtime does not declare a hand rate, and makes the pan/flick prompts
-  say to move the hand rather than the body.
+  `test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`. ONY-501's
+  addendum scores `J` on the last 10 s of S without the first 2 s or samples
+  above 2 cm/s, and `J_D` only on the 10-50 cm/s D band; the tuner now reports
+  the scored sample counts. The full 4,264-point grid still has no passing
+  point (`J = 1.514 mm`, `J_D = 7.576 mm`), so no constant is chosen. Also
+  fixes the guided-bench device summary reporting "up to 0 Hz" when a runtime
+  does not declare a hand rate, and clarifies the braced-still, drifting and
+  pan/flick prompts.
 - ONY-669: the Android XR runtime profile now lists `CAMERA`,
   `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`, matching
   the plugin's required set.
