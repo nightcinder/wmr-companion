@@ -120,8 +120,8 @@ Per runtime, from ONY-501's `filter-spec` rev 4 sections 1 and 8:
 
 | Metric | Bar | Applies to |
 |---|---|---|
-| Jitter `J` (RMS from 1 s moving mean) | <= 0.5 mm | segment S, every runtime |
-| Jitter `J_D` (residual from 1 s quadratic) | <= 0.75 mm | segment D, every runtime |
+| Jitter `J` (RMS from 1 s moving mean; last 10 s of S, first 2 s and >2 cm/s dropped) | <= 0.5 mm | segment S, every runtime |
+| Jitter `J_D` (residual from 1 s quadratic; 10-50 cm/s samples only) | <= 0.75 mm | segment D, every runtime |
 | Median lag `L` | <= 20 ms | medium and fast sweeps |
 | Median lag `L` | <= 160 ms | slow sweeps, regression check only |
 
