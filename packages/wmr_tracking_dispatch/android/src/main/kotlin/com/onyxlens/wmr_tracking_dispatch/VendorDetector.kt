@@ -4,12 +4,18 @@ package com.onyxlens.wmr_tracking_dispatch
  * Detects the glasses vendor before any Unity command is sent.
  *
  * Order, highest priority first:
- * 1. A known host (Neckband -> VITURE, Beam Pro -> XREAL); the host is the
+ * 1. An Android XR host (`android.software.xr.api.openxr` / `.spatial`). The
+ *    headset is the compute unit and runs the native Android XR tracking
+ *    source. It also exposes its own USB hardware, which can match a vendor ID
+ *    (Google Aura reports the XREAL-built headset as `0x3318:0x043A`), so USB
+ *    detection must not treat that device as external glasses. Starting the
+ *    shared vendor Unity player on an Android XR host loads VITURE's Android
+ *    plugin, which crashes on the missing vendor runtime class (ONY-879).
+ * 2. A known host (Neckband -> VITURE, Beam Pro -> XREAL); the host is the
  *    vendor compute unit, so its built-in glasses are already known.
- * 2. Exactly one configured USB vendor/product match. Vendor/product IDs are
+ * 3. Exactly one configured USB vendor/product match. Vendor/product IDs are
  *    readable without USB permission, so matching never waits for a grant;
  *    the grant is only reported for the matched device.
- * 3. An Android XR host (`android.software.xr.api.openxr` / `.spatial`).
  * 4. Nothing, reported as `none` with a reason.
  *
  * Both vendor USB matches fail closed instead of guessing; no Unity command is
@@ -21,6 +27,15 @@ class VendorDetector(
     fun detect(environment: GlassesEnvironment): GlassesDetection {
         val ids = config()
         val host = hostOf(environment, ids)
+
+        if (environment.isAndroidXrHost) {
+            return GlassesDetection(
+                vendor = GlassesVendor.ANDROID_XR,
+                host = host,
+                usbPermissionGranted = true,
+                detail = "Android XR runtime feature reported by the host",
+            )
+        }
 
         when (host) {
             GlassesHost.NECKBAND -> return GlassesDetection(
@@ -73,14 +88,6 @@ class VendorDetector(
                     if (granted) "" else " (no USB permission granted yet)",
             )
         }
-        if (environment.isAndroidXrHost) {
-            return GlassesDetection(
-                vendor = GlassesVendor.ANDROID_XR,
-                host = host,
-                usbPermissionGranted = true,
-                detail = "Android XR runtime feature reported by the host",
-            )
-        }
         return GlassesDetection(
             vendor = GlassesVendor.NONE,
             host = host,
@@ -94,6 +101,9 @@ class VendorDetector(
         environment: GlassesEnvironment,
         ids: GlassesUsbConfig,
     ): GlassesHost {
+        // An Android XR headset is its own compute unit; its vendor-name
+        // hardware must not label it as a Beam Pro or Neckband.
+        if (environment.isAndroidXrHost) return GlassesHost.UNKNOWN
         val identity = listOfNotNull(environment.manufacturer, environment.model)
             .joinToString(" ")
             .lowercase()
@@ -104,10 +114,6 @@ class VendorDetector(
         if (ids.xrealHostMarkers.any { identity.contains(it.lowercase()) }) {
             return GlassesHost.BEAM_PRO
         }
-        return if (environment.isAndroidXrHost) {
-            GlassesHost.UNKNOWN
-        } else {
-            GlassesHost.PHONE
-        }
+        return GlassesHost.PHONE
     }
 }

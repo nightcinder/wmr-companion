@@ -1,5 +1,16 @@
 package com.onyxlens.wmr_tracking_dispatch
 
+/**
+ * Platform features that identify an Android XR host.
+ *
+ * Shared by the vendor detector and the Unity player gate so both agree on
+ * what counts as an Android XR device.
+ */
+internal val ANDROID_XR_FEATURES = listOf(
+    "android.software.xr.api.openxr",
+    "android.software.xr.api.spatial",
+)
+
 /** A vendor identified before any Unity command is sent. */
 enum class GlassesVendor(val wireName: String) {
     VITURE("viture"),

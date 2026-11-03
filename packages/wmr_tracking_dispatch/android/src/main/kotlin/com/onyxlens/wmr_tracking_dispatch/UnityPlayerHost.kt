@@ -88,6 +88,7 @@ interface PlayerHost {
  */
 class UnityPlayerHost internal constructor(
     private val viewHost: UnityPlayerViewHost,
+    private val isAndroidXrHost: (Any) -> Boolean = ::hostRunsAndroidXr,
 ) : PlayerHost {
 
     constructor() : this(ReflectiveUnityPlayerViewHost())
@@ -117,6 +118,19 @@ class UnityPlayerHost internal constructor(
                     hosted = false,
                     stage = STAGE_UNAVAILABLE,
                     detail = "No activity to host the shared Unity player",
+                )
+            }
+            // An Android XR headset uses its native tracking source; it must
+            // never construct the shared vendor Unity player. On Aura the
+            // player loads VITURE's Android plugin and the process dies on the
+            // missing vendor runtime class before any loader command can pick
+            // XREAL (ONY-879). Fail closed here even if detection is wrong.
+            if (isAndroidXrHost(newTarget)) {
+                return PlayerHostResult(
+                    hosted = false,
+                    stage = STAGE_UNAVAILABLE,
+                    detail = "Android XR hosts use the native Android XR tracking " +
+                        "source; the vendor Unity player is not loaded",
                 )
             }
             if (hosted && target === newTarget) {
@@ -204,6 +218,18 @@ class UnityPlayerHost internal constructor(
         /** The process-wide player host the activity and the vendor plugins share. */
         val shared: UnityPlayerHost = UnityPlayerHost()
     }
+}
+
+/**
+ * Production Android XR check for [UnityPlayerHost].
+ *
+ * The target is an `Activity` (therefore a `Context`) in production; a test
+ * seam passes a plain object with its own predicate. A non-context target is
+ * never treated as Android XR.
+ */
+private fun hostRunsAndroidXr(target: Any): Boolean {
+    val context = target as? android.content.Context ?: return false
+    return ANDROID_XR_FEATURES.any(context.packageManager::hasSystemFeature)
 }
 
 /**
