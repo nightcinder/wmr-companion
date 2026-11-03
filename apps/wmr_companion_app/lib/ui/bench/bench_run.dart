@@ -514,9 +514,13 @@ class RealBenchSession implements BenchSession {
         data: data,
       );
     }
+    // Android XR does not declare a hand rate; 0 means "not documented", not
+    // "up to 0 Hz". The pose recorder measures the real rate per run.
+    final rate = caps.maxHandRateHz > 0
+        ? ', up to ${caps.maxHandRateHz} Hz'
+        : ' (hand rate not declared)';
     return BenchStepOutcome.done(
-      '${source.vendor.name}: ${caps.handJointCount} hand joints, '
-      'up to ${caps.maxHandRateHz} Hz',
+      '${source.vendor.name}: ${caps.handJointCount} hand joints$rate',
       data: data,
     );
   }

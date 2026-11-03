@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- ONY-502: the first complete 6-run hardware corpus (Android XR / Google Aura,
+  2026-11-03, app commit `591ac18`) is committed under
+  `test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`. The full
+  4,264-point grid replayed with no passing point (`J = 7.644 mm`,
+  `J_D = 1.703 mm`), so no constant is chosen and the result is escalated to
+  ONY-501. Also fixes the guided-bench device summary reporting "up to 0 Hz"
+  when a runtime does not declare a hand rate, and makes the pan/flick prompts
+  say to move the hand rather than the body.
 - ONY-669: the Android XR runtime profile now lists `CAMERA`,
   `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`, matching
   the plugin's required set.
@@ -15,12 +23,11 @@
   section 8 coverage matrix and refuses an incomplete corpus with exit 1,
   naming every missing cell. `pose_filter_tune.dart` reads the split tree.
 - ONY-502: ingestion for the first hardware pilot. `pose_capture_prepare.dart`
-  gains `--runs-per-class` (a one-run-per-class pilot instead of the four-run
-  section 8 target) and `--allow-incomplete` (write an interrupted corpus and
-  exit 3); the tuner marks rows from a partial corpus unscored and chooses no
-  constants. The two accepted Android XR left-hand still traces are committed
-  under `test/fixtures/pose_filter_captures/hardware/`; they are evidence, not
-  a tuning result.
+  gains `--allow-incomplete` (write an interrupted corpus and exit 3); the
+  tuner marks rows from a partial corpus unscored and chooses no constants.
+  The two accepted Android XR left-hand still traces are committed under
+  `test/fixtures/pose_filter_captures/hardware/`; they are evidence, not a
+  tuning result. ONY-869 later replaced the pilot plan with the 6-run default.
 - ONY-502: the hand-anchor `OneEuroFilter` now runs on the anchor sample's own
   clock, once per new anchor sample, and the fuser holds the filtered value
   between samples. `minDt` follows the anchor rate (11 ms) instead of the

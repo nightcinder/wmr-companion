@@ -32,21 +32,22 @@ enum PoseSegment {
     'slow_pan',
     'Slow pan',
     Duration(seconds: 18),
-    'Move 30 cm sideways over 3 s, then back. Repeat until the timer ends.',
+    'Move your hand 30 cm sideways over 3 s, then back. Keep your body still. '
+        'Repeat until the timer ends.',
   ),
   mediumPan(
     'medium_pan',
     'Medium pan',
     Duration(seconds: 15),
-    'Move 50 cm sideways in 1 s, then back. Keep repeating until the timer '
-        'ends.',
+    'Move your hand 50 cm sideways in 1 s, then back. Keep your body still. '
+        'Keep repeating until the timer ends.',
   ),
   fastFlick(
     'fast_flick',
     'Fast flick',
     Duration(seconds: 20),
-    'Flick 45 cm in 0.3 s, pause, then bring it back. Repeat until the timer '
-        'ends.',
+    'Flick your hand 45 cm in 0.3 s, pause, then bring it back. Keep your body '
+        'still. Repeat until the timer ends.',
   ),
   occlusion(
     'occlusion',

@@ -1,10 +1,14 @@
 # Pose filter tuning against recorded captures (ONY-502)
 
-> **Status: blocked awaiting captures. No constants were chosen.** ONY-501
-> requires the grid search to run on recorded anchor traces, not on reasoning.
-> No complete corpus exists yet, so `minCutoff`, `beta` and `dCutoff` are still
-> the published defaults. The structural fix and the 4,264-point harness are
-> implemented and tested; the tables below are deliberately unfilled.
+> **Status: blocked on ONY-501. No constants were chosen.** A complete 6-run
+> Android XR corpus was recorded on 2026-11-03 (app 0.3.15, commit `591ac18`,
+> no bridge). The full 4,264-point grid was replayed and **no point passes**:
+> the still trace gives `J = 7.644 mm` against the 0.5 mm bar and the drifting
+> trace gives `J_D = 1.703 mm` against 0.75 mm. Lag passes with margin. Under
+> `filter-spec` rev 4's failure rule this is the outcome that reopens the
+> error-state Kalman or fixed-lag options, so it is escalated to ONY-501 rather
+> than tuned around. The structural fix and the harness are implemented and
+> tested.
 >
 > Normative source: ONY-501's `filter-spec` **revision 4**, including its note on
 > the 6-run default. Where this sheet and that document disagree, the document
@@ -66,6 +70,30 @@ grounds to escalate. The harness extends that axis by 50 % at the same step,
 reruns the whole grid and writes both runs. If the extended run still selects a
 boundary point, it exits 3 and says to take both grids to ONY-501.
 
+## Result: Android XR, 2026-11-03
+
+Source: `wmr-aura-0.3.15-test-20261103.zip` from the external tester, Android XR
+on a Google Aura (Android 14 / API 34), app 0.3.15 (versionCode 2020) at commit
+`591ac18`, no bridge attached so `firmware_sha` is null. Six runs, one per
+class, hands alternating, 143 Hz and 26 joints. The prepared corpus is
+committed under
+`packages/wmr_tracking/test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`
+and passes `pose_capture_prepare.dart` coverage (6 of 6 cells, exit 0).
+
+The full 4,264-point grid was replayed. **No point passes.** The best `J_D` in
+the grid is 1.702 mm (at `minCutoff = 1.0`, `beta = 0.00`,
+`dCutoff = 0.5`), still above the 0.75 mm bar; `J` never falls below 7.641 mm.
+The tuner therefore chose no constant and exited 1. The whole grid is in
+[pose-filter-grid-androidXr-20261103.md](pose-filter-grid-androidXr-20261103.md).
+
+Lag is not the problem: median `L` is 10 ms on the slow sweep, 1 ms on medium
+and 7 ms on fast, all inside their bars. The failure is the palm anchor's own
+motion. The still trace moves 41 x 66 x 30 mm peak to peak over 15 s and its
+first three seconds are a settle transient (43.7 mm in the first second);
+after that it still wanders about 1.5 mm RMS over the last 10 s. The residual
+is low-frequency, so a One Euro cutoff of 1 Hz or higher cannot remove it.
+That is a property of the Android XR palm anchor, not of the grid.
+
 ## Acceptance
 
 Per runtime, from ONY-501's `filter-spec` rev 4 sections 1 and 8:
@@ -82,19 +110,21 @@ The whole grid is published, not just the winner. The synthetic vectors under
 harness vectors, not captures: they say `kind: synthetic`, `app_commit: null`,
 `firmware_sha: null`, and must not be used to choose constants.
 
-## Before and after (pending captures)
+## Before and after (Android XR, 2026-11-03)
 
-Every cell stays empty until the hardware runs exist. Fill one row group per
-runtime; the tuner writes the numbers in this shape.
+No tuned point exists, so the `after` column repeats the published defaults
+(`minCutoff = 1 Hz`, `beta = 0.02`, `dCutoff = 1 Hz`). `before` is the pre-ONY-502
+paper default (`minDt = 4.167 ms`). The table is evidence of the failure, not a
+tuning result.
 
 | Runtime | Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Android XR | still | | | — | — | — | — | — | — | — | — |
-| Android XR | held, drifting | — | — | | | — | — | — | — | — | — |
-| Android XR | slow pan | — | — | — | — | | | | | — | — |
-| Android XR | medium pan | — | — | — | — | | | | | — | — |
-| Android XR | fast flick | — | — | — | — | | | | | | |
-| Android XR | occlusion | — | — | — | — | | | | | — | — |
+| Android XR | still | 7.644 | 7.644 | — | — | — | — | — | — | — | — |
+| Android XR | held, drifting | — | — | 1.703 | 1.703 | — | — | — | — | — | — |
+| Android XR | slow pan | — | — | — | — | 10 | 10 | 10 | 10 | — | — |
+| Android XR | medium pan | — | — | — | — | 1 | 1 | 7 | 7 | — | — |
+| Android XR | fast flick | — | — | — | — | 7 | 7 | 9 | 9 | 91.6 | 91.6 |
+| Android XR | occlusion | — | — | — | — | 1 | 1 | 8 | 8 | — | — |
 | VITURE | still | | | — | — | — | — | — | — | — | — |
 | VITURE | held, drifting | — | — | | | — | — | — | — | — | — |
 | VITURE | slow pan | — | — | — | — | | | | | — | — |
@@ -124,9 +154,9 @@ Hands alternate so both hands appear in the bundle.
 |---|---|---|---|---|---|---|---|
 | 1 | LEFT | S | still | 0 | Rest the hand with the arm braced | 15 s | J |
 | 2 | RIGHT | D | held, drifting | 10-50 cm/s | Hold as if aiming, let it wander slowly | 15 s | J_D |
-| 3 | LEFT | slow | slow pan | 10 cm/s | 30 cm sideways in 3 s, back and forth | 18 s | L <= 160 ms |
-| 4 | RIGHT | M | medium pan | 50 cm/s | 50 cm sideways in 1 s, back and forth | 15 s | L <= 20 ms |
-| 5 | LEFT | F | fast flick | 150 cm/s | 45 cm flick in 0.3 s, pause, return | 20 s | L <= 20 ms |
+| 3 | LEFT | slow | slow pan | 10 cm/s | Move the hand 30 cm sideways in 3 s, back and forth; keep the body still | 18 s | L <= 160 ms |
+| 4 | RIGHT | M | medium pan | 50 cm/s | Move the hand 50 cm sideways in 1 s, back and forth; keep the body still | 15 s | L <= 20 ms |
+| 5 | LEFT | F | fast flick | 150 cm/s | Flick the hand 45 cm in 0.3 s, pause, return; keep the body still | 20 s | L <= 20 ms |
 | 6 | RIGHT | occ | occlusion | n/a | Aim, then hide the hand for a second or two | 15 s | diagnostic |
 
 The occlusion run has no acceptance bar. It records reacquisition gaps for
