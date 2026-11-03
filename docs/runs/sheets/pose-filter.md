@@ -114,7 +114,8 @@ runtime; the tuner writes the numbers in this shape.
 follows the path and duration. Analysis bins samples by the speed measured from
 the reference trajectory. It scores only samples within ±25 % of nominal.
 
-The default guided bench records the 6-run protocol. One run covers each scored
+ONY-869 makes the guided bench record the 6-run protocol. Builds before that
+change still use the section 8 schedule below. One run covers each scored
 motion class. One diagnostic occlusion run follows. A run lasts one segment
 cycle, between 15 s and 20 s. The capture is 98 s of recording, about 1.5 min.
 Hands alternate so both hands appear in the bundle.
@@ -142,7 +143,7 @@ Section 8 still asks for four runs per scored class per hand, each at least
 that needs per-hand replicates, and only with a tester who is not fatigued.
 
 `pose_capture_prepare.dart --full` checks that corpus. Without the flag the tool
-checks the 6-run corpus. The app's guided bench always runs the 6-run default.
+checks the 6-run corpus. ONY-869 adds the flag.
 
 ### Provenance
 

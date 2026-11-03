@@ -123,7 +123,7 @@ values and capture logs (section 7.5 below). A 2D/mono player fails closed
 with `unavailable` instead of stalling. If the app shows a black right eye on
 launch, see section 6D.
 
-**Capture 6DoF pose** appears only while your glasses report hand tracking. It records six short runs: one each for still, held drifting, slow pan, medium pan and fast flick, plus one occlusion check. A run lasts 15 to 20 seconds. The whole step takes about 1.5 minutes and alternates hands, so both hands are used. Hold still with your arm braced. For drifting, hold as if aiming and let the hand wander. Pan 30 cm sideways over 3 s for slow, 50 cm in 1 s for medium, and flick 45 cm in 0.3 s for fast. For the occlusion check, hide the hand for a second or two. Skipping a run (whole or per run) is fine and does not break the run. Skipped runs are recorded as skipped. Its files are inside the bundle you send.
+**Capture 6DoF pose** appears only while your glasses report hand tracking. It records six short runs: one each for still, held drifting, slow pan, medium pan and fast flick, plus one occlusion check. A run lasts 15 to 20 seconds. The whole step takes about 1.5 minutes and alternates hands, so both hands are used. Hold still with your arm braced. For drifting, hold as if aiming and let the hand wander. Pan 30 cm sideways over 3 s for slow, 50 cm in 1 s for medium, and flick 45 cm in 0.3 s for fast. For the occlusion check, hide the hand for a second or two. Skipping a run (whole or per run) is fine and does not break the run. Skipped runs are recorded as skipped. Its files are inside the bundle you send. The six-run plan arrives with ONY-869. Earlier builds still ask for the longer section 8 schedule.
 
 ### 6C : PSVR2 Sense (experimental)
 
