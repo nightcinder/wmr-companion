@@ -97,10 +97,5 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
 
     companion object {
         internal const val CHANNEL_NAME = "wmr_tracking_dispatch/methods"
-
-        private val ANDROID_XR_FEATURES = listOf(
-            "android.software.xr.api.openxr",
-            "android.software.xr.api.spatial",
-        )
     }
 }

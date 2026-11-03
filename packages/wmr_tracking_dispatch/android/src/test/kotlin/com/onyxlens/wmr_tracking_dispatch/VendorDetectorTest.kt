@@ -201,6 +201,40 @@ class VendorDetectorTest {
     }
 
     @Test
+    fun androidXrHostWinsOverItsOwnXrealUsbDevice() {
+        // Google Aura exposes the XREAL-built headset as USB 0x3318:0x043A.
+        // Treating that as external XREAL glasses starts the vendor Unity
+        // player, which loads VITURE's plugin and kills the process (ONY-879).
+        val result = VendorDetector().detect(
+            GlassesEnvironment(
+                manufacturer = "Google",
+                model = "Aura niobe",
+                isAndroidXrHost = true,
+                usbDevices = listOf(
+                    UsbDeviceId(GlassesUsbConfig.XREAL_VENDOR_ID, 0x043A),
+                ),
+            ),
+        )
+        assertEquals(GlassesVendor.ANDROID_XR, result.vendor)
+        assertEquals(GlassesHost.UNKNOWN, result.host)
+        assertTrue(result.usbPermissionGranted)
+    }
+
+    @Test
+    fun androidXrHostWinsOverAVitureUsbDevice() {
+        val result = VendorDetector().detect(
+            GlassesEnvironment(
+                manufacturer = "Google",
+                model = "Aura niobe",
+                isAndroidXrHost = true,
+                usbDevices = listOf(vitureDevice),
+            ),
+        )
+        assertEquals(GlassesVendor.ANDROID_XR, result.vendor)
+        assertEquals(GlassesHost.UNKNOWN, result.host)
+    }
+
+    @Test
     fun blankHostIdentityIsUnknown() {
         val result = detector.detect(GlassesEnvironment())
         assertEquals(GlassesHost.UNKNOWN, result.host)
