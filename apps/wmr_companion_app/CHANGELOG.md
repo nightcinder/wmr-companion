@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.15+20
+
+- The guided bench now runs the 6-run pose capture by default: one run per
+  scored motion class plus one diagnostic occlusion run, alternating hands,
+  for 98 s of recording. The full 42-run section 8 schedule stays available
+  for lab captures (ONY-869).
+- Pose-filter and external-tester run sheets document the 6-run sequence and
+  its 15-20 s per-run durations (ONY-871).
+- Capture bundles from the 6-run protocol pass the WMR_Bridge triage floor of
+  14 s per scored run (ONY-870).
+
 ## 0.3.14+19
 
 - VITURE Pro Neckband in embedded UaaL: the displayless gate now starts
