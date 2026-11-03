@@ -2,13 +2,13 @@
 
 > **Status: blocked awaiting captures. No constants were chosen.** ONY-501
 > requires the grid search to run on recorded anchor traces, not on reasoning.
-> No such capture exists yet, so `minCutoff`, `beta` and `dCutoff` are still the
-> published defaults. The structural fix and the 4,264-point harness are
+> No complete corpus exists yet, so `minCutoff`, `beta` and `dCutoff` are still
+> the published defaults. The structural fix and the 4,264-point harness are
 > implemented and tested; the tables below are deliberately unfilled.
 >
-> Normative source: ONY-501's `filter-spec` **revision 4**. Where this sheet and
-> that document disagree, the document wins. Revision 1's grid, speeds and
-> acceptance text are superseded.
+> Normative source: ONY-501's `filter-spec` **revision 4**, including its note on
+> the 6-run default. Where this sheet and that document disagree, the document
+> wins. Revision 1's grid, speeds and acceptance text are superseded.
 
 ## What landed
 
@@ -111,45 +111,60 @@ runtime; the tuner writes the numbers in this shape.
 ## Capture protocol (ONY-249)
 
 `filter-spec` rev 4 section 8 maps the segment names to speeds. The operator
-follows the path and duration; analysis bins samples by the speed measured from
-the reference trajectory and scores only samples within ±25 % of nominal.
+follows the path and duration. Analysis bins samples by the speed measured from
+the reference trajectory. It scores only samples within ±25 % of nominal.
 
-| Segment | Sheet name | Nominal speed | How to perform | Duration | Scores |
-|---|---|---|---|---|---|
-| S | still | 0 | Controller rested in the hand, arm braced | 10 s | J |
-| D | held, drifting | 10-50 cm/s | Hold as if aiming; let it wander slowly | 10 s | J_D |
-| slow | slow pan | 10 cm/s | 30 cm sideways in 3 s, back and forth | 3 x 6 s | L <= 160 ms |
-| M | medium pan | 50 cm/s | 50 cm sideways in 1 s, back and forth | 10 s | L <= 20 ms |
-| F | fast flick | 150 cm/s | 45 cm flick in 0.3 s, pause, return | 10 reps | L <= 20 ms |
+ONY-869 makes the guided bench record the 6-run protocol. Builds before that
+change still use the section 8 schedule below. One run covers each scored
+motion class. One diagnostic occlusion run follows. A run lasts one segment
+cycle, between 15 s and 20 s. The capture is 98 s of recording, about 1.5 min.
+Hands alternate so both hands appear in the bundle.
 
-Record at least four runs per motion class per runtime, each at least 30 s:
-repeat the segment path until the run is long enough. Record **each hand**
-separately (`TrackedHand.left` and `TrackedHand.right`). Include an occlusion
-run (hand-anchor motion with the hand briefly hidden) for diagnostics; rev 4 has
-no bar for that class.
+| # | Hand | Segment | Sheet name | Nominal speed | How to perform | Duration | Scores |
+|---|---|---|---|---|---|---|---|
+| 1 | LEFT | S | still | 0 | Rest the hand with the arm braced | 15 s | J |
+| 2 | RIGHT | D | held, drifting | 10-50 cm/s | Hold as if aiming, let it wander slowly | 15 s | J_D |
+| 3 | LEFT | slow | slow pan | 10 cm/s | 30 cm sideways in 3 s, back and forth | 18 s | L <= 160 ms |
+| 4 | RIGHT | M | medium pan | 50 cm/s | 50 cm sideways in 1 s, back and forth | 15 s | L <= 20 ms |
+| 5 | LEFT | F | fast flick | 150 cm/s | 45 cm flick in 0.3 s, pause, return | 20 s | L <= 20 ms |
+| 6 | RIGHT | occ | occlusion | n/a | Aim, then hide the hand for a second or two | 15 s | diagnostic |
+
+The occlusion run has no acceptance bar. It records reacquisition gaps for
+diagnostics.
+
+The tuner pools both hands per runtime and motion. The 6-run protocol therefore
+covers every scored class without a replicate on each hand. Use it for the
+default hardware capture.
+
+### The section 8 lab schedule
+
+Section 8 still asks for four runs per scored class per hand, each at least
+30 s. That is 42 runs, about 23 min of recording. Use it only for a lab capture
+that needs per-hand replicates, and only with a tester who is not fatigued.
+
+`pose_capture_prepare.dart --full` checks that corpus. Without the flag the tool
+checks the 6-run corpus. ONY-869 adds the flag.
+
+### Provenance
 
 For every file record the runtime (`androidXr`, `viture`, `xreal`), the app
 commit, the firmware short SHA, the anchor rate and the run index in the
-`provenance` block. The guided bench below does this automatically; a
-debug-screen recording made by hand needs the same fields added before it can
-count as corpus data.
+`provenance` block. The guided bench does this automatically. A debug-screen
+recording made by hand needs the same fields before it can count as corpus
+data.
 
-### The guided bench writes the section 8 corpus
+### The guided bench writes the 6-run corpus
 
-The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) now emits this corpus
-directly. It is no longer the old still/slow-only wizard described in earlier
-revisions.
+The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) emits this corpus
+directly.
 
-1. Attach a hand-tracking runtime on the Debug screen, then open **Guided bench
+1. Attach a hand-tracking runtime on the Debug screen. Open **Guided bench
    run** from Connect.
-2. Choose **6DoF only** (no bridge) or **Combined**. The pose step records four
-   runs of each of the five scored motion classes for each hand, in this order:
-   LEFT still x4, LEFT drifting x4, LEFT slow x4, LEFT medium x4, LEFT fast x4,
-   then one LEFT occlusion diagnostic; then the same corpus and diagnostic for
-   RIGHT. That is **40 corpus files plus 2 diagnostic files**.
-3. Each run repeats the section 8 path until it is at least 30 s: still 30 s,
-   held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s. The
-   occlusion run is 30 s and diagnostic only.
+2. Choose **6DoF only** (no bridge) or **Combined**. The pose step records six
+   runs in the order above: LEFT still, RIGHT drifting, LEFT slow pan, RIGHT
+   medium pan, LEFT fast flick, RIGHT occlusion.
+3. Each run lasts one cycle: still 15 s, drifting 15 s, slow pan 18 s, medium
+   pan 15 s, fast flick 20 s, occlusion 15 s.
 4. Recordings are sampled once per new anchor frame, not per 30 Hz viewer tick.
    Each `PoseRecording` carries a `provenance` block with `runtime`,
    `app_commit`, `firmware_sha`, `anchor_rate_hz`, `run_index`, `hand`,
@@ -160,14 +175,14 @@ revisions.
    app commit and plan signature). If the app is interrupted, re-entering the
    pose step skips every run whose file is still on disk. A completed corpus
    starts fresh on the next run.
-6. Finish the wizard and export the test bundle. Zip names and the manifest
-   table use `pose_capture_<runtime>_<hand>_<segment>.json` for run 1 and
-   `..._runN.json` for runs 2-4, and the manifest lists each run's anchor rate.
+6. Finish the wizard and export the test bundle. A 6-run file is named
+   `pose_capture_<runtime>_<hand>_<segment>.json`. Runs 2-4 of a lab corpus add
+   `_runN`. The manifest lists each run's anchor rate.
 
 ### One command from bundle to tuning run
 
 `packages/wmr_tracking/tool/pose_capture_prepare.dart` converts the recordings
-and checks section 8 coverage. From `packages/wmr_tracking`:
+and checks corpus coverage. From `packages/wmr_tracking`:
 
 ```bash
 # 1. convert the tester bundle into tuner captures
@@ -188,18 +203,21 @@ runtime, hand, segment and run from the bundle's `diagnostics.json`, then the
 recording's `provenance` block, then the file name
 (`pose_capture_<runtime>_<hand>_<segment>[_runN].json`), converts each file with
 `PoseCapture.fromRecording`, and writes
-`<runtime>/<hand>/<motion>/run<N>.json` plus `coverage.md`. The printed matrix
-covers S, D, slow, M, F and occlusion per runtime and hand.
+`<runtime>/<hand>/<motion>/run<N>.json` plus `coverage.md`. The default matrix
+covers S, D, slow, M, F and occlusion per runtime, with both hands pooled.
+`--full` prints one row per runtime and hand. ONY-869 sets the 14 s floor, the
+pooled matrix and the `--full` flag.
 
 It refuses an incomplete corpus with exit 1 and names every missing cell, for
-example `viture/right/mediumPan: 3 of 4 runs`, and writes nothing in that case.
-A run shorter than the section 8 30 s minimum also counts as missing and is
-named (`viture/right/mediumPan: run 2 is 5.0 s, needs 30 s`). The check uses the
-sample span and allows one second of truncation, because the bench stops on a
-wall-clock timer and stamps each sample when the frame arrives; the occlusion
-diagnostic has no duration bar, so a short occlusion recording still counts. A
-complete corpus is four runs of each scored class and one occlusion run, for
-both hands of each runtime present in the bundle.
+example `viture/mediumPan: 0 of 1 runs`, and writes nothing in that case. A run
+shorter than 14 s also counts as missing and is named
+(`viture/mediumPan: run 1 is 12.0 s, needs 14 s`). The check uses the sample
+span and allows one second of truncation. The bench stops on a wall-clock timer
+and stamps each sample when the frame arrives. The occlusion diagnostic has no
+duration bar, so a short occlusion recording still counts. A complete default
+corpus is one run of each scored class per runtime across both hands, plus one
+occlusion run. With `--full` it is four runs of each scored class per hand and
+one occlusion run per hand.
 
 Controller-only
 recordings still do not close the gap: with no runtime anchor the fuser falls
