@@ -123,7 +123,7 @@ values and capture logs (section 7.5 below). A 2D/mono player fails closed
 with `unavailable` instead of stalling. If the app shows a black right eye on
 launch, see section 6D.
 
-**Capture 6DoF pose** appears only while your glasses report hand tracking. It records the full filter-spec rev 4 section 8 corpus: five motion classes (still, held drifting, slow pan, medium pan, fast flick), four runs per class per hand, each at least 30 s, plus one diagnostic occlusion run per hand. That is roughly 10 minutes per hand. Each run repeats its path until the timer ends, at the bench durations: still 30 s, held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s, occlusion 30 s. Paths: still (rest, arm braced), held drifting (aim and let it wander), slow pan 30 cm over 3 s back and forth, medium pan 50 cm in 1 s, fast flick 45 cm in 0.3 s. Skipping a run (whole or per run) is fine and does not break the run; skipped runs are recorded as skipped. Its files are inside the bundle you send.
+**Capture 6DoF pose** appears only while your glasses report hand tracking. It records six short runs: one each for still, held drifting, slow pan, medium pan and fast flick, plus one occlusion check. A run lasts 15 to 20 seconds. The whole step takes about 1.5 minutes and alternates hands, so both hands are used. Hold still with your arm braced. For drifting, hold as if aiming and let the hand wander. Pan 30 cm sideways over 3 s for slow, 50 cm in 1 s for medium, and flick 45 cm in 0.3 s for fast. For the occlusion check, hide the hand for a second or two. Skipping a run (whole or per run) is fine and does not break the run. Skipped runs are recorded as skipped. Its files are inside the bundle you send.
 
 ### 6C : PSVR2 Sense (experimental)
 

@@ -235,7 +235,7 @@ ONY-501 kept the One Euro structure and required a constant change. The structur
 
 **The tuning constants are unchanged and not chosen by reasoning.** `minCutoff = 1 Hz`, `beta = 0.02` and `dCutoff = 1 Hz` remain the published defaults until a hardware capture exists. The grid harness (`packages/wmr_tracking/tool/pose_filter_tune.dart`) evaluates all 4,264 points of `filter-spec` rev 4 section 7, selects the passing point with the lowest drift jitter `J_D`, and writes the full grid plus per-capture before/after metrics. A winner on a bar-limiting grid edge is inconclusive: the harness extends that axis 50 % and reruns both. Its committed test vectors are synthetic placeholders, clearly marked `kind: synthetic`; they exercise the harness and are not a tuning result.
 
-The task is blocked on four >=30 s hardware runs per motion class and hand (still, held drifting, slow 10 cm/s, medium 50 cm/s, fast 150 cm/s, plus an occlusion run) recorded with the ONY-249 recorder, with the app commit and firmware SHA attached. Procedure and acceptance: [runs/sheets/pose-filter.md](runs/sheets/pose-filter.md).
+The task is blocked on a hardware capture of the 6-run default corpus: one run of each scored motion class (still, held drifting, slow 10 cm/s, medium 50 cm/s, fast 150 cm/s) plus one occlusion diagnostic, 15-20 s each, about 98 s in total. Hands alternate. The app commit and firmware SHA must be attached. The section 8 lab schedule (four runs per class per hand at 30 s) is optional and checked with `pose_capture_prepare.dart --full`. Procedure and acceptance: [runs/sheets/pose-filter.md](runs/sheets/pose-filter.md).
 
 ## Not yet run on hardware (as of 2026-10-30)
 
