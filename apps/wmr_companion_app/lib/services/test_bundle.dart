@@ -575,8 +575,8 @@ String _manifest(TestBundleInput input) {
         '- Firmware SHA: ${first['firmware_sha'] ?? 'none (no bridge)'}',
       )
       ..writeln(
-        '- Corpus plan: ${plan ?? '4 runs per motion class per hand, '
-                'each run >= 30 s, sampled at the anchor rate'}',
+        '- Corpus plan: ${plan ?? '1 run per motion class across alternating '
+                'hands, each run 15-20 s, sampled at the anchor rate'}',
       )
       ..writeln(
         '- Occlusion runs are diagnostic only: filter-spec rev 4 section 8 '

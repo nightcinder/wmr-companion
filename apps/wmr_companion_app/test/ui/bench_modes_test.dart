@@ -351,7 +351,7 @@ void main() {
     await tap(tester, 'bench-start');
     expect(container.read(benchControllerProvider).step, BenchStep.poseCapture);
     expect(find.byKey(const Key('bench-capture-prompt')), findsOneWidget);
-    expect(find.textContaining('Pose 1 of 42'), findsOneWidget);
+    expect(find.textContaining('Pose 1 of 6'), findsOneWidget);
 
     await tap(tester, 'bench-start');
     final segment = container.read(benchControllerProvider);
