@@ -98,14 +98,41 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
-  test('the guided bench records the 4x5x2 corpus with provenance', () async {
+  test(
+    'the default corpus signs without the full schedule hand multiplier',
+    () {
+      expect(const BenchPosePlan().signature, 'short:1x5+1occlusion@15000ms');
+    },
+  );
+
+  test('the lab plan keeps 42 runs, both hands and the 30 s floor', () {
+    const plan = BenchPosePlan.full();
+    final specs = plan.sequence;
+
+    expect(specs, hasLength(42));
+    expect(plan.minRunDuration, const Duration(seconds: 30));
+    expect(plan.signature, 'full:4x5x2+1occlusion@30000ms');
+    for (final segment in poseCorpus) {
+      expect(
+        specs.where((spec) => spec.segment == segment).map((spec) => spec.hand),
+        containsAll(<int>[0, 1]),
+      );
+    }
+    for (final spec in specs) {
+      final duration =
+          spec.segment.defaultDuration * plan.cyclesFor(spec.segment);
+      expect(duration, greaterThanOrEqualTo(plan.minRunDuration));
+    }
+  });
+
+  test('the guided bench records the 6-run alternating-hand corpus', () async {
     const durations = BenchDurations(
-      poseStill: Duration(milliseconds: 12),
-      poseDrifting: Duration(milliseconds: 12),
-      poseSlowPan: Duration(milliseconds: 12),
-      poseMediumPan: Duration(milliseconds: 12),
-      poseFastFlick: Duration(milliseconds: 12),
-      poseOcclusion: Duration(milliseconds: 12),
+      poseStill: Duration(milliseconds: 60),
+      poseDrifting: Duration(milliseconds: 60),
+      poseSlowPan: Duration(milliseconds: 60),
+      poseMediumPan: Duration(milliseconds: 60),
+      poseFastFlick: Duration(milliseconds: 60),
+      poseOcclusion: Duration(milliseconds: 60),
     );
     const plan = BenchPosePlan();
     final store = PoseRecordingStore(Directory('${dir.path}/documents'));
@@ -187,7 +214,8 @@ void main() {
 
     final state = container.read(benchControllerProvider);
     expect(state.step, BenchStep.export);
-    expect(recorder.durations, hasLength(42));
+    expect(benchPoseSequence, hasLength(6));
+    expect(recorder.durations, hasLength(6));
     for (var i = 0; i < benchPoseSequence.length; i++) {
       expect(
         recorder.durations[i],
@@ -195,15 +223,37 @@ void main() {
         reason: benchPoseSequence[i].key,
       );
     }
-    // Every corpus run is at least the section 8 30 s with the real defaults.
+    // The short protocol is one cycle per class: 15, 15, 18, 15, 20 and 15 s.
     const realDurations = BenchDurations();
+    var totalSeconds = 0;
     for (final segment in poseCorpus) {
+      final run = realDurations.poseRunDuration(segment, plan);
       expect(
-        realDurations.poseRunDuration(segment, plan),
-        greaterThanOrEqualTo(const Duration(seconds: 30)),
+        run,
+        greaterThanOrEqualTo(const Duration(seconds: 15)),
         reason: segment.id,
       );
+      expect(run, lessThanOrEqualTo(const Duration(seconds: 20)));
+      totalSeconds += run.inSeconds;
     }
+    expect(totalSeconds, 83);
+    final occlusion = realDurations.poseRunDuration(
+      PoseSegment.occlusion,
+      plan,
+    );
+    expect(occlusion, const Duration(seconds: 15));
+    expect(totalSeconds + occlusion.inSeconds, 98);
+    expect(
+      [for (final spec in benchPoseSequence) '${spec.hand}:${spec.segment.id}'],
+      [
+        '0:still',
+        '1:drifting',
+        '0:slow_pan',
+        '1:medium_pan',
+        '0:fast_flick',
+        '1:occlusion',
+      ],
+    );
 
     await controller.exportBundle();
     final bundle = container.read(benchControllerProvider);
@@ -220,7 +270,7 @@ void main() {
     final poseFiles = archive.files
         .where((f) => f.name.startsWith('pose_capture_'))
         .toList();
-    expect(poseFiles, hasLength(42));
+    expect(poseFiles, hasLength(6));
     final counts = <String, int>{};
     for (final file in poseFiles) {
       final recording = PoseRecording.decode(
@@ -242,11 +292,13 @@ void main() {
         expect(diagnostics['occlusion_gaps'], isA<int>());
       }
     }
-    for (final hand in ['LEFT', 'RIGHT']) {
-      for (final segment in poseCorpus) {
-        expect(counts['$hand:${segment.id}'], 4, reason: '$hand ${segment.id}');
-      }
-      expect(counts['$hand:occlusion'], 1);
-    }
+    expect(counts, {
+      'LEFT:still': 1,
+      'RIGHT:drifting': 1,
+      'LEFT:slow_pan': 1,
+      'RIGHT:medium_pan': 1,
+      'LEFT:fast_flick': 1,
+      'RIGHT:occlusion': 1,
+    });
   });
 }

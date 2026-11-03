@@ -22,24 +22,45 @@ import 'package:wmr_tracking/wmr_tracking.dart';
 
 import 'pose_filter_tuning.dart';
 
-/// `filter-spec` rev 4 section 8 corpus: five scored classes and one
-/// diagnostic class, four runs per scored class per hand and per runtime.
+/// Corpus plan for the guided pose bench.
+///
+/// The default is the 6-run fatigue-limited protocol: one run per scored
+/// motion class plus one diagnostic occlusion run, alternating hands, with a
+/// 14 s acceptance floor for runs the bench times at 15-20 s.
+/// [PoseCorpusPlan.full] keeps the section 8 schedule: four runs per class per
+/// hand at 30 s.
 class PoseCorpusPlan {
   const PoseCorpusPlan({
-    this.runsPerClass = 4,
+    this.runsPerClass = 1,
     this.occlusionRuns = 1,
-    this.minimumRunSeconds = 30,
+    this.minimumRunSeconds = 14,
+    this.poolHands = true,
   });
 
-  /// Section 8: "at least four runs per motion class per runtime".
+  /// `filter-spec` rev 4 section 8: four runs per class per hand at 30 s.
+  const PoseCorpusPlan.full()
+    : runsPerClass = 4,
+      occlusionRuns = 1,
+      minimumRunSeconds = 30,
+      poolHands = false;
+
+  /// Scored runs required per motion class.
   final int runsPerClass;
 
-  /// Section 8 gives occlusion no bar, and the app records one run per hand.
+  /// Section 8 gives occlusion no bar; the short protocol records one
+  /// diagnostic run, and the full schedule records one per hand.
   final int occlusionRuns;
 
-  /// Section 8: every run is "at least 30 s" of anchor samples. A shorter file
-  /// is a named deficiency, never a run that satisfies a cell.
+  /// Shortest accepted run. The 6-run bench times each run at 15-20 s, so a
+  /// 14 s floor tolerates the timer's final frame boundary.
   final int minimumRunSeconds;
+
+  /// Whether coverage is counted per `(runtime, motion)` across both hands.
+  ///
+  /// `pose_filter_tune.dart` pools hands per `(runtime, motion)`, so the 6-run
+  /// protocol matches its unit and does not require both hands in every
+  /// class. The full section 8 schedule keeps the per-hand matrix.
+  final bool poolHands;
 
   static const List<PoseMotion> scored = [
     PoseMotion.still,
@@ -75,6 +96,7 @@ class PoseCorpusPlan {
     'runs_per_class': runsPerClass,
     'occlusion_runs': occlusionRuns,
     'minimum_run_seconds': minimumRunSeconds,
+    'pool_hands': poolHands,
   };
 }
 
@@ -132,15 +154,16 @@ class PreparedCapture {
   /// The cell this capture was placed in.
   final CaptureLabels labels;
 
-  /// Wall time covered by the trace: last sample minus first sample. Section 8
-  /// asks for at least 30 s, so a file count alone does not prove coverage.
+  /// Wall time covered by the trace: last sample minus first sample. The
+  /// plan's minimum proves enough of a run was captured, so a file count alone
+  /// does not prove coverage.
   Duration get span => Duration(
     microseconds:
         (capture.samples.last.timeNs - capture.samples.first.timeNs) ~/ 1000,
   );
 
   /// The guided bench stops on a wall-clock timer and stamps each sample when
-  /// the frame arrives, so a 30 s run ends a frame or more before the timer
+  /// the frame arrives, so a 15 s run ends a frame or more before the timer
   /// fires. One second of truncation is accepted; a seconds-long recording is
   /// still short.
   static const Duration spanTolerance = Duration(seconds: 1);
@@ -150,7 +173,7 @@ class PreparedCapture {
       minimum == Duration.zero || span + spanTolerance >= minimum;
 }
 
-/// A run whose samples cover less than the section 8 minimum.
+/// A run whose samples cover less than the plan's minimum.
 class ShortRun {
   const ShortRun({
     required this.labels,
@@ -168,27 +191,33 @@ class ShortRun {
       '${minimum.inSeconds} s';
 }
 
-/// How many runs one `(runtime, hand, motion)` cell has.
+/// How many runs one coverage cell has.
+///
+/// [hand] is null when the plan pools both hands into one
+/// `(runtime, motion)` cell.
 class CoverageCell {
   const CoverageCell({
     required this.runtime,
-    required this.hand,
+    this.hand,
     required this.motion,
     required this.runs,
     required this.requiredRuns,
   });
 
   final TrackingVendor runtime;
-  final TrackedHand hand;
+  final TrackedHand? hand;
   final PoseMotion motion;
   final int runs;
   final int requiredRuns;
 
   bool get complete => runs >= requiredRuns;
 
-  String get description =>
-      '${runtime.name}/${hand.name}/${motion.name}: '
-      '$runs of $requiredRuns runs';
+  String get description {
+    final key = hand == null
+        ? '${runtime.name}/${motion.name}'
+        : '${runtime.name}/${hand!.name}/${motion.name}';
+    return '$key: $runs of $requiredRuns runs';
+  }
 }
 
 /// The section 8 coverage matrix for one corpus.
@@ -223,24 +252,40 @@ class CorpusCoverage {
     return seen.toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  /// Runs recorded in [runtime] and [hand] for [motion].
+  /// Runs recorded in [runtime] for [motion].
+  ///
+  /// When the plan pools hands the matching cell already counts both, so the
+  /// [hand] argument is only used by the per-hand section 8 matrix.
   int runs(TrackingVendor runtime, TrackedHand hand, PoseMotion motion) {
     for (final cell in cells) {
       if (cell.runtime == runtime &&
-          cell.hand == hand &&
-          cell.motion == motion) {
+          cell.motion == motion &&
+          (cell.hand == null || cell.hand == hand)) {
         return cell.runs;
       }
     }
     return 0;
   }
 
-  /// The matrix as a markdown table, one row per runtime and hand.
+  /// The matrix as a markdown table, one row per runtime and hand, or one row
+  /// per runtime when the plan pools hands.
   String toMarkdown() {
     final buffer = StringBuffer()
       ..writeln('| Runtime | Hand | S | D | slow | M | F | occ |')
       ..writeln('|---|---|---:|---:|---:|---:|---:|---:|');
     for (final runtime in runtimes) {
+      if (plan.poolHands) {
+        buffer.write('| ${runtime.name} | both |');
+        for (final motion in PoseCorpusPlan.motions) {
+          final cell = _cell(runtime, null, motion);
+          final runs = cell?.runs ?? 0;
+          final required = plan.requiredFor(motion);
+          final mark = runs >= required ? '' : ' **missing**';
+          buffer.write(' $runs/$required$mark |');
+        }
+        buffer.writeln();
+        continue;
+      }
       for (final hand in TrackedHand.values) {
         buffer.write('| ${runtime.name} | ${hand.name} |');
         for (final motion in PoseCorpusPlan.motions) {
@@ -253,6 +298,21 @@ class CorpusCoverage {
       }
     }
     return buffer.toString();
+  }
+
+  CoverageCell? _cell(
+    TrackingVendor runtime,
+    TrackedHand? hand,
+    PoseMotion motion,
+  ) {
+    for (final cell in cells) {
+      if (cell.runtime == runtime &&
+          cell.hand == hand &&
+          cell.motion == motion) {
+        return cell;
+      }
+    }
+    return null;
   }
 }
 
@@ -454,6 +514,27 @@ PreparedCorpus prepareCorpus(
     for (final prepared in byCell.values) prepared.capture.runtime,
   }.toList()..sort((a, b) => a.name.compareTo(b.name));
   for (final runtime in runtimes) {
+    if (plan.poolHands) {
+      for (final motion in PoseCorpusPlan.motions) {
+        final runs = byCell.values
+            .where(
+              (prepared) =>
+                  prepared.labels.runtime == runtime &&
+                  prepared.labels.motion == motion &&
+                  prepared.covers(plan.minimumRunFor(motion)),
+            )
+            .length;
+        cells.add(
+          CoverageCell(
+            runtime: runtime,
+            motion: motion,
+            runs: runs,
+            requiredRuns: plan.requiredFor(motion),
+          ),
+        );
+      }
+      continue;
+    }
     for (final hand in TrackedHand.values) {
       for (final motion in PoseCorpusPlan.motions) {
         final runs = byCell.values

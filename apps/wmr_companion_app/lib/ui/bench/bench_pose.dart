@@ -12,19 +12,19 @@ import '../debug/pose_recording_store.dart';
 ///
 /// The five corpus classes are the scored rows (still, drifting, slow, medium,
 /// fast). [occlusion] is the diagnostic row section 8 also asks for; it has no
-/// acceptance bar, so it is recorded once per hand outside the 4x5x2 corpus.
+/// acceptance bar, so it is recorded once outside the scored corpus.
 enum PoseSegment {
   still(
     'still',
     'Hold still',
-    Duration(seconds: 10),
+    Duration(seconds: 15),
     'Rest the controller in your hand and brace your arm. Keep it still; the '
         'run repeats this hold until the timer ends.',
   ),
   drifting(
     'drifting',
     'Held, drifting',
-    Duration(seconds: 10),
+    Duration(seconds: 15),
     'Hold as if you were aiming, and let the controller wander slowly; the '
         'run repeats this until the timer ends.',
   ),
@@ -37,7 +37,7 @@ enum PoseSegment {
   mediumPan(
     'medium_pan',
     'Medium pan',
-    Duration(seconds: 10),
+    Duration(seconds: 15),
     'Move 50 cm sideways in 1 s, then back. Keep repeating until the timer '
         'ends.',
   ),
@@ -51,7 +51,7 @@ enum PoseSegment {
   occlusion(
     'occlusion',
     'Occlusion (diagnostic)',
-    Duration(seconds: 30),
+    Duration(seconds: 15),
     'Move as if aiming. Hide the hand from the sensors for a second or two, '
         'bring it back, and repeat. This run only measures reacquisition gaps; '
         'it has no acceptance bar.',
@@ -106,24 +106,40 @@ class BenchPoseSpec {
 
 /// How much of the filter-spec section 8 corpus one guided run records.
 ///
-/// The counts and the 30 s minimum are runtime parameters, not constants in
-/// the recorder: tests override the provider with a shorter plan and the app
-/// keeps the sheet's four runs per class.
+/// The default is the 6-run fatigue-limited protocol: one run per scored
+/// motion class plus one diagnostic occlusion run, alternating hands, with
+/// 15-20 s per run (98 s in total). [BenchPosePlan.full] keeps the section 8
+/// schedule for lab captures. The counts and durations are runtime
+/// parameters, not constants in the recorder: tests override the provider
+/// with a shorter plan.
 class BenchPosePlan {
   const BenchPosePlan({
-    this.runsPerClass = 4,
-    this.minRunDuration = const Duration(seconds: 30),
+    this.runsPerClass = 1,
+    this.minRunDuration = const Duration(seconds: 15),
     this.occlusionRuns = 1,
+    this.alternateHands = true,
   });
 
-  /// Section 8: "at least four runs per motion class per runtime".
+  /// Section 8's lab schedule: four runs per motion class per hand at 30 s.
+  const BenchPosePlan.full()
+    : runsPerClass = 4,
+      minRunDuration = const Duration(seconds: 30),
+      occlusionRuns = 1,
+      alternateHands = false;
+
+  /// Runs per scored motion class.
   final int runsPerClass;
 
-  /// Section 8: "each at least 30 s".
+  /// Shortest run the plan asks for; each segment repeats its cycle until the
+  /// run reaches it.
   final Duration minRunDuration;
 
-  /// One diagnostic occlusion run per hand; section 8 gives it no bar.
+  /// Diagnostic occlusion runs; section 8 gives occlusion no bar.
   final int occlusionRuns;
+
+  /// Whether the default 6-run protocol alternates hands instead of recording
+  /// every class on both hands.
+  final bool alternateHands;
 
   /// How many nominal cycles make a run at least [minRunDuration] long.
   int cyclesFor(PoseSegment segment) {
@@ -133,19 +149,42 @@ class BenchPosePlan {
     return cycles < 1 ? 1 : cycles;
   }
 
-  List<BenchPoseSpec> get sequence => [
-    for (var hand = 0; hand < 2; hand++) ...[
-      for (final segment in poseCorpus)
-        for (var run = 1; run <= runsPerClass; run++)
-          BenchPoseSpec(hand, segment, run: run),
-      for (var run = 1; run <= occlusionRuns; run++)
-        BenchPoseSpec(hand, PoseSegment.occlusion, run: run),
-    ],
-  ];
+  List<BenchPoseSpec> get sequence {
+    if (!alternateHands) {
+      return [
+        for (var hand = 0; hand < 2; hand++) ...[
+          for (final segment in poseCorpus)
+            for (var run = 1; run <= runsPerClass; run++)
+              BenchPoseSpec(hand, segment, run: run),
+          for (var run = 1; run <= occlusionRuns; run++)
+            BenchPoseSpec(hand, PoseSegment.occlusion, run: run),
+        ],
+      ];
+    }
+    final specs = <BenchPoseSpec>[];
+    var index = 0;
+    for (var run = 1; run <= runsPerClass; run++) {
+      for (final segment in poseCorpus) {
+        specs.add(BenchPoseSpec(index.isEven ? 0 : 1, segment, run: run));
+        index++;
+      }
+    }
+    for (var run = 1; run <= occlusionRuns; run++) {
+      specs.add(
+        BenchPoseSpec(index.isEven ? 0 : 1, PoseSegment.occlusion, run: run),
+      );
+      index++;
+    }
+    return specs;
+  }
 
   /// Written into the resume file so a changed plan starts a fresh corpus.
+  ///
+  /// The `x2` hand multiplier is only part of the full schedule; the short
+  /// protocol records its five scored runs on alternating hands.
   String get signature =>
-      '${runsPerClass}x${poseCorpus.length}x2'
+      '${alternateHands ? 'short' : 'full'}:'
+      '${runsPerClass}x${poseCorpus.length}${alternateHands ? '' : 'x2'}'
       '+${occlusionRuns}occlusion@${minRunDuration.inMilliseconds}ms';
 }
 
@@ -157,7 +196,8 @@ final benchPoseSequenceProvider = Provider<List<BenchPoseSpec>>(
   (ref) => ref.watch(benchPosePlanProvider).sequence,
 );
 
-/// The default 4x5x2 corpus plus the two diagnostic occlusion runs.
+/// The default six alternating-hand runs: five scored motion classes plus one
+/// diagnostic occlusion run.
 final List<BenchPoseSpec> benchPoseSequence = const BenchPosePlan().sequence;
 
 /// Whether the active tracking source can feed the pose recorder.

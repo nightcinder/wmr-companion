@@ -538,8 +538,8 @@ void main() {
                 .data['segments']!
             as List;
     expect(segments, hasLength(benchPoseSequence.length));
-    // Every run of both hands' still class fails; the rest are recorded.
-    const stillRuns = 4 * 2;
+    // The single still run fails; the other five classes are recorded.
+    const stillRuns = 1;
     expect(
       segments.where((segment) => (segment as Map)['status'] == 'skipped'),
       hasLength(stillRuns),

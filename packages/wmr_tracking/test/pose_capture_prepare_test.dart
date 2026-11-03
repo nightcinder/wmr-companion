@@ -105,6 +105,24 @@ List<RecordingInput> _corpus() => [
         ),
 ];
 
+/// The default 6-run schedule: one run per class, alternating hands.
+List<RecordingInput> _shortCorpus({
+  Duration span = const Duration(seconds: 15),
+}) => [
+  for (var index = 0; index < _segments.length; index++)
+    RecordingInput(
+      fileName:
+          'pose_capture_viture_'
+          '${index.isEven ? 'left' : 'right'}_${_segments[index]}.json',
+      recording: _recording(
+        runtime: TrackingVendor.viture,
+        hand: index.isEven ? TrackedHand.left : TrackedHand.right,
+        segment: _segments[index],
+        span: span,
+      ),
+    ),
+];
+
 void main() {
   late Directory temp;
 
@@ -116,11 +134,50 @@ void main() {
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 
-  test('converts and splits a complete corpus by runtime, hand and motion', () {
-    final corpus = prepareCorpus(
-      _corpus(),
-      plan: const PoseCorpusPlan(runsPerClass: 4),
+  test('accepts the default 6-run corpus pooled per runtime and motion', () {
+    final corpus = prepareCorpus(_shortCorpus());
+
+    expect(corpus.isComplete, isTrue);
+    expect(corpus.captures, hasLength(6));
+    expect(corpus.missingCells, isEmpty);
+    expect(
+      corpus.coverage.toMarkdown(),
+      contains('| viture | both | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |'),
     );
+    expect(corpus.paths, contains('viture/left/slowPan/run1.json'));
+    expect(corpus.paths, contains('viture/right/occlusion/run1.json'));
+  });
+
+  test('refuses a 6-run run shorter than the 14 s floor', () {
+    final inputs = [
+      for (final input in _shortCorpus())
+        if (input.fileName == 'pose_capture_viture_left_still.json')
+          RecordingInput(
+            fileName: input.fileName,
+            recording: _recording(
+              runtime: TrackingVendor.viture,
+              hand: TrackedHand.left,
+              segment: 'still',
+              span: const Duration(milliseconds: 12900),
+            ),
+          )
+        else
+          input,
+    ];
+
+    final corpus = prepareCorpus(inputs);
+
+    expect(corpus.isComplete, isFalse);
+    expect(corpus.missingCells, contains('viture/still: 0 of 1 runs'));
+    expect(
+      corpus.missingCells,
+      contains('viture/left/still: run 1 is 12.9 s, needs 14 s'),
+    );
+    expect(corpus.coverage.toMarkdown(), contains('0/1 **missing**'));
+  });
+
+  test('converts and splits a complete corpus by runtime, hand and motion', () {
+    final corpus = prepareCorpus(_corpus(), plan: const PoseCorpusPlan.full());
 
     expect(corpus.isComplete, isTrue);
     expect(corpus.captures, hasLength(42));
@@ -190,6 +247,7 @@ void main() {
       captures.path,
       '--out',
       out.path,
+      '--full',
     ], workingDirectory: Directory.current.path);
 
     expect(result.exitCode, 1, reason: '${result.stderr}');
@@ -220,7 +278,7 @@ void main() {
           input,
     ];
 
-    final corpus = prepareCorpus(inputs);
+    final corpus = prepareCorpus(inputs, plan: const PoseCorpusPlan.full());
 
     expect(corpus.isComplete, isFalse);
     expect(
@@ -262,7 +320,7 @@ void main() {
           input,
     ];
 
-    final corpus = prepareCorpus(inputs);
+    final corpus = prepareCorpus(inputs, plan: const PoseCorpusPlan.full());
 
     expect(corpus.isComplete, isTrue);
     expect(corpus.missingCells, isEmpty);
@@ -349,7 +407,7 @@ void main() {
 
     final prepared = prepareCorpus(
       inputs,
-      plan: const PoseCorpusPlan(runsPerClass: 2),
+      plan: const PoseCorpusPlan(runsPerClass: 2, poolHands: false),
     ).captures.single;
     // The manifest wins over the file name.
     expect(prepared.labels.hand, TrackedHand.right);
