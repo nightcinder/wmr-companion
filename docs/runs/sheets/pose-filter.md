@@ -139,7 +139,7 @@ default hardware capture.
 ### The section 8 lab schedule
 
 Section 8 still asks for four runs per scored class per hand, each at least
-30 s. That is 42 runs, about 22 min of recording. Use it only for a lab capture
+30 s. That is 42 runs, about 23 min of recording. Use it only for a lab capture
 that needs per-hand replicates, and only with a tester who is not fatigued.
 
 `pose_capture_prepare.dart --full` checks that corpus. Without the flag the tool
@@ -205,7 +205,8 @@ recording's `provenance` block, then the file name
 `PoseCapture.fromRecording`, and writes
 `<runtime>/<hand>/<motion>/run<N>.json` plus `coverage.md`. The default matrix
 covers S, D, slow, M, F and occlusion per runtime, with both hands pooled.
-`--full` prints one row per runtime and hand.
+`--full` prints one row per runtime and hand. ONY-869 sets the 14 s floor, the
+pooled matrix and the `--full` flag.
 
 It refuses an incomplete corpus with exit 1 and names every missing cell, for
 example `viture/mediumPan: 0 of 1 runs`, and writes nothing in that case. A run
