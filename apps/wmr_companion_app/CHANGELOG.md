@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.16+21
+
+- Detect an Android XR host before USB IDs and host markers, and refuse to
+  construct the vendor Unity player on one. The Google Aura launch no longer
+  reaches VITURE's plugin and dies with
+  `NoClassDefFoundError: android.viture.xr.XRManager` (ONY-879).
+
 ## 0.3.15+20
 
 - The guided bench now runs the 6-run pose capture by default: one run per
