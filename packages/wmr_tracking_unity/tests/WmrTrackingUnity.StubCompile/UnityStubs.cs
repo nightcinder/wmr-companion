@@ -3,15 +3,49 @@
 // emulator and do not validate Unity API signatures.
 
 using System;
+using System.Collections;
+
+namespace UnityEngine.Rendering
+{
+    public enum GraphicsDeviceType
+    {
+        OpenGLES2 = 8,
+        OpenGLES3 = 11,
+        Vulkan = 21,
+    }
+}
 
 namespace UnityEngine
 {
+    public static class SystemInfo
+    {
+        public static UnityEngine.Rendering.GraphicsDeviceType graphicsDeviceType
+        {
+            get;
+            set;
+        } = UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3;
+    }
+
     public class Object
     {
+        public string name { get; set; }
+
+        public static T FindObjectOfType<T>() where T : class => null;
     }
 
     public class GameObject : Object
     {
+        public GameObject()
+        {
+        }
+
+        public GameObject(string name)
+        {
+            this.name = name;
+        }
+
+        public Transform transform { get; } = new Transform();
+
         public void SetActive(bool value)
         {
         }
@@ -19,12 +53,34 @@ namespace UnityEngine
         public void SendMessage(string methodName, object value, SendMessageOptions options)
         {
         }
+
+        public static GameObject CreatePrimitive(PrimitiveType type) => new GameObject();
+
+        public T AddComponent<T>() where T : class, new() => new T();
+    }
+
+    public enum PrimitiveType
+    {
+        Sphere = 0,
+        Capsule = 1,
+        Cylinder = 2,
+        Cube = 3,
+        Plane = 4,
+        Quad = 5,
     }
 
     public enum SendMessageOptions
     {
         RequireReceiver = 0,
         DontRequireReceiver = 1,
+    }
+
+    public enum StereoTargetEyeMask
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+        Both = 3,
     }
 
     public class MonoBehaviour : Object
@@ -41,18 +97,88 @@ namespace UnityEngine
 
         public T[] GetComponentsInChildren<T>(bool includeInactive) where T : class =>
             Array.Empty<T>();
+
+        public Coroutine StartCoroutine(IEnumerator routine) => new Coroutine();
     }
 
-    public class Camera : Object
+    public class Coroutine
+    {
+    }
+
+    public sealed class WaitForEndOfFrame
+    {
+    }
+
+    public class Behaviour : Object
+    {
+        public bool enabled { get; set; } = true;
+
+        public GameObject gameObject { get; } = new GameObject();
+    }
+
+    public class Light : Behaviour
+    {
+        public LightType type { get; set; }
+
+        public float intensity { get; set; } = 1f;
+    }
+
+    public enum LightType
+    {
+        Spot = 0,
+        Directional = 1,
+        Point = 2,
+        Area = 3,
+    }
+
+    public sealed class Camera : Object
     {
         public static Camera main { get; set; }
 
+        public StereoTargetEyeMask stereoTargetEye { get; set; }
+
+        public CameraClearFlags clearFlags { get; set; }
+
+        public Color backgroundColor { get; set; }
+
         public Transform transform { get; } = new Transform();
+    }
+
+    public enum CameraClearFlags
+    {
+        Skybox = 1,
+        Color = 2,
+        SolidColor = 2,
+        Depth = 3,
+        Nothing = 4,
+    }
+
+    public struct Color
+    {
+        public float r;
+        public float g;
+        public float b;
+        public float a;
+
+        public Color(float r, float g, float b, float a)
+        {
+            this.r = r;
+            this.g = g;
+            this.b = b;
+            this.a = a;
+        }
+    }
+
+    public static class Time
+    {
+        public static float unscaledTime { get; set; }
     }
 
     public class Transform : Object
     {
         public Vector3 position { get; set; }
+
+        public Vector3 localScale { get; set; }
 
         public Quaternion rotation { get; set; }
     }
@@ -85,6 +211,9 @@ namespace UnityEngine
             this.z = z;
             this.w = w;
         }
+
+        public static Quaternion Euler(float x, float y, float z) =>
+            new Quaternion(0f, 0f, 0f, 1f);
     }
 
     public static class Debug
@@ -149,15 +278,80 @@ namespace UnityEngine
     }
 }
 
+namespace UnityEngine.XR
+{
+    public static class XRSettings
+    {
+        public enum StereoRenderingMode
+        {
+            MultiPass = 0,
+            SinglePass = 1,
+            SinglePassInstanced = 2,
+        }
+
+        public static bool isDeviceActive { get; set; } = true;
+
+        // Read-only in Unity 6000.0: a setter here would hide CS0200.
+        public static StereoRenderingMode stereoRenderingMode { get; }
+    }
+
+    /// <summary>
+    /// Models the subsystem XRLoaderHelper loads for device tracking. Starting
+    /// it is what feeds head poses to Camera.main when VITURE runs without its
+    /// display subsystem.
+    /// </summary>
+    public class XRInputSubsystem
+    {
+        public bool running { get; set; }
+
+        public int startCalls { get; private set; }
+
+        public int stopCalls { get; private set; }
+
+        /// <summary>Test hook: a start that leaves the subsystem stopped.</summary>
+        public bool failOnStart { get; set; }
+
+        public void Start()
+        {
+            startCalls += 1;
+            running = !failOnStart;
+        }
+
+        public void Stop()
+        {
+            stopCalls += 1;
+            running = false;
+        }
+    }
+}
+
 namespace UnityEngine.XR.Management
 {
     public class XRLoader
     {
     }
 
+    /// <summary>
+    /// Models the one XRLoaderHelper member the loader gate uses to start the
+    /// VITURE input and hand subsystems without starting the display subsystem.
+    /// </summary>
+    public class XRLoaderHelper : XRLoader
+    {
+        public object loadedSubsystem { get; set; }
+
+        public object loadedInputSubsystem { get; set; }
+
+        public T GetLoadedSubsystem<T>() where T : class =>
+            (loadedInputSubsystem as T) ?? (loadedSubsystem as T);
+    }
+
     public class XRManagerSettings
     {
         public XRLoader activeLoader { get; set; }
+
+        public int startSubsystemsCalls { get; private set; }
+
+        public int stopSubsystemsCalls { get; private set; }
 
         public bool automaticLoading { get; set; }
 
@@ -185,10 +379,12 @@ namespace UnityEngine.XR.Management
 
         public void StartSubsystems()
         {
+            startSubsystemsCalls += 1;
         }
 
         public void StopSubsystems()
         {
+            stopSubsystemsCalls += 1;
         }
 
         public void DeinitializeLoader()

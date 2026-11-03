@@ -1,0 +1,122 @@
+{
+  "v": 1,
+  "schemaVersion": 1,
+  "space": "openxr",
+  "time_ns": 1900000000000000,
+  "handJointCount": 26,
+  "head": {
+    "pose": {"t": [0.0, 1.62, -0.08], "q": [-0.05, 0.1, 0.02, 0.993529063490344]},
+    "confidence": "high"
+  },
+  "hands": {
+    "right": {
+      "hand": "right",
+      "joints": {
+        "wrist": {
+          "pose": {"t": [0.18, 1.18, -0.34], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "palm": {
+          "pose": {"t": [0.2, 1.21, -0.36], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "thumbMetacarpal": {
+          "pose": {"t": [0.16, 1.19, -0.35], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "thumbProximal": {
+          "pose": {"t": [0.15, 1.2, -0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "thumbDistal": {
+          "pose": {"t": [0.14, 1.21, -0.39], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "thumbTip": {
+          "pose": {"t": [0.13, 1.22, -0.41], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "indexMetacarpal": {
+          "pose": {"t": [0.18, 1.22, -0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "indexProximal": {
+          "pose": {"t": [0.18, 1.23, -0.4], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "indexIntermediate": {
+          "pose": {"t": [0.18, 1.24, -0.42], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "indexDistal": {
+          "pose": {"t": [0.18, 1.24, -0.44], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "indexTip": {
+          "pose": {"t": [0.18, 1.25, -0.46], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "middleMetacarpal": {
+          "pose": {"t": [0.2, 1.22, -0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "middleProximal": {
+          "pose": {"t": [0.2, 1.23, -0.4], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "middleIntermediate": {
+          "pose": {"t": [0.2, 1.24, -0.43], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "middleDistal": {
+          "pose": {"t": [0.2, 1.24, -0.45], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "middleTip": {
+          "pose": {"t": [0.2, 1.25, -0.47], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ringMetacarpal": {
+          "pose": {"t": [0.22, 1.21, -0.37], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ringProximal": {
+          "pose": {"t": [0.22, 1.22, -0.4], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ringIntermediate": {
+          "pose": {"t": [0.22, 1.23, -0.42], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ringDistal": {
+          "pose": {"t": [0.22, 1.23, -0.44], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "ringTip": {
+          "pose": {"t": [0.22, 1.24, -0.46], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "littleMetacarpal": {
+          "pose": {"t": [0.24, 1.2, -0.36], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "littleProximal": {
+          "pose": {"t": [0.24, 1.21, -0.39], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "littleIntermediate": {
+          "pose": {"t": [0.24, 1.22, -0.41], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "littleDistal": {
+          "pose": {"t": [0.24, 1.22, -0.43], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        },
+        "littleTip": {
+          "pose": {"t": [0.24, 1.23, -0.45], "q": [0.0, 0.0, 0.0, 1.0]},
+          "confidence": "high"
+        }
+      }
+    }
+  }
+}

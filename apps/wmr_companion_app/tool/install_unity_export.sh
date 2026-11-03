@@ -14,13 +14,13 @@
 #   - `ndkPath "/home/<owner>/Unity/..."` plus the exporting machine's
 #     `ndkVersion`.
 #
-# It also adapts the export to AGP 9 / Gradle 9 and this app's minSdk; see the
-# numbered comments in the body. The input zip/directory is treated as
-# immutable: it is copied and only the copy is normalised. Installation
-# replaces any previous export for the flavor.
+# It also adapts the export to AGP 9 / Gradle 9 and this app's minSdk, and
+# unexports the Unity/vendor player activities so only MainActivity can be
+# launched; see the numbered comments in the body. The input zip/directory is
+# treated as immutable: it is copied and only the copy is normalised.
+# Installation replaces any previous export for the flavor.
 #
 #   tool/install_unity_export.sh unified path/to/unityLibrary.zip
-#   tool/install_unity_export.sh viture path/to/unityLibrary
 #
 # Options (after the two positional arguments):
 #   --ndk-version <version>  NDK to record in unityLibrary/build.gradle.
@@ -35,7 +35,7 @@ app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 android_dir="$app_dir/android"
 
 usage() {
-  echo "usage: $0 {viture|xreal|unified} <unityLibrary.zip|unityLibrary dir> [--ndk-version <v>] [--target-root <dir>]" >&2
+  echo "usage: $0 unified <unityLibrary.zip|unityLibrary dir> [--ndk-version <v>] [--target-root <dir>]" >&2
   exit 64
 }
 
@@ -66,13 +66,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$flavor" in
-  viture | xreal | unified) ;;
-  *) usage ;;
-esac
-case "$flavor" in
-  viture) module="unityLibraryViture" ;;
-  xreal) module="unityLibraryXreal" ;;
   unified) module="unityLibraryUnified" ;;
+  *)
+    echo "FAIL: only the unified export is supported (ONY-565); the per-vendor flavors are retired." >&2
+    usage
+    ;;
 esac
 
 if [ -z "$ndk_version" ]; then
@@ -237,6 +235,16 @@ if grep -q 'unityStreamingAssets' "$build_gradle" &&
     "$build_gradle"
 fi
 
+# 8. AGP 9 rejects global options in a consumer ProGuard file. Unity writes
+#    `-ignorewarnings` into proguard-unity.txt, which the module exposes as
+#    `consumerProguardFiles`, so `exportReleaseConsumerProguardFiles` fails.
+#    It only suppresses build warnings; drop it and keep the keep rules.
+proguard_unity="$src/proguard-unity.txt"
+if [ -f "$proguard_unity" ]; then
+  perl -0pi -e \
+    's{^[ \t]*-ignorewarnings[ \t]*(?:\r?\n|\z)}{}mg' "$proguard_unity"
+fi
+
 if grep -Eq "implementation[[:blank:]]*\([[:blank:]]*name:" "$build_gradle"; then
   echo "FAIL: local-AAR module notation survived normalisation" >&2
   exit 1
@@ -265,6 +273,60 @@ if ! grep -q "\"$ndk_version\"" "$build_gradle"; then
   echo "FAIL: ndkVersion $ndk_version was not written" >&2
   exit 1
 fi
+if grep -Eq '^[[:blank:]]*-ignorewarnings[[:blank:]]*$' "$proguard_unity" 2>/dev/null; then
+  echo "FAIL: -ignorewarnings survived in proguard-unity.txt" >&2
+  exit 1
+fi
+
+# 9. Unexport the vendor/Unity player activities. Unity and the XREAL SDK mark
+#    them exported (and often MAIN/LAUNCHER) for standalone players. In this
+#    UaaL app only MainActivity may be launched: an exported
+#    UnityPlayerActivity starts the bare Unity scene after a crash, with no
+#    Flutter UI and no loader command (ONY-842). The app's unified manifest
+#    also applies tools:replace; this keeps the installed module safe on its
+#    own.
+unexport_player_activities() {
+  local manifest="$1"
+  [ -f "$manifest" ] || return 0
+  python3 - "$manifest" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+names = (
+    "com.unity3d.player.UnityPlayerActivity",
+    "ai.nreal.activitylife.NRXRActivity",
+    "ai.nreal.activitylife.UnityPlayerActivity",
+)
+for name in names:
+    tag_pattern = re.compile(
+        r'<activity\b[^>]*\bandroid:name="%s"[^>]*>' % re.escape(name)
+    )
+
+    def unexport(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        if re.search(r'\bandroid:exported="[^"]*"', tag):
+            return re.sub(
+                r'\bandroid:exported="[^"]*"', 'android:exported="false"', tag
+            )
+        if tag.endswith("/>"):
+            return tag[:-2].rstrip() + ' android:exported="false" />'
+        return tag[:-1].rstrip() + ' android:exported="false">'
+
+    text, _ = tag_pattern.subn(unexport, text)
+
+for name in names:
+    for tag in re.findall(
+        r'<activity\b[^>]*\bandroid:name="%s"[^>]*>' % re.escape(name), text
+    ):
+        if 'android:exported="false"' not in tag:
+            sys.exit(f"FAIL: {name} is not exported=false in {path}")
+open(path, "w", encoding="utf-8").write(text)
+PY
+}
+unexport_player_activities "$src/src/main/AndroidManifest.xml"
+unexport_player_activities "$src/xrmanifest.androidlib/AndroidManifest.xml"
 
 dest="$target_root/$flavor/unityLibrary"
 rm -rf "$target_root/$flavor/unityLibrary"

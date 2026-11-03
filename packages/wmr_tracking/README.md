@@ -1,6 +1,6 @@
 # wmr_tracking
 
-Pure-Dart head and hand tracking seam for 6DoF controller fusion in the WMR
+Pure Dart head and hand tracking seam for 6DoF controller fusion in the WMR
 companion. This package is publish-ready but like the other packages is not on pub.dev
 yet; no vendor adapter has been run on hardware. The research and integration plan are in
 [`docs/TRACKING.md`](../../docs/TRACKING.md).

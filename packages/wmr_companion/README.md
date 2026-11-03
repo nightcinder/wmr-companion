@@ -9,17 +9,21 @@ This package is the umbrella API from `docs/LIBRARY.md`. It wraps
 can adapt the streams to whatever state layer it already uses. The reference
 app in this repository is the first consumer.
 
-Status: **0.1.0, landed**. All eight packages — `wmr_core`, `wmr_companion`,
-`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_companion_ui` and
-`wmr_companion_hid_android` — are in the pub workspace and pass their export
-boundary checks; publishing to pub.dev is on hold per the owner's decision. The
-facade works on the fake transport and is dogfooded by the app's real connection
-path, including `WmrWsTransport` alongside `UniversalBleTransport` and
-`FakeTransport`. Nothing here has been run on iOS hardware.
+Status: **0.2.2, landed**. All twelve packages — `wmr_core`, `wmr_companion`,
+`wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_tracking_dispatch`,
+`wmr_tracking_android_xr`, `wmr_tracking_viture`, `wmr_tracking_xreal`,
+`wmr_companion_ui` and `wmr_companion_hid_android` — are in the pub workspace at
+0.2.2 and pass their export boundary checks; publishing to pub.dev is on hold per
+the owner's decision. The facade works on the fake transport and is dogfooded by
+the app's real connection path, including `WmrWsTransport` alongside
+`UniversalBleTransport` and `FakeTransport`. Nothing here has been run on iOS
+hardware.
 
 The optional, publishable `wmr_tracking` package (covered by the release
 dry-run) defines the `TrackingSource` seam and `SixDofFuser` behind `poses`.
-The facade re-exports its types. No vendor adapter ships yet, and no headset has been tested; see
+The facade re-exports its types. Vendor adapters ship in their own packages
+(`wmr_tracking_android_xr`, `wmr_tracking_viture`, `wmr_tracking_xreal`) and
+are off by default; no headset has been tested; see
 [`docs/TRACKING.md`](../../docs/TRACKING.md).
 
 ## Why in-process input
@@ -171,7 +175,7 @@ thrown. A discovery failure leaves `protocol` null; a failed FF16 read leaves
 fired after `connect` reports `ready`, so a slow read does not delay the
 stream. `UniversalBleTransport` caches the GATT table from its connect
 sequence, so the service's lookup does not run a second platform discovery on a
-live link; a custom transport should do the same or expect one extra
+live link; a custom transport must do the same or expect one extra
 `discoverServices` call after connect.
 
 `WmrProtocolVersion.features` is a capability matrix taken from the bridge's
@@ -191,7 +195,7 @@ so the characteristics are the reliable signal:
 A bridge with no FF16 is an older firmware and a normal status:
 `protocol.firmwareVersion` is null and `features.firmwareVersion` is false. The
 rest of the matrix still describes what that bridge can do. Unknown
-characteristics are ignored, and callers should ignore records or fields their
+characteristics are ignored, and callers must ignore records or fields their
 app does not know instead of treating them as fatal.
 
 None of this is a hardware claim: the firmware change is merged, and this client
@@ -205,7 +209,7 @@ is exercised against the fake bridge only.
   `BleTransport` has no MTU-request call yet, so the facade does not expose one.
 - **iOS:** `NSBluetoothAlwaysUsageDescription` in the host's `Info.plist`.
   `bluetooth-central` background mode only if the host claims background
-  operation. iOS chooses MTU and connection interval; the facade may report null
+  operation. iOS chooses MTU and connection interval; the facade can report null
   for either.
 - **Desktop/web:** out of scope for v1.
 

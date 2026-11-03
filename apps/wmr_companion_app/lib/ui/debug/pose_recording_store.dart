@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,10 +16,18 @@ class PoseRecordingStore {
   static final RegExp _namePattern = RegExp(r'^pose-\d{8}-\d{6}\.json$');
 
   /// Writes [recording] and returns the new file.
-  Future<File> save(PoseRecording recording, DateTime now) async {
+  ///
+  /// [name] lets the guided bench use its fixed
+  /// `pose_capture_<runtime>_<hand>_<segment>.json` name; the debug screen
+  /// keeps the timestamped default.
+  Future<File> save(
+    PoseRecording recording,
+    DateTime now, {
+    String? name,
+  }) async {
     await directory.create(recursive: true);
     final separator = Platform.pathSeparator;
-    final file = File('${directory.path}$separator${fileName(now)}');
+    final file = File('${directory.path}$separator${name ?? fileName(now)}');
     await file.writeAsString(recording.encode());
     return file;
   }
@@ -50,6 +59,43 @@ class PoseRecordingStore {
     return 'pose-${now.year.toString().padLeft(4, '0')}'
         '${two(now.month)}${two(now.day)}'
         '-${two(now.hour)}${two(now.minute)}${two(now.second)}.json';
+  }
+
+  static const String _progressName = 'bench_pose_progress.json';
+
+  File get _progressFile =>
+      File('${directory.path}${Platform.pathSeparator}$_progressName');
+
+  /// The saved guided-corpus progress, or null when there is none.
+  Future<Map<String, Object?>?> loadBenchProgress() async {
+    final file = _progressFile;
+    if (!file.existsSync()) return null;
+    try {
+      final decoded = jsonDecode(file.readAsStringSync());
+      if (decoded is! Map) return null;
+      return {for (final entry in decoded.entries) '${entry.key}': entry.value};
+    } on FormatException {
+      return null;
+    }
+  }
+
+  Future<void> saveBenchProgress(Map<String, Object?> progress) async {
+    await directory.create(recursive: true);
+    await _progressFile.writeAsString(jsonEncode(progress));
+  }
+
+  Future<void> clearBenchProgress() async {
+    final file = _progressFile;
+    if (file.existsSync()) await file.delete();
+  }
+
+  /// Whether a resumed segment's file is still on disk.
+  bool hasRecording(String path) {
+    try {
+      return File(path).existsSync();
+    } on FileSystemException {
+      return false;
+    }
   }
 }
 

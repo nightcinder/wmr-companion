@@ -14,6 +14,9 @@ coverage/
 **/android/local.properties
 **/android/key.properties
 **/android/gradle-wrapper.jar
+# Proprietary SDKs staged by hand or by release-unified (VITURE libglasses.so);
+# never commit them. The release job deletes its copy with an always() step.
+**/android/app/src/main/jniLibs/
 *.keystore
 *.jks
 
@@ -37,6 +40,9 @@ apps/wmr_companion_app/assets/monado/wmr_config_key.bin
 # not redistributable; copy unity/Build/Android/unityLibrary here to opt in.
 # android/unity/README.md documents the path.
 apps/wmr_companion_app/android/unity/*/
+
+# Python bytecode from the tool/ tests
+__pycache__/
 
 # The pub workspace has one lockfile at the root; members do not keep their own
 packages/*/pubspec.lock

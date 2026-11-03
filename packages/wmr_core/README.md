@@ -31,7 +31,7 @@ This package contains the core domain logic, protocol decoders, and transport ab
 
 ## Usage
 
-Most applications should depend on `wmr_companion` for a high-level facade. Use `wmr_core` directly if building custom pipelines or running in a headless Dart server/CLI environment without Flutter.
+Most applications use `wmr_companion` for a high-level facade. Use `wmr_core` directly if building custom pipelines or running in a headless Dart server/CLI environment without Flutter.
 
 ```dart
 import 'package:wmr_core/ble/ble_transport.dart';

@@ -47,6 +47,8 @@ const androidXrRuntimeProfile = TrackingDeviceProfile(
   ),
   host: 'On the headset or wired XR glasses; ARCore for Jetpack XR',
   permissions:
+      'android.permission.CAMERA, '
+      'android.permission.SCENE_UNDERSTANDING_COARSE, '
       'android.permission.HAND_TRACKING and '
       'android.permission.HEAD_TRACKING at runtime',
   integration: 'Flutter Android plugin (Kotlin) that forwards frames',
@@ -178,7 +180,9 @@ const vitureNeckbandUnityProfile = TrackingDeviceProfile(
       TrackingFeature.handJoints,
       TrackingFeature.handGestures,
       TrackingFeature.passthroughCamera,
+      TrackingFeature.originReset,
     },
+    handJointCount: 26,
   ),
   host: 'VITURE Pro Neckband running the VITURE XR SDK for Unity 0.9.0',
   permissions: 'Android camera permission for RGB/passthrough',

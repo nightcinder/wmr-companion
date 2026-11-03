@@ -336,7 +336,23 @@ class UniversalBleTransport implements BleTransport {
       );
       _adapterScanning = true;
       _emit(BleLinkPhase.scanning);
-      _armScanTimer(ctl);
+      // A bridge the phone already holds (for example as a HID gamepad) does
+      // not advertise, so startScan never sees it. Publish system-connected
+      // devices alongside the scan results; the native service filter keeps
+      // this to bridges.
+      //
+      // The timeout is armed only once that enumeration settles. On Android
+      // getSystemDevices() opens a GATT link to each system-connected device
+      // (up to 2 s each) before it filters, so arming first would close the
+      // scan while the bridge is still being found. The call runs outside the
+      // scan queue, so a cancel and rescan is not blocked behind it.
+      unawaited(
+        _publishSystemDevices(ctl).whenComplete(() {
+          if (!_scanWanted || _scanPaused || ctl.isClosed) return;
+          if (!identical(ctl, _scanCtl)) return;
+          _armScanTimer(ctl);
+        }),
+      );
     } on BleTransportException catch (e) {
       _adapterScanning = false;
       if (!_scanWanted || _scanPaused || ctl.isClosed) return;
@@ -350,6 +366,45 @@ class UniversalBleTransport implements BleTransport {
       ctl.addError(_fail(BleLinkPhase.connectFailed, 'Scan failed: $e'));
       unawaited(ctl.close());
     }
+  }
+
+  /// Adds devices the platform already connected, which therefore do not
+  /// advertise. A failure here must not fail the scan: some platforms cannot
+  /// enumerate system devices, and the normal scan still works.
+  Future<void> _publishSystemDevices(
+    StreamController<BleScanResult> ctl,
+  ) async {
+    final List<BleScanResult> devices;
+    try {
+      devices = await _adapter.systemDevices(withServices: _scanServices);
+    } catch (_) {
+      return;
+    }
+    // The scan may have been cancelled and replaced while this ran: the old
+    // result then belongs to a dead controller and must not count towards the
+    // new scan's timeout.
+    if (!_scanWanted || _scanPaused || ctl.isClosed) return;
+    if (!identical(ctl, _scanCtl)) return;
+    for (final device in devices) {
+      if (!_looksLikeBridge(device)) continue;
+      _scanSeen++;
+      ctl.add(device);
+    }
+  }
+
+  /// Drops a system device only when its metadata positively says it is not a
+  /// bridge. Name and service may both be missing on some platforms, and the
+  /// native call was already filtered by service, so unknown metadata passes.
+  bool _looksLikeBridge(BleScanResult device) {
+    final name = device.name;
+    final nameMatches = name != null && _scanNamePrefixes.any(name.startsWith);
+    final serviceMatches = device.serviceUuids.any(
+      (uuid) => _scanServices.any(
+        (wanted) => wanted.toLowerCase() == uuid.toLowerCase(),
+      ),
+    );
+    final hasMetadata = name != null || device.serviceUuids.isNotEmpty;
+    return nameMatches || serviceMatches || !hasMetadata;
   }
 
   void _armScanTimer(StreamController<BleScanResult> ctl) {

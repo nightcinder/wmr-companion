@@ -1,6 +1,6 @@
 # wmr_fusion
 
-Pure-Dart 3DoF orientation filters (Madgwick and Mahony, 6-axis) for gyro + accelerometer samples. No Flutter dependency, no external math dependency.
+Pure Dart 3DoF orientation filters (Madgwick and Mahony, 6-axis) for gyro + accelerometer samples. No Flutter dependency, no external math dependency.
 
 ## Usage
 

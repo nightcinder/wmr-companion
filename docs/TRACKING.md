@@ -12,15 +12,15 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access.
 - `packages/wmr_tracking_xreal`: default-off XREAL Air 2 Ultra Unity UaaL relay (ONY-214). Host/JVM-tested; Unity/XREAL SDK external gate.
 - `packages/wmr_tracking_dispatch`: native glasses detection and one shared `SharedUnityRuntime` for VITURE/XREAL (ONY-274).
 - Unified Unity prototype: `packages/wmr_tracking_unity` (ONY-273); coexistence unproven.
-- Android build flavors `base`/`viture`/`xreal` (ONY-271); see [BUILDS.md](tracking/BUILDS.md).
+- Android build flavors `base`/`unified` (ONY-271, ONY-565; per-vendor flavors retired); see [BUILDS.md](tracking/BUILDS.md).
 
 ## Index
 
-- [RESEARCH.md](tracking/RESEARCH.md) — vendor research and sources.
-- [FRAMEWORK.md](tracking/FRAMEWORK.md) — seam, filter, vectors, adapter recipes, vertical slices.
-- [BUILDS.md](tracking/BUILDS.md) — build matrix, flavors, `--dart-define`, Unity exports.
-- [GATES.md](tracking/GATES.md) — hardware gates and open questions.
-- [PREFLIGHT.md](tracking/PREFLIGHT.md) — named 1.0 path (XREAL), current unified APK, and the desk-only export/permission check.
+- [RESEARCH.md](tracking/RESEARCH.md): vendor research and sources.
+- [FRAMEWORK.md](tracking/FRAMEWORK.md): seam, filter, vectors, adapter recipes, vertical slices.
+- [BUILDS.md](tracking/BUILDS.md): build matrix, flavors, `--dart-define`, Unity exports.
+- [GATES.md](tracking/GATES.md): hardware gates and open questions.
+- [PREFLIGHT.md](tracking/PREFLIGHT.md): named 1.0 path (XREAL), current unified APK, and the desk-only export/permission check.
 - Run sheets: [Android XR](runs/sheets/pose-androidxr.md), [VITURE](runs/sheets/pose-viture.md), [XREAL](runs/sheets/pose-xreal.md).
 - Filter tuning: [pose-filter.md](runs/sheets/pose-filter.md) (ONY-502; synthetic first pass, hardware replay still open).
 

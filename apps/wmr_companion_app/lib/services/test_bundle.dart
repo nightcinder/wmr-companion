@@ -112,16 +112,78 @@ class BenchBundleStep {
 
 /// The guided bench run that produced this bundle, in step order.
 class BenchBundleRun {
-  const BenchBundleRun(this.steps);
+  const BenchBundleRun(this.steps, {this.mode = '3dof_only'});
 
   final List<BenchBundleStep> steps;
+
+  /// `3dof_only`, `6dof_only` or `combined`.
+  final String mode;
 
   int get done => steps.where((s) => s.status == 'done').length;
   int get skipped => steps.where((s) => s.status == 'skipped').length;
   int get failed => steps.where((s) => s.status == 'failed').length;
 
+  BenchBundleStep? step(String id) {
+    for (final step in steps) {
+      if (step.id == id) return step;
+    }
+    return null;
+  }
+
   Map<String, Object?> toJson() => {
+    'mode': mode,
     'steps': [for (final step in steps) step.toJson()],
+  };
+}
+
+/// Zip name for one corpus file. Run 1 keeps the short name; later runs get a
+/// `_runN` suffix so four runs of the same hand/class cannot overwrite.
+String poseCaptureFileName({
+  required String runtime,
+  required String hand,
+  required String segment,
+  int run = 1,
+}) =>
+    'pose_capture_${runtime}_${hand.toLowerCase()}_$segment'
+    '${run > 1 ? '_run$run' : ''}.json';
+
+/// One recorded 6DoF pose file and the labels its zip name uses.
+class PoseCaptureFile {
+  const PoseCaptureFile({
+    required this.path,
+    required this.runtime,
+    required this.hand,
+    required this.segment,
+    this.run = 1,
+    this.anchorRateHz,
+  });
+
+  final String path;
+
+  /// `androidXr`, `viture` or `xreal`.
+  final String runtime;
+
+  /// `left` or `right`.
+  final String hand;
+
+  /// [PoseSegment.id] from the guided bench.
+  final String segment;
+
+  /// Run index within this hand/class, starting at 1.
+  final int run;
+
+  /// Measured anchor rate recorded in the pose file's provenance block.
+  final double? anchorRateHz;
+
+  String get fileName => path.split(RegExp(r'[\\/]')).last;
+
+  Map<String, Object?> toJson() => {
+    'file': fileName,
+    'runtime': runtime,
+    'hand': hand,
+    'segment': segment,
+    'run': run,
+    if (anchorRateHz != null) 'anchor_rate_hz': anchorRateHz,
   };
 }
 
@@ -133,13 +195,17 @@ class TestBundleInput {
     required this.phone,
     required this.androidVersion,
     required this.streamMode,
+    this.appCommit = 'unknown',
     this.streamFault,
     this.rawStats,
     this.decodedStats,
     this.bridges = const [],
     this.latencyFiles = const [],
     this.captureFiles = const [],
+    this.poseCaptures = const [],
     this.benchRun,
+    this.benchRuntime,
+    this.firmwareSha,
   });
 
   /// Local time; the file name uses its date and the manifest its timestamp.
@@ -147,6 +213,9 @@ class TestBundleInput {
 
   /// `0.2.2+4` from the package metadata.
   final String appVersion;
+
+  /// Short git commit the APK was built from, or `unknown`.
+  final String appCommit;
 
   /// Manufacturer and model, or the platform's own description.
   final String phone;
@@ -171,8 +240,17 @@ class TestBundleInput {
   /// Every saved FF11 capture.
   final List<String> captureFiles;
 
+  /// 6DoF pose recordings from the guided bench.
+  final List<PoseCaptureFile> poseCaptures;
+
   /// The guided bench run, null when the tester exported without one.
   final BenchBundleRun? benchRun;
+
+  /// The attached hand-tracking runtime, when the capture step ran.
+  final String? benchRuntime;
+
+  /// The attached bridge's firmware identity, null without a bridge.
+  final String? firmwareSha;
 }
 
 /// What one export produced, for the screen and for tests.
@@ -260,6 +338,61 @@ Future<TestBundle> writeTestBundle(
     );
   }
 
+  final poseNames = <String>[];
+  for (final pose in input.poseCaptures) {
+    final name = poseCaptureName(pose);
+    final bytes = await _read(pose.path);
+    if (bytes == null) {
+      missing.add('6DoF pose capture `$name` — the saved file was missing.');
+      continue;
+    }
+    files[name] = bytes;
+    poseNames.add(name);
+  }
+  if (poseNames.isNotEmpty) {
+    present.add(
+      '6DoF pose captures: ${poseNames.length} file(s) '
+      '(${poseNames.join(', ')})',
+    );
+  }
+
+  final carinaNames = <String>[];
+  for (final directoryPath in _carinaDirectories(input.benchRun)) {
+    final directory = Directory(directoryPath);
+    if (!await directory.exists()) {
+      missing.add(
+        'Carina output directory `${_baseName(directoryPath)}` — the saved '
+        'directory was missing.',
+      );
+      continue;
+    }
+    final prefix = 'carina/${_baseName(directoryPath)}';
+    await for (final entity in directory.list(
+      recursive: true,
+      followLinks: false,
+    )) {
+      if (entity is! File) continue;
+      final relative = entity.path
+          .substring(directory.path.length + 1)
+          .replaceAll('\\', '/');
+      final name = '$prefix/$relative';
+      final bytes = await _read(entity.path);
+      if (bytes == null) {
+        missing.add('Carina file `$name` — the saved file was missing.');
+        continue;
+      }
+      if (files.containsKey(name)) continue;
+      files[name] = bytes;
+      carinaNames.add(name);
+    }
+  }
+  if (carinaNames.isNotEmpty) {
+    present.add(
+      'Carina captures: ${carinaNames.length} file(s) '
+      '(${carinaNames.join(', ')})',
+    );
+  }
+
   final firmware = _firmwareSummary(input.bridges);
   if (firmware == null) {
     missing.add('Firmware version (FF16) — ${_firmwareReason(input.bridges)}');
@@ -287,7 +420,11 @@ Future<TestBundle> writeTestBundle(
   final diagnostics = const JsonEncoder.withIndent('  ').convert({
     'format': 'wmr-test-bundle/1',
     'generated_at': input.now.toUtc().toIso8601String(),
-    'app': {'name': 'wmr_companion_app', 'version': input.appVersion},
+    'app': {
+      'name': 'wmr_companion_app',
+      'version': input.appVersion,
+      'commit': input.appCommit,
+    },
     'device': {'phone': input.phone, 'android': input.androidVersion},
     'stream': {
       'mode': input.streamMode,
@@ -297,6 +434,14 @@ Future<TestBundle> writeTestBundle(
     },
     'bridges': [for (final bridge in input.bridges) bridge.toJson()],
     if (bench != null) 'bench': bench.toJson(),
+    'bench_mode': input.benchRun?.mode,
+    'tracking_runtime': input.benchRuntime,
+    'app_commit': input.appCommit,
+    'firmware_sha': input.firmwareSha,
+    if (input.poseCaptures.isNotEmpty)
+      'pose_captures': [
+        for (final capture in input.poseCaptures) capture.toJson(),
+      ],
   });
 
   final archive = Archive();
@@ -330,6 +475,14 @@ Future<List<int>?> _read(String path) async {
 }
 
 String _baseName(String path) => path.split(RegExp(r'[\\/]')).last;
+
+/// The archive name the task fixes for one pose capture.
+String poseCaptureName(PoseCaptureFile pose) => poseCaptureFileName(
+  runtime: pose.runtime,
+  hand: pose.hand,
+  segment: pose.segment,
+  run: pose.run,
+);
 
 String _two(int value) => value.toString().padLeft(2, '0');
 
@@ -388,7 +541,11 @@ String _manifest(TestBundleInput input) {
     )
     ..writeln('- MTU: ${_mtuSummary(input.bridges) ?? 'not reported'}')
     ..writeln('- App: WMR Companion ${input.appVersion}')
+    ..writeln('- App commit: ${input.appCommit}')
     ..writeln('- Bridges: ${input.bridges.length}')
+    ..writeln('- Firmware SHA: ${input.firmwareSha ?? 'none (no bridge)'}')
+    ..writeln('- Bench mode: ${input.benchRun?.mode ?? 'not selected'}')
+    ..writeln('- Tracking runtime: ${input.benchRuntime ?? 'none'}')
     ..writeln();
   final bench = input.benchRun;
   if (bench != null) {
@@ -404,11 +561,95 @@ String _manifest(TestBundleInput input) {
     }
     buffer.writeln();
   }
+  final poseSegments = _poseSegments(bench);
+  if (poseSegments.isNotEmpty) {
+    final first = poseSegments.first;
+    final poseData = _poseStepData(bench);
+    final plan = poseData?['plan'];
+    buffer
+      ..writeln('## 6DoF pose captures')
+      ..writeln()
+      ..writeln('- Runtime: ${first['runtime'] ?? 'unknown'}')
+      ..writeln('- App commit: ${first['app_commit'] ?? input.appCommit}')
+      ..writeln(
+        '- Firmware SHA: ${first['firmware_sha'] ?? 'none (no bridge)'}',
+      )
+      ..writeln(
+        '- Corpus plan: ${plan ?? '4 runs per motion class per hand, '
+                'each run >= 30 s, sampled at the anchor rate'}',
+      )
+      ..writeln(
+        '- Occlusion runs are diagnostic only: filter-spec rev 4 section 8 '
+        'has no acceptance bar for that class.',
+      )
+      ..writeln()
+      ..writeln(
+        '| File | Hand | Segment | Run | Status | Samples '
+        '| Anchor Hz | Reason |',
+      )
+      ..writeln('|---|---|---|---|---:|---:|---:|---|');
+    for (final segment in poseSegments) {
+      final file = segment['file'] as String?;
+      final rate = segment['anchor_rate_hz'];
+      buffer.writeln(
+        '| ${file == null ? '—' : _baseName(file)} '
+        '| ${segment['hand'] ?? '—'} '
+        '| ${segment['segment'] ?? '—'} '
+        '| ${segment['run'] ?? 1} '
+        '| ${segment['status'] ?? '—'} '
+        '| ${segment['samples'] ?? '—'} '
+        '| ${rate is num ? rate.toStringAsFixed(1) : '—'} '
+        '| ${segment['reason'] ?? '—'} |',
+      );
+    }
+    buffer.writeln();
+  }
   buffer.writeln(
     'Generated by the Export test bundle or Run guided bench action on '
     'the Connect screen.',
   );
   return buffer.toString();
+}
+
+/// Segment rows from a pose step, or an empty list when the run had none.
+List<Map<String, Object?>> _poseSegments(BenchBundleRun? bench) {
+  final segments = _poseStepData(bench)?['segments'];
+  if (segments is! List) return const [];
+  return [
+    for (final segment in segments)
+      if (segment is Map)
+        {for (final entry in segment.entries) '${entry.key}': entry.value},
+  ];
+}
+
+/// Data of the pose step, which also carries the corpus plan.
+Map<String, Object?>? _poseStepData(BenchBundleRun? bench) {
+  if (bench == null) return null;
+  for (final step in bench.steps) {
+    if (step.id != 'pose_capture') continue;
+    return step.data;
+  }
+  return null;
+}
+
+/// Every Carina output directory the bench recorded, in step order.
+List<String> _carinaDirectories(BenchBundleRun? bench) {
+  if (bench == null) return const [];
+  final seen = <String>{};
+  final paths = <String>[];
+  for (final step in bench.steps) {
+    if (step.id != 'carina_leds' &&
+        step.id != 'carina_checkerboard' &&
+        step.id != 'carina_pose') {
+      continue;
+    }
+    final directories = step.data['directories'];
+    if (directories is! List) continue;
+    for (final value in directories) {
+      if (value is String && seen.add(value)) paths.add(value);
+    }
+  }
+  return paths;
 }
 
 String _readme(

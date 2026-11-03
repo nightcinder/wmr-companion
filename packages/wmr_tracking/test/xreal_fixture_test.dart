@@ -63,6 +63,32 @@ void main() {
     expect(hand.palmPose, isNotNull);
   });
 
+  test('XREAL 26-joint OpenXR fixture decodes the production C# wire shape '
+      'without a second conversion', () {
+    const codec = UnityRelayFrameCodec();
+    final frame = codec.decodeString(_read('xreal_26_joint_openxr_frame.json'));
+
+    expect(frame.timeNs, 1900000000000000);
+    final head = frame.head!;
+    expect(head.pose.translation, Vector3(0.0, 1.62, -0.08));
+    expect(head.pose.rotation.x, closeTo(-0.05, 1e-6));
+    expect(head.pose.rotation.y, closeTo(0.10, 1e-6));
+    expect(head.pose.rotation.z, closeTo(0.02, 1e-6));
+
+    final hand = frame.rightHand!;
+    expect(hand.hand, TrackedHand.right);
+    expect(hand.joints, hasLength(26));
+    expect(hand.joints.keys, containsAll(HandJoint.values));
+    expect(
+      hand.joints[HandJoint.palm]!.pose.translation,
+      Vector3(0.2, 1.21, -0.36),
+    );
+    expect(
+      hand.joints[HandJoint.wrist]!.pose.translation,
+      Vector3(0.18, 1.18, -0.34),
+    );
+  });
+
   test('XREAL palm anchor positions the controller through the default grip offset', () {
     const codec = UnityRelayFrameCodec();
     final frame = codec.decodeString(_read('xreal_26_joint_unity_frame.json'));

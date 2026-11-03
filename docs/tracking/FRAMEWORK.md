@@ -1,28 +1,28 @@
-# Headset hand and head tracking — framework
+# Headset hand and head tracking : framework
 
 ## Packaging: Kotlin and Unity inside a Flutter plugin
 
-**Yes, both can ship in a Flutter library.** They belong in separate platform packages, because `wmr_tracking` is pure Dart and should stay that way.
+**Yes, both can ship in a Flutter library.** They belong in separate platform packages, because `wmr_tracking` is pure Dart and must stay that way.
 
 ### Kotlin plugin (Android XR)
 
-- A standard Flutter plugin's `android/` module can hold Kotlin code, a manifest with `HAND_TRACKING`/`HEAD_TRACKING`, and a `MethodChannel`/`EventChannel`. Dart registers a `TrackingSource` that listens to the event channel and passes each map to `TrackingFrameCodec`/`RelayTrackingSource`.
+- A standard Flutter plugin's `android/` module can hold Kotlin code, a manifest with `CAMERA`/`SCENE_UNDERSTANDING_COARSE`/`HAND_TRACKING`/`HEAD_TRACKING` (but not `SCENE_UNDERSTANDING_FINE`), and a `MethodChannel`/`EventChannel`. Dart registers a `TrackingSource` that listens to the event channel and passes each map to `TrackingFrameCodec`/`RelayTrackingSource`.
 - Android XR tracking is a Kotlin API and does not require Flutter to render XR. A tracking-only plugin can own the XR session and forward poses; if the app also wants XR content, that content is a Jetpack XR/Compose view and needs a platform view or a native activity. The tracking seam is the same either way.
 - Permissions and the session lifecycle stay in the plugin. A refused `SPATIAL` mode or a missing hand must surface as `TrackingExceptionKind.unsupported`, not an empty stream.
 
 ### Unity as a Library (UnitySendMessage)
 
-- Unity exports an Android Gradle project with a `unityLibrary` module. Add it to the Flutter plugin's `android/` Gradle project (or publish it as an `.aar` plus the Unity assets) and the plugin can start/stop the Unity player. Unity's own docs restrict UaaL to **full-screen rendering**, **one Unity runtime instance per process**, and warn that native/managed plugins may need adaptation.
+- Unity exports an Android Gradle project with a `unityLibrary` module. Add it to the Flutter plugin's `android/` Gradle project (or publish it as an `.aar` plus the Unity assets) and the plugin can start/stop the Unity player. Unity's own docs restrict UaaL to **full-screen rendering**, **one Unity runtime instance per process**, and warn that native/managed plugins can need adaptation.
 - **`UnitySendMessage` is one-way, Java/Kotlin → C#, string-only, with a one-frame delay.** Use it for commands such as `start`, `stop`, `recenter` or `setFilterMode`. It is not a way to get poses out of Unity.
 - **Poses travel the other way.** C# either calls a Kotlin object through `AndroidJavaObject`/`AndroidJavaProxy`, or writes into a JNI callback the plugin exposed. The plugin forwards the JSON on an event channel; Dart decodes it with `TrackingFrameCodec`. A `Stream<Object?>` of those messages plugs straight into `RelayTrackingSource`.
-- Practical costs: a Unity build adds the whole player and its assets, needs its own Gradle/NDK setup, and must be licensed and versioned per Unity 6. The player is a second render loop competing with Flutter for the same GPU, so a tracking-only scene should stay minimal or render nothing when hidden.
+- Practical costs: a Unity build adds the whole player and its assets, needs its own Gradle/NDK setup, and must be licensed and versioned per Unity 6. The player is a second render loop competing with Flutter for the same GPU, so a tracking-only scene must stay minimal or render nothing when hidden.
 - **Recommended shape:** a sibling package such as `wmr_tracking_viture` that depends on `wmr_tracking` and owns the Unity relay channels, permissions and C# bridge script, while sharing `UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints` and `unityToOpenXrPose` in `wmr_tracking`. The pure-Dart fusion package remains hardware-free, and apps that do not need Unity pay nothing.
 
 The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_tracking_viture`) are implemented and host-tested; exporting the Unity 6000.0.27f1 `unityLibrary` AAR with the proprietary VITURE XR SDK (`com.viture.xr` v0.9.0, `Viture.XR.VitureXR`) and running on a physical Pro Neckband remain external SDK/hardware gates.
 
 ### One `unityLibrary` for both vendors
 
-`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, ONY-271 flavors stay the answer.
+`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, record the limitation and stop: the per-vendor ONY-271 flavors were retired in ONY-565, so `base` is the only no-Unity fallback.
 
 
 ## The framework
@@ -106,18 +106,18 @@ The facade owns the source (start, alignment, stop and dispose), emits one `Cont
 
 ### Debug viewer and simulator
 
-The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. A **Tracking source** selector offers None, Simulated, Android XR, VITURE and XREAL and defaults to None, which shows the controller IMU orientation and an `orientationOnly` badge. Selecting a vendor calls that package's `create()` only when its `--dart-define` flag is on, starts the source, aligns its frames to the viewer clock and feeds `SixDofFuser`; a typed `TrackingException` (`unavailable` when the Unity relay is not linked, `unsupported`, `permissionDenied`, `protocol`) is shown in the selector status instead of crashing. Simulated keeps the deterministic `FakeTrackingSource` hand trajectory that moves the viewer without a headset. One APK built with all three flags is safe to run with no Unity runtime linked. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
+The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. A **Tracking source** selector offers None, Simulated, Android XR, VITURE and XREAL and defaults to None, which shows the controller IMU orientation and an `orientationOnly` badge. Selecting a vendor calls that package's `create()` only when its `--dart-define` flag is on, starts the source, aligns its frames to the viewer clock and feeds `SixDofFuser`; a typed `TrackingException` (`unsupported`, `unavailable`, `permissionDenied`, `protocol`) is shown in the selector status instead of crashing. For VITURE, a build without the Unity runtime keeps the controller 3DoF path and shows which APK to install, rather than a failed start; XREAL still reports typed `unavailable` in that build. Simulated keeps the deterministic `FakeTrackingSource` hand trajectory that moves the viewer without a headset. One APK built with all three flags is safe to run with no Unity runtime linked. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
 
 ### Native detection and one UnityPlayer
 
-`packages/wmr_tracking_dispatch` detects the vendor before any Unity command: the host (Neckband, Beam Pro or phone) and USB IDs, returning a typed `GlassesDetection`. Its Dart `TrackingSourceSelector` attaches the matching source or reports `unsupported` / `unavailable` / `permissionDenied`, and it never probes the native channel while every vendor flag is off. VITURE and XREAL now share one process-wide `SharedUnityRuntime`: the first claimant owns the single `UnityPlayer`, the other reuses it, and frame/error/glasses-model callbacks route by vendor. The per-vendor model check still runs as a second confirmation. USB IDs that public docs do not state are configurable rather than guessed; see [GLASSES_DETECTION.md](../GLASSES_DETECTION.md).
+`packages/wmr_tracking_dispatch` detects the vendor before any Unity command: the host (Neckband, Beam Pro or phone) and USB IDs, returning a typed `GlassesDetection`. Its Dart `TrackingSourceSelector` attaches the matching source or reports `unsupported` / `unavailable` / `permissionDenied` / `fallback`, and it never probes the native channel while every vendor flag is off. VITURE and XREAL now share one process-wide `SharedUnityRuntime`: the first claimant owns the single `UnityPlayer`, the other reuses it, and frame/error/glasses-model callbacks route by vendor. The per-vendor model check still runs as a second confirmation. USB IDs that public docs do not state are configurable rather than guessed; see [GLASSES_DETECTION.md](../GLASSES_DETECTION.md).
 
 
 ### Adapter recipes
 
 **Android XR (implemented first target).**
 1. `packages/wmr_tracking_android_xr` is the Kotlin plugin; the debug screen's tracking-source selector starts it when `WMR_ANDROID_XR_TRACKING` is on.
-2. The plugin requests `HAND_TRACKING` and `HEAD_TRACKING`, then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
+2. The plugin requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING` — never `SCENE_UNDERSTANDING_FINE` — then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
 3. It reads `ArDevice.getInstance(session).state` and `Hand.left/right(session).state`, maps all 26 `HandJointType`s to the OpenXR `HandJoint` names, and sends `TrackingFrameCodec` JSON over an event channel.
 4. Frames use `System.nanoTime()`; the facade's aligner maps them to the BLE clock. No wall-clock comparison is made.
 5. `AndroidXrTrackingSource.create()` returns null when the flag is off and throws `unsupported`/`permissionDenied`/`unavailable` when the device cannot deliver the slice.
@@ -127,7 +127,7 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 2. Export with Unity as a Library and add the `unityLibrary` module to the Flutter plugin's Gradle build. One Unity runtime per process, full-screen only.
 3. Kotlin starts/stops the player and sends commands with `UnityPlayer.UnitySendMessage(go, "OnCommand", json)`; C# receives `void OnCommand(string)`.
 4. C# sends poses back through a Kotlin callback (JNI/`AndroidJavaProxy`) as one `TrackingFrameCodec` JSON string per sample. The plugin forwards it on an event channel.
-5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor: ...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction — it is string-only, one-way, one frame late.
+5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor: ...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction : it is string-only, one-way, one frame late.
 6. Keep the Unity scene tracking-only. It must not own BLE or the gamepad mapping; that stays in Dart.
 
 **VITURE C SDK (head pose only, no Neckband).**
@@ -203,12 +203,12 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_viture && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && tool/build_flavor.sh viture
+cd apps/wmr_companion_app && tool/build_flavor.sh unified
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_viture:testDebugUnitTest
 ```
 
 Explicit unknowns and SDK-bound gates:
-- **External SDK gate:** Unity 6000.0.27f1 Android build support, `com.unity.xr.hands`, and the VITURE XR SDK for Unity v0.9.0 (`com.viture.xr`, API `Viture.XR.VitureXR`) are not redistributable in this repo. `WmrTrackingViturePlugin` isolates `com.unity3d.player.UnityPlayer` behind `VitureUnityBridge` so standard CI builds and tests pass, and reports `TrackingExceptionKind.unavailable` when `unityLibrary` is not linked.
+- **External SDK gate:** Unity 6000.0.27f1 Android build support, `com.unity.xr.hands`, and the VITURE XR SDK for Unity v0.9.0 (`com.viture.xr`, API `Viture.XR.VitureXR`) are not redistributable in this repo. `WmrTrackingViturePlugin` isolates `com.unity3d.player.UnityPlayer` behind `VitureUnityBridge` so standard CI builds and tests pass. When `unityLibrary` is not linked, the source creation reports a `link` stage, and `TrackingSourceSelector` turns it into a 3DoF fallback message that names the missing runtime and the unified release APK instead of a failed start.
 - **Undocumented vendor parameters:** Unity head and hand update rates on the Pro Neckband are not stated in VITURE's public docs (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); Android permissions required by the VITURE Unity runtime beyond `android.permission.CAMERA` are not documented; and whether a hand gripping a WMR controller stays tracked by `Viture.XR.VitureXR.HandTracking` is unproven.
 
 
@@ -238,7 +238,7 @@ Commands used for this slice:
 cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_xreal && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
-cd apps/wmr_companion_app && tool/build_flavor.sh xreal
+cd apps/wmr_companion_app && tool/build_flavor.sh unified
 cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_xreal:testDebugUnitTest
 ```
 

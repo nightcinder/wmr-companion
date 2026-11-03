@@ -615,7 +615,7 @@ void main() {
             findsWidgets,
           );
         }
-        expect(find.text('Tracking source'), findsOneWidget);
+        expect(find.text('Glasses detection'), findsOneWidget);
       });
     }
 

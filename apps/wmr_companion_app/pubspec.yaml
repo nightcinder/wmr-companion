@@ -1,7 +1,7 @@
 name: wmr_companion_app
 description: "Companion app for the ESP32 WMR Bridge."
 publish_to: 'none'
-version: 0.2.2+4
+version: 0.3.14+19
 
 environment:
   sdk: ^3.13.5
@@ -26,6 +26,7 @@ dependencies:
   wmr_companion_hid_android: ^0.2.2
   wmr_fusion: ^0.2.2
   wmr_tracking: ^0.2.2
+  wmr_tracking_dispatch: ^0.2.2
   wmr_tracking_android_xr: ^0.2.2
   wmr_tracking_viture: ^0.2.2
   wmr_tracking_xreal: ^0.2.2
@@ -41,3 +42,7 @@ flutter:
   assets:
     # Holds only .gitkeep in git; tool/fetch_wmr_config_key.dart adds the key.
     - assets/monado/
+    # VITURE C SDK 2.4.1 LICENSE + NOTICE, surfaced on the licence page.
+    - assets/notices/
+    # The EULA the VITURE SDK agreement requires (2.3.1), shown in-app.
+    - assets/legal/

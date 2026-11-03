@@ -20,7 +20,6 @@ enum class GlassesHost(val wireName: String) {
 object GlassesDetectionReason {
     const val NO_MATCH = "noMatch"
     const val USB_AMBIGUOUS = "usbAmbiguous"
-    const val USB_PERMISSION_DENIED = "usbPermissionDenied"
 }
 
 /** A USB device as seen by [VendorDetector]; Android-free for JVM tests. */
@@ -50,15 +49,26 @@ fun glassesEnvironment(
     isAndroidXrHost: Boolean,
     usbHostAvailable: Boolean,
     usbDevices: List<UsbDeviceSnapshot>,
-): GlassesEnvironment = GlassesEnvironment(
-    manufacturer = manufacturer,
-    model = model,
-    isAndroidXrHost = isAndroidXrHost,
-    usbPermissionGranted = usbHostAvailable && usbDevices.all { it.permissionGranted },
-    usbDevices = usbDevices.map {
+    config: GlassesUsbConfig = GlassesUsbConfig.DEFAULT,
+): GlassesEnvironment {
+    val devices = usbDevices.map {
         UsbDeviceId(it.vendorId, it.productId, it.permissionGranted)
-    },
-)
+    }
+    return GlassesEnvironment(
+        manufacturer = manufacturer,
+        model = model,
+        isAndroidXrHost = isAndroidXrHost,
+        // Same "at least one relevant device is openable" rule the detector
+        // uses for a matched vendor; `all` would let one unrelated denied
+        // device mask a granted glasses device in the host/no-match fallback
+        // paths, and `any` over every device would let a granted keyboard or
+        // hub report USB permission for glasses that are not granted.
+        usbPermissionGranted = usbHostAvailable && devices.any {
+            (config.matchesViture(it) || config.matchesXreal(it)) && it.permissionGranted
+        },
+        usbDevices = devices,
+    )
+}
 
 /**
  * The inputs the detector inspects. Production fills this from `Build`,

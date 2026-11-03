@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
+import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/capture/capture_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
@@ -172,4 +173,196 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+
+  testWidgets('a published pose run puts every capture in the zip', (
+    tester,
+  ) async {
+    final poseDir = Directory('${dir.path}/pose')..createSync();
+    final left = File('${poseDir.path}/pose_capture_viture_left_still.json')
+      ..writeAsStringSync(
+        '{"format":"wmr-pose-recording","version":1,'
+        '"samples":[]}',
+      );
+    final right =
+        File('${poseDir.path}/pose_capture_viture_right_fast_flick.json')
+          ..writeAsStringSync(
+            '{"format":"wmr-pose-recording","version":1,'
+            '"samples":[]}',
+          );
+
+    final transport = UniversalBleTransport(
+      adapter: adapter,
+      scanTimeout: const Duration(minutes: 5),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        realTransportProvider.overrideWithValue(transport),
+        streamModeProvider.overrideWith(RawModeNotifier.new),
+        latencyStoreProvider.overrideWith(
+          (ref) => LatencyStore(Directory('${dir.path}/latency')),
+        ),
+        captureStoreProvider.overrideWith(
+          (ref) => CaptureStore(Directory('${dir.path}/captures')),
+        ),
+        bundleOutputDirectoryProvider.overrideWith(
+          (ref) async => Directory('${dir.path}/out'),
+        ),
+        bundleClockProvider.overrideWithValue(
+          () => DateTime(2026, 10, 29, 12, 30, 0),
+        ),
+        bundleDeviceInfoProvider.overrideWithValue(
+          () async => const BundleDeviceInfo(
+            appVersion: '0.2.2+4',
+            phone: 'Galaxy XR',
+            androidVersion: 'Android 16 (API 36)',
+          ),
+        ),
+        shareTestBundleProvider.overrideWithValue((path) async {
+          shared.add(path);
+        }),
+      ],
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Scan'));
+    await tester.pump();
+    await tester.pump();
+    adapter.emitScanResult(
+      const BleScanResult(
+        deviceId: fakeBridgeDeviceId,
+        name: 'WMR Bridge',
+        rssi: -48,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Connect'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    container
+        .read(benchBundleProvider.notifier)
+        .publish(
+          BenchBundleRun([
+            const BenchBundleStep(
+              id: 'device_summary',
+              status: 'done',
+              data: {'runtime': 'viture', 'hand_joints': true},
+            ),
+            BenchBundleStep(
+              id: 'pose_capture',
+              status: 'done',
+              data: {
+                'segments': [
+                  {
+                    'runtime': 'viture',
+                    'hand': 'LEFT',
+                    'segment': 'still',
+                    'status': 'done',
+                    'file': left.path,
+                    'samples': 30,
+                  },
+                  {
+                    'runtime': 'viture',
+                    'hand': 'RIGHT',
+                    'segment': 'fast_flick',
+                    'status': 'done',
+                    'file': right.path,
+                    'samples': 30,
+                  },
+                ],
+              },
+            ),
+            const BenchBundleStep(id: 'export', status: 'done'),
+          ], mode: '6dof_only'),
+        );
+
+    final zip = File('${dir.path}/out/wmr-ext-20261029.zip');
+    late List<int> bytes;
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const Key('export-test-bundle')));
+      for (var i = 0; i < 200 && shared.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      bytes = await zip.readAsBytes();
+    });
+    await tester.pump();
+
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final names = [for (final file in archive.files) file.name];
+    expect(
+      names,
+      containsAll([
+        'pose_capture_viture_left_still.json',
+        'pose_capture_viture_right_fast_flick.json',
+      ]),
+    );
+
+    String text(String name) => utf8.decode(
+      archive.files.firstWhere((file) => file.name == name).content,
+    );
+    final manifest = text('manifest.md');
+    expect(manifest, contains('- Bench mode: 6dof_only'));
+    expect(manifest, contains('- Tracking runtime: viture'));
+    expect(manifest, contains('## 6DoF pose captures'));
+    expect(manifest, contains('| pose_capture_viture_left_still.json | LEFT'));
+    expect(
+      manifest,
+      contains('| pose_capture_viture_right_fast_flick.json | RIGHT'),
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    container.dispose();
+  });
+
+  test(
+    'Carina PGM and telemetry directories are added to the bundle',
+    () async {
+      final carina = Directory('${dir.path}/carina-led-0p8m')
+        ..createSync(recursive: true);
+      File('${carina.path}/carina-diagnostics.json')
+          .writeAsStringSync('{"schema":"wmr.carina.diagnostics.v1"}');
+      File('${carina.path}/carina-rung0-left0-0.1ms.pgm')
+          .writeAsStringSync('P5');
+      final bundle = await writeTestBundle(
+        TestBundleInput(
+          now: DateTime(2026, 11, 1, 12),
+          appVersion: '0.3.8+13',
+          phone: 'test',
+          androidVersion: 'Android 14',
+          streamMode: 'raw',
+          benchRun: BenchBundleRun([
+            BenchBundleStep(
+              id: 'carina_leds',
+              status: 'done',
+              data: {
+                'directories': [carina.path],
+              },
+            ),
+          ]),
+        ),
+        Directory('${dir.path}/out'),
+      );
+      expect(bundle.present.join('\n'), contains('Carina captures'));
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final names = [for (final file in archive.files) file.name];
+      expect(
+        names,
+        containsAll([
+          'carina/carina-led-0p8m/carina-diagnostics.json',
+          'carina/carina-led-0p8m/carina-rung0-left0-0.1ms.pgm',
+        ]),
+      );
+    },
+  );
 }

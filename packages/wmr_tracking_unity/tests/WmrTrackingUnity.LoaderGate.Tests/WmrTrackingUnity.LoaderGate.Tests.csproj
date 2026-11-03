@@ -7,11 +7,13 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CS0649;CS0414</NoWarn>
+    <DefineConstants>$(DefineConstants);WMR_UNITY_XR_HANDS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/Dispatch/*.cs" />
     <Compile Include="../../unity/Assets/WmrTrackingUnity/Runtime/VendorLoaderGate.cs" />
     <Compile Include="../WmrTrackingUnity.StubCompile/UnityStubs.cs" />
+    <Compile Include="../WmrTrackingUnity.StubCompile/VendorSdkStubs.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 </Project>

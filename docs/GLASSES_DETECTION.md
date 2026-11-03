@@ -1,6 +1,6 @@
 # Native glasses detection and vendor dispatch
 
-Status: desk research plus host-tested Kotlin/Dart. **Nothing here was run on a
+Status: desk research plus host-tested Kotlin/Dart. **Nothing here ran on a
 Neckband, Beam Pro, phone, glasses or Android XR headset.**
 
 ## Why detection runs before Unity
@@ -35,16 +35,20 @@ hand tracking) with `unsupported`. Detection never overrides the model check.
 
 The detector does not run on plugin attach. `TrackingSourceSelector` calls it
 only when at least one vendor flag is enabled, so BLE, controller and 3DoF
-flag-off paths touch no channel.
+flag-off paths touch no channel. The companion app runs the selector
+automatically when the debug or bench screen opens and again when the tester
+taps **Re-detect**; there is no vendor dropdown. If nothing is detected, or
+both vendor USB IDs are attached, the app stays on 3DoF and offers a
+**Simulated** 6DoF fallback.
 
 ## USB and host IDs
 
 | Item | Value | Source / status |
 | --- | --- | --- |
-| VITURE USB vendor ID | `0x35CA` | Public; recorded in [TRACKING.md](TRACKING.md). |
+| VITURE USB vendor ID | `0x35CA` | Public; shipped as `GlassesUsbConfig.VITURE_VENDOR_ID`. |
 | VITURE USB product IDs | unknown | Not published in this repository; default matches any product. Configurable. |
-| XREAL USB vendor ID | unknown | Not published in this repository; default is empty (no USB match). Configurable. |
-| XREAL USB product IDs | unknown | Not published in this repository; configurable, but only with a vendor ID. |
+| XREAL USB vendor ID | `0x3318` | Public; shipped as `GlassesUsbConfig.XREAL_VENDOR_ID`. |
+| XREAL USB product IDs | unknown | Not published in this repository; default matches any product. Configurable. |
 | VITURE host markers | `viture` | Product-name heuristic, case-insensitive on manufacturer/model. Configurable in `GlassesUsbConfig`. |
 | XREAL host markers | `xreal`, `nreal` | Product-name heuristic. Configurable in `GlassesUsbConfig`. |
 | Android XR features | `android.software.xr.api.openxr`, `android.software.xr.api.spatial` | Android XR platform feature strings. |
@@ -55,13 +59,12 @@ at runtime:
 ```dart
 await const PlatformGlassesDetector().configureIds(
   vitureProductIds: [0x1011], // only IDs confirmed from vendor docs/hardware
-  xrealVendorIds: [0x3318],
   xrealProductIds: [0x0424],
 );
 ```
 
-Empty product-ID sets match any product from that vendor ID. An empty vendor-ID
-set never matches, which is how XREAL stays fail-closed by default.
+Empty product-ID sets match any product from that vendor ID. Both vendor IDs
+default to their published values, so XREAL is detected without configuration.
 
 ## USB permission
 
@@ -76,6 +79,14 @@ Detection reads IDs only and does not request USB permission. Opening a
 `UsbDeviceConnection` (for example for the VITURE C SDK) still needs the
 platform USB permission flow, which is outside this issue. The host marker path
 never reads USB at all.
+
+USB permission is not a hand-tracking requirement. The Neckband and Beam Pro run
+the vendor tracking runtime on the compute unit itself, and the VITURE Unity
+relay starts without a USB grant. The grant only gates the VITURE C SDK raw
+camera feed in the guarded bench, which requests it when that step runs. The
+status banner therefore says `USB camera access not granted (hand tracking does
+not need it)` rather than `USB permission not granted`; a missing grant never
+stops Auto from attaching hand tracking.
 
 The `usbPermissionDenied` reason is retained in the Dart API for older native
 detectors, but the current Kotlin detector no longer produces it.
@@ -112,15 +123,15 @@ runtime or vendor SDK is required.
   a grant, host markers, single creation, reuse, routing).
 - `packages/wmr_tracking_dispatch/test` - Dart detection parsing, selector
   outcomes (`attached`, `unsupported`, `unavailable`, `permissionDenied`,
-  `none`), and a flag-off test asserting zero channel calls.
+  `fallback`, `none`), and a flag-off test asserting zero channel calls.
 - `flutter analyze` and `flutter test` in the workspace.
 - Existing VITURE/XREAL Dart and Kotlin suites remain green; no BLE/3DoF code was
   touched.
 
 ## Open questions
 
-- XREAL USB IDs and both vendors' product IDs are unknown in public docs and
-  are configurable rather than guessed.
+- Both vendors' USB product IDs are unknown in public docs and are configurable
+  rather than guessed. XREAL's vendor ID is known and is on by default.
 - Host markers are product-name heuristics; a firmware string change falls back
   to USB detection.
 - Whether Android reports the glasses as USB devices on every host/firmware is

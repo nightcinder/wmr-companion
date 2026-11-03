@@ -12,6 +12,7 @@ import 'package:wmr_core/services/controller_service.dart';
 import '../ui/capture/capture_providers.dart';
 import '../ui/connect/connect_providers.dart';
 import '../ui/latency/latency_providers.dart';
+import 'firmware_identity.dart';
 import 'test_bundle.dart';
 
 /// App and device facts that go into the manifest and diagnostics.
@@ -68,6 +69,13 @@ final bundleDeviceInfoProvider = Provider<Future<BundleDeviceInfo> Function()>((
 /// The clock the file name and manifest use. Fixed in tests.
 final bundleClockProvider = Provider<DateTime Function()>(
   (ref) => DateTime.now,
+);
+
+/// The short git commit the APK was built from. `tool/build_flavor.sh` passes
+/// `WMR_APP_COMMIT`; a plain `flutter build` leaves it `unknown`.
+final appCommitProvider = Provider<String>(
+  (ref) =>
+      const String.fromEnvironment('WMR_APP_COMMIT', defaultValue: 'unknown'),
 );
 
 /// Where `wmr-ext-<date>.zip` is written before the share sheet opens.
@@ -143,10 +151,17 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
     final captureStore = await ref.read(captureStoreProvider.future);
     final runs = latencyStore.list();
     final latest = runs.isEmpty ? null : runs.first;
+    final firmwareSha = bridges.isEmpty
+        ? null
+        : firmwareShaFromVersions({
+            for (final bridge in bridges) bridge.id: bridge.firmwareVersion,
+          });
 
+    final run = benchRun ?? ref.read(benchBundleProvider);
     return TestBundleInput(
       now: ref.read(bundleClockProvider)(),
       appVersion: info.appVersion,
+      appCommit: ref.read(appCommitProvider),
       phone: info.phone,
       androidVersion: info.androidVersion,
       streamMode: service?.mode.name ?? device.mode?.mode.name ?? 'none',
@@ -158,7 +173,10 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       bridges: bridges,
       latencyFiles: latest?.paths ?? const [],
       captureFiles: [for (final capture in captureStore.list()) capture.path],
-      benchRun: benchRun ?? ref.read(benchBundleProvider),
+      benchRun: run,
+      poseCaptures: poseCapturesFromRun(run),
+      benchRuntime: poseRuntimeFromRun(run),
+      firmwareSha: firmwareSha,
     );
   };
 });
@@ -205,6 +223,57 @@ class BenchBundleNotifier extends Notifier<BenchBundleRun?> {
   void publish(BenchBundleRun run) => state = run;
 
   void clear() => state = null;
+}
+
+/// Recorded pose files named by the pose step's segment data.
+///
+/// Shared with the bench tests so the zip they inspect goes through the same
+/// selection the app uses.
+List<PoseCaptureFile> poseCapturesFromRun(BenchBundleRun? run) {
+  if (run == null) return const [];
+  final captures = <PoseCaptureFile>[];
+  for (final step in run.steps) {
+    if (step.id != 'pose_capture') continue;
+    final segments = step.data['segments'];
+    if (segments is! List) continue;
+    for (final segment in segments) {
+      if (segment is! Map) continue;
+      if (segment['status'] != 'done') continue;
+      final path = segment['file'];
+      final runtime = segment['runtime'];
+      final hand = segment['hand'];
+      final name = segment['segment'];
+      if (path is! String || runtime is! String) continue;
+      if (hand is! String || name is! String) continue;
+      final run = segment['run'];
+      final rate = segment['anchor_rate_hz'];
+      captures.add(
+        PoseCaptureFile(
+          path: path,
+          runtime: runtime,
+          hand: hand.toLowerCase(),
+          segment: name,
+          run: run is int ? run : 1,
+          anchorRateHz: rate is num ? rate.toDouble() : null,
+        ),
+      );
+    }
+  }
+  return captures;
+}
+
+/// The runtime the pose step recorded, taken from the segment entries so the
+/// manifest header and the 6DoF section cannot disagree. Null when the run has
+/// no pose step (3DoF only, or a plain export).
+String? poseRuntimeFromRun(BenchBundleRun? run) {
+  final segments = run?.step('pose_capture')?.data['segments'];
+  if (segments is! List) return null;
+  for (final segment in segments) {
+    if (segment is! Map) continue;
+    final runtime = segment['runtime'];
+    if (runtime is String && runtime.isNotEmpty) return runtime;
+  }
+  return null;
 }
 
 Map<String, Object?>? _rawStatsJson(StreamStats? stats) {

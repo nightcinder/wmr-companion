@@ -22,13 +22,31 @@ void main() {
     expect(encodeHidReport(pad()).length, hidReportSize);
   });
 
-  test('buttons use the documented bit order', () {
-    for (var i = 0; i < hidButtonOrder.length; i++) {
-      final r = encodeHidReport(pad(buttons: {hidButtonOrder[i]}));
-      expect(r[0] | (r[1] << 8), 1 << i, reason: '${hidButtonOrder[i]}');
+  test('buttons use the Android/Linux HID slot order', () {
+    const slots = {
+      GamepadButton.a: 0,
+      GamepadButton.b: 1,
+      GamepadButton.x: 3,
+      GamepadButton.y: 4,
+      GamepadButton.l1: 6,
+      GamepadButton.r1: 7,
+      GamepadButton.l2: 8,
+      GamepadButton.r2: 9,
+      GamepadButton.select: 10,
+      GamepadButton.start: 11,
+      GamepadButton.guide: 12,
+      GamepadButton.l3: 13,
+      GamepadButton.r3: 14,
+    };
+    for (final entry in slots.entries) {
+      final r = encodeHidReport(pad(buttons: {entry.key}));
+      expect(r[0] | (r[1] << 8), 1 << entry.value, reason: '${entry.key}');
     }
-    final all = encodeHidReport(pad(buttons: hidButtonOrder.toSet()));
-    expect(all[0] | (all[1] << 8), (1 << hidButtonOrder.length) - 1);
+    expect(hidButtonOrder[2], isNull); // C
+    expect(hidButtonOrder[5], isNull); // Z
+    final all = encodeHidReport(pad(buttons: slots.keys.toSet()));
+    // Every used slot is set; the reserved C and Z bits stay clear.
+    expect(all[0] | (all[1] << 8), 0x7FDB);
   });
 
   test('d-pad becomes a hat, opposite directions cancel', () {

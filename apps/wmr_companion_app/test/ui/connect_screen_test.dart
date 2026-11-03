@@ -30,6 +30,7 @@ void main() {
       ProviderScope(
         overrides: [
           realTransportProvider.overrideWithValue(transport),
+          appVersionProvider.overrideWith((ref) => '0.3.0+5'),
           if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -49,7 +50,18 @@ void main() {
     await open(tester);
     expect(find.text('Fake bridge'), findsNothing);
     expect(find.text('Real device'), findsNothing);
+    expect(find.text('Version 0.3.0+5'), findsOneWidget);
     expect(find.text('Scan'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('the scan action takes the initial D-pad focus', (tester) async {
+    await open(tester);
+    await tester.pump();
+    final scan = tester.widget<FilledButton>(
+      find.byKey(const Key('connect-scan')),
+    );
+    expect(scan.focusNode?.hasFocus, isTrue);
     await close(tester);
   });
 
@@ -238,6 +250,20 @@ void main() {
     await tester.pump();
 
     expect(find.text('State: Bluetooth permission denied'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('opens the Neckband controls hint', (tester) async {
+    await open(tester);
+
+    await tester.tap(find.byKey(const Key('neckband-controls')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('neckband-controls-hint')), findsOneWidget);
+    expect(
+      find.textContaining('Volume Up and Volume Down move focus'),
+      findsOneWidget,
+    );
     await close(tester);
   });
 }

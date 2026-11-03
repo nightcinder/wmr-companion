@@ -1,4 +1,4 @@
-# Headset hand and head tracking — gates and open questions
+# Headset hand and head tracking : gates and open questions
 
 > **Current SDK note (ONY-378):** the VITURE gate now targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The gate definitions and results are unchanged.
 
@@ -48,7 +48,7 @@ The code is a framework, not a hardware result. In order:
    only that `headRelative` moves with the head and is not positional tracking.
 9. **VITURE C path.** Run `get_gl_pose_carina` on an Android phone with Luma Ultra, measure pose rate/status and USB permission behaviour. If it works, it is the lowest-friction phone-only head-pose source.
 
-**Host-side coverage for gates 2 and 3.** From `packages/wmr_tracking`, `dart run tool/xr_contract_harness.dart` replays deterministic head poses and 26-joint hands through both adapter contracts — native plugin JSON in OpenXR axes and Unity relay JSON in left-handed Unity axes — decodes the paired golden fixtures, logs the achieved head and hand rates, and exits non-zero if either contract drifts or a malformed frame is accepted. Passing a valid frame as `--malformed` must fail, which is how the rejection check is verified. A green run proves the wire contract and rate accounting in CI; it does not replace the permission, session-lifecycle, Unity hot-restart or "hand gripping a controller" checks in gates 2 and 3.
+**Host-side coverage for gates 2 and 3.** From `packages/wmr_tracking`, `dart run tool/xr_contract_harness.dart` replays deterministic head poses and 26-joint hands through both adapter contracts (native plugin JSON in OpenXR axes and Unity relay JSON in left-handed Unity axes), and decodes the paired golden fixtures, logs the achieved head and hand rates, and exits non-zero if either contract drifts or a malformed frame is accepted. Passing a valid frame as `--malformed` must fail, which is how the rejection check is verified. A green run proves the wire contract and rate accounting in CI; it does not replace the permission, session-lifecycle, Unity hot-restart or "hand gripping a controller" checks in gates 2 and 3.
 
 Until 1–9 produce reported hardware results, describe the framework as "ready for an adapter", not "6DoF supported".
 

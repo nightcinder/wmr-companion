@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 /// The default-off build flag for the VITURE Pro Neckband vertical slice.
 ///
@@ -63,6 +64,7 @@ enum VitureGlassesModel {
           TrackingFeature.handJoints,
           TrackingFeature.handGestures,
           TrackingFeature.passthroughCamera,
+          TrackingFeature.originReset,
         },
         handJointCount: 26,
         maxHandRateHz: 0,
@@ -159,6 +161,27 @@ class VitureTrackingPlatform {
 
   /// One JSON string (or map) per tracking frame, plus typed platform errors.
   Stream<Object?> frames() => events.receiveBroadcastStream();
+
+  /// Debug-only: opens the VITURE glasses and returns the USB fd metadata
+  /// (`session`, `fd`, `productId`) for the Carina native harness.
+  Future<Map<String, Object?>> openCarinaDiagnosticUsb() async {
+    final result = await methods.invokeMapMethod<String, Object?>(
+      'carinaDiagnosticUsb',
+    );
+    if (result == null) {
+      throw PlatformException(
+        code: 'protocol',
+        message: 'carinaDiagnosticUsb returned no map',
+      );
+    }
+    return result;
+  }
+
+  /// Closes the USB connection that owns the fd handed to the native harness.
+  Future<void> closeCarinaDiagnosticUsb(String session) =>
+      methods.invokeMethod<void>('carinaDiagnosticUsbClose', <String, Object?>{
+        'session': session,
+      });
 }
 
 /// Alias for [VitureNeckbandTrackingSource].
@@ -205,6 +228,13 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     final Map<String, Object?> raw;
     try {
       raw = await platform.capabilities();
+    } on MissingPluginException {
+      throw const TrackingException(
+        TrackingExceptionKind.unavailable,
+        'This APK does not include the VITURE tracking plugin. Install the '
+        'unified release APK to enable 6DoF hand tracking.',
+        stage: unityRuntimeLinkStage,
+      );
     } on PlatformException catch (error) {
       throw _mapPlatformError(error);
     }
@@ -212,15 +242,21 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     final unityAvailable = raw['unityAvailable'];
     final reason = raw['reason'];
     if (unityAvailable == false) {
-      throw TrackingException(
+      throw const TrackingException(
         TrackingExceptionKind.unavailable,
-        reason is String && reason.isNotEmpty
-            ? reason
-            : 'VITURE Unity UaaL relay is not linked in this build',
+        'This APK was built without the VITURE Unity runtime (unityLibrary). '
+        'Install the unified release APK to enable 6DoF hand tracking.',
+        stage: unityRuntimeLinkStage,
       );
     }
 
     final glassesModel = VitureGlassesModel.fromSdkName(raw['glassesModel']);
+    // The unified Unity scene keeps the VITURE backend inactive until `start`,
+    // so the native layer cannot report a model before capabilities and marks
+    // it with `modelReported: false`. Defer the Luma Ultra check to the Unity
+    // start handshake in that case. Absent means reported, so an older native
+    // plugin keeps failing closed.
+    final modelReported = raw['modelReported'] != false;
     final supported = raw['supported'] == true;
     final handTracking = raw['handTracking'] == true;
     final headTracking = raw['headTracking'] == true;
@@ -229,8 +265,9 @@ class VitureNeckbandTrackingSource implements TrackingSource {
     if (!supported ||
         !handTracking ||
         !headTracking ||
-        (glassesModel != VitureGlassesModel.unknown &&
-            !glassesModel.supportsHandTracking)) {
+        (modelReported &&
+            (glassesModel == VitureGlassesModel.unknown ||
+                !glassesModel.supportsHandTracking))) {
       throw TrackingException(
         TrackingExceptionKind.unsupported,
         reason is String && reason.isNotEmpty
@@ -261,6 +298,7 @@ class VitureNeckbandTrackingSource implements TrackingSource {
       TrackingFeature.handJoints,
       if (raw['handGestures'] != false) TrackingFeature.handGestures,
       if (raw['passthroughCamera'] != false) TrackingFeature.passthroughCamera,
+      TrackingFeature.originReset,
     };
 
     return VitureNeckbandTrackingSource._(
@@ -443,10 +481,15 @@ TrackingException _mapPlatformError(Object error) {
       'protocol' => TrackingExceptionKind.protocol,
       _ => TrackingExceptionKind.protocol,
     };
+    final details = error.details;
+    final stage = details is Map && details['stage'] is String
+        ? details['stage'] as String
+        : null;
     return TrackingException(
       kind,
       error.message ?? 'VITURE tracking failed (${error.code})',
       cause: error,
+      stage: stage,
     );
   }
   return TrackingException(

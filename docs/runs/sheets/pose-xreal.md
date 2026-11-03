@@ -26,7 +26,7 @@ Gates covered: **3** (Unity-in-Flutter smoke test), **5** (XREAL Air 2 Ultra han
 | Glasses | XREAL Air 2 Ultra (the only model with hand tracking). `One`/`OnePro` (6DoF head only, no hands) and `Air`/`Air2`/`Air2Pro`/`Light` (3DoF) are rejected by the adapter and must not be used for gate 5. |
 | Host | Beam Pro or Samsung S24/S25 or later. XREAL warns against Android 16 on dev devices. Record model and Android version. |
 | Unity | Unity 2021.3+/6000.0 with Android build support, `com.unity.xr.hands`, XREAL SDK 3.x (`com.xreal.xr`). External SDK gate; not redistributable. |
-| App build | Release `v0.2.1` unified debug APK (SHA-256 `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b`, all tracking flags on, both SDKs in one `unityLibrary`), or a local `tool/build_flavor.sh unified --debug` from the same export. Record app commit. |
+| App build | Release `v0.3.7` unified APK (SHA-256 `d66f5147f85f76d8b4a7249b4cc7d29e969f06205599f04a5fb99825249d865c`, all tracking flags on, both SDKs in one `unityLibrary`), or a local `tool/build_flavor.sh unified --debug` from the same export. Record app commit. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb`, terminal, logcat capture. |
 
@@ -61,14 +61,18 @@ Confirm the flag is live: the debug overlay shows "XREAL tracking: available" wh
 2. Put the bridge in its usual place, controllers on taped marks ~0.5 m from it. Photo the setup.
 3. Start the serial monitor (bridge) and a logcat capture (host).
 4. Connect the app to the bridge, select **Batched FF14**, confirm `STREAM` shows `stream=batched`, `sub=1`, live `rate_rx`. Confirm `bridge_hands=0`.
-5. Confirm the app reports the glasses model as `Air2Ultra` before gate 5; any other model makes gate 5 fail with `unsupported`.
+5. Start tracking: the Unity `start` handshake is the model confirmation. A
+   successful start means `Air2Ultra`; any other model fails gate 5 with
+   `unsupported (found <model>)`. The handshake model is not re-reported to the
+   app, so do not expect a pre-start `Air2Ultra` read.
 
-## 2.1 Pre-flight (desk-only, done 2026-10-28)
+## 2.1 Pre-flight (desk-only, re-run 2026-11-01 on v0.3.7)
 
-Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). On the
-v0.2.1 unified APK (SHA-256 above) the merged manifest declares `CAMERA`,
-`BLUETOOTH_SCAN`/`CONNECT`, `HAND_TRACKING`/`HEAD_TRACKING`, `usb.host` and an
-optional camera feature; both vendor runtimes and their Unity subsystems are
+Recorded in [`docs/tracking/PREFLIGHT.md`](../../tracking/PREFLIGHT.md). The
+v0.3.7 unified APK (SHA-256 above) was re-checked on 2026-11-01: its merged
+manifest declares `CAMERA`,
+`SCENE_UNDERSTANDING_COARSE`, `BLUETOOTH_SCAN`/`CONNECT`, `HAND_TRACKING`/`HEAD_TRACKING`,
+`usb.host` and an optional camera feature, and never `SCENE_UNDERSTANDING_FINE`; both vendor runtimes and their Unity subsystems are
 present; and the session classes (`SharedUnityRuntime`, `PendingStartGate`,
 both vendor plugins) are in the dex. This is a build-content check only.
 
@@ -127,7 +131,7 @@ Record:
 
 Procedure:
 
-1. Confirm glasses model is `Air2Ultra` (gate fails with `unsupported` otherwise).
+1. Start tracking: the Unity `start` handshake fails with `unsupported` unless the glasses are an Air 2 Ultra (the model it reports is not re-surfaced to the app).
 2. Start tracking. With the hand empty and visible, log for 60 s.
 3. Record joint count and rate, and the raw `GetDeviceType()` name.
 4. Repeat with the hand gripping a WMR controller (controller awake, not streaming). Record whether joints still arrive.

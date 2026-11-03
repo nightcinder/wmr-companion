@@ -73,6 +73,24 @@ class UniversalBleAdapter implements BleAdapter {
   Future<void> stopScan() => ub.UniversalBle.stopScan();
 
   @override
+  Future<List<BleScanResult>> systemDevices({
+    required List<String> withServices,
+  }) async {
+    final devices = await ub.UniversalBle.getSystemDevices(
+      withServices: withServices,
+    );
+    return [
+      for (final d in devices)
+        BleScanResult(
+          deviceId: d.deviceId,
+          name: d.name,
+          rssi: d.rssi,
+          serviceUuids: d.services,
+        ),
+    ];
+  }
+
+  @override
   Future<void> connect(String deviceId) => ub.UniversalBle.connect(deviceId);
 
   @override

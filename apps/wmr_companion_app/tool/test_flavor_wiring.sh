@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Prove the ONY-271/ONY-355 Unity include path, flavor isolation and the
-# mutual exclusion guard. Creates throwaway `unityLibrary` stubs in the
-# gitignored locations, builds flavors, then removes them. Needs an Android SDK
-# with aapt; no Unity or vendor SDK is required.
+# Prove the ONY-355 unified Unity include path: a unified export is linked into
+# the unified APK, and a unified build with no export still succeeds without a
+# Unity runtime (ONY-520). Also proves the ONY-565 retired per-vendor guard
+# fails configuration instead of ignoring a stale export. Creates throwaway
+# stubs in the gitignored locations, builds the flavor, then removes them.
+# Needs an Android SDK with aapt; no Unity or vendor SDK is required.
+#
+# Also proves ONY-561: the unified APK keeps exactly one home-screen icon when
+# the linked export declares standalone MAIN/LAUNCHER activities.
 #
 #   tool/test_flavor_wiring.sh
 set -euo pipefail
@@ -11,8 +16,6 @@ app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 unity_root="$app_dir/android/unity"
 build_root="$app_dir/build"
 
-viture_permission="com.onyxlens.wmr.UNITY_STUB_VITURE"
-xreal_permission="com.onyxlens.wmr.UNITY_STUB_XREAL"
 unified_permission="com.onyxlens.wmr.UNITY_STUB_UNIFIED"
 
 aapt=""
@@ -26,42 +29,56 @@ if [ -z "$aapt" ]; then
   exit 1
 fi
 
-# A developer may have a real (proprietary, gitignored) VITURE/XREAL/unified
-# export at these paths. Move any such directory aside before writing stubs and
-# put it back on exit; only remove directories this script created itself.
+# A developer may have a real (proprietary, gitignored) export at these paths.
+# Move it aside before writing a stub and put it back on exit; only remove a
+# directory this script created itself.
 backup_root=""
-restored_vendors=()
-created_vendors=()
+created_flavors=()
 
 cleanup() {
-  local vendor
-  for vendor in "${created_vendors[@]+"${created_vendors[@]}"}"; do
-    rm -rf "$unity_root/$vendor"
+  local flavor
+  for flavor in "${created_flavors[@]+"${created_flavors[@]}"}"; do
+    rm -rf "$unity_root/$flavor"
   done
   if [ -n "$backup_root" ]; then
-    for vendor in "${restored_vendors[@]+"${restored_vendors[@]}"}"; do
-      mv "$backup_root/$vendor" "$unity_root/$vendor"
+    for saved in "$backup_root"/*; do
+      if [ -e "$saved" ]; then
+        mv "$saved" "$unity_root/"
+      fi
     done
-    rmdir "$backup_root"
+    rmdir "$backup_root" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
 
-for vendor in viture xreal unified; do
-  if [ -e "$unity_root/$vendor" ] || [ -L "$unity_root/$vendor" ]; then
+drop_created() {
+  local keep=() flavor
+  for flavor in "${created_flavors[@]+"${created_flavors[@]}"}"; do
+    if [ "$flavor" != "$1" ]; then
+      keep+=("$flavor")
+    fi
+  done
+  created_flavors=("${keep[@]+"${keep[@]}"}")
+}
+
+backup_export() {
+  local flavor="$1"
+  if [ -e "$unity_root/$flavor" ] || [ -L "$unity_root/$flavor" ]; then
     if [ -z "$backup_root" ]; then
       backup_root="$(mktemp -d "$unity_root/.flavor-wiring-backup.XXXXXX")"
     fi
-    echo "==> preserving existing $unity_root/$vendor (restored on exit)"
-    mv "$unity_root/$vendor" "$backup_root/$vendor"
-    restored_vendors+=("$vendor")
+    echo "==> preserving existing $unity_root/$flavor (restored on exit)"
+    mv "$unity_root/$flavor" "$backup_root/$flavor"
   fi
+}
+
+for flavor in unified viture xreal; do
+  backup_export "$flavor"
 done
 
 create_stub() {
-  local vendor="$1" permission="$2" namespace="com.onyxlens.wmr.unitystub.$1"
-  local dir="$unity_root/$vendor/unityLibrary"
-  created_vendors+=("$vendor")
+  local dir="$unity_root/unified/unityLibrary"
+  created_flavors+=(unified)
   mkdir -p "$dir/src/main"
   cat >"$dir/build.gradle" <<EOF
 // Throwaway stand-in for a Unity UaaL export, used by tool/test_flavor_wiring.sh.
@@ -77,7 +94,7 @@ buildscript {
 apply plugin: 'com.android.library'
 
 android {
-    namespace = '$namespace'
+    namespace = 'com.onyxlens.wmr.unitystub.unified'
     compileSdk = 36
 
     defaultConfig {
@@ -87,13 +104,37 @@ android {
 EOF
   cat >"$dir/src/main/AndroidManifest.xml" <<EOF
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="$permission" />
+    <uses-permission android:name="$unified_permission" />
+    <!-- Mimic the XREAL/Unity export: both activities carry a standalone
+         launcher filter. The app flavor manifest must remove them so the APK
+         installs one icon (ONY-561). -->
+    <application>
+        <activity
+            android:name="ai.nreal.activitylife.NRXRActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.unity3d.player.UnityPlayerActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>
 EOF
 }
 
 apk_path() {
-  echo "$build_root/app/outputs/flutter-apk/app-$1-debug.apk"
+  local flavor="${1:-unified}"
+  echo "$build_root/app/outputs/flutter-apk/app-$flavor-debug.apk"
 }
 
 has_permission() {
@@ -101,105 +142,112 @@ has_permission() {
   "$aapt" dump permissions "$apk" | grep -q "$permission"
 }
 
+launcher_activities() {
+  "$aapt" dump badging "$1" |
+    sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p"
+}
+
+assert_one_launcher() {
+  local flavor="$1"
+  local apk launchers
+  apk="$(apk_path "$flavor")"
+  launchers="$(launcher_activities "$apk")"
+  if [ "$launchers" != "com.onyxlens.wmr_companion.MainActivity" ]; then
+    echo "FAIL: $flavor APK launcher activities: ${launchers:-none}" >&2
+    echo "      expected only com.onyxlens.wmr_companion.MainActivity" >&2
+    exit 1
+  fi
+  if "$aapt" dump badging "$apk" | grep -q '^leanback-launchable-activity'; then
+    echo "FAIL: $flavor APK still exposes a leanback launcher activity" >&2
+    exit 1
+  fi
+  echo "PASS: $flavor APK has one launcher icon"
+}
+
+assert_only_main_exported() {
+  local flavor="$1"
+  local apk tree name
+  apk="$(apk_path "$flavor")"
+  tree="$("$aapt" dump xmltree "$apk" AndroidManifest.xml)"
+  for name in \
+    com.unity3d.player.UnityPlayerActivity \
+    ai.nreal.activitylife.NRXRActivity \
+    ai.nreal.activitylife.UnityPlayerActivity; do
+    if grep -A1 "android:name.*\"$name\"" <<<"$tree" |
+      grep -q 'android:exported.*0xffffffff'; then
+      echo "FAIL: $flavor APK exports $name (ONY-842)" >&2
+      exit 1
+    fi
+    if ! grep -A1 "android:name.*\"$name\"" <<<"$tree" |
+      grep -q 'android:exported.*0x0'; then
+      echo "FAIL: $flavor APK does not set exported=false on $name" >&2
+      exit 1
+    fi
+  done
+  if ! grep -A2 'android:name.*"com.onyxlens.wmr_companion.MainActivity"' <<<"$tree" |
+    grep -q 'android:exported.*0xffffffff'; then
+    echo "FAIL: $flavor APK does not export MainActivity" >&2
+    exit 1
+  fi
+  echo "PASS: $flavor APK has only MainActivity exported"
+}
+
 # settings.gradle.kts probes the export directories at configuration time, which
 # the configuration cache cannot track. The project disables the cache, but drop
 # any entry anyway so a forced `--configuration-cache` run still re-probes after
-# each stub change (ONY-355).
+# the stub change (ONY-355).
 reset_configuration_cache() {
   rm -rf "$app_dir/android/.gradle/configuration-cache"
 }
 
 build() {
-  local flavor="$1"
+  local flavor="${1:-unified}"
   reset_configuration_cache
   (cd "$app_dir" && tool/build_flavor.sh "$flavor")
 }
 
-remove_stub() {
-  rm -rf "$unity_root/$1"
-}
-
-expect_build_failure() {
-  local flavor="$1" expected="$2"
-  local output status
-  reset_configuration_cache
-  set +e
-  output="$(cd "$app_dir" && tool/build_flavor.sh "$flavor" 2>&1)"
-  status=$?
-  set -e
-  if [ "$status" -eq 0 ]; then
-    echo "FAIL: $flavor build accepted incompatible Unity exports" >&2
-    exit 1
-  fi
-  if ! grep -q "$expected" <<<"$output"; then
-    echo "FAIL: $flavor failure did not name the conflict:" >&2
-    echo "$output" >&2
-    exit 1
-  fi
-}
-
-echo "==> base with a VITURE unityLibrary present must not link Unity"
-create_stub viture "$viture_permission"
-build base
-if has_permission "$(apk_path base)" "$viture_permission"; then
-  echo "FAIL: base APK linked the VITURE unityLibrary" >&2
-  exit 1
-fi
-echo "PASS: base ignored the VITURE unityLibrary"
-
-echo "==> viture must link the VITURE unityLibrary"
-rm -rf "$build_root/app/outputs/flutter-apk/app-viture-debug.apk"
-build viture
-if ! has_permission "$(apk_path viture)" "$viture_permission"; then
-  echo "FAIL: viture APK did not contain the VITURE unityLibrary manifest" >&2
-  exit 1
-fi
-echo "PASS: viture linked the VITURE unityLibrary"
-
-echo "==> xreal + VITURE both present must fail with a clear message"
-create_stub xreal "$xreal_permission"
-expect_build_failure xreal "Cannot link both Unity libraries"
-echo "PASS: both libraries fail the build with a clear message"
-
-echo "==> xreal with no export must still build"
-remove_stub xreal
-remove_stub viture
-build xreal
-if has_permission "$(apk_path xreal)" "$viture_permission"; then
-  echo "FAIL: xreal APK linked the VITURE unityLibrary" >&2
-  exit 1
-fi
-echo "PASS: xreal built without a Unity export"
-
-echo "==> a unified stub must link only the unified unityLibrary"
-create_stub unified "$unified_permission"
-rm -rf "$build_root/app/outputs/flutter-apk/app-unified-debug.apk"
-build unified
-if ! has_permission "$(apk_path unified)" "$unified_permission"; then
+echo "==> a unified stub must link the unified unityLibrary"
+create_stub
+rm -rf "$(apk_path)"
+build
+if ! has_permission "$(apk_path)" "$unified_permission"; then
   echo "FAIL: unified APK did not contain the unified unityLibrary manifest" >&2
   exit 1
 fi
-for permission in "$viture_permission" "$xreal_permission"; do
-  if has_permission "$(apk_path unified)" "$permission"; then
-    echo "FAIL: unified APK linked a per-vendor unityLibrary ($permission)" >&2
-    exit 1
-  fi
-done
-echo "PASS: unified linked only the unified unityLibrary"
+echo "PASS: unified linked the unified unityLibrary"
 
-echo "==> unified + a VITURE export must fail with a clear message"
-create_stub viture "$viture_permission"
-expect_build_failure unified "cannot be combined with per-vendor Unity exports"
-echo "PASS: unified plus a per-vendor export fails the build with a clear message"
+assert_one_launcher unified
+assert_only_main_exported unified
 
 echo "==> unified with no export must still build"
-remove_stub viture
-remove_stub unified
-build unified
-if has_permission "$(apk_path unified)" "$unified_permission"; then
+rm -rf "$unity_root/unified"
+drop_created unified
+rm -rf "$(apk_path)"
+build
+if has_permission "$(apk_path)" "$unified_permission"; then
   echo "FAIL: unified APK without an export linked a Unity stub" >&2
   exit 1
 fi
 echo "PASS: unified built without a Unity export"
+assert_only_main_exported unified
+
+echo "==> a leftover per-vendor export must fail configuration"
+# ONY-565 retired android/unity/viture and android/unity/xreal. The guard runs
+# at configuration time, so an empty directory is enough to trigger it.
+backup_export viture
+created_flavors+=(viture)
+mkdir -p "$unity_root/viture/unityLibrary"
+if build_output="$(build 2>&1)"; then
+  echo "FAIL: a retired per-vendor export built instead of failing" >&2
+  exit 1
+fi
+if ! grep -q "retired per-vendor Unity export" <<<"$build_output"; then
+  echo "FAIL: expected the retired per-vendor export guard, got:" >&2
+  echo "$build_output" >&2
+  exit 1
+fi
+rm -rf "$unity_root/viture"
+drop_created viture
+echo "PASS: retired per-vendor export rejected"
 
 echo "All flavor wiring checks passed."

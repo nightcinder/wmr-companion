@@ -1,7 +1,7 @@
 # 6DoF pre-flight: named path, current build, desk evidence
 
-Status: **desk work only, 2026-10-28.** No glasses, phone or Unity runtime was
-started. The artifact checks below are real host-side results; every tracking
+Status: **desk work only, re-checked 2026-11-02 on v0.3.12.** No glasses, phone
+or Unity runtime was started. The artifact checks below are real host-side results; every tracking
 figure and permission prompt remains a hardware gate.
 
 This is the ONY-440 pre-flight companion to [GATES.md](GATES.md),
@@ -36,12 +36,12 @@ purchases for the same unproven gates.
 
 | Item | Value |
 |---|---|
-| Artifact | `wmr-companion-0.2.1-unified-debug.apk` |
-| Release | [`v0.2.1`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.2.1), commit `58b5c40` |
-| APK SHA-256 | `b9ec93297a75801876d80c731d18659ec8e320c8437e48c15affdef0848eb71b` |
-| Unified export SHA-256 | `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5` (owner export, ONY-354) |
+| Artifact | `wmr-companion-0.3.12-unified-arm64-v8a.apk` |
+| Release | [`v0.3.12`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.12), commit `2a7e176` |
+| APK SHA-256 | `93647e6f63191581bebcdc54f7e4d3bbd9caa8d84475db43cd86b2387a575458` |
+| Unity export SHA-256 | `2a19edc07e9204094317efd2cda08175bca82f75181a77c3420948d2d14b6ef8` (`unity-export-1.2`, the export this release was built from; CI now pins `unity-export-1.4`) |
 | Flavor | `unified`: VITURE 0.9.0 + XREAL 3.1.0 in one `unityLibrary`, vendor selected at runtime |
-| Signing | debug key; not for distribution |
+| Signing | release key; tester build, not a store upload |
 
 The release APK already enables every tracking flag, so the XREAL sheet does
 not need a `--dart-define` rebuild. To rebuild locally from the owner export:
@@ -54,24 +54,28 @@ apps/wmr_companion_app/tool/build_flavor.sh unified --debug
 Validate any unified APK without a device before installing it:
 
 ```bash
-gh release download v0.2.1 -p 'wmr-companion-0.2.1-unified-debug.apk'
-python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.2.1-unified-debug.apk
+gh release download v0.3.12 -p 'wmr-companion-0.3.12-unified-arm64-v8a.apk'
+python3 apps/wmr_companion_app/tool/check_unified_apk.py wmr-companion-0.3.12-unified-arm64-v8a.apk
 ```
 
 ## 3. Permission and session path (host-validated)
 
-`check_unified_apk.py` passed on the v0.2.1 artifact with its recorded SHA-256.
+`check_unified_apk.py` passed on the v0.3.12 release artifact with its recorded
+SHA-256, re-run 2026-11-02 against the downloaded release asset, including the
+`Android XR callbacks` row: v0.3.12 contains ONY-758 and later, so the
+callbacks survive R8. Older builds such as v0.3.7 and v0.3.8 still fail that row.
 It reads the binary manifest, dex and Unity subsystem files. A `uses-feature`
-without `android:required` counts as required, as Android does — `camera` must
+without `android:required` counts as required, as Android does : `camera` must
 say `required="false"`. `tool/test_check_unified_apk.py` covers the binary-XML
 parser (UTF-16 and UTF-8 pools) and that camera gate.
 
 | Check | Result |
 |---|---|
-| Merged permissions | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `CAMERA` present; `HAND_TRACKING` and `HEAD_TRACKING` also merged (Android XR plugin) |
+| Merged permissions | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `CAMERA` (checked by `check_unified_apk.py`); the Android XR plugin manifest declares `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`; `SCENE_UNDERSTANDING_FINE` must not be declared |
 | Features | `bluetooth_le`, `usb.host`, and `camera` declared `required=false` |
 | Both runtimes | `libVitureUnityXR.so`, `libXREALXRPlugin.so`, one `libunity.so`; Unity subsystems 0.9.0 and 3.1.0 |
-| Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin`, `SharedUnityRuntime`, `PendingStartGate` in the dex |
+| Session classes | `WmrTrackingDispatchPlugin`, `WmrTrackingViturePlugin`, `WmrTrackingXrealPlugin` in the dex; `SharedUnityRuntime` and `PendingStartGate` are reported as informational because R8 can rename them in a release build |
+| Android XR callbacks | Builds after ONY-758 (first release v0.3.9 and later): every dex class that implements a device `com.android.extensions.xr` callback interface (`function.Consumer`, `splitengine.RequestCallback`, `splitengine.MessageGroupCallback`) keeps its method. When R8 cannot resolve those interfaces it shrinks the callbacks to empty classes and the device kills the process with an `AbstractMethodError` as soon as the session starts, so older builds such as v0.3.7 and v0.3.8 fail this row |
 | Activities | Flutter `MainActivity`, `UnityPlayerActivity`, XREAL `NRXRActivity` |
 | Vendor metadata | VITURE `sdk 0.9.0`, `dof 6dof`; XREAL `supportDevices` present |
 
@@ -100,6 +104,13 @@ Unity start, frame rate and joint delivery are gates 3 and 5 in the run sheet.
    still unmeasured. They are run-sheet fields, not assumptions.
 6. **VITURE remains unvalidated.** It is carried in the same artifact; the
    unified export's coexistence of both SDKs is still only host-tested.
+
+## 4.1 BLE HOGP vs Companion Android HID coexistence
+
+When using the ESP32 WMR Bridge with Android hosts (including phone, VITURE Pro Neckband, and Beam Pro):
+- The ESP32 firmware advertises standard BLE HID-over-GATT (HOGP, service `0x1812`) and `0xFF10` concurrently on the same LE link. Android binds the bridge's HOGP gamepad profile directly at the OS level upon bonding.
+- The Companion app (`wmr-companion`) also provides an optional app-level HID output feature (`BluetoothHidDevice` / `wmr_companion_hid_android`) to send controller reports to a remote PC or console host.
+- **Coexistence rule**: Testers must **not** enable Companion app HID output while the host is paired to the bridge's HOGP gamepad. Registering `BluetoothHidDevice` disables Android's HID Host service (preventing the host from receiving HOGP input from the bridge) and causes radio contention on the phone between Classic HID and the BLE GATT stream. When using the firmware HOGP gamepad, keep Companion app HID output disabled.
 
 ## 5. What was not done here
 

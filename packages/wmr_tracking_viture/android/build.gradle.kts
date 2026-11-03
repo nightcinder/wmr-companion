@@ -2,7 +2,6 @@ group = "com.onyxlens.wmr_tracking_viture"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    val kotlinVersion = "2.4.0"
     repositories {
         google()
         mavenCentral()
@@ -10,7 +9,6 @@ buildscript {
 
     dependencies {
         classpath("com.android.tools.build:gradle:9.1.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     }
 }
 
@@ -23,13 +21,26 @@ allprojects {
 
 plugins {
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "com.onyxlens.wmr_tracking_viture"
 
     compileSdk = 36
+
+    // The Carina diagnostic harness is C, built for the only ABI the VITURE
+    // SDK ships. CI pins the same NDK for the app's Unity export.
+    ndkVersion = "28.2.13676358"
+
+    // AGP 9 configures CMake paths per module, not per build type, so the
+    // harness library is built and packaged into every variant. It is inert
+    // outside debug: the Dart trigger refuses to load it unless kDebugMode.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -47,6 +58,9 @@ android {
 
     defaultConfig {
         minSdk = 24
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     testOptions {
@@ -71,5 +85,5 @@ dependencies {
     implementation("androidx.core:core:1.16.0")
     implementation(project(":wmr_tracking_dispatch"))
 
-    testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.0")
 }

@@ -3,12 +3,18 @@
 
 Validates what can be proved without a device: the binary Android manifest is
 merged from the app and both vendor SDK manifests, both Unity XR runtimes are
-present with their hand-tracking libraries, the Dart/Kotlin tracking classes are
-in the dex, and the permission/session contract the run sheet relies on is
-declared. It does not prove that a vendor runtime starts, that permissions are
-granted, or that hands are tracked; those stay on the hardware gates.
+present with their hand-tracking libraries, the Monado config key is packaged,
+the Dart/Kotlin plugin entry classes are in the dex, and the permission/session
+contract the run sheet relies on is declared: BLE, camera and the Android XR
+scene-understanding-coarse, hand-tracking and head-tracking permissions, with
+no request for precise (fine) scene understanding. It does not prove that a vendor
+runtime starts, that permissions are granted, or that hands are tracked; those
+stay on the hardware gates.
 
     python3 tool/check_unified_apk.py path/to/wmr-companion-0.2.1-unified-debug.apk
+
+Add `--require-lib lib/arm64-v8a/libglasses.so` for a release that must carry
+the VITURE C SDK (the bench Gate 1, checkerboard and Gate 9 steps call into it).
 
 No Android SDK, Unity or third-party Python package needed. Exit codes:
 0 = all checks pass, 1 = a required check failed, 64 = bad usage.
@@ -27,6 +33,16 @@ REQUIRED_PERMISSIONS = {
     "android.permission.BLUETOOTH_SCAN",
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.CAMERA",
+    # Android XR: coarse scene understanding plus head and hand tracking are
+    # what the tracking source reads (ONY-614).
+    "android.permission.SCENE_UNDERSTANDING_COARSE",
+    "android.permission.HAND_TRACKING",
+    "android.permission.HEAD_TRACKING",
+}
+FORBIDDEN_PERMISSIONS = {
+    # This source reads poses only; requesting precise scene geometry would
+    # prompt the user for data the app never uses (ONY-614).
+    "android.permission.SCENE_UNDERSTANDING_FINE",
 }
 REQUIRED_FEATURES = {
     "android.hardware.bluetooth_le",
@@ -38,10 +54,20 @@ REQUIRED_LIBS = {
     "lib/arm64-v8a/libVitureUnityXR.so",
     "lib/arm64-v8a/libXREALXRPlugin.so",
 }
+# Flutter packages every declared pubspec asset under assets/flutter_assets/,
+# so `assets/monado/` lands at assets/flutter_assets/assets/monado/. The bare
+# pubspec path is not an APK entry. The key is fetched by CI before the build
+# and is exactly 1024 bytes (see tool/monado_key.dart).
+MONADO_KEY_ASSET = "assets/flutter_assets/assets/monado/wmr_config_key.bin"
+MONADO_KEY_SIZE = 1024
 REQUIRED_DEX_CLASSES = {
     "WmrTrackingXrealPlugin",
     "WmrTrackingViturePlugin",
     "WmrTrackingDispatchPlugin",
+}
+# R8 in a `--release` build may rename or inline these, so they are reported
+# but not required: only the Flutter-registered plugin entry classes survive.
+OPTIONAL_DEX_CLASSES = {
     "SharedUnityRuntime",
     "PendingStartGate",
 }
@@ -49,6 +75,243 @@ UNITY_SUBSYSTEMS = {
     "assets/bin/Data/UnitySubsystems/VitureUnityXR/UnitySubsystemsManifest.json": ("VITURE XR Plugin", "0.9.0"),
     "assets/bin/Data/UnitySubsystems/XREALXRPlugin/UnitySubsystemsManifest.json": ("XREAL XR Plugin", "3.1.0"),
 }
+# ONY-612's WmrStereoCameraRig reports these stage names through
+# WmrTrackingViturePlugin.onUnityStage. An APK built from the pre-ONY-612
+# export carries none of them, so their absence proves the release artifact
+# does not hold the current bridge.
+REQUIRED_STEREO_LITERALS = ("playerHosted", "loaderStarted", "firstFrame")
+# The unified relay replaced the per-vendor Unity scenes; an APK built from an
+# export with only the old vendor bridges must not pass.
+REQUIRED_METADATA_LITERALS = (
+    "WmrTrackingUnifiedBridge",
+    "VendorLoaderGate",
+    "VendorRelayDispatch",
+)
+UNITY_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
+# The Android XR extension classes live in the device's shared library
+# (/system_ext/framework/com.android.extensions.xr.jar), not in the APK. R8
+# must still resolve the callback interfaces: when it cannot, it shrinks the
+# implementations to empty classes and the device kills the process with an
+# AbstractMethodError as soon as the Android XR session starts (ONY-758).
+# `:xr_extensions_stubs` supplies the compile-only interfaces.
+XR_CALLBACKS = {
+    "Lcom/android/extensions/xr/function/Consumer;": ("accept", "(Ljava/lang/Object;)V"),
+    "Lcom/android/extensions/xr/splitengine/RequestCallback;": ("onResult", "([B)V"),
+    "Lcom/android/extensions/xr/splitengine/MessageGroupCallback;": (
+        "onMessageGroupComplete",
+        "(I)V",
+    ),
+}
+# Consumer is the callback the Android XR session registers, so at least one
+# implementation must survive every release build.
+XR_REQUIRED_CALLBACK = "Lcom/android/extensions/xr/function/Consumer;"
+# The Unity C# bridges reach these Kotlin objects by hard-coded class and method
+# name through AndroidJavaClass.CallStatic. R8 renamed both in 0.3.10, so frames
+# and stage reports silently stopped reaching Dart. Keep the names (ONY-776).
+R8_JNI_CALLBACKS = {
+    "Lcom/onyxlens/wmr_tracking_xreal/WmrTrackingXrealPlugin;": (
+        ("onUnityFrame", ("Ljava/lang/String;",), "V"),
+        ("onUnityError", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+        ("onUnityGlassesModel", ("Ljava/lang/String;",), "V"),
+        ("onUnityStage", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+    ),
+    "Lcom/onyxlens/wmr_tracking_viture/WmrTrackingViturePlugin;": (
+        ("onUnityFrame", ("Ljava/lang/String;",), "V"),
+        ("onUnityError", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+        ("onUnityGlassesModel", ("Ljava/lang/String;",), "V"),
+        ("onUnityStage", ("Ljava/lang/String;", "Ljava/lang/String;"), "V"),
+    ),
+}
+# Vendor SDK and Unity player classes are called from native/JNI code, so R8
+# cannot see their callers and shrinks them unless the release keeps them.
+R8_REQUIRED_CLASSES = {
+    "Lcom/unity3d/player/UnityPlayer;": "Unity player",
+    "Lai/nreal/activitylife/NRXRActivity;": "XREAL NREAL activity",
+    "Lcom/xreal/glassesdisplayplugevent/provider/GlassesInitProvider;": "XREAL display provider",
+}
+# The Flutter activity is the only entry point. Unity and the XREAL SDK ship
+# their player activities exported for standalone use; when one stays exported,
+# the Neckband launcher can start the bare Unity scene after a crash, with no
+# Flutter UI and no loader command (ONY-842). VITURE's application-scope XR
+# metadata must therefore bind only to MainActivity.
+ENTRY_ACTIVITY = "com.onyxlens.wmr_companion.MainActivity"
+VENDOR_ACTIVITIES = (
+    "com.unity3d.player.UnityPlayerActivity",
+    "ai.nreal.activitylife.NRXRActivity",
+    "ai.nreal.activitylife.UnityPlayerActivity",
+)
+
+
+class Dex:
+    """Minimal DEX reader: class descriptors, interfaces and method signatures.
+
+    Only the tables the XR callback check needs are decoded. Parsing every
+    method of every class is not needed, so code items and annotations are
+    skipped.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        if data[:4] != b"dex\n":
+            raise ValueError("not a dex file")
+        self.data = data
+        self.string_ids_size = struct.unpack_from("<I", data, 0x38)[0]
+        self.string_ids_off = struct.unpack_from("<I", data, 0x3C)[0]
+        self.type_ids_off = struct.unpack_from("<I", data, 0x44)[0]
+        self.proto_ids_off = struct.unpack_from("<I", data, 0x4C)[0]
+        self.method_ids_off = struct.unpack_from("<I", data, 0x5C)[0]
+        self.class_defs_size = struct.unpack_from("<I", data, 0x60)[0]
+        self.class_defs_off = struct.unpack_from("<I", data, 0x64)[0]
+        self._strings: dict[int, str] = {}
+
+    def string(self, index: int) -> str:
+        cached = self._strings.get(index)
+        if cached is not None:
+            return cached
+        at = struct.unpack_from("<I", self.data, self.string_ids_off + 4 * index)[0]
+        _, at = _uleb128(self.data, at)
+        end = self.data.index(b"\0", at)
+        value = self.data[at:end].decode("utf-8", "replace")
+        self._strings[index] = value
+        return value
+
+    def type_name(self, index: int) -> str:
+        return self.string(struct.unpack_from("<I", self.data, self.type_ids_off + 4 * index)[0])
+
+    def proto(self, index: int) -> str:
+        at = self.proto_ids_off + 12 * index
+        returns = self.type_name(struct.unpack_from("<I", self.data, at + 4)[0])
+        params_off = struct.unpack_from("<I", self.data, at + 8)[0]
+        params: list[str] = []
+        if params_off:
+            size = struct.unpack_from("<I", self.data, params_off)[0]
+            params = [
+                self.type_name(struct.unpack_from("<H", self.data, params_off + 4 + 2 * i)[0])
+                for i in range(size)
+            ]
+        return f"({''.join(params)}){returns}"
+
+    def method(self, index: int) -> tuple[str, str]:
+        at = self.method_ids_off + 8 * index
+        name = self.string(struct.unpack_from("<I", self.data, at + 4)[0])
+        return name, self.proto(struct.unpack_from("<H", self.data, at + 2)[0])
+
+    def classes(self) -> list[tuple[str, list[str], set[tuple[str, str]]]]:
+        """(descriptor, interface descriptors, {(method name, proto)})."""
+        found = []
+        for slot in range(self.class_defs_size):
+            at = self.class_defs_off + 32 * slot
+            interfaces_off = struct.unpack_from("<I", self.data, at + 12)[0]
+            interfaces: list[str] = []
+            if interfaces_off:
+                size = struct.unpack_from("<I", self.data, interfaces_off)[0]
+                interfaces = [
+                    self.type_name(struct.unpack_from("<H", self.data, interfaces_off + 4 + 2 * i)[0])
+                    for i in range(size)
+                ]
+            class_data_off = struct.unpack_from("<I", self.data, at + 24)[0]
+            methods = self._methods(class_data_off) if class_data_off else set()
+            found.append((self.type_name(struct.unpack_from("<I", self.data, at)[0]), interfaces, methods))
+        return found
+
+    def _methods(self, class_data_off: int) -> set[tuple[str, str]]:
+        data = self.data
+        static_fields, at = _uleb128(data, class_data_off)
+        instance_fields, at = _uleb128(data, at)
+        direct_methods, at = _uleb128(data, at)
+        virtual_methods, at = _uleb128(data, at)
+        for _ in range(static_fields + instance_fields):
+            _, at = _uleb128(data, at)  # field_idx_diff
+            _, at = _uleb128(data, at)  # access_flags
+        methods: set[tuple[str, str]] = set()
+        for count in (direct_methods, virtual_methods):
+            index = 0
+            for _ in range(count):
+                diff, at = _uleb128(data, at)
+                index += diff
+                _, at = _uleb128(data, at)  # access_flags
+                _, at = _uleb128(data, at)  # code_off
+                methods.add(self.method(index))
+        return methods
+
+
+def _uleb128(data: bytes, at: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while True:
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, at
+        shift += 7
+
+
+def xr_callback_failures(dex_files: list[bytes]) -> list[str]:
+    """Empty callback implementations look fine in the dex strings alone.
+
+    ONY-758: the device's XrExtensions calls these methods on the callbacks the
+    app registered. R8 removed them when the interfaces were missing from its
+    classpath, and the call died with an AbstractMethodError. Reject an APK
+    whose implementations lost their callback method.
+    """
+    implementors: dict[str, list[tuple[str, set[tuple[str, str]]]]] = {name: [] for name in XR_CALLBACKS}
+    for data in dex_files:
+        for name, interfaces, methods in Dex(data).classes():
+            for interface in XR_CALLBACKS:
+                if interface in interfaces:
+                    implementors[interface].append((name, methods))
+    failures = []
+    if not implementors[XR_REQUIRED_CALLBACK]:
+        failures.append(
+            f"no class implements {XR_REQUIRED_CALLBACK}; "
+            "the Android XR session callbacks were shrunk away"
+        )
+    for interface, (method, proto) in XR_CALLBACKS.items():
+        failures.extend(
+            f"{name} implements {interface} without {method}{proto}; "
+            "the Android XR session will crash on start"
+            for name, methods in implementors[interface]
+            if (method, proto) not in methods
+        )
+    return failures
+
+
+
+def r8_keep_failures(dex_files: list[bytes]) -> list[str]:
+    """Reject an APK where R8 renamed a class or method that is called by name.
+
+    The Unity side resolves plugin callbacks with AndroidJavaClass.CallStatic
+    and the vendor SDKs are entered from native code, so neither shows up as a
+    Java reference R8 can follow. Only the -keep rules in proguard-rules.pro
+    protect them (ONY-776).
+    """
+    classes: dict[str, set[tuple[str, str]]] = {}
+    for data in dex_files:
+        for name, _, methods in Dex(data).classes():
+            classes.setdefault(name, set()).update(methods)
+    failures = []
+    for name, label in R8_REQUIRED_CLASSES.items():
+        if name not in classes:
+            failures.append(
+                f"{label} class {name} was renamed or removed by R8; "
+                "add a -keep rule (ONY-776)"
+            )
+    for name, callbacks in R8_JNI_CALLBACKS.items():
+        methods = classes.get(name)
+        if methods is None:
+            failures.append(
+                f"{name} was renamed or removed by R8; "
+                "the Unity JNI callbacks cannot reach it (ONY-776)"
+            )
+            continue
+        for method, params, returns in callbacks:
+            proto = f"({''.join(params)}){returns}"
+            if (method, proto) not in methods:
+                failures.append(
+                    f"{name} lost {method}{proto}; "
+                    "the Unity JNI callback cannot reach it (ONY-776)"
+                )
+    return failures
 
 
 class Axml:
@@ -125,6 +388,44 @@ class Axml:
         found = self.of(element)
         return found[0] if found else {}
 
+    def launcher_activities(self) -> list[str]:
+        """Activities with a MAIN + LAUNCHER/LEANBACK intent filter.
+
+        The Android binary XML reader keeps a flat element list, so this walks
+        it in document order and treats each component element as the owner of
+        the intent filters that follow it until the next component.
+        """
+        launcher_categories = {
+            "android.intent.category.LAUNCHER",
+            "android.intent.category.LEANBACK_LAUNCHER",
+        }
+        found: list[str] = []
+        current: str | None = None
+        has_main = False
+        has_launcher = False
+        for name, attrs in self.elements:
+            if name in (
+                "activity",
+                "activity-alias",
+                "receiver",
+                "service",
+                "provider",
+            ):
+                if current is not None and has_main and has_launcher:
+                    found.append(current)
+                current = attrs.get("name") if name in ("activity", "activity-alias") else None
+                has_main = False
+                has_launcher = False
+            elif current is not None and name == "action":
+                if attrs.get("name") == "android.intent.action.MAIN":
+                    has_main = True
+            elif current is not None and name == "category":
+                if attrs.get("name") in launcher_categories:
+                    has_launcher = True
+        if current is not None and has_main and has_launcher:
+            found.append(current)
+        return found
+
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
@@ -136,10 +437,26 @@ def is_required(value: str | None) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    require_libs: set[str] = set()
+    paths: list[str] = []
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--require-lib":
+            index += 1
+            if index >= len(argv):
+                print("--require-lib needs an APK entry name", file=sys.stderr)
+                return 64
+            require_libs.add(argv[index])
+        elif arg.startswith("--require-lib="):
+            require_libs.add(arg.split("=", 1)[1])
+        else:
+            paths.append(arg)
+        index += 1
+    if len(paths) != 1:
         print(__doc__.strip().splitlines()[0], file=sys.stderr)
         return 64
-    apk_path = Path(argv[1])
+    apk_path = Path(paths[0])
     if not apk_path.is_file():
         print(f"FAIL: not found: {apk_path}", file=sys.stderr)
         return 64
@@ -167,9 +484,10 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             print(f"PASS permissions: {sorted(REQUIRED_PERMISSIONS)}")
-        for optional in ("android.permission.HAND_TRACKING", "android.permission.HEAD_TRACKING"):
-            if optional in permissions:
-                print(f"INFO permission: {optional} (Android XR runtime)")
+        forbidden = FORBIDDEN_PERMISSIONS & permissions
+        if forbidden:
+            fail(f"forbidden permissions present: {sorted(forbidden)}")
+            failures += 1
 
         features = {row.get("name"): row.get("required") for row in manifest.of("uses-feature") if row.get("name")}
         missing = REQUIRED_FEATURES - set(features)
@@ -177,29 +495,104 @@ def main(argv: list[str]) -> int:
             fail(f"missing features: {sorted(missing)}")
             failures += 1
         else:
-            camera_required = features.get("android.hardware.camera")
-            if is_required(camera_required):
-                fail("android.hardware.camera is required (explicitly or by default); it would filter devices")
-                failures += 1
-            else:
-                print("PASS features: bluetooth_le, camera(required=false), usb.host")
+            for feature in ("android.hardware.camera", "android.hardware.usb.host"):
+                if is_required(features.get(feature)):
+                    fail(
+                        f"{feature} is required (explicitly or by default); "
+                        "it would filter devices"
+                    )
+                    failures += 1
+            if not any(
+                is_required(features.get(feature))
+                for feature in ("android.hardware.camera", "android.hardware.usb.host")
+            ):
+                print(
+                    "PASS features: bluetooth_le, camera(required=false), "
+                    "usb.host(required=false)"
+                )
 
-        missing_libs = REQUIRED_LIBS - names
+        required_libs = REQUIRED_LIBS | require_libs
+        missing_libs = required_libs - names
         if missing_libs:
             fail(f"missing native libraries: {sorted(missing_libs)}")
             failures += 1
         else:
-            print(f"PASS native: {sorted(REQUIRED_LIBS)}")
+            print(f"PASS native: {sorted(required_libs)}")
         abis = sorted({name.split("/")[1] for name in names if name.startswith("lib/") and name.count("/") == 2})
         print(f"INFO ABIs: {abis}")
 
-        dex = b"".join(apk.read(name) for name in names if name.startswith("classes") and name.endswith(".dex"))
+        if MONADO_KEY_ASSET not in names:
+            monado = sorted(name for name in names if "monado" in name.lower())
+            fail(f"missing Monado config key: {MONADO_KEY_ASSET}; APK monado entries: {monado}")
+            failures += 1
+        elif apk.getinfo(MONADO_KEY_ASSET).file_size != MONADO_KEY_SIZE:
+            size = apk.getinfo(MONADO_KEY_ASSET).file_size
+            fail(f"Monado config key is {size} bytes, expected {MONADO_KEY_SIZE}: {MONADO_KEY_ASSET}")
+            failures += 1
+        else:
+            print(f"PASS Monado key: {MONADO_KEY_ASSET} ({MONADO_KEY_SIZE} bytes)")
+
+        if UNITY_METADATA not in names:
+            fail(f"missing IL2CPP metadata: {UNITY_METADATA}")
+            failures += 1
+        else:
+            metadata = apk.read(UNITY_METADATA)
+            required = REQUIRED_STEREO_LITERALS + REQUIRED_METADATA_LITERALS
+            missing_symbols = [name for name in required if name.encode() not in metadata]
+            if missing_symbols:
+                fail(
+                    "IL2CPP metadata is stale, missing the stereo or unified "
+                    f"dispatch path: {missing_symbols}"
+                )
+                failures += 1
+            else:
+                print(f"PASS metadata: {list(required)}")
+
+        dex_files = [apk.read(name) for name in sorted(names) if name.startswith("classes") and name.endswith(".dex")]
+        dex = b"".join(dex_files)
         missing_classes = {name for name in REQUIRED_DEX_CLASSES if name.encode() not in dex}
         if missing_classes:
             fail(f"missing tracking classes: {sorted(missing_classes)}")
             failures += 1
         else:
             print(f"PASS dex: {sorted(REQUIRED_DEX_CLASSES)}")
+        optional = ", ".join(
+            f"{name}={'present' if name.encode() in dex else 'renamed/inlined'}"
+            for name in sorted(OPTIONAL_DEX_CLASSES)
+        )
+        print(f"INFO dex (release may rename): {optional}")
+
+        consumer_failures = xr_callback_failures(dex_files)
+        if consumer_failures:
+            for message in consumer_failures:
+                fail(message)
+            failures += 1
+        else:
+            print("PASS dex: Android XR callbacks keep their methods")
+
+        keep_failures = r8_keep_failures(dex_files)
+        if keep_failures:
+            for message in keep_failures:
+                fail(message)
+            failures += 1
+        else:
+            print("PASS dex: vendor/Unity classes and plugin JNI callbacks kept")
+
+        # XREAL's glasses AAR bundles android.hardware.display.DisplayManager
+        # as a stub. R8 must keep it: when it is shrunk, R8 rewrites the SDK's
+        # `(DisplayManager) getSystemService("display")` cast into an
+        # unconditional ClassCastException and GlassesInitProvider kills the
+        # process before the launcher activity runs (ONY-557). A shrunk stub
+        # leaves no type string in the dex.
+        display_stub = "android/hardware/display/DisplayManager"
+        if display_stub.encode() not in dex:
+            fail(
+                "XREAL display stub is missing from the dex; "
+                "GlassesInitProvider will crash on launch (ONY-557)"
+            )
+            failures += 1
+        else:
+            print("PASS dex: XREAL display stub kept for GlassesInitProvider")
 
         for path, (plugin_name, version_expected) in UNITY_SUBSYSTEMS.items():
             if path not in names:
@@ -231,9 +624,10 @@ def main(argv: list[str]) -> int:
         else:
             print(f"INFO XREAL supportDevices: {support} (confirm Air 2 Ultra coverage on device)")
 
-        activities = {row.get("name") for row in manifest.of("activity")}
+        activity_rows = manifest.of("activity")
+        activities = {row.get("name") for row in activity_rows}
         required_activities = (
-            "com.onyxlens.wmr_companion.MainActivity",
+            ENTRY_ACTIVITY,
             "com.unity3d.player.UnityPlayerActivity",
             "ai.nreal.activitylife.NRXRActivity",
         )
@@ -243,6 +637,47 @@ def main(argv: list[str]) -> int:
             failures += 1
         else:
             print("PASS sessions: Flutter MainActivity + UnityPlayerActivity + XREAL NREAL activities")
+
+        exported = {row.get("name"): row.get("exported") for row in activity_rows}
+        vendor_failures = [
+            f"{name} is exported={exported[name]!r}; vendor/Unity activities must be exported=false"
+            for name in VENDOR_ACTIVITIES
+            if name in exported and exported[name] != "false"
+        ]
+        if vendor_failures:
+            for message in vendor_failures:
+                fail(message)
+            failures += 1
+        else:
+            print("PASS exported: vendor/Unity activities are exported=false")
+
+        exported_activities = sorted(
+            name for name, value in exported.items() if name and value == "true"
+        )
+        if exported_activities != [ENTRY_ACTIVITY]:
+            fail(
+                f"exported activities: {exported_activities}; "
+                f"expected only {ENTRY_ACTIVITY}"
+            )
+            failures += 1
+        else:
+            print(f"PASS exported: only {ENTRY_ACTIVITY}")
+            print(
+                "PASS VITURE XR binding: application metadata reaches "
+                f"the sole exported activity {ENTRY_ACTIVITY}"
+            )
+
+        # Only the Flutter activity may appear on the home screen. XREAL's
+        # NRXRActivity ships a launcher filter for standalone Unity apps; if it
+        # survives merging, the APK installs two icons and the extra one opens
+        # a black Unity scene (ONY-561).
+        launchers = manifest.launcher_activities()
+        expected_launcher = ENTRY_ACTIVITY
+        if launchers != [expected_launcher]:
+            fail(f"launcher activities: {launchers}; expected only {expected_launcher}")
+            failures += 1
+        else:
+            print(f"PASS launcher: only {expected_launcher}")
 
         if not application.get("name"):
             fail("application element has no name")

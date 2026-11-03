@@ -121,9 +121,12 @@ void main(List<String> args) {
 List<PoseCapture> _load(String path) {
   final directory = Directory(path);
   if (!directory.existsSync()) return const [];
+  // Recursive: `tool/pose_capture_prepare.dart` splits a corpus into
+  // <runtime>/<hand>/<motion>/, and the tuner must pool both hands of one
+  // runtime the way `filter-spec` section 7 tunes it.
   final files =
       directory
-          .listSync()
+          .listSync(recursive: true)
           .whereType<File>()
           .where((file) => file.path.endsWith('.json'))
           .toList()

@@ -24,14 +24,23 @@ enum TrackingExceptionKind {
 
 /// A typed failure from a tracking source.
 class TrackingException implements Exception {
-  const TrackingException(this.kind, this.message, {this.cause});
+  const TrackingException(this.kind, this.message, {this.cause, this.stage});
 
   final TrackingExceptionKind kind;
   final String message;
   final Object? cause;
 
+  /// The platform boundary that failed, when the source reports one.
+  ///
+  /// Android XR names `permissions`, `sessionCreate`, `sessionConfigure` and
+  /// `trackingStart`, so a crash-safe failure says where it stopped instead of
+  /// looking like an empty stream.
+  final String? stage;
+
   @override
-  String toString() => 'TrackingException($kind): $message';
+  String toString() => stage == null
+      ? 'TrackingException($kind): $message'
+      : 'TrackingException($kind, stage: $stage): $message';
 }
 
 /// A source of head and hand tracking for 6DoF fusion.

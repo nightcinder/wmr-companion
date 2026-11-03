@@ -130,28 +130,83 @@ no bar for that class.
 
 For every file record the runtime (`androidXr`, `viture`, `xreal`), the app
 commit, the firmware short SHA, the anchor rate and the run index in the
-`provenance` block. Use the debug screen's pose recorder, pull the JSON, and
-convert it with `PoseCapture.fromRecording` or add the conversion to the
-recorder export.
+`provenance` block. The guided bench below does this automatically; a
+debug-screen recording made by hand needs the same fields added before it can
+count as corpus data.
 
-### Why the ONY-491 guided bench is not enough
+### The guided bench writes the section 8 corpus
 
-The tuner replays a `PoseRecording`: per viewer tick, the fused controller pose
-plus the `TrackingFrame` that positioned it. It only needs the position and
-timestamp of each new **anchor** sample, where the anchor is a runtime-tracked
-controller pose or a hand palm/grip anchor from the XR runtime.
+The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) now emits this corpus
+directly. It is no longer the old still/slow-only wizard described in earlier
+revisions.
 
-The guided bench (`apps/wmr_companion_app/lib/ui/bench/`) records 60 s of the
-FF11 raw controller stream, a still hold and a slow move per hand, and exports
-a test bundle. It has no pose-recorder step, so it writes no `TrackingFrame`s,
-and it has no held-drift, medium, fast or occlusion class. Its files cannot feed
-the tuner.
+1. Attach a hand-tracking runtime on the Debug screen, then open **Guided bench
+   run** from Connect.
+2. Choose **6DoF only** (no bridge) or **Combined**. The pose step records four
+   runs of each of the five scored motion classes for each hand, in this order:
+   LEFT still x4, LEFT drifting x4, LEFT slow x4, LEFT medium x4, LEFT fast x4,
+   then one LEFT occlusion diagnostic; then the same corpus and diagnostic for
+   RIGHT. That is **40 corpus files plus 2 diagnostic files**.
+3. Each run repeats the section 8 path until it is at least 30 s: still 30 s,
+   held drifting 30 s, slow pan 36 s, medium pan 30 s, fast flick 40 s. The
+   occlusion run is 30 s and diagnostic only.
+4. Recordings are sampled once per new anchor frame, not per 30 Hz viewer tick.
+   Each `PoseRecording` carries a `provenance` block with `runtime`,
+   `app_commit`, `firmware_sha`, `anchor_rate_hz`, `run_index`, `hand`,
+   `motion` and `seconds`. Occlusion files also carry
+   `diagnostics.occlusion_gaps`, `diagnostics.occluded_samples` and
+   `diagnostics.max_occlusion_ms`.
+5. Progress is saved after every run in `bench_pose_progress.json` (runtime,
+   app commit and plan signature). If the app is interrupted, re-entering the
+   pose step skips every run whose file is still on disk. A completed corpus
+   starts fresh on the next run.
+6. Finish the wizard and export the test bundle. Zip names and the manifest
+   table use `pose_capture_<runtime>_<hand>_<segment>.json` for run 1 and
+   `..._runN.json` for runs 2-4, and the manifest lists each run's anchor rate.
 
-Controller-only recordings do not close the gap either: with no runtime anchor
-the fuser falls back to the head-relative offset or orientation only
+### One command from bundle to tuning run
+
+`packages/wmr_tracking/tool/pose_capture_prepare.dart` converts the recordings
+and checks section 8 coverage. From `packages/wmr_tracking`:
+
+```bash
+# 1. convert the tester bundle into tuner captures
+dart run tool/pose_capture_prepare.dart --bundle wmr-ext-20261030.zip
+
+# 2. tune each runtime on the converted corpus
+dart run tool/pose_filter_tune.dart \
+  --captures build/pose_corpus/viture \
+  --markdown build/pose_corpus/viture-grid.md
+```
+
+For a directory of `PoseRecording` JSON (for example the phone's documents
+folder) pass `--captures path/to/recordings` instead of `--bundle`; `--out`
+changes the default `build/pose_corpus`. A debug-screen recording
+(`pose-<timestamp>.json`) has no provenance and cannot be placed in a cell, so
+the tool warns and skips it instead of failing the run. The tool reads the
+runtime, hand, segment and run from the bundle's `diagnostics.json`, then the
+recording's `provenance` block, then the file name
+(`pose_capture_<runtime>_<hand>_<segment>[_runN].json`), converts each file with
+`PoseCapture.fromRecording`, and writes
+`<runtime>/<hand>/<motion>/run<N>.json` plus `coverage.md`. The printed matrix
+covers S, D, slow, M, F and occlusion per runtime and hand.
+
+It refuses an incomplete corpus with exit 1 and names every missing cell, for
+example `viture/right/mediumPan: 3 of 4 runs`, and writes nothing in that case.
+A run shorter than the section 8 30 s minimum also counts as missing and is
+named (`viture/right/mediumPan: run 2 is 5.0 s, needs 30 s`). The check uses the
+sample span and allows one second of truncation, because the bench stops on a
+wall-clock timer and stamps each sample when the frame arrives; the occlusion
+diagnostic has no duration bar, so a short occlusion recording still counts. A
+complete corpus is four runs of each scored class and one occlusion run, for
+both hands of each runtime present in the bundle.
+
+Controller-only
+recordings still do not close the gap: with no runtime anchor the fuser falls
+back to the head-relative offset or orientation only
 (`SixDofFuser.update`), and those paths are never filtered, so they say nothing
 about One Euro. A capture needs a runtime that tracks controllers or hands
-(Android XR, VITURE or XREAL) attached while the debug screen records.
+(Android XR, VITURE or XREAL) attached while the bench records.
 
 ## Reproduce
 
@@ -161,12 +216,14 @@ From `packages/wmr_tracking`:
 # harness smoke test on the synthetic vectors (not a tuning result)
 dart run tool/pose_filter_tune.dart --markdown build/pose-filter-grid.md
 
-# hardware captures, once recorded
+# hardware captures: tester bundle -> corpus -> grid
+dart run tool/pose_capture_prepare.dart --bundle path/to/wmr-ext.zip
 dart run tool/pose_filter_tune.dart \
-  --captures path/to/hardware-captures \
+  --captures build/pose_corpus/viture \
   --markdown ../../docs/runs/sheets/pose-filter-grid.md
 
-dart test test/pose_filter_tuning_test.dart test/filter_test.dart
+dart test test/pose_filter_tuning_test.dart test/filter_test.dart \
+  test/pose_capture_prepare_test.dart
 ```
 
 After the hardware run, fill the table, copy the chosen constants into

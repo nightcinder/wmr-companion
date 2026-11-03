@@ -195,6 +195,22 @@ void main() {
         expect(f.orientation.norm, closeTo(1, 1e-12));
       });
 
+      test('resetYaw is stable near pitch = +/-90 degrees', () {
+        final pose = Quaternion.fromEuler(
+          yaw: 1.1,
+          pitch: math.pi / 2,
+          roll: 0,
+        );
+        f.reset(orientation: pose);
+        f.resetYaw();
+        expect(f.orientation.isFinite, isTrue);
+        expect(f.orientation.norm, closeTo(1, 1e-12));
+        // The gravity direction must survive removing the heading.
+        final before = pose.rotate(const Vector3(0, 0, 1));
+        final after = f.orientation.rotate(const Vector3(0, 0, 1));
+        expect(after.dot(before), closeTo(1, 1e-9));
+      });
+
       test('stays normalized over 100000 updates', () {
         var seed = 12345;
         double rnd() {

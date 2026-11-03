@@ -1,6 +1,6 @@
 # Native Android GATT Probe (`tool/gatt_probe`)
 
-Minimal, standalone native Android application (Kotlin) for measuring BLE round-trip latency and stream delivery directly on the Android Bluetooth stack (`BluetoothGattCallback`), bypassing Flutter, `universal_ble`, and the platform channel.
+Small, standalone native Android application (Kotlin) for measuring BLE round-trip latency and stream delivery directly on the Android Bluetooth stack (`BluetoothGattCallback`), bypassing Flutter, `universal_ble`, and the platform channel.
 
 This tool provides the baseline measurement for Milestone 7.1 to resolve Milestone 5 (Flutter vs. native receive hot path) as specified in `docs/runs/sheets/latency-2.md` (ONY-23).
 

@@ -12,6 +12,7 @@ import 'package:wmr_core/domain/synthetic_motion.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 import 'package:wmr_tracking_android_xr/wmr_tracking_android_xr.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 import 'package:wmr_tracking_xreal/wmr_tracking_xreal.dart';
 
@@ -277,6 +278,7 @@ final decodedViewProvider = StreamProvider.family<DecodedView, DebugSource>((
 enum DebugTrackingSource {
   none('None', null),
   simulated('Simulated', null),
+  auto('Auto (USB)', null),
   androidXr('Android XR', 'WMR_ANDROID_XR_TRACKING'),
   viture('VITURE', 'WMR_VITURE_TRACKING'),
   xreal('XREAL', 'WMR_XREAL_TRACKING');
@@ -285,14 +287,33 @@ enum DebugTrackingSource {
 
   final String label;
 
-  /// The `--dart-define` that enables this source. Null for [none] and
-  /// [simulated], which need no platform support.
+  /// The `--dart-define` that enables this source. Null for [none], [simulated]
+  /// and [auto], which gate on the vendor component flags instead.
   final String? buildFlag;
 }
 
-/// The source selected in the debug screen. [DebugTrackingSource.none] by
-/// default: the viewer shows the controller's 3DoF orientation with an
-/// `orientationOnly` badge.
+/// Picks the vendor source from the native USB/host detection instead of a
+/// manual vendor choice.
+///
+/// The selector only calls the detector when at least one vendor component is
+/// built in, so a flag-off build never touches `wmr_tracking_dispatch`.
+final debugTrackingSelectorProvider = Provider<TrackingSourceSelector>((ref) {
+  return TrackingSourceSelector(
+    detector: const PlatformGlassesDetector(),
+    flags: TrackingSourceFlags(
+      viture: VitureTracking.enabled,
+      xreal: XrealTracking.enabled,
+      androidXr: AndroidXrTracking.enabled,
+    ),
+    vitureSource: VitureNeckbandTrackingSource.create,
+    xrealSource: XrealAir2UltraTrackingSource.create,
+    androidXrSource: AndroidXrTrackingSource.create,
+  );
+});
+
+/// The source selected in the debug screen. Detection runs automatically and
+/// the viewer falls back to the controller's 3DoF orientation with an
+/// `orientationOnly` badge when no glasses are attached.
 final debugTrackingSourceProvider =
     NotifierProvider<DebugTrackingSourceNotifier, DebugTrackingSelection>(
       DebugTrackingSourceNotifier.new,
@@ -328,6 +349,10 @@ Future<TrackingSource?> createDebugTrackingSource(
   switch (choice) {
     case DebugTrackingSource.none:
       return null;
+    case DebugTrackingSource.auto:
+      // Auto detection needs the selector, which the notifier owns; it never
+      // reaches this per-vendor factory.
+      return null;
     case DebugTrackingSource.simulated:
       return FakeTrackingSource();
     case DebugTrackingSource.androidXr:
@@ -346,6 +371,8 @@ class DebugTrackingAttachment {
     this.source,
     this.error,
     this.disabled = false,
+    this.message,
+    this.detection,
   });
 
   final DebugTrackingSource choice;
@@ -359,6 +386,17 @@ class DebugTrackingAttachment {
 
   /// The source exists but its default-off build flag is not set.
   final bool disabled;
+
+  /// Extra status text, such as the selector's detection result for
+  /// [DebugTrackingSource.auto].
+  final String? message;
+
+  /// The native detection behind an [DebugTrackingSource.auto] attachment.
+  ///
+  /// Null for a manual selection or before the first probe finishes. The
+  /// status banner uses it to name the detected vendor and host and to decide
+  /// whether the Simulated fallback applies.
+  final GlassesDetection? detection;
 
   bool get running => source != null;
 }
@@ -395,22 +433,41 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       _owned = null;
       if (source != null) unawaited(releaseDebugTrackingSource(source));
     });
+    // Detection is the only selection path now: the tester does not choose a
+    // vendor. The probe starts after this build returns; a manual Simulated
+    // toggle made meanwhile wins through the generation check in [select].
+    unawaited(_autoSelectOnStartup());
     return const DebugTrackingSelection(
-      choice: DebugTrackingSource.none,
-      attachment: AsyncValue.data(
-        DebugTrackingAttachment(choice: DebugTrackingSource.none),
-      ),
+      choice: DebugTrackingSource.auto,
+      attachment: AsyncValue.loading(),
     );
   }
 
+  Future<void> _autoSelectOnStartup() async {
+    // The notifier cannot read its own state until build() returns.
+    await Future<void>.microtask(() {});
+    if (!ref.mounted) return;
+    // A manual choice made before the probe starts wins.
+    if (state.choice != DebugTrackingSource.auto ||
+        !state.attachment.isLoading) {
+      return;
+    }
+    await select(DebugTrackingSource.auto);
+  }
+
   void set(DebugTrackingSource choice) => unawaited(select(choice));
+
+  /// Runs native detection again after the tester plugs in or removes glasses.
+  Future<void> redetect() => select(DebugTrackingSource.auto, force: true);
 
   /// Detaches the current source before creating and starting [choice].
   ///
   /// [choice] is ignored when it arrives after a newer selection; its source,
   /// if it was already created, is released rather than left running.
-  Future<void> select(DebugTrackingSource choice) async {
-    if (choice == state.choice && !state.attachment.isLoading) return;
+  Future<void> select(DebugTrackingSource choice, {bool force = false}) async {
+    if (!force && choice == state.choice && !state.attachment.isLoading) {
+      return;
+    }
     final generation = ++_generation;
     final previous = _owned;
     _owned = null;
@@ -424,6 +481,32 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       state = DebugTrackingSelection(
         choice: choice,
         attachment: AsyncValue.data(DebugTrackingAttachment(choice: choice)),
+      );
+      return;
+    }
+    if (choice == DebugTrackingSource.auto) {
+      final selected = await ref
+          .read(debugTrackingSelectorProvider)
+          .select(isCancelled: () => generation != _generation);
+      if (generation != _generation) {
+        final created = selected.source;
+        if (created != null) await releaseDebugTrackingSource(created);
+        return;
+      }
+      if (selected.source != null) _owned = selected.source;
+      _publish(
+        generation,
+        DebugTrackingAttachment(
+          choice: choice,
+          source: selected.source,
+          message: selected.message,
+          detection: selected.detection,
+          // Auto carries the detection/start failure in [message]; surface it
+          // as the typed error the bench and the debug viewer read, so a 2D
+          // (XR stereo inactive) player is actionable instead of "Starting
+          // Auto (USB)...".
+          error: selected.source == null ? _selectionError(selected) : null,
+        ),
       );
       return;
     }
@@ -489,6 +572,31 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       attachment: AsyncValue.data(attachment),
     );
   }
+
+  /// The typed error for a failed [DebugTrackingSource.auto] selection.
+  ///
+  /// "No glasses detected" and "this build has no Unity runtime" stay messages
+  /// rather than errors: nothing failed on the device, and the app keeps the
+  /// controller 3DoF path while the banner offers the Simulated fallback.
+  static TrackingException? _selectionError(TrackingSelection selection) {
+    if (selection.status == TrackingSelectionStatus.none ||
+        selection.status == TrackingSelectionStatus.fallback) {
+      return null;
+    }
+    final kind = switch (selection.status) {
+      TrackingSelectionStatus.unsupported => TrackingExceptionKind.unsupported,
+      TrackingSelectionStatus.permissionDenied =>
+        TrackingExceptionKind.permissionDenied,
+      TrackingSelectionStatus.attached ||
+      TrackingSelectionStatus.unavailable ||
+      TrackingSelectionStatus.fallback ||
+      TrackingSelectionStatus.none => TrackingExceptionKind.unavailable,
+    };
+    return TrackingException(
+      kind,
+      selection.message ?? 'The automatic tracking source failed',
+    );
+  }
 }
 
 /// One viewer update: the fused pose per hand plus the head that produced it.
@@ -515,6 +623,33 @@ class DebugPoses {
 
   ControllerPose? forHand(int hand) => hand == 0 ? left : right;
 }
+
+/// The [SixDofFuser] behind [debugPosesProvider] for [source].
+///
+/// Hoisted out of the stream provider so "Reset orientation" can drop the
+/// offsets learned under the old IMU heading. It is recreated with the tracking
+/// source, and with the host clock behind the buffered frames: every
+/// `BleTransport` owns its own `MonotonicClock`, while the aligner re-bases the
+/// first frames of the new link near its origin. Frames kept from the old
+/// domain would sort ahead of every new one, so no controller sample would find
+/// a frame and the viewer would stay `orientationOnly` until the two clocks
+/// met.
+final debugFuserProvider = Provider.family<SixDofFuser?, DebugSource>((
+  ref,
+  source,
+) {
+  if (source == DebugSource.fake) {
+    ref.watch(transportProvider);
+  } else {
+    ref.watch(realLinkTransportProvider);
+  }
+  final tracking = ref
+      .watch(debugTrackingSourceProvider)
+      .attachment
+      .value
+      ?.source;
+  return tracking == null ? null : SixDofFuser();
+});
 
 /// Poses for the 6DoF viewer.
 ///
@@ -550,9 +685,13 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   final choice = selection.choice;
   final tracking = selection.attachment.value?.source;
   final simulated = choice == DebugTrackingSource.simulated;
-  final fuser = tracking == null ? null : SixDofFuser();
+  final fuser = ref.watch(debugFuserProvider(source));
   const motion = SyntheticMotion();
   final clock = Stopwatch()..start();
+  final transport = source == DebugSource.fake
+      ? ref.watch(transportProvider)
+      : ref.watch(realLinkTransportProvider);
+  final hostClock = service?.transport.clock ?? transport.clock;
   final aligner = SourceClockAligner();
   StreamSubscription<TrackingFrame>? trackingSub;
   Pose? head;
@@ -567,7 +706,7 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
             : frame.withHostTime(
                 aligner.align(
                   sourceTimeNs: frame.timeNs,
-                  hostTimeNs: clock.elapsed.inMicroseconds * 1000,
+                  hostTimeNs: hostClock.nowUs * 1000,
                 ),
               );
         fuser?.onTrackingFrame(aligned);
@@ -594,7 +733,10 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   void tick() {
     if (controller.isClosed) return;
     final now = clock.elapsed;
-    final nowNs = now.inMicroseconds * 1000 + 1;
+    // Frames are aligned to the transport's monotonic clock and controller
+    // samples already live in it, so poses tick on that same clock. The
+    // synthetic motion phase above keeps its own tick clock.
+    final nowNs = hostClock.nowUs * 1000 + 1;
     final trackingSource = tracking;
     final fuserState = fuser;
     if (simulated && trackingSource != null && fuserState != null) {

@@ -3,7 +3,7 @@
 Optional Android **Bluetooth HID gamepad output** for a
 [`wmr_companion`](../wmr_companion/README.md) host: the phone appears as a
 Bluetooth gamepad to a PC or console. It is not required for in-process
-controller input, and it does not exist on iOS (no public HID API).
+controller input, and it is not on iOS (no public HID API).
 
 Status: **phase 7**. The Dart transport/report moved from the reference app and
 the Android code is now a self-registering Flutter plugin. The behaviour is

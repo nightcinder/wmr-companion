@@ -5,28 +5,161 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_core/services/latency_files.dart';
+import 'package:wmr_companion_app/services/firmware_identity.dart';
+import 'package:wmr_companion_app/ui/capture/capture_providers.dart';
+import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
+import 'package:wmr_companion_app/ui/latency/latency_providers.dart';
+import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_ble/testing.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/bench/bench_controller.dart';
+import 'package:wmr_companion_app/ui/bench/bench_pose.dart';
 import 'package:wmr_companion_app/ui/bench/bench_run.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
+import 'package:wmr_companion_app/ui/debug/pose_recording_store.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 
 /// A 700-byte block exercises both FF13 windows (496 + 204).
 Uint8List _configBlob(int seed) =>
     Uint8List.fromList([for (var i = 0; i < 700; i++) (i + seed) & 0xff]);
 
+/// Writes a valid pose file with the guided bench's fixed name.
+class _FakePoseRecorder implements BenchPoseRecorder {
+  _FakePoseRecorder(this.dir) {
+    dir.createSync(recursive: true);
+  }
+
+  final Directory dir;
+  final List<String> recorded = [];
+
+  @override
+  String get runtime => 'viture';
+
+  @override
+  Future<PoseCaptureResult> record({
+    required int hand,
+    required PoseSegment segment,
+    required Duration duration,
+    int run = 1,
+    Future<void>? cancel,
+  }) async {
+    recorded.add('$hand:${segment.id}:$run');
+    final name = poseCaptureFileName(
+      runtime: runtime,
+      hand: hand == 0 ? 'left' : 'right',
+      segment: segment.id,
+      run: run,
+    );
+    final file = File('${dir.path}/$name')
+      ..writeAsStringSync(
+        '{"format":"wmr-pose-recording","version":1,'
+        '"samples":[]}',
+      );
+    return PoseCaptureResult(
+      runtime: runtime,
+      path: file.path,
+      samples: 3,
+      seconds: duration.inSeconds,
+      run: run,
+      anchorRateHz: 90,
+      provenance: const {'runtime': 'viture', 'run_index': 1},
+    );
+  }
+}
+
+class _FakeCarinaRunner implements CarinaCaptureRunner {
+  _FakeCarinaRunner({this.failOnCall});
+
+  final int? failOnCall;
+  int calls = 0;
+
+  @override
+  Future<CarinaDiagnosticReport> capture({
+    required Duration duration,
+    required String outputDirectory,
+  }) async {
+    calls++;
+    if (calls == failOnCall) {
+      throw const CarinaDiagnosticException(
+        'sdkUnavailable',
+        'libglasses.so is not loaded',
+      );
+    }
+    return CarinaDiagnosticReport.fromJson(const {
+      'schema': 'wmr.carina.diagnostics.v1',
+      'ok': true,
+      'pose': {'polls': 100, 'successes': 99, 'rateHz': 99.0, 'valid': true},
+    });
+  }
+}
+
+/// A short corpus session used by the resume tests.
+RealBenchSession _resumeSession(Directory dir, BenchPoseRecorder recorder) =>
+    RealBenchSession(
+      poseRecorder: recorder,
+      clock: MonotonicClock(),
+      captureStore: CaptureStore(Directory('${dir.path}/captures')),
+      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+      durations: const BenchDurations(
+        poseStill: Duration(milliseconds: 10),
+        poseDrifting: Duration(milliseconds: 10),
+        poseSlowPan: Duration(milliseconds: 10),
+        poseMediumPan: Duration(milliseconds: 10),
+        poseFastFlick: Duration(milliseconds: 10),
+        poseOcclusion: Duration(milliseconds: 10),
+      ),
+      appCommit: 'abc1234',
+      firmwareSha: 'deadbee',
+    );
+
+ProviderContainer _openResumeContainer(
+  Directory dir,
+  PoseRecordingStore progress,
+  BenchSession session,
+) {
+  final container = ProviderContainer(
+    overrides: [
+      benchSessionProvider.overrideWithValue(() async => session),
+      benchPoseAvailabilityProvider.overrideWithValue(
+        const BenchPoseAvailability.available('viture'),
+      ),
+      poseRecordingStoreProvider.overrideWith((ref) async => progress),
+    ],
+  );
+  addTearDown(container.dispose);
+  return container;
+}
+
+Future<BenchController> _startResumeCorpus(ProviderContainer container) async {
+  final sub = container.listen(benchControllerProvider, (_, _) {});
+  addTearDown(sub.close);
+  final controller = container.read(benchControllerProvider.notifier);
+  controller.selectMode(BenchMode.sixDofOnly);
+  controller.skipCurrent(); // capability summary is not part of the corpus
+  controller.skipCurrent(); // ONY-733 empty-hand baseline
+  controller.skipCurrent(); // ONY-733 grip run
+  return controller;
+}
+
 void main() {
   late Directory dir;
   late FakeTransport transport;
-  late FakeWmrBridge bridge;
-  late ControllerService service;
+  FakeWmrBridge? bridge;
+  ControllerService? service;
 
-  Future<BenchSession> open({List<int> hands = const [0, 1]}) async {
+  Future<BenchSession> open({
+    List<int> hands = const [0, 1],
+    CarinaCaptureRunner? carina,
+  }) async {
     transport = FakeTransport(devices: const [fakeBridgeDevice]);
     bridge = FakeWmrBridge(
       transport,
@@ -34,7 +167,7 @@ void main() {
       configBlobs: [_configBlob(0), _configBlob(7)],
     )..start();
     service = ControllerService(transport, fakeBridgeDeviceId);
-    await service.start();
+    await service!.start();
     return RealBenchSession(
       service: service,
       clock: transport.clock,
@@ -45,10 +178,20 @@ void main() {
         move: Duration(milliseconds: 80),
         capture: Duration(milliseconds: 250),
         latency: Duration(milliseconds: 250),
+        poseStill: Duration(milliseconds: 10),
+        poseDrifting: Duration(milliseconds: 10),
+        poseSlowPan: Duration(milliseconds: 10),
+        poseMediumPan: Duration(milliseconds: 10),
+        poseFastFlick: Duration(milliseconds: 10),
         handTimeout: Duration(seconds: 2),
         firmwareTimeout: Duration(seconds: 2),
       ),
       mtu: 185,
+      poseRecorder: _FakePoseRecorder(dir),
+      appCommit: 'abc1234',
+      firmwareSha: 'deadbee',
+      carinaCapture: carina,
+      carinaRoot: '${dir.path}/carina',
     );
   }
 
@@ -57,8 +200,8 @@ void main() {
   });
 
   tearDown(() async {
-    bridge.stop();
-    await service.dispose();
+    bridge?.stop();
+    await service?.dispose();
     dir.deleteSync(recursive: true);
   });
 
@@ -128,7 +271,7 @@ void main() {
     final session = await open();
     await session.connect();
     await session.bothHands();
-    bridge.stop(); // no more frames from either hand
+    bridge!.stop(); // no more frames from either hand
 
     final still = await session.still(wmrHandLeft);
 
@@ -142,14 +285,25 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         benchSessionProvider.overrideWithValue(() async => session),
+        benchPoseAvailabilityProvider.overrideWithValue(
+          const BenchPoseAvailability.available('viture'),
+        ),
         exportTestBundleProvider.overrideWithValue(
           ({BenchBundleRun? benchRun}) => writeTestBundle(
             TestBundleInput(
               now: DateTime(2026, 10, 29, 13),
               appVersion: '0.2.2+4',
+              appCommit: 'abc1234',
               phone: 'Test Phone',
               androidVersion: 'Android 14 (API 34)',
               streamMode: 'raw',
+              bridges: const [
+                BundleBridge(
+                  id: fakeBridgeDeviceId,
+                  firmwareVersion: 'v0.2.4-3-gdeadbee',
+                ),
+              ],
+              poseCaptures: poseCapturesFromRun(benchRun),
               benchRun: benchRun,
             ),
             Directory('${dir.path}/out'),
@@ -162,13 +316,26 @@ void main() {
     final sub = container.listen(benchControllerProvider, (_, _) {});
     addTearDown(sub.close);
     final controller = container.read(benchControllerProvider.notifier);
+    controller.selectMode(BenchMode.combined);
 
-    for (var i = 0; i < 9; i++) {
+    for (var i = 0; i < 30; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
+        break;
+      }
       await controller.runCurrent();
     }
     expect(container.read(benchControllerProvider).step, BenchStep.photo);
     await controller.confirmCurrent();
     await controller.confirmCurrent();
+    for (var i = 0; i < benchPoseSequence.length + 10; i++) {
+      final step = container.read(benchControllerProvider).step;
+      if (step == BenchStep.export) break;
+      if (step == BenchStep.handEmpty || step == BenchStep.handGrip) {
+        controller.skipCurrent();
+        continue;
+      }
+      await controller.runCurrent();
+    }
     await controller.exportBundle();
 
     final state = container.read(benchControllerProvider);
@@ -178,8 +345,496 @@ void main() {
     );
     final file = archive.files.firstWhere((f) => f.name == 'manifest.md');
     final manifest = utf8.decode(file.content as List<int>);
-    for (final step in BenchStep.values) {
+    for (final step in BenchMode.combined.steps) {
+      final status =
+          step == BenchStep.handEmpty ||
+              step == BenchStep.handGrip ||
+              step == BenchStep.carinaLeds ||
+              step == BenchStep.carinaCheckerboard ||
+              step == BenchStep.carinaPose
+          ? 'skipped'
+          : 'done';
+      expect(manifest, contains('- ${step.id}: $status'), reason: step.id);
+    }
+    expect(manifest, contains('- Bench mode: combined'));
+    expect(manifest, contains('## 6DoF pose captures'));
+    expect(manifest, contains('pose_capture_viture_left_still.json'));
+    expect(manifest, contains('pose_capture_viture_right_fast_flick.json'));
+    // The header commit is the app build, not the per-segment fallback.
+    final header = manifest.split('## 6DoF').first;
+    expect(header, contains('- App commit: abc1234'));
+    expect(manifest, contains('- Firmware SHA: deadbee'));
+    // Every recorded segment is in the zip, not just in the manifest table.
+    final poseFiles = archive.files
+        .map((f) => f.name)
+        .where((name) => name.startsWith('pose_capture_'))
+        .toList();
+    expect(poseFiles, hasLength(benchPoseSequence.length));
+    expect(poseFiles, contains('pose_capture_viture_left_still.json'));
+  });
+
+  test('3DoF only adds the Carina gates after the serial log', () async {
+    final carina = _FakeCarinaRunner();
+    final session = await open(carina: carina);
+    final container = ProviderContainer(
+      overrides: [
+        benchSessionProvider.overrideWithValue(() async => session),
+        carinaCaptureProvider.overrideWithValue(carina),
+        exportTestBundleProvider.overrideWithValue(
+          ({BenchBundleRun? benchRun}) => writeTestBundle(
+            TestBundleInput(
+              now: DateTime(2026, 10, 29, 13),
+              appVersion: '0.2.2+4',
+              appCommit: 'abc1234',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+              streamMode: 'raw',
+              bridges: const [
+                BundleBridge(
+                  id: fakeBridgeDeviceId,
+                  firmwareVersion: 'v0.2.4-3-gdeadbee',
+                ),
+              ],
+              poseCaptures: poseCapturesFromRun(benchRun),
+              benchRun: benchRun,
+            ),
+            Directory('${dir.path}/out'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final sub = container.listen(benchControllerProvider, (_, _) {});
+    addTearDown(sub.close);
+    final controller = container.read(benchControllerProvider.notifier);
+    controller.selectMode(BenchMode.threeDofOnly);
+
+    for (var i = 0; i < 30; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.photo) {
+        break;
+      }
+      await controller.runCurrent();
+    }
+    expect(container.read(benchControllerProvider).step, BenchStep.photo);
+    await controller.confirmCurrent();
+    await controller.confirmCurrent();
+    for (var i = 0; i < 5; i++) {
+      if (container.read(benchControllerProvider).step == BenchStep.export) {
+        break;
+      }
+      await controller.runCurrent();
+    }
+    await controller.exportBundle();
+
+    final state = container.read(benchControllerProvider);
+    expect(state.bundleError, isNull);
+    final archive = ZipDecoder().decodeBytes(
+      File(state.bundlePath!).readAsBytesSync(),
+    );
+    final manifest = utf8.decode(
+      archive.files.firstWhere((f) => f.name == 'manifest.md').content
+          as List<int>,
+    );
+    final steps = BenchMode.threeDofOnly.steps;
+    expect(steps, hasLength(15));
+    for (final step in steps) {
       expect(manifest, contains('- ${step.id}: done'), reason: step.id);
     }
+    expect(manifest, contains('- Bench mode: 3dof_only'));
+    expect(manifest, isNot(contains('## 6DoF pose captures')));
+    expect(
+      archive.files.where((f) => f.name.startsWith('pose_capture_')),
+      isEmpty,
+    );
   });
+
+  test('an interrupted corpus resumes from the first missing run', () async {
+    final progress = PoseRecordingStore(Directory('${dir.path}/documents'));
+    final first = _FakePoseRecorder(Directory('${dir.path}/runs'));
+    final second = _FakePoseRecorder(Directory('${dir.path}/runs'));
+
+    final firstContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, first),
+    );
+    final firstController = await _startResumeCorpus(firstContainer);
+    for (var i = 0; i < 5; i++) {
+      await firstController.runCurrent();
+    }
+    expect(firstContainer.read(benchControllerProvider).poseSegment, 5);
+    expect(first.recorded, hasLength(5));
+    await firstController.poseProgressWritten;
+    firstContainer.dispose();
+
+    final secondContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, second),
+    );
+    final secondController = await _startResumeCorpus(secondContainer);
+    await secondController.runCurrent();
+    expect(second.recorded, hasLength(1), reason: 'only the next run records');
+    expect(second.recorded.single, '0:drifting:2');
+    expect(secondContainer.read(benchControllerProvider).poseSegment, 6);
+
+    for (var i = 6; i < benchPoseSequence.length; i++) {
+      await secondController.runCurrent();
+    }
+    final state = secondContainer.read(benchControllerProvider);
+    expect(state.step, BenchStep.export);
+    final segments =
+        state.resultFor(BenchStep.poseCapture).data['segments']! as List;
+    expect(segments, hasLength(benchPoseSequence.length));
+    final keys = [
+      for (final segment in segments.cast<Map>())
+        '${segment['hand']}:${segment['segment']}:${segment['run']}',
+    ];
+    expect(keys.toSet(), hasLength(benchPoseSequence.length));
+  });
+
+  test('resume drops saved runs after a mid-corpus missing file', () async {
+    final progress = PoseRecordingStore(Directory('${dir.path}/documents'));
+    final first = _FakePoseRecorder(Directory('${dir.path}/runs'));
+    final second = _FakePoseRecorder(Directory('${dir.path}/runs'));
+
+    final firstContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, first),
+    );
+    final firstController = await _startResumeCorpus(firstContainer);
+    for (var i = 0; i < 8; i++) {
+      await firstController.runCurrent();
+    }
+    expect(first.recorded, hasLength(8));
+    await firstController.poseProgressWritten;
+    firstContainer.dispose();
+
+    // LEFT still run 4 (sequence index 3) is gone; the later runs are on disk.
+    final missing = File(
+      '${dir.path}/runs/'
+      '${poseCaptureFileName(runtime: 'viture', hand: 'left', segment: 'still', run: 4)}',
+    );
+    expect(missing.existsSync(), isTrue);
+    missing.deleteSync();
+
+    final secondContainer = _openResumeContainer(
+      dir,
+      progress,
+      _resumeSession(dir, second),
+    );
+    final secondController = await _startResumeCorpus(secondContainer);
+    await secondController.runCurrent();
+    expect(
+      second.recorded,
+      hasLength(1),
+      reason: 'resume restarts at the missing run, not the first recorded one',
+    );
+    expect(second.recorded.single, '0:still:4');
+    expect(secondContainer.read(benchControllerProvider).poseSegment, 4);
+
+    for (var i = 4; i < benchPoseSequence.length; i++) {
+      await secondController.runCurrent();
+    }
+    final state = secondContainer.read(benchControllerProvider);
+    expect(state.step, BenchStep.export);
+    final segments =
+        state.resultFor(BenchStep.poseCapture).data['segments']! as List;
+    expect(segments, hasLength(benchPoseSequence.length));
+    final keys = [
+      for (final segment in segments.cast<Map>())
+        '${segment['hand']}:${segment['segment']}:${segment['run']}',
+    ];
+    expect(keys.toSet(), hasLength(benchPoseSequence.length));
+    expect(second.recorded, hasLength(benchPoseSequence.length - 3));
+    expect(second.recorded.first, '0:still:4');
+  });
+
+  group('firmware SHA', () {
+    test('only a git-describe shape yields a SHA', () {
+      expect(gitShaFromFirmware('v0.2.4-3-gdeadbee'), 'deadbee');
+      expect(gitShaFromFirmware('0.2.4-g1234567'), '1234567');
+      expect(gitShaFromFirmware('2026-10-29 deadbee'), isNull);
+      expect(gitShaFromFirmware('deadbee'), isNull);
+      expect(gitShaFromFirmware('v0.2.4'), isNull);
+      expect(gitShaFromFirmware(null), isNull);
+    });
+
+    test('one SHA for agreeing bridges, per-bridge when they differ', () {
+      expect(firmwareShaFromVersions({'a': 'v1-gdeadbee'}), 'deadbee');
+      expect(
+        firmwareShaFromVersions({'a': 'v1-gdeadbee', 'b': 'v1-gdeadbee'}),
+        'deadbee',
+      );
+      expect(
+        firmwareShaFromVersions({'a': 'v1-gdeadbee', 'b': 'v1-gc0ffee0'}),
+        'a=deadbee; b=c0ffee0',
+      );
+      expect(
+        firmwareShaFromVersions({'a': '2026-10-29', 'b': null}),
+        'unknown',
+      );
+    });
+  });
+
+  group('pose gate', () {
+    DebugTrackingSelection selection(
+      DebugTrackingSource choice, {
+      TrackingSource? source,
+    }) => DebugTrackingSelection(
+      choice: choice,
+      attachment: AsyncValue.data(
+        DebugTrackingAttachment(choice: choice, source: source),
+      ),
+    );
+
+    test('no source, simulated and jointless sources are unavailable', () {
+      expect(
+        BenchPoseAvailability.fromSelection(selection(DebugTrackingSource.none))
+            .available,
+        isFalse,
+      );
+      expect(
+        BenchPoseAvailability.fromSelection(
+          selection(
+            DebugTrackingSource.simulated,
+            source: FakeTrackingSource(),
+          ),
+        ).available,
+        isFalse,
+        reason: 'the simulator is not a real 6DoF runtime',
+      );
+      final jointless = FakeTrackingSource(
+        capabilities: const TrackingCapabilities(
+          features: {TrackingFeature.headPose6Dof},
+        ),
+      );
+      expect(
+        BenchPoseAvailability.fromSelection(
+          selection(DebugTrackingSource.viture, source: jointless),
+        ).available,
+        isFalse,
+      );
+    });
+
+    test('a running vendor source with hand joints offers the step', () {
+      for (final choice in [
+        DebugTrackingSource.viture,
+        DebugTrackingSource.xreal,
+        DebugTrackingSource.androidXr,
+      ]) {
+        final availability = BenchPoseAvailability.fromSelection(
+          selection(choice, source: FakeTrackingSource()),
+        );
+        expect(availability.available, isTrue, reason: choice.name);
+        expect(availability.runtime, choice.name);
+      }
+    });
+  });
+
+  group('grayscale-camera gates', () {
+    test('Gate 4 records grip dropout from tracking frames', () async {
+      final source = FakeTrackingSource();
+      await source.start();
+      addTearDown(source.dispose);
+      final session = RealBenchSession(
+        tracking: source,
+        clock: MonotonicClock(),
+        captureStore: CaptureStore(Directory('${dir.path}/captures')),
+        latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+        durations: const BenchDurations(handGrip: Duration(seconds: 2)),
+      );
+      final joint = HandPose(
+        hand: TrackedHand.left,
+        joints: {HandJoint.palm: TrackedPose(pose: Pose.identity)},
+      );
+      final run = session.handTracking(
+        gripping: true,
+        duration: const Duration(seconds: 2),
+      );
+      for (var i = 0; i < 10; i++) {
+        source.addFrame(TrackingFrame(timeNs: i, leftHand: joint));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      for (var i = 10; i < 20; i++) {
+        source.addFrame(TrackingFrame(timeNs: i));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final outcome = await run;
+      expect(outcome.ok, isTrue, reason: outcome.error);
+      expect(outcome.data['mode'], 'gripping');
+      expect(outcome.data['hand_tracked'], isTrue);
+      expect(outcome.data['frames'], greaterThanOrEqualTo(20));
+      expect(outcome.data['joints_present'], 1);
+      expect(outcome.data['dropout_percent'], greaterThan(0));
+      expect(outcome.data['dropout_percent'], lessThan(100));
+    });
+
+    test('Gate 1 saves one capture per distance and orientation', () async {
+      final runner = _FakeCarinaRunner();
+      final session = RealBenchSession(
+        clock: MonotonicClock(),
+        captureStore: CaptureStore(Directory('${dir.path}/captures')),
+        latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+        durations: const BenchDurations(carinaFrame: Duration(milliseconds: 1)),
+        carinaCapture: runner,
+        carinaRoot: '${dir.path}/carina',
+      );
+      final outcome = await session.carinaLeds();
+      expect(outcome.ok, isTrue, reason: outcome.error);
+      final captures = (outcome.data['captures']! as List).cast<Map>();
+      expect(
+        captures,
+        hasLength(carinaLedDistancesM.length * carinaLedOrientations.length),
+      );
+      expect(
+        captures.map((capture) => capture['distance_m']).toSet(),
+        carinaLedDistancesM.toSet(),
+      );
+      expect(
+        captures.map((capture) => capture['orientation']).toSet(),
+        carinaLedOrientations.toSet(),
+      );
+      final directories = (outcome.data['directories']! as List).cast<String>();
+      expect(directories, hasLength(captures.length));
+      expect(
+        directories.toSet(),
+        hasLength(captures.length),
+        reason: 'each orientation keeps its own output directory',
+      );
+    });
+
+    test('Gate 1 reports the distance where the capture failed', () async {
+      final session = RealBenchSession(
+        clock: MonotonicClock(),
+        captureStore: CaptureStore(Directory('${dir.path}/captures')),
+        latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+        durations: const BenchDurations(carinaFrame: Duration(milliseconds: 1)),
+        carinaCapture: _FakeCarinaRunner(failOnCall: 7),
+        carinaRoot: '${dir.path}/carina',
+      );
+      final outcome = await session.carinaLeds();
+      expect(outcome.ok, isFalse);
+      expect(outcome.error, contains('0.8 m'));
+      expect((outcome.data['captures']! as List), hasLength(6));
+      final directories = (outcome.data['directories']! as List).cast<String>();
+      expect(
+        directories,
+        hasLength(7),
+        reason: 'the failed capture directory is packed too',
+      );
+    });
+
+    test('Gate 9 records the pose rate and status', () async {
+      final session = RealBenchSession(
+        clock: MonotonicClock(),
+        captureStore: CaptureStore(Directory('${dir.path}/captures')),
+        latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+        durations: const BenchDurations(
+          carinaPoseRun: Duration(milliseconds: 1),
+        ),
+        carinaCapture: _FakeCarinaRunner(),
+        carinaRoot: '${dir.path}/carina',
+      );
+      final outcome = await session.carinaPose();
+      expect(outcome.ok, isTrue, reason: outcome.error);
+      expect(outcome.data['pose_rate_hz'], 99.0);
+      expect(outcome.data['pose_polls'], 100);
+    });
+
+    test('Carina gates run with no bridge or tracking source', () async {
+      final runner = _FakeCarinaRunner();
+      final carinaSession = RealBenchSession(
+        clock: MonotonicClock(),
+        captureStore: CaptureStore(Directory('${dir.path}/captures')),
+        latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+        durations: const BenchDurations(carinaFrame: Duration(milliseconds: 1)),
+        carinaCapture: runner,
+        carinaRoot: '${dir.path}/carina',
+      );
+      final container = ProviderContainer(
+        overrides: [
+          benchSessionProvider.overrideWithValue(() async => null),
+          carinaOnlySessionProvider.overrideWithValue(
+            () async => carinaSession,
+          ),
+          carinaCaptureProvider.overrideWithValue(runner),
+        ],
+      );
+      addTearDown(container.dispose);
+      final sub = container.listen(benchControllerProvider, (_, _) {});
+      addTearDown(sub.close);
+      final controller = container.read(benchControllerProvider.notifier);
+      controller.selectMode(BenchMode.threeDofOnly);
+      while (container.read(benchControllerProvider).step !=
+          BenchStep.carinaLeds) {
+        controller.skipCurrent();
+      }
+      await controller.runCurrent();
+      final result = container
+          .read(benchControllerProvider)
+          .resultFor(BenchStep.carinaLeds);
+      expect(result.status, BenchStatus.done, reason: result.error);
+      expect((result.data['captures']! as List), isNotEmpty);
+    });
+  });
+
+  group('session clock', () {
+    test('a tracking-only session keeps one clock across resolves', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final source = FakeTrackingSource();
+      await source.start();
+      final transport = UniversalBleTransport(adapter: FakeBleAdapter());
+      addTearDown(transport.dispose);
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          debugTrackingSourceProvider.overrideWith(
+            () => _FixedTracking(
+              DebugTrackingSelection(
+                choice: DebugTrackingSource.viture,
+                attachment: AsyncValue.data(
+                  DebugTrackingAttachment(
+                    choice: DebugTrackingSource.viture,
+                    source: source,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          benchPoseAvailabilityProvider.overrideWithValue(
+            const BenchPoseAvailability.unavailable('no 6DoF source'),
+          ),
+          captureStoreProvider.overrideWith(
+            (ref) async => CaptureStore(Directory('${dir.path}/captures')),
+          ),
+          latencyStoreProvider.overrideWith(
+            (ref) async => LatencyStore(Directory('${dir.path}/latency')),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      addTearDown(source.dispose);
+
+      final resolve = container.read(benchSessionProvider);
+      final first = await resolve() as RealBenchSession;
+      final second = await resolve() as RealBenchSession;
+      expect(first.service, isNull, reason: 'no controller service');
+      expect(
+        identical(first.clock, second.clock),
+        isTrue,
+        reason: 'host_ns must not restart at every pose segment',
+      );
+    });
+  });
+}
+
+class _FixedTracking extends DebugTrackingSourceNotifier {
+  _FixedTracking(this.selection);
+
+  final DebugTrackingSelection selection;
+
+  @override
+  DebugTrackingSelection build() => selection;
 }

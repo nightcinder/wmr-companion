@@ -116,6 +116,13 @@ abstract class BleAdapter {
   });
   Future<void> stopScan();
 
+  /// Devices the platform already holds a connection to, so they no longer
+  /// advertise and [scanResults] never reports them. [withServices] filters
+  /// natively where the platform supports it.
+  Future<List<BleScanResult>> systemDevices({
+    required List<String> withServices,
+  });
+
   /// Completes when the link is up; throws if it could not be established.
   Future<void> connect(String deviceId);
   Future<void> disconnect(String deviceId);

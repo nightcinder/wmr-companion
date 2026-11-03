@@ -76,6 +76,13 @@ android {
             // Local debug runs and `tool/test_flavor_wiring.sh` keep using the
             // throwaway Android debug key (ONY-492).
             signingConfig = signingConfigs.getByName("debug")
+            // A debug APK is signed with the Android debug key, which never
+            // matches the project release key. Under one applicationId the
+            // package manager then refuses the release APK while any debug
+            // build is installed, and Android only says "Something went
+            // wrong" (ONY-572). The suffix gives debug builds their own
+            // package, so `flutter run` and the GitHub release APK coexist.
+            applicationIdSuffix = ".debug"
         }
         release {
             // Null when key.properties/env is missing; the task-graph check
@@ -88,27 +95,20 @@ android {
         }
     }
 
-    // One APK can carry the Dart flags for every vendor, but only one Unity
-    // runtime. `base` links no Unity at all (Android XR, emulator, BLE/3DoF);
-    // `viture` and `xreal` link a locally exported per-vendor unityLibrary;
-    // `unified` links the shared unityLibrary exported from
-    // packages/wmr_tracking_unity and selects a vendor at runtime.
+    // Only the unified APK ships. `base` remains for emulator and BLE/3DoF
+    // development and links no Unity at all; `unified` links the shared
+    // unityLibrary exported from packages/wmr_tracking_unity and selects a
+    // vendor at runtime. The retired per-vendor flavors are gone (ONY-565).
     flavorDimensions += "vendor"
     productFlavors {
         create("base") {
             dimension = "vendor"
         }
-        create("viture") {
-            dimension = "vendor"
-        }
-        create("xreal") {
-            dimension = "vendor"
-        }
         create("unified") {
             dimension = "vendor"
             // VITURE 0.9.0's VitureUnityXR.aar declares minSdk 33, and the
-            // unified export links it alongside XREAL. Keep the other flavors
-            // on Flutter's default (ONY-388).
+            // unified export links it alongside XREAL. `base` stays on
+            // Flutter's default (ONY-388).
             minSdk = 33
         }
     }
@@ -121,6 +121,16 @@ android {
             pickFirsts += "**/libVkLayer_khronos_validation.so"
         }
     }
+}
+
+dependencies {
+    // The Android XR extension classes come from the device's shared library,
+    // so they are not on the R8 classpath. Without a resolvable
+    // `Consumer` interface R8 emits the androidx.xr callbacks as empty classes
+    // and the device kills the process with an AbstractMethodError when the
+    // Android XR session starts (ONY-758). `compileOnly` keeps the stubs out of
+    // the APK; the device copy still wins at run time.
+    compileOnly(project(":xr_extensions_stubs"))
 }
 
 // A release build must never silently fall back to the debug key. Debug builds
@@ -141,24 +151,10 @@ gradle.taskGraph.whenReady {
 }
 
 dependencies {
-    // Only the matching flavor gets the module, so base can never carry Unity
-    // and two runtimes can never be linked together. settings.gradle.kts
-    // already fails when incompatible exports exist.
-    findProject(":unityLibraryViture")?.let {
-        "vitureImplementation"(project(":unityLibraryViture"))
-    }
-    findProject(":unityLibraryXreal")?.let {
-        "xrealImplementation"(project(":unityLibraryXreal"))
-    }
+    // Only the unified flavor gets the module, so base can never carry Unity.
+    // settings.gradle.kts includes the module only when its export exists.
     findProject(":unityLibraryUnified")?.let {
         "unifiedImplementation"(project(":unityLibraryUnified"))
-    }
-    val linkedUnityModules =
-        listOf("unityLibraryViture", "unityLibraryXreal", "unityLibraryUnified")
-            .filter { findProject(":$it") != null }
-    check(linkedUnityModules.size <= 1) {
-        "Cannot link multiple unityLibrary modules into one APK: " +
-            linkedUnityModules.joinToString() + "."
     }
 }
 

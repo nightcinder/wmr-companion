@@ -33,8 +33,24 @@ namespace OnyxLens.WmrTrackingXreal
         private const string KotlinPluginClass =
             "com.onyxlens.wmr_tracking_xreal.WmrTrackingXrealPlugin";
 
+        // The Kotlin/Dart contracts accept these XREAL model aliases. The
+        // device type string varies by SDK path, so compare the same set here
+        // instead of only the canonical `Air2Ultra`.
+        private static readonly string[] SupportedModels =
+        {
+            "air2ultra",
+            "xrealair2ultra",
+            "nrair2ultra",
+        };
+
         private bool _running;
         private bool _applicationPaused;
+#if WMR_UNITY_XR_HANDS
+        private bool _handReadErrorReported;
+#endif
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private bool _relayErrorReported;
+#endif
         private Transform _headTransform;
 
         /// <summary>True while a `start` command has been accepted and not stopped.</summary>
@@ -143,6 +159,11 @@ namespace OnyxLens.WmrTrackingXreal
                 case "start":
                     StartTracking();
                     break;
+                case "recenter":
+                    // XREAL has no origin-reset call in this bridge. Accept
+                    // the shared relay verb as a no-op instead of reporting a
+                    // protocol error that the Kotlin host treats as fatal.
+                    break;
                 case "stop":
                     StopTracking();
                     break;
@@ -184,11 +205,21 @@ namespace OnyxLens.WmrTrackingXreal
 #endif
         }
 
+        private static bool IsSupportedModel(string model)
+        {
+            string normalized = NormalizeModel(model);
+            for (int i = 0; i < SupportedModels.Length; i++)
+            {
+                if (normalized == SupportedModels[i]) return true;
+            }
+            return false;
+        }
+
         private void StartTracking()
         {
             ReportGlassesModel();
             string model = CurrentGlassesModel();
-            if (NormalizeModel(model) != "air2ultra")
+            if (!IsSupportedModel(model))
             {
                 ReportError(
                     "unsupported",
@@ -198,7 +229,18 @@ namespace OnyxLens.WmrTrackingXreal
             }
 
 #if WMR_UNITY_XR_HANDS
-            EnsureHandSubsystem();
+            try
+            {
+                EnsureHandSubsystem();
+            }
+            catch (Exception ex)
+            {
+                ReportError(
+                    "unavailable",
+                    "XREAL XR Hands subsystem query failed: " + ex.Message
+                );
+                return;
+            }
             if (_handSubsystem == null || !_handSubsystem.running)
             {
                 ReportError(
@@ -267,8 +309,12 @@ namespace OnyxLens.WmrTrackingXreal
         {
             long timeNs = MonotonicTimeNs();
             var sb = new StringBuilder(2048);
-            sb.Append("{\"v\":1,\"space\":\"openxr\",\"time_ns\":")
+            sb.Append("{\"v\":1,\"schemaVersion\":1,\"space\":\"openxr\",\"time_ns\":")
               .Append(timeNs.ToString(CultureInfo.InvariantCulture));
+#if WMR_UNITY_XR_HANDS
+            sb.Append(",\"handJointCount\":")
+              .Append(JointTable.Length.ToString(CultureInfo.InvariantCulture));
+#endif
 
             if (_headTransform != null)
             {
@@ -283,29 +329,40 @@ namespace OnyxLens.WmrTrackingXreal
             }
 
 #if WMR_UNITY_XR_HANDS
-            EnsureHandSubsystem();
-            if (_handSubsystem != null && _handSubsystem.running)
+            try
             {
-                bool hasLeft = _handSubsystem.leftHand.isTracked;
-                bool hasRight = _handSubsystem.rightHand.isTracked;
-                if (hasLeft || hasRight)
+                EnsureHandSubsystem();
+                if (_handSubsystem != null && _handSubsystem.running)
                 {
-                    sb.Append(",\"hands\":{");
-                    if (hasLeft)
+                    bool hasLeft = _handSubsystem.leftHand.isTracked;
+                    bool hasRight = _handSubsystem.rightHand.isTracked;
+                    if (hasLeft || hasRight)
                     {
-                        sb.Append("\"left\":");
-                        AppendHand(sb, _handSubsystem.leftHand, "left");
+                        sb.Append(",\"hands\":{");
+                        if (hasLeft)
+                        {
+                            sb.Append("\"left\":");
+                            AppendHand(sb, _handSubsystem.leftHand, "left");
+                        }
+                        if (hasLeft && hasRight)
+                        {
+                            sb.Append(',');
+                        }
+                        if (hasRight)
+                        {
+                            sb.Append("\"right\":");
+                            AppendHand(sb, _handSubsystem.rightHand, "right");
+                        }
+                        sb.Append('}');
                     }
-                    if (hasLeft && hasRight)
-                    {
-                        sb.Append(',');
-                    }
-                    if (hasRight)
-                    {
-                        sb.Append("\"right\":");
-                        AppendHand(sb, _handSubsystem.rightHand, "right");
-                    }
-                    sb.Append('}');
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_handReadErrorReported)
+                {
+                    _handReadErrorReported = true;
+                    ReportError("unavailable", "XR Hands frame read failed: " + ex.Message);
                 }
             }
 #endif
@@ -403,7 +460,18 @@ namespace OnyxLens.WmrTrackingXreal
         private void SendFrameToKotlin(string frameJson)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
-            GetPluginClass()?.CallStatic("onUnityFrame", frameJson);
+            try
+            {
+                GetPluginClass()?.CallStatic("onUnityFrame", frameJson);
+            }
+            catch (Exception ex)
+            {
+                if (!_relayErrorReported)
+                {
+                    _relayErrorReported = true;
+                    ReportError("unavailable", "Frame relay failed: " + ex.Message);
+                }
+            }
 #endif
         }
 
@@ -411,7 +479,14 @@ namespace OnyxLens.WmrTrackingXreal
         {
             ErrorReported?.Invoke(code, message);
 #if UNITY_ANDROID && !UNITY_EDITOR
-            GetPluginClass()?.CallStatic("onUnityError", code, message);
+            try
+            {
+                GetPluginClass()?.CallStatic("onUnityError", code, message);
+            }
+            catch (Exception)
+            {
+                // Ignore when running outside the Flutter plugin host.
+            }
 #endif
         }
 

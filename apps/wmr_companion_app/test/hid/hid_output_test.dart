@@ -95,7 +95,7 @@ void main() {
     await pump();
     // The pad as it stood when the host connected.
     expect(hid.reports, hasLength(1));
-    expect(hid.reports.single[0] & (1 << 5), isNot(0)); // R1 (squeeze, RIGHT)
+    expect(hid.reports.single[0] & (1 << 7), isNot(0)); // R1 (squeeze, RIGHT)
     expect(state().status.deviceName, 'PC');
 
     feed(record(2, buttons: wmrBtnSqueeze)); // same state: no report
@@ -128,15 +128,15 @@ void main() {
     hid.emit(const HidStatus(HidState.connected));
     await pump();
     final before = hid.reports.length;
-    // R2 lamp (bit 7) is off at the default 0.5 press point.
-    expect(hid.reports.last[0] & (1 << 7), 0);
+    // R2 lamp (bit 9) is off at the default 0.5 press point.
+    expect(hid.reports.last[1] & (1 << 1), 0);
     final c = container.read(gamepadConfigProvider);
     container
         .read(gamepadConfigProvider.notifier)
         .set(c.copyWith(triggerPressThreshold: 0.2));
     await pump();
     expect(hid.reports.length, before + 1);
-    expect(hid.reports.last[0] & (1 << 7), isNot(0));
+    expect(hid.reports.last[1] & (1 << 1), isNot(0));
   });
 
   test('a held trigger in the hysteresis band does not flicker', () async {
@@ -146,15 +146,15 @@ void main() {
     // 153/255 = 0.60 crosses the 0.55 press point.
     feed(record(1, trigger: 153));
     await pump();
-    expect(hid.reports.last[0] & (1 << 7), isNot(0));
+    expect(hid.reports.last[1] & (1 << 1), isNot(0));
     // 128/255 = 0.50 sits between release 0.45 and press 0.55: stays down.
     feed(record(2, trigger: 128));
     await pump();
-    expect(hid.reports.last[0] & (1 << 7), isNot(0));
+    expect(hid.reports.last[1] & (1 << 1), isNot(0));
     // 114/255 = 0.447 reaches the release point: lets go.
     feed(record(3, trigger: 114));
     await pump();
-    expect(hid.reports.last[0] & (1 << 7), 0);
+    expect(hid.reports.last[1] & (1 << 1), 0);
   });
 
   test('send failures are counted and the report is retried', () async {

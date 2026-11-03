@@ -1,6 +1,6 @@
 # wmr_tracking_xreal
 
-Default-off XREAL Air 2 Ultra head and 26-joint hand tracking relay source for
+Off by default: XREAL Air 2 Ultra head and 26-joint hand tracking relay source for
 [`wmr_tracking`](../wmr_tracking).
 
 XREAL hand tracking is available only through the XREAL SDK for Unity 3.x
@@ -35,8 +35,13 @@ controller IMU and 3DoF output are unchanged.
 Failures are typed `TrackingException`s:
 - `unavailable`: the Unity UaaL runtime (`com.unity3d.player.UnityPlayer`), the
   XREAL XR Hands subsystem or the host activity is missing.
-- `unsupported`: the glasses model is unreported / unknown, or it is not an Air
-  2 Ultra (`One`, `OnePro`, `Air`, `Air2`, `Air2Pro`, `Light`).
+- `unsupported`: the reported glasses model is not an Air 2 Ultra (`One`,
+  `OnePro`, `Air`, `Air2`, `Air2Pro`, `Light`, or an unclassifiable name). An
+  unreported model is not an error: `create()` succeeds and the Unity `start`
+  handshake reports the real model. That handshake result is not surfaced back
+  to Dart (`glassesModel` is the pre-start snapshot), so on the deferred path a
+  successful `start` is the Air 2 Ultra confirmation; any other model fails
+  `unsupported (found <model>)`.
 - `permissionDenied`: `android.permission.CAMERA` was denied. The permission is
   declared in the plugin manifest (with `android.hardware.camera` optional)
   and is inert while `WMR_XREAL_TRACKING` is false.

@@ -317,18 +317,18 @@ void main() {
     await pump();
     feed(decoded(2, hand: 0, trigger: 128), deviceId: fakeBridgeLeftDeviceId);
     await pump();
-    const l2 = 1 << 6;
-    expect(hid.reports.last[0] & l2, isNot(0));
+    const l2 = 1 << 0;
+    expect(hid.reports.last[1] & l2, isNot(0));
 
     adapter.dropLink(deviceId: fakeBridgeRightDeviceId);
     await wait(100);
     // Before the fix this cleared the global previous state, so the surviving
     // hand was judged from released and L2 flickered off in the band.
-    expect(hid.reports.last[0] & l2, isNot(0));
+    expect(hid.reports.last[1] & l2, isNot(0));
 
     feed(decoded(3, hand: 0, trigger: 128), deviceId: fakeBridgeLeftDeviceId);
     await pump();
-    expect(hid.reports.last[0] & l2, isNot(0));
+    expect(hid.reports.last[1] & l2, isNot(0));
   });
 
   test('an intentional disconnect does not re-dial and stops HID', () async {

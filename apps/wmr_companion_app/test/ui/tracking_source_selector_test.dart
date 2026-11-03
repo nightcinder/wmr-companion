@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,8 +9,10 @@ import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
+import 'package:wmr_companion_app/ui/debug/tracking_source_banner.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import 'raw_mode_notifier.dart';
 
@@ -44,6 +48,7 @@ Future<void> close(WidgetTester tester) async {
 Future<void> open(
   WidgetTester tester, {
   DebugTrackingSourceFactory? factory,
+  TrackingSourceSelector? selector,
 }) async {
   tall(tester);
   await tester.pumpWidget(
@@ -60,6 +65,8 @@ Future<void> open(
         ),
         if (factory != null)
           debugTrackingSourceFactoryProvider.overrideWithValue(factory),
+        if (selector != null)
+          debugTrackingSelectorProvider.overrideWithValue(selector),
       ],
       child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
     ),
@@ -98,6 +105,41 @@ TrackingFrame _handFrame(int timeNs) {
   );
 }
 
+class _FixedDetector implements GlassesDetector {
+  const _FixedDetector(this.detection);
+
+  final GlassesDetection detection;
+
+  @override
+  Future<GlassesDetection> detect() async => detection;
+}
+
+class _MutableDetector implements GlassesDetector {
+  _MutableDetector(this.detection);
+
+  GlassesDetection detection;
+
+  @override
+  Future<GlassesDetection> detect() async => detection;
+}
+
+class _CountingDetector implements GlassesDetector {
+  int calls = 0;
+
+  @override
+  Future<GlassesDetection> detect() async {
+    calls++;
+    return GlassesDetection.none;
+  }
+}
+
+class _DeferredDetector implements GlassesDetector {
+  final completer = Completer<GlassesDetection>();
+
+  @override
+  Future<GlassesDetection> detect() => completer.future;
+}
+
 void main() {
   test('the default factory returns null for every vendor flag off without '
       'touching a platform channel', () async {
@@ -124,17 +166,335 @@ void main() {
     expect(calls, isEmpty);
   });
 
-  testWidgets('the selector offers None, Simulated and the three vendors', (
+  testWidgets('the screen shows a read-only detection banner, not a vendor '
+      'dropdown', (tester) async {
+    await open(tester);
+    await settle(tester);
+
+    expect(
+      find.byKey(const ValueKey('tracking-source-selector')),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('tracking-source-banner')), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-redetect')), findsOneWidget);
+    expect(find.text('Glasses detection'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets(
+    'the banner disables both source controls when its host gates it',
+    (tester) async {
+      tall(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            debugTrackingSelectorProvider.overrideWithValue(
+              const TrackingSourceSelector(
+                detector: _FixedDetector(GlassesDetection.none),
+                flags: TrackingSourceFlags(),
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: TrackingSourceBanner(enabled: false)),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(const Key('tracking-source-redetect')),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(const Key('tracking-source-simulated')),
+            )
+            .onChanged,
+        isNull,
+      );
+    },
+  );
+
+  testWidgets('startup attaches the detected vendor on any host', (
     tester,
   ) async {
-    await open(tester);
-    await tester.tap(find.byKey(const ValueKey('tracking-source-selector')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    FakeTrackingSource? source;
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.viture,
+            host: GlassesHost.phone,
+            usbPermissionGranted: true,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => source = FakeTrackingSource(),
+      ),
+    );
+    await settle(tester);
 
-    for (final choice in DebugTrackingSource.values) {
-      expect(find.text(choice.label), findsWidgets);
-    }
+    expect(source?.started, isTrue);
+    expect(find.textContaining('Detected VITURE on phone'), findsOneWidget);
+    expect(find.textContaining('Attached viture tracking'), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsNothing);
+
+    source!.addFrame(_handFrame(1));
+    await settle(tester);
+    expect(find.textContaining('source handAnchor'), findsNWidgets(2));
+    await close(tester);
+  });
+
+  testWidgets('neckband USB permission is not reported as a tracking fault', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.viture,
+            host: GlassesHost.neckband,
+            usbPermissionGranted: false,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => FakeTrackingSource(),
+      ),
+    );
+    await settle(tester);
+
+    expect(
+      find.textContaining(
+        'USB camera access not granted (hand tracking does not need it)',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('USB permission not granted'), findsNothing);
+    await close(tester);
+  });
+
+  testWidgets('an unlinked Unity runtime falls back to 3DoF, not a failure', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.viture,
+            host: GlassesHost.neckband,
+            usbPermissionGranted: true,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => throw const TrackingException(
+          TrackingExceptionKind.unavailable,
+          'This APK was built without the VITURE Unity runtime '
+          '(unityLibrary). Install the unified release APK to enable 6DoF '
+          'hand tracking.',
+          stage: unityRuntimeLinkStage,
+        ),
+      ),
+    );
+    await settle(tester);
+
+    expect(
+      find.textContaining('continuing with controller 3DoF'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('unified release APK'), findsOneWidget);
+    expect(find.textContaining('TrackingException'), findsNothing);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('no glasses leaves 0DoF and offers the Simulated fallback', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(GlassesDetection.none),
+        flags: const TrackingSourceFlags(viture: true),
+      ),
+    );
+    await settle(tester);
+
+    expect(
+      find.textContaining(
+        'No VITURE, XREAL or Android XR glasses were detected',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tracking-source-simulated')));
+    await settle(tester);
+    expect(
+      find.textContaining('FakeTrackingSource trajectory'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('source handAnchor'), findsNWidgets(2));
+    await close(tester);
+  });
+
+  testWidgets('ambiguous USB devices leave 0DoF and offer Simulated', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.none,
+            host: GlassesHost.phone,
+            reason: GlassesDetectionReason.usbAmbiguous,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true, xreal: true),
+      ),
+    );
+    await settle(tester);
+
+    expect(find.textContaining('refusing to guess'), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('Re-detect attaches glasses connected after startup', (
+    tester,
+  ) async {
+    final detector = _MutableDetector(GlassesDetection.none);
+    FakeTrackingSource? source;
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(xreal: true),
+        xrealSource: () async => source = FakeTrackingSource(),
+      ),
+    );
+    await settle(tester);
+    expect(
+      find.textContaining(
+        'No VITURE, XREAL or Android XR glasses were detected',
+      ),
+      findsOneWidget,
+    );
+
+    detector.detection = const GlassesDetection(
+      vendor: GlassesVendor.xreal,
+      host: GlassesHost.beamPro,
+      usbPermissionGranted: true,
+    );
+    await tester.tap(find.byKey(const Key('tracking-source-redetect')));
+    await settle(tester);
+
+    expect(source?.started, isTrue);
+    expect(
+      find.textContaining('Detected XREAL on XREAL Beam Pro'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Attached xreal tracking'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('a flag-off build never probes the detector', (tester) async {
+    final detector = _CountingDetector();
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(),
+      ),
+    );
+    await settle(tester);
+
+    expect(detector.calls, 0);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DebugScreen)),
+    );
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.choice, DebugTrackingSource.auto);
+    expect(selection.attachment.value?.source, isNull);
+    // No vendor source exists to fall back from, so Simulated is the only
+    // way to reach 6DoF in this build.
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('a detected but unbuildable vendor still offers Simulated', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: const _FixedDetector(
+          GlassesDetection(
+            vendor: GlassesVendor.xreal,
+            host: GlassesHost.beamPro,
+            usbPermissionGranted: true,
+          ),
+        ),
+        flags: const TrackingSourceFlags(viture: true),
+      ),
+    );
+    await settle(tester);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DebugScreen)),
+    );
+    final selection = container.read(debugTrackingSourceProvider);
+    expect(selection.attachment.value?.source, isNull);
+    expect(find.textContaining('does not enable that vendor'), findsOneWidget);
+    expect(find.byKey(const Key('tracking-source-simulated')), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('a manual selection made during the startup probe wins', (
+    tester,
+  ) async {
+    final detector = _DeferredDetector();
+    var vitureCreated = false;
+    await open(
+      tester,
+      selector: TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async {
+          vitureCreated = true;
+          return FakeTrackingSource();
+        },
+      ),
+    );
+
+    select(tester, DebugTrackingSource.simulated);
+    await settle(tester);
+    detector.completer.complete(
+      const GlassesDetection(
+        vendor: GlassesVendor.viture,
+        host: GlassesHost.neckband,
+      ),
+    );
+    await settle(tester);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(DebugScreen)),
+    );
+    expect(
+      container.read(debugTrackingSourceProvider).choice,
+      DebugTrackingSource.simulated,
+    );
+    expect(vitureCreated, isFalse);
     await close(tester);
   });
 

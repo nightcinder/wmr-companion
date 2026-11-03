@@ -2,8 +2,9 @@
 # 1. Verifies the vendor Runtime folders copied into the unified project match
 #    their per-vendor sources.
 # 2. Compiles the Unity-dependent unified bridge and the real vendor bridges
-#    against minimal stubs, in both the Android-player and editor
-#    preprocessor configurations.
+#    against minimal stubs, in the Android-player and editor configurations,
+#    plus the Android configuration with the vendor SDK and XR Hands defines
+#    so the on-device branches are type-checked too.
 # 3. Compiles the Unity-independent vendor dispatch and runs its assertions.
 # 4. Runs the VendorLoaderGate switch-after-start regression checks.
 #
@@ -22,5 +23,7 @@ loader_gate_project="tests/WmrTrackingUnity.LoaderGate.Tests/WmrTrackingUnity.Lo
 "$dotnet_bin" build "$stub_project" --configuration Release --nologo
 "$dotnet_bin" build "$stub_project" --configuration Release --nologo \
   -p:UnityEditorStub=true
+"$dotnet_bin" build "$stub_project" --configuration Release --nologo \
+  -p:WmrUnityXrHands=true -p:WmrVitureXrSdk=true -p:WmrXrealXrSdk=true
 "$dotnet_bin" run --configuration Release --project "$dispatch_project"
 "$dotnet_bin" run --configuration Release --project "$loader_gate_project"

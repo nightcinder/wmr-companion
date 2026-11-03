@@ -2,7 +2,7 @@
 
 > For the tracking (head/hand pose) side and the framework that consumes it, see [TRACKING.md](TRACKING.md). This page stays scoped to raw camera access.
 
-Question: could the app fuse the controllers' IMU with a headset's cameras to get 6DoF (the long-term goal)? Devices looked at: Xreal Aura, URXR One, Xreal One Pro + Eye, Viture Luma Ultra. This is desk research from a handful of searches; most vendor docs are thin and the sources were read through tool summaries, so details may be incomplete. Nothing here was tested on a device. Saved from the artifact `CEnR6zMhVKcqq5eFChk111`.
+Question: can the app fuse the controllers' IMU with a headset's cameras to get 6DoF (the long-term goal)? Devices looked at: Xreal Aura, URXR One, Xreal One Pro + Eye, Viture Luma Ultra. This is desk research from a handful of searches; most vendor docs are thin and the sources were read through tool summaries, so details can be incomplete. Nothing here was tested on a device. Saved from the artifact `CEnR6zMhVKcqq5eFChk111`.
 
 ## Short answer
 
@@ -21,14 +21,14 @@ Tags: **documented**, **partial/likely**, **blocked/doubtful**, **not found / gu
 | IR sensitivity | unknown | unknown | doubtful (guess): RGB cameras normally carry an IR-cut filter | unknown |
 | Frame timestamps / exposure | not found (Camera2 normally exposes sensor timestamps and manual exposure if the device allows it) | not found | not documented (the page covers pixel format only) | not found |
 | Headset pose | likely: Android XR provides head tracking to apps (guess for Aura) | not found: 6DoF is computed on the glasses; whether it reaches an app is unknown | partial: One Pro is 3DoF, Eye is marketed as adding 6DoF; pose API not checked | documented: pose via `get_gl_pose_carina`, described as 3/6DoF |
-| Where fusion runs | on the glasses or puck (Android XR app) | on the tethered phone or PC; pose would have to cross USB-C | on the host phone or PC | on the host (Android app via the SDK, or desktop) |
+| Where fusion runs | on the glasses or puck (Android XR app) | on the tethered phone or PC; pose will have to cross USB-C | on the host phone or PC | on the host (Android app via the SDK, or desktop) |
 | Restrictions | user permission prompt; likely an in-use indicator | shipping mid-Oct 2026 to backers; unreviewed | one series only; Eye is an accessory | Luma Ultra not supported in the browser SDK |
 
 ## What this means for the plan
 
 - **The blocker is IR, not permission.** WMR controller LEDs are, as far as known, near-IR and are seen by monochrome headset cameras. Passthrough or RGB feeds probably cannot see them. Confirm with one captured frame per device before building anything.
 - **Fallback that works on all four:** take the headset's 6DoF pose where the SDK exposes it and fuse it with the controller IMU orientation plus a hand-held anchor (grip offset or a user-calibrated pose). That gives drift-limited controller position without LED tracking.
-- **The phone is the fusion host** for URXR One, Xreal and Viture. Only Aura could host it on the glasses. That keeps the BLE link on the phone, which matches this app.
+- **The phone is the fusion host** for URXR One, Xreal and Viture. Only Aura can host it on the glasses. That keeps the BLE link on the phone, which matches this app.
 - **Camera and IMU must share a clock.** Camera timestamps come from the host OS; the controller IMU arrives with `rx_time_us` at the transport. The monotonic `Stopwatch` at the transport boundary is the right place to take host time. This is why the raw timestamped FF12/FF14 stream and its loss and latency matter ([STATUS.md](STATUS.md)).
 
 ## Common camera abstraction (sketch, not built)
@@ -53,7 +53,7 @@ Capability flags (`info.ir`, exposure supported, timestamp quality) let the app 
 ## Reusable open source
 
 - **Monado** has a constellation controller tracking branch for WMR controllers ([dev-constellation-controller-tracking](https://gitlab.freedesktop.org/thaytan/monado/-/commits/dev-constellation-controller-tracking)). It matches LED blobs to a controller model, fuses with IMU and rejects stray lights. It is C, runs on Linux, expects WMR headset cameras, and its PnP refinement is disabled because OpenCV RANSAC PnP "frequently produces really wrong answers". A reference for the LED model and fusion design, not a drop-in for Android XR. Not tested.
-- The FOSDEM 2026 Monado slides may describe progress since; not read.
+- The FOSDEM 2026 Monado slides can describe progress since. They were not read.
 
 ## Gaps to close
 

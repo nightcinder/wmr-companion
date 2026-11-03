@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 
 const _supportedLumaUltra = <String, Object?>{
@@ -140,6 +141,7 @@ void main() {
       source.capabilities.supports(TrackingFeature.controllerPose),
       isFalse,
     );
+    expect(source.capabilities.supports(TrackingFeature.originReset), isTrue);
     expect(source.permissions['camera'], 'granted');
   });
 
@@ -184,24 +186,81 @@ void main() {
     },
   );
 
-  test('an unreported or unknown glasses model maps to TrackingExceptionKind.unsupported', () async {
-    const unknownCapabilities = <String, Object?>{
-      'unityAvailable': true,
-      'supported': false,
-      'handTracking': false,
-      'headTracking': false,
-      'handGestures': false,
-      'passthroughCamera': false,
-      'handJointCount': 0,
-      'glassesModel': 'Unknown',
-      'reason': 'VITURE hand tracking requires LumaUltra on Pro Neckband (found Unknown)',
-      'permissions': <String, Object?>{'camera': 'granted'},
-    };
+  test(
+    'capabilities that report no support are refused as unsupported',
+    () async {
+      const unknownCapabilities = <String, Object?>{
+        'unityAvailable': true,
+        'supported': false,
+        'handTracking': false,
+        'headTracking': false,
+        'handGestures': false,
+        'passthroughCamera': false,
+        'handJointCount': 0,
+        'glassesModel': 'Unknown',
+        'reason':
+            'VITURE hand tracking requires LumaUltra on Pro Neckband '
+            '(found Unknown)',
+        'permissions': <String, Object?>{'camera': 'granted'},
+      };
+
+      await expectLater(
+        VitureNeckbandTrackingSource.create(
+          enabled: true,
+          platform: _FakeViturePlatform(capabilities: unknownCapabilities),
+        ),
+        throwsA(
+          isA<TrackingException>().having(
+            (error) => error.kind,
+            'kind',
+            TrackingExceptionKind.unsupported,
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'an unreported model defers the check to the Unity start handshake',
+    () async {
+      const pendingCapabilities = <String, Object?>{
+        'unityAvailable': true,
+        'modelReported': false,
+        'supported': true,
+        'handTracking': true,
+        'headTracking': true,
+        'handGestures': true,
+        'passthroughCamera': true,
+        'handJointCount': 26,
+        'glassesModel': 'Unknown',
+        'reason': null,
+        'permissions': <String, Object?>{'camera': 'granted'},
+      };
+      final platform = _FakeViturePlatform(capabilities: pendingCapabilities);
+
+      final source = await VitureNeckbandTrackingSource.create(
+        enabled: true,
+        platform: platform,
+      );
+
+      expect(source, isNotNull);
+      expect(source!.glassesModel, VitureGlassesModel.lumaUltra);
+      expect(source.capabilities.handJointCount, 26);
+      await source.start();
+      expect(platform.startCalls, 1);
+      await source.dispose();
+    },
+  );
+
+  test('a reported Unknown model is still rejected', () async {
+    final capabilities = Map<String, Object?>.from(_supportedLumaUltra)
+      ..['glassesModel'] = 'Unknown'
+      ..['modelReported'] = true;
 
     await expectLater(
       VitureNeckbandTrackingSource.create(
         enabled: true,
-        platform: _FakeViturePlatform(capabilities: unknownCapabilities),
+        platform: _FakeViturePlatform(capabilities: capabilities),
       ),
       throwsA(
         isA<TrackingException>().having(
@@ -213,26 +272,50 @@ void main() {
     );
   });
 
-  test(
-    'an unlinked Unity UaaL runtime maps to TrackingExceptionKind.unavailable',
-    () async {
-      final fixture = _fixture('viture_unity_unavailable.json');
+  test('an unlinked Unity UaaL runtime reports a build fallback, not a device fault', () async {
+    final fixture = _fixture('viture_unity_unavailable.json');
 
-      await expectLater(
-        VitureNeckbandTrackingSource.create(
-          enabled: true,
-          platform: _FakeViturePlatform(capabilities: fixture),
-        ),
-        throwsA(
-          isA<TrackingException>().having(
-            (error) => error.kind,
-            'kind',
-            TrackingExceptionKind.unavailable,
-          ),
-        ),
+    await expectLater(
+      VitureNeckbandTrackingSource.create(
+        enabled: true,
+        platform: _FakeViturePlatform(capabilities: fixture),
+      ),
+      throwsA(
+        isA<TrackingException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TrackingExceptionKind.unavailable,
+            )
+            .having((error) => error.stage, 'stage', unityRuntimeLinkStage)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('unified release APK'),
+            ),
+      ),
+    );
+  });
+
+  test('a missing VITURE plugin reports the same build fallback', () async {
+    final platform = _FakeViturePlatform()
+      ..capabilityError = MissingPluginException(
+        'No implementation found for method capabilities',
       );
-    },
-  );
+
+    await expectLater(
+      VitureNeckbandTrackingSource.create(enabled: true, platform: platform),
+      throwsA(
+        isA<TrackingException>()
+            .having((error) => error.stage, 'stage', unityRuntimeLinkStage)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('VITURE tracking plugin'),
+            ),
+      ),
+    );
+  });
 
   test(
     'camera permission denial from fixture maps to permissionDenied',
@@ -262,6 +345,38 @@ void main() {
       expect(platform.stopCalls, 0);
     },
   );
+
+  test('a staged platform error keeps the failing boundary', () async {
+    final platform = _FakeViturePlatform()
+      ..startError = PlatformException(
+        code: 'unavailable',
+        message: 'VITURE player was detached',
+        details: const {'stage': 'detach'},
+      );
+    final source = (await VitureNeckbandTrackingSource.create(
+      enabled: true,
+      platform: platform,
+    ))!;
+
+    await expectLater(
+      source.start(),
+      throwsA(
+        isA<TrackingException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TrackingExceptionKind.unavailable,
+            )
+            .having((error) => error.stage, 'stage', 'detach')
+            .having(
+              (error) => error.toString(),
+              'toString',
+              contains('stage: detach'),
+            ),
+      ),
+    );
+    expect(source.started, isFalse);
+  });
 
   test(
     'start, configure, recenter, stop, restart and dispose are idempotent',

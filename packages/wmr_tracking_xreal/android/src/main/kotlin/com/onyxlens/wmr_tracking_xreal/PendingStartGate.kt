@@ -8,9 +8,9 @@ package com.onyxlens.wmr_tracking_xreal
  * dependency.
  */
 internal interface StartReply {
-    fun success()
+    fun success(report: Map<String, Any?>)
 
-    fun error(code: String, message: String)
+    fun error(code: String, message: String, stage: String? = null)
 }
 
 /**
@@ -46,10 +46,10 @@ internal class PendingStartGate {
         return resolved
     }
 
-    /** Fails the held reply with [code]/[message]; idempotent. */
-    fun cancel(code: String, message: String): Boolean {
+    /** Fails the held reply with [code]/[message]/[stage]; idempotent. */
+    fun cancel(code: String, message: String, stage: String? = null): Boolean {
         val cancelled = resolve() ?: return false
-        cancelled.error(code, message)
+        cancelled.error(code, message, stage)
         return true
     }
 }

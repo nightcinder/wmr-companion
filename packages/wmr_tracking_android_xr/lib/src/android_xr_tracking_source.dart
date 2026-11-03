@@ -55,16 +55,19 @@ class AndroidXrTrackingPlatform {
 
 /// A [TrackingSource] for Android XR headsets and wired XR glasses.
 ///
-/// The Kotlin plugin owns the ARCore for Jetpack XR session: it requests
-/// `HAND_TRACKING` and `HEAD_TRACKING`, configures `HandTrackingMode.BOTH` and
-/// `DeviceTrackingMode.SPATIAL`, converts perception-space poses to the
-/// activity space and emits 26 OpenXR-named joints plus the device pose as
-/// `TrackingFrameCodec` JSON.
+/// The Kotlin plugin owns the ARCore for Jetpack XR session. It requests
+/// `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and
+/// `HEAD_TRACKING`, waits for every grant and for the activity to resume,
+/// configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`,
+/// converts perception-space poses to the activity space and emits 26
+/// OpenXR-named joints plus the device pose as `TrackingFrameCodec` JSON.
 ///
 /// Failures are typed: a denied permission, an unsupported device or a refused
 /// SPATIAL mode throws [TrackingException] from [create] or [start] instead of
-/// leaving an empty stream. Runtime tracking loss arrives as frames without
-/// the missing hand or head; it is not an error.
+/// leaving an empty stream. A platform failure carries the boundary that
+/// failed in [TrackingException.stage] (`permissions`, `sessionCreate`,
+/// `sessionConfigure` or `trackingStart`). Runtime tracking loss arrives as
+/// frames without the missing hand or head; it is not an error.
 class AndroidXrTrackingSource implements TrackingSource {
   AndroidXrTrackingSource._({
     required this.platform,
@@ -264,10 +267,15 @@ TrackingException _mapPlatformError(Object error) {
       'protocol' => TrackingExceptionKind.protocol,
       _ => TrackingExceptionKind.protocol,
     };
+    final details = error.details;
+    final stage = details is Map && details['stage'] is String
+        ? details['stage'] as String
+        : null;
     return TrackingException(
       kind,
       error.message ?? 'Android XR tracking failed (${error.code})',
       cause: error,
+      stage: stage,
     );
   }
   return TrackingException(

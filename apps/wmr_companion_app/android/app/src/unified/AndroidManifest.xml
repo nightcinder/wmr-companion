@@ -1,0 +1,45 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- An embedded Unity library is started by the Flutter app, never from the
+         home screen. The XREAL SDK's NRXRActivity still declares MAIN/LAUNCHER
+         (and LEANBACK_LAUNCHER) for standalone Unity apps, which gives the
+         unified APK a second launcher icon; tapping it opens the Unity scene
+         and shows a black screen after the splash (ONY-561).
+
+         The vendor activities must also not be exported at all: after a crash
+         the Neckband launcher can start a package activity that is not the
+         launcher icon, and an exported UnityPlayerActivity opens the bare Unity
+         scene with no Flutter UI and no loader command (ONY-842). -->
+    <application>
+        <activity
+            android:name="ai.nreal.activitylife.NRXRActivity"
+            android:exported="false"
+            tools:replace="android:exported">
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- The XREAL SDK also ships its own UnityPlayerActivity next to
+             NRXRActivity. Unexport it with the Unity player below. -->
+        <activity
+            android:name="ai.nreal.activitylife.UnityPlayerActivity"
+            android:exported="false"
+            tools:replace="android:exported" />
+        <!-- Unity's standalone manifest marks its player activity as the
+             launcher and exported; the Flutter MainActivity is the only entry
+             point. The VITURE XR metadata stays at application scope, so it
+             can bind only to that exported MainActivity. -->
+        <activity
+            android:name="com.unity3d.player.UnityPlayerActivity"
+            android:exported="false"
+            tools:replace="android:exported">
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

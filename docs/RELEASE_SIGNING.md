@@ -7,15 +7,17 @@ certificate instead of `CN=Android Debug`.
 The ONY-492 key was regenerated in ONY-493 before any tester build was
 distributed: its store and key passwords were not recoverable, so every release
 build failed at signing. The current key uses a random store password and a
-separate key password, both kept in Paperclip secrets. No
-installed app uses a different certificate, so in-place updates are unaffected.
+separate key password, both kept in Paperclip secrets. Two release APKs from
+this key install over each other; any build signed with another key (a debug
+APK, or a release APK from a throwaway keystore) must be uninstalled once, as
+described in [Installing a release APK](#installing-a-release-apk).
 
 ## Key facts
 
 | Item | Value |
 |---|---|
 | Keystore | `apps/wmr_companion_app/android/wmr-release.keystore` (gitignored, never committed) |
-| Format | JKS (keeps a distinct key password; PKCS#12 would reuse the store password) |
+| Format | JKS (keeps a distinct key password; PKCS#12 will reuse the store password) |
 | Alias | `wmr-companion` |
 | Algorithm | RSA 4096-bit |
 | Validity | 10,000 days (2026-10-29 to 2054-03-16) |
@@ -62,9 +64,9 @@ Signing rules:
 
 ```sh
 cd apps/wmr_companion_app
-tool/build_flavor.sh base --release
+tool/build_flavor.sh unified --release
 "$ANDROID_HOME"/build-tools/<version>/apksigner verify --print-certs \
-  build/app/outputs/flutter-apk/app-base-release.apk
+  build/app/outputs/flutter-apk/app-unified-release.apk
 ```
 
 Expected certificate:
@@ -76,12 +78,72 @@ Signer #1 certificate SHA-256 digest: bdaa32b51ad3afd267d0f80f28a473b85319f8c37e
 
 A release APK signed by the debug key (`CN=Android Debug`) is a regression.
 
-## CI release: tag to downloadable APK (ONY-493)
+## Installing a release APK
 
-Pushing a `v*` tag runs the `release` job in `.github/workflows/ci.yml`; no local
-build is needed. The job decodes the keystore, builds
-`tool/build_flavor.sh base --release --split-per-abi`, checks each APK with
-`apksigner`, and attaches the assets to that tag's GitHub Release.
+Android replaces an installed app only when the new APK is signed with the same
+key. Otherwise the package installer stops with the generic **"Something went
+wrong"** dialog and `adb` reports:
+
+```text
+INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package
+com.onyxlens.wmr_companion signatures do not match newer version; ignoring!
+```
+
+That is not a broken download: `SHA256SUMS` still matches. A phone that ever
+installed a debug build (`flutter run`, a CI `wmr-companion-debug-apks`
+artifact, or a locally signed release) holds the other key, so uninstall it
+once and install the release:
+
+```sh
+adb uninstall com.onyxlens.wmr_companion
+adb uninstall --user 10 com.onyxlens.wmr_companion   # work profile, if present
+adb install wmr-companion-X.Y.Z-unified-arm64-v8a.apk
+```
+
+Since 0.3.3 debug builds use the `com.onyxlens.wmr_companion.debug` package
+(`applicationIdSuffix` in `android/app/build.gradle.kts`), so a debug build no
+longer has to be removed before the release APK installs, and both can stay
+installed side by side. Release APKs share one key and update in place.
+
+## CI release: tag to downloadable APK (ONY-493, ONY-508, ONY-520)
+
+Pushing a `v*` tag runs one build job in `.github/workflows/ci.yml`; no local
+build is needed. It decodes the keystore, checks the APK with `apksigner`, and
+attaches the assets to that tag's GitHub Release. `release-checksums` then
+writes one `SHA256SUMS` covering the published APKs.
+
+CI publishes only the `unified` flavor. `base` remains buildable locally with
+`tool/build_flavor.sh`, but it has no release path (ONY-520). The per-vendor
+`viture`/`xreal` flavors are retired (ONY-565).
+
+| Job | Flavor | Build |
+|---|---|---|
+| `release-unified` | `unified` | downloads the approved export, `tool/install_unity_export.sh unified`, then `tool/build_flavor.sh unified --release --split-per-abi --target-platform android-arm64` |
+
+`unified` is the artifact testers with VITURE or XREAL glasses install: one
+APK links a single `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0 and
+selects the vendor at runtime. The export is never committed or built in CI;
+`release-unified` downloads `unityLibrary.zip` from the `unity-export-1.4`
+release (a prerelease on purpose, so the export never takes the repository's
+"Latest release" flag), refuses it unless its SHA-256 is
+`da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3` (the ONY-856
+export, built from merge commit `35d8015` whose `packages/wmr_tracking_unity`
+subtree is identical to `main` at `94573b2`, graphics APIs pinned to
+OpenGL ES 3), runs `tool/check_unity_export.py`
+on the zip to reject a stale export, one that still emits the `mono` stereo
+mode, one built before the ONY-840 hand-only UaaL gate (`_embeddedUaaL`), or one
+built before the ONY-856 input start (`VITURE input subsystem did not start`),
+and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
+publishing. The Monado config key fetch is not optional: the job fails unless
+the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that
+asset is a one-off from a machine holding the zip:
+
+```sh
+gh release create unity-export-1.4 --prerelease --target <merge-commit> \
+  --title unity-export-1.4 \
+  --notes "Approved Unity UaaL export (VITURE 0.9.0 + XREAL 3.1.0, ONY-840 hand-only UaaL, ONY-856 input start, GLES3 player) used by the unified release job."
+gh release upload unity-export-1.4 unityLibrary.zip unityLibrary.zip.sha256
+```
 
 Repository secrets (`Settings → Secrets and variables → Actions`):
 
@@ -98,16 +160,43 @@ the checkout (it is gitignored anyway).
 Release assets for tag `vX.Y.Z`:
 
 ```text
-wmr-companion-X.Y.Z-base-arm64-v8a.apk
-wmr-companion-X.Y.Z-base-armeabi-v7a.apk
-wmr-companion-X.Y.Z-base-x86_64.apk    # emulator
+wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
 SHA256SUMS
 ```
 
-`wmr-companion-X.Y.Z-base-arm64-v8a.apk` is the phone/tablet asset testers
-should install. The job fails if an APK is debug-signed, lacks a
-`CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so
-a green tag run means the published APKs match this document.
+`wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
+XREAL glasses install. The unified flavor is published for `arm64-v8a` only:
+the approved export ships `arm64-v8a` natives, so a 32-bit or x86_64 unified
+split would install without any Unity runtime and report VITURE and XREAL as
+`unavailable`. The job fails if an APK is debug-signed, lacks a
+`CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so a
+green tag run means the published APK matches this document.
+
+## Release body
+
+`release-unified` renders the body from first-parent history with
+`tool/release_notes.py`: one bullet per pull request merged since the previous
+version tag (a squash commit subject ending in `(#123)`), plus the assets the
+tag publishes. The body is written to the run summary and passed to
+`gh release create --notes-file`; a re-run refreshes an existing release's
+notes. The generator and its tests use no network, so `python3 -m unittest -v
+tool/test_release_notes.py` runs in the normal `build` job.
+
+A dry-run tag renders the same body without building or publishing:
+
+```sh
+git tag v0.3.7-dryrun <commit>
+git push origin v0.3.7-dryrun
+```
+
+`release-notes-dryrun` prints the body to the run summary and uploads it as the
+`release-notes` artifact. `release-unified` and `release-checksums` skip any
+tag containing `-dryrun`, so a dry run cannot create a release. Delete the tag
+when done:
+
+```sh
+git push origin :refs/tags/v0.3.7-dryrun
+```
 
 ## Offline backup
 
@@ -142,15 +231,15 @@ Android requires a strictly increasing `versionCode` for every distributed APK.
 The app version lives in `apps/wmr_companion_app/pubspec.yaml`:
 
 ```yaml
-version: 0.2.2+4   # versionName 0.2.2, versionCode 4
+version: 0.3.7+12   # versionName 0.3.7, versionCode 12
 ```
 
 Before building a new tester APK, increment the build number after `+`
-(`0.2.2+4` → `0.2.2+5`) and commit that change with the release PR. Also bump
+(`0.3.7+12` → `0.3.7+13`) and commit that change with the release PR. Also bump
 `versionName` when the user-facing version changes. `flutter build` maps these
 to Android `versionName`/`versionCode`; confirm with:
 
 ```sh
 "$ANDROID_HOME"/build-tools/<version>/aapt dump badging \
-  build/app/outputs/flutter-apk/app-base-release.apk | grep package:
+  build/app/outputs/flutter-apk/app-unified-release.apk | grep package:
 ```

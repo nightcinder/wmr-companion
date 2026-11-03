@@ -1,6 +1,6 @@
 # WMR Companion iOS Probe
 
-A native iOS diagnostic harness and GATT probe built with SwiftUI and `WMRCompanionKit`.
+A native iOS diagnostic tool and GATT probe built with SwiftUI and `WMRCompanionKit`.
 
 This tool provides a native iOS baseline for evaluating controller streaming latency, report loss %, and 3DoF orientation tracking without Flutter or platform channel overhead.
 

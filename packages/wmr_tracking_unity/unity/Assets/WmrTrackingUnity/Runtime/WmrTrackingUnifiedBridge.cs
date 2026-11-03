@@ -44,6 +44,16 @@ namespace OnyxLens.WmrTrackingUnity
         private readonly VendorRelayDispatch _dispatch = new VendorRelayDispatch();
         private VendorBackend _activeBackend = VendorBackend.None;
         private VendorLoaderGate _loaderGate;
+        private bool _vitureDisplayless;
+
+        /// <summary>
+        /// True while VITURE hand tracking runs without its XR display
+        /// subsystem. This bridge is the embedded UaaL dispatcher, so VITURE
+        /// never starts the display provider that would take over the host
+        /// activity, and the vendor bridge must skip the stereo-3D preflight
+        /// (ONY-840).
+        /// </summary>
+        public bool IsVitureDisplayless => _vitureDisplayless;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
         private AndroidJavaClass _viturePlugin;
@@ -112,7 +122,10 @@ namespace OnyxLens.WmrTrackingUnity
             vitureBackend.ErrorReported += OnVendorError;
             xrealBackend.ErrorReported += OnVendorError;
 
-            _loaderGate = new VendorLoaderGate();
+            // The unified player is always embedded in the Flutter host, so
+            // VITURE must use its hand subsystem only: the display provider
+            // would take over the host activity's surface (ONY-840).
+            _loaderGate = new VendorLoaderGate(embeddedUaaL: true);
             SetBackendEnabled(VendorBackend.Viture, false);
             SetBackendEnabled(VendorBackend.Xreal, false);
         }
@@ -203,15 +216,23 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void HandleConfigure(RelayDecision decision, string json)
         {
-            if (!Activate(decision.Target, out string failure))
+            // Do not enable the vendor backend yet. Enabling it runs `Awake`,
+            // which queries the vendor SDK, and the loader gate has not run.
+            // Selection is recorded here; `start` activates the backend after
+            // `EnsureOnly` initialises the matching XR loader.
+            if (!HasBackend(decision.Target))
             {
-                ReportError(decision.Target, "unavailable", failure);
+                ReportError(
+                    decision.Target,
+                    "unavailable",
+                    "No " + VendorNames.ToWireName(decision.Target) + " backend is wired"
+                );
                 return;
             }
 
             // The XREAL relay has no `configure` command; forwarding it would
             // raise a spurious `onUnityError("protocol", ...)` even though
-            // selection succeeded. XREAL only needs the backend enabled here.
+            // selection succeeded.
             if (decision.Target != VendorBackend.Xreal)
             {
                 Forward(decision.Target, json);
@@ -225,18 +246,15 @@ namespace OnyxLens.WmrTrackingUnity
 
         private void HandleStart(RelayDecision decision, string json)
         {
-            if (!Activate(decision.Target, out string failure))
-            {
-                _dispatch.StartFailed(decision);
-                ReportError(decision.Target, "unavailable", failure);
-                return;
-            }
-
+            // Initialise the vendor loader before the backend is enabled, so
+            // the bridge's `Awake` SDK query runs against the selected loader
+            // instead of whatever loader was active before.
             if (initialiseVendorLoader)
             {
                 VendorLoaderGate.Result result = _loaderGate.EnsureOnly(decision.Target);
                 if (result != VendorLoaderGate.Result.AlreadyActive &&
-                    result != VendorLoaderGate.Result.Initialised)
+                    result != VendorLoaderGate.Result.Initialised &&
+                    result != VendorLoaderGate.Result.InitialisedHandOnly)
                 {
                     string message = VendorLoaderGate.Describe(decision.Target, result);
 #if UNITY_EDITOR
@@ -250,6 +268,31 @@ namespace OnyxLens.WmrTrackingUnity
                     return;
 #endif
                 }
+            }
+
+            // The embedded UaaL player starts only VITURE's hand subsystem;
+            // the vendor bridge must skip its stereo-3D preflight in that
+            // mode. The loader gate also does this on a non-GLES3 player.
+            _vitureDisplayless = decision.Target == VendorBackend.Viture &&
+                _loaderGate != null && _loaderGate.VitureHandOnly;
+            if (vitureBackend != null)
+            {
+                vitureBackend.DisplaylessHandTracking = _vitureDisplayless;
+            }
+            if (_vitureDisplayless)
+            {
+                Debug.Log(
+                    "[WmrTrackingUnity] embedded UaaL VITURE hand tracking " +
+                    "without the XR display subsystem (" +
+                    SystemInfo.graphicsDeviceType + ")"
+                );
+            }
+
+            if (!Activate(decision.Target, out string failure))
+            {
+                _dispatch.StartFailed(decision);
+                ReportError(decision.Target, "unavailable", failure);
+                return;
             }
 
             Forward(decision.Target, json);
@@ -288,6 +331,12 @@ namespace OnyxLens.WmrTrackingUnity
             _loaderGate?.Deinitialise();
             _dispatch.Accepted(decision);
             Debug.Log("[WmrTrackingUnity] disposed");
+        }
+
+        private bool HasBackend(VendorBackend vendor)
+        {
+            return (vendor == VendorBackend.Viture && vitureBackend != null) ||
+                   (vendor == VendorBackend.Xreal && xrealBackend != null);
         }
 
         private bool Activate(VendorBackend vendor, out string failure)
@@ -396,9 +445,9 @@ namespace OnyxLens.WmrTrackingUnity
             );
             ErrorReported?.Invoke(code, message);
 #if UNITY_ANDROID && !UNITY_EDITOR
-            AndroidJavaClass plugin = GetPluginClass(vendor);
             try
             {
+                AndroidJavaClass plugin = GetPluginClass(vendor);
                 plugin?.CallStatic("onUnityError", code, message);
             }
             catch (Exception)

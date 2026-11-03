@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
@@ -701,3 +702,17 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     }
   }
 }
+
+/// The running app's version, e.g. `0.3.0+5`. Shown on the scan screen so
+/// testers can quote it in bug reports. A platform failure degrades to
+/// `unknown` rather than hiding the label.
+final appVersionProvider = FutureProvider<String>((ref) async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    return info.buildNumber.isEmpty
+        ? info.version
+        : '${info.version}+${info.buildNumber}';
+  } catch (_) {
+    return 'unknown';
+  }
+});

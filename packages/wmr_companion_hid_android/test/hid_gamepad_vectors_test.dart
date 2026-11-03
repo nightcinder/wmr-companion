@@ -1,7 +1,8 @@
 // Shared input->report vectors, firmware (WMR_Bridge) and companion side.
 //
-// test/vectors/hid_gamepad.txt and hid_report_descriptor.txt are byte copies of
-// WMR_Bridge tests/vectors/*. Change both repositories in the same change.
+// test/vectors/hid_gamepad.txt and hid_report_descriptor.txt are copies of
+// WMR_Bridge tests/vectors/*; only the gamepad header's doc pointer differs.
+// Change both repositories in the same change.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

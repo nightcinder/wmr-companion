@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
@@ -389,6 +391,44 @@ void main() {
     expect(pose.position, _vector(0.1, 1, 0));
   });
 
+  test('rotated grip calibration keeps the palm-to-controller rotation', () {
+    final fuser = SixDofFuser();
+    final palmRotation = Quaternion.axisAngle(Vector3(0, 1, 0), math.pi / 2);
+    final gripRotation = Quaternion.axisAngle(Vector3(0, 0, 1), math.pi / 2);
+    final palm = Pose(
+      translation: Vector3(0.2, 1.0, 0),
+      rotation: palmRotation,
+    );
+    final worldOffset = rotateVector(palmRotation, Vector3(0.1, 0, 0));
+    final controller = Pose(
+      translation: palm.translation + worldOffset,
+      rotation: palmRotation * gripRotation,
+    );
+    fuser.calibrateGrip(
+      hand: TrackedHand.right,
+      palm: palm,
+      controller: controller,
+    );
+    fuser.onTrackingFrame(
+      _frame(
+        1000,
+        right: _hand(
+          TrackedHand.right,
+          Pose(translation: Vector3(0, 2, 0), rotation: palmRotation),
+        ),
+      ),
+    );
+
+    final pose = fuser.update(
+      hand: TrackedHand.right,
+      orientation: controller.rotation,
+      hostTimeNs: 1000,
+    );
+
+    // The offset must follow the calibrated grip rotation, not just the palm.
+    expect(pose.position, _vector(0, 2, -0.1));
+  });
+
   test('reset clears frames and learned offsets but keeps calibration', () {
     final fuser = SixDofFuser();
     fuser.calibrateGrip(
@@ -419,6 +459,46 @@ void main() {
     expect(pose.source, ControllerPoseSource.orientationOnly);
     expect(fuser.gripOffset(TrackedHand.right).translation.x, 0.1);
   });
+  test(
+    'resetYaw drops the head-local offset learned under the old heading',
+    () {
+      final fuser = SixDofFuser();
+      final head = Pose(
+        translation: Vector3(0, 1.6, 0),
+        rotation: Quaternion.identity(),
+      );
+      fuser.onTrackingFrame(
+        _frame(
+          1000,
+          head: head,
+          left: _hand(
+            TrackedHand.left,
+            Pose(
+              translation: Vector3(-0.1, 1.4, -0.5),
+              rotation: Quaternion.identity(),
+            ),
+          ),
+        ),
+      );
+      final anchored = fuser.update(
+        hand: TrackedHand.left,
+        orientation: Quaternion.identity(),
+        hostTimeNs: 1000,
+      );
+      expect(anchored.source, ControllerPoseSource.handAnchor);
+
+      fuser.onTrackingFrame(_frame(2000, head: head));
+      fuser.resetYaw(hand: TrackedHand.left);
+      final fallback = fuser.update(
+        hand: TrackedHand.left,
+        orientation: Quaternion.identity(),
+        hostTimeNs: 2000,
+      );
+      expect(fallback.source, ControllerPoseSource.headRelative);
+      // The configured default, not the anchor position learned above.
+      expect(fallback.position, _vector(-0.20, 1.35, -0.30));
+    },
+  );
 }
 
 Matcher _vector(double x, double y, double z) => predicate<Vector3>(
