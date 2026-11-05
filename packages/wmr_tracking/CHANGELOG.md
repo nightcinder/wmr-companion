@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- ONY-502: the second complete 6-run hardware corpus (Android XR / Google
+  Aura, 2026-11-05, app commit `903f03f`) is committed under
+  `test/fixtures/pose_filter_captures/hardware/androidXr-20261105/`. The full
+  4,264-point grid still has no passing point: `J = 1.009 mm` against 0.5 mm,
+  and `J_D` is unscorable because the drifting run never reaches 10-50 cm/s
+  after warm-up. The build predates this branch's rev 4 bench prompts, so the
+  capture does not follow section 8. No constant is chosen.
 - ONY-502: the first complete 6-run hardware corpus (Android XR / Google Aura,
   2026-11-03, app commit `591ac18`) is committed under
   `test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`. ONY-501's

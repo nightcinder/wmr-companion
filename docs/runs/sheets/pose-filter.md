@@ -1,14 +1,16 @@
 # Pose filter tuning against recorded captures (ONY-502)
 
-> **Status: blocked awaiting captures. No constants were chosen.** A complete
-> 6-run Android XR corpus was recorded on 2026-11-03 (app 0.3.15, commit
-> `591ac18`, no bridge). ONY-501's addendum scores `J` on the last 10 s of S
-> with the first 2 s and samples above 2 cm/s dropped, and `J_D` only on the
-> 10-50 cm/s D band. The full 4,264-point grid still has **no passing point**:
-> `J = 1.514 mm` against 0.5 mm and `J_D = 7.576 mm` against 0.75 mm. The S run
-> was hand-held, not braced, and the D run's median speed was 2.9 cm/s, so only
-> 43 samples fell in band. A braced S and an in-band D are needed before the
-> bars can be judged. Lag passes with margin. Bars and grid are unchanged.
+> **Status: blocked awaiting captures. No constants were chosen.** Two complete
+> 6-run Android XR corpora have been replayed. The 2026-11-03 corpus (app
+> 0.3.15, `591ac18`) gave `J = 1.514 mm` and `J_D = 7.576 mm`. The 2026-11-05
+> corpus (app 0.3.16, `903f03f`) brings S to `J = 1.009 mm`, but D is
+> **unscorable**: its median speed is 1.16 cm/s, and the 42 samples that touch
+> the 10-50 cm/s band are all in the first second's settle, so none pass the
+> tuner's warm-up gate. Neither full 4,264-point grid has a passing point; the
+> 2026-11-05 `J` spread is 0.005 mm, so the filter is not limiting. Both app
+> builds predate this branch's section 8 bench prompts, so the tester was told
+> to brace an arm and "wander slowly", not to rest the forearm on a table and
+> move at 10-50 cm/s. Lag passes with margin. Bars and grid are unchanged.
 >
 > Normative source: ONY-501's `filter-spec` **revision 4**, including its note on
 > the 6-run default. Where this sheet and that document disagree, the document
@@ -95,6 +97,50 @@ peak to peak over 15 s, with a 43.7 mm settle in the first second; the last
 braced source-noise hold. The drifting trace's median speed is 2.9 cm/s, so
 only 43 of 2138 samples fall in segment D's 10-50 cm/s band; the gated `J_D`
 is therefore not representative of D.
+
+## Result: Android XR, 2026-11-05
+
+Source: `wmr-ext-20261105.zip` from the external tester, Android XR on a Google
+Aura (Android 14 / API 34), app 0.3.16 (versionCode 2021) at commit `903f03f`,
+no bridge attached so `firmware_sha` is null. Six runs, one per class, hands
+alternating, 144 Hz and 26 joints. The prepared corpus is committed under
+`packages/wmr_tracking/test/fixtures/pose_filter_captures/hardware/androidXr-20261105/`
+and passes `pose_capture_prepare.dart` coverage (6 of 6 cells, exit 0).
+
+The full 4,264-point grid was replayed. No point passes: `J` is 1.009-1.014 mm
+against 0.5 mm, and `J_D` is 0.000 mm because **no sample is scorable**. The
+tuner chose no constant and exited 1. The grid is in
+[pose-filter-grid-androidXr-20261105.md](pose-filter-grid-androidXr-20261105.md).
+
+Lag is inside every bar: median `L` is 11 ms on the slow sweep, 6 ms on medium
+and 7 ms on fast. S is 15 x 8 x 16 mm peak to peak over 15 s (was 41 x 66 x
+30 mm), so the bracing helped, but the last 10 s still wander about 1.0 mm RMS
+and the filter changes that by at most 0.005 mm across the whole grid. D has a
+median speed of 1.16 cm/s: 42 samples touch the 10-50 cm/s band between 0.0 and
+0.96 s, and none survive the tuner's one-second warm-up gate. That is a slow
+wander, not a 10-50 cm/s drift.
+
+Both corpora were recorded on released builds, whose prompts still said to
+brace an arm and let the controller wander slowly. This branch carries the
+section 8 prompts (forearm on a table; 10-50 cm/s, "not a slow drift"), but
+they were not in `591ac18` or `903f03f`. The next capture must be recorded with
+a build that contains them, or the tester must be given the section 8 speeds in
+writing.
+
+No tuned point exists, so `after` repeats the published defaults
+(`minCutoff = 1 Hz`, `beta = 0.02`, `dCutoff = 1 Hz`). `before` is the pre-ONY-502
+paper default (`minDt = 4.167 ms`). The still row uses the addendum gates; the
+drifting row has zero scorable samples, so its `—` is "not measured", not zero
+jitter.
+
+| Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| still | 1.010 | 1.010 | — | — | — | — | — | — | — | — |
+| held, drifting | — | — | — | — | — | — | — | — | — | — |
+| slow pan | — | — | — | — | 10 | 10 | 10 | 10 | — | — |
+| medium pan | — | — | — | — | 2 | 2 | 2 | 2 | — | — |
+| fast flick | — | — | — | — | 7 | 7 | 7 | 7 | 76.4 | 76.4 |
+| occlusion | — | — | — | — | 1 | 1 | 3 | 3 | — | — |
 
 ## ONY-501 addendum (2026-11-03)
 
