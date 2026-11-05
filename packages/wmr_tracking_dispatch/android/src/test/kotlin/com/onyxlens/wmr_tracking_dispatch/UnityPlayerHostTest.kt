@@ -68,6 +68,31 @@ class UnityPlayerHostTest {
     }
 
     @Test
+    fun androidXrHostNeverHostsThePlayer() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade, isAndroidXrHost = { true })
+
+        val result = host.hostTarget(Any())
+
+        assertFalse(result.hosted)
+        assertEquals(UnityPlayerHost.STAGE_UNAVAILABLE, result.stage)
+        assertTrue(result.detail!!.contains("Android XR"))
+        assertEquals(0, facade.creates)
+        assertFalse(host.isHosted)
+    }
+
+    @Test
+    fun aNonAndroidXrHostStillHostsThePlayer() {
+        val facade = FakeViewHost()
+        val host = UnityPlayerHost(facade, isAndroidXrHost = { false })
+
+        val result = host.hostTarget(Any())
+
+        assertTrue(result.hosted)
+        assertEquals(1, facade.creates)
+    }
+
+    @Test
     fun hostsThePlayerBehindExistingContent() {
         val facade = FakeViewHost()
         val host = UnityPlayerHost(facade)

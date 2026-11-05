@@ -21,17 +21,28 @@ hand tracking) with `unsupported`. Detection never overrides the model check.
 
 `packages/wmr_tracking_dispatch` runs this order, highest priority first:
 
-1. **Host marker.** `Build.MANUFACTURER`/`MODEL` contains a configured marker:
+1. **Android XR host.** `android.software.xr.api.openxr` or
+   `android.software.xr.api.spatial` -> `androidXr` with host `unknown`. The
+   headset is the compute unit and runs the native Android XR tracking source.
+   It also exposes its own internal USB hardware, which can match a vendor
+   ID (Google Aura reports the XREAL-built headset as `0x3318:0x043A`), so an
+   Android XR host must be settled before USB or host-marker detection. Starting
+   the shared vendor Unity player there loads VITURE's Android plugin, which
+   crashes on the missing vendor runtime class (ONY-879).
+2. **Host marker.** `Build.MANUFACTURER`/`MODEL` contains a configured marker:
    VITURE -> `neckband` host and `viture`; XREAL/Nreal -> `beamPro` host and
    `xreal`. The host is the vendor compute unit, so its glasses are known even
-   when USB access is denied.
-2. **USB IDs.** Vendor/product IDs are readable without a USB permission
+   when USB access is denied. Android XR hosts never take this path.
+3. **USB IDs.** Vendor/product IDs are readable without a USB permission
    grant, so configured matches are evaluated first. Exactly one configured
    vendor/product match -> that vendor. Both VITURE and XREAL ->
    `none` with `usbAmbiguous`: refuse to guess.
-3. **Android XR host.** `android.software.xr.api.openxr` or
-   `android.software.xr.api.spatial` -> `androidXr`.
 4. **Nothing.** `none` with `noMatch`.
+
+The shared `UnityPlayerHost` also refuses to construct the vendor Unity player
+on an Android XR host, even if detection is bypassed or wrong. The player
+returns the typed `unavailable` stage, so the selector keeps the controller
+3DoF path instead of loading a vendor loader that cannot exist on the host.
 
 The detector does not run on plugin attach. `TrackingSourceSelector` calls it
 only when at least one vendor flag is enabled, so BLE, controller and 3DoF
@@ -120,7 +131,8 @@ runtime or vendor SDK is required.
 
 - `packages/wmr_tracking_dispatch/android/src/test` - detector and shared-runtime
   JVM tests (VITURE, XREAL, both, neither, per-device permission mapping without
-  a grant, host markers, single creation, reuse, routing).
+  a grant, host markers, Android XR before its own vendor USB IDs, the Android
+  XR Unity-player gate, single creation, reuse, routing).
 - `packages/wmr_tracking_dispatch/test` - Dart detection parsing, selector
   outcomes (`attached`, `unsupported`, `unavailable`, `permissionDenied`,
   `fallback`, `none`), and a flag-off test asserting zero channel calls.
