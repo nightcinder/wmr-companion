@@ -10,7 +10,7 @@ environment:
 resolution: workspace
 
 dependencies:
-  vector_math: ^2.4.3
+  vector_math: ^2.4.4
   wmr_fusion: ^0.2.2
 
 dev_dependencies:
