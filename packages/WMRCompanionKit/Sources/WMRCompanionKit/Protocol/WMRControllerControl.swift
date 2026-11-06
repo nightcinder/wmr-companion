@@ -45,10 +45,6 @@ public enum WMRControllerAddressSource: UInt8, Sendable {
 public enum WMRControllerModel: UInt8, Sendable {
     case wmr = 0
     case psvr2 = 1
-
-    init(code: UInt8) {
-        self = code == 1 ? .psvr2 : .wmr
-    }
 }
 
 public enum WMRControllerDiscoveryState: UInt8, Sendable {
@@ -68,7 +64,8 @@ public struct WMRControllerHandStatus: Equatable, Sendable {
     public let connecting: Bool
     public let descriptorReceived: Bool
     public let addressSource: WMRControllerAddressSource
-    public let model: WMRControllerModel
+    /// nil when the bridge reports a model this kit does not know.
+    public let model: WMRControllerModel?
 
     /// Last three bytes of the controller's Bluetooth address, zero when the
     /// hand has no address.
@@ -79,7 +76,7 @@ public struct WMRControllerHandStatus: Equatable, Sendable {
         connecting: Bool,
         descriptorReceived: Bool,
         addressSource: WMRControllerAddressSource,
-        model: WMRControllerModel,
+        model: WMRControllerModel?,
         addressTail: [UInt8]
     ) {
         self.connected = connected
@@ -109,7 +106,8 @@ public struct WMRControllerStatusV2: Equatable, Sendable {
 
     /// Opcode of the last write command, nil if none.
     public let lastCommand: WMRControllerCommand?
-    public let lastResult: WMRControllerResult
+    /// nil when the bridge reports a result code this kit does not know.
+    public let lastResult: WMRControllerResult?
 
     public init(
         version: UInt8,
@@ -117,7 +115,7 @@ public struct WMRControllerStatusV2: Equatable, Sendable {
         discoveryState: WMRControllerDiscoveryState,
         discoveryRound: UInt8,
         lastCommand: WMRControllerCommand?,
-        lastResult: WMRControllerResult
+        lastResult: WMRControllerResult?
     ) {
         self.version = version
         self.hands = hands
@@ -127,10 +125,12 @@ public struct WMRControllerStatusV2: Equatable, Sendable {
         self.lastResult = lastResult
     }
 
-    /// Returns nil if `data` is too short for the version 1 layout.
+    /// Returns nil if `data` is not the version 1 layout.
     public static func parse(_ data: Data) -> WMRControllerStatusV2? {
         let bytes = [UInt8](data)
-        guard bytes.count >= length else { return nil }
+        guard bytes.count >= length,
+              bytes[0] == WMRConstants.controllerStatusVersion
+        else { return nil }
 
         func hand(at base: Int) -> WMRControllerHandStatus {
             let flags = bytes[base]
@@ -139,7 +139,7 @@ public struct WMRControllerStatusV2: Equatable, Sendable {
                 connecting: flags & 0x02 != 0,
                 descriptorReceived: flags & 0x04 != 0,
                 addressSource: WMRControllerAddressSource(code: bytes[base + 1]),
-                model: WMRControllerModel(code: bytes[base + 2]),
+                model: WMRControllerModel(rawValue: bytes[base + 2]),
                 addressTail: [bytes[base + 3], bytes[base + 4], bytes[base + 5]]
             )
         }
@@ -150,7 +150,7 @@ public struct WMRControllerStatusV2: Equatable, Sendable {
             discoveryState: WMRControllerDiscoveryState(code: bytes[15]),
             discoveryRound: bytes[16],
             lastCommand: WMRControllerCommand(rawValue: bytes[17]),
-            lastResult: WMRControllerResult(rawValue: bytes[18]) ?? .ok
+            lastResult: WMRControllerResult(rawValue: bytes[18])
         )
     }
 }

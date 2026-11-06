@@ -155,7 +155,9 @@ public final class WMRBleCentralManager: NSObject, @unchecked Sendable {
         p.readValue(for: c)
     }
 
-    /// Writes an FF17 command (1-2 bytes) with response so the ATT result is observable.
+    /// Writes an FF17 command (1-2 bytes) with response. This manager does not
+    /// surface the ATT result; callers read the outcome from the FF17 status
+    /// notification's `lastResult`.
     public func writeControllerCommand(_ data: Data) {
         guard let p = activePeripheral, let c = controllerChar else { return }
         p.writeValue(data, for: c, type: .withResponse)

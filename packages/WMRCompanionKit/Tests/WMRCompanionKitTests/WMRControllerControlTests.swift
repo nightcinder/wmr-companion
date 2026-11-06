@@ -92,16 +92,27 @@ final class WMRControllerControlTests: XCTestCase {
         XCTAssertEqual(status.lastResult, .busy)
     }
 
-    func testAnUnknownLastCommandIsNilAndAnUnknownResultFallsBackToOk() throws {
+    func testAnUnknownLastCommandResultAndModelAreNil() throws {
         let status = try XCTUnwrap(
-            WMRControllerStatusV2.parse(statusBytes(lastCommand: 0x7F, lastResult: 0x7F))
+            WMRControllerStatusV2.parse(
+                statusBytes(
+                    leftModel: 0x7F,
+                    lastCommand: 0x7F,
+                    lastResult: 0x7F
+                )
+            )
         )
 
+        XCTAssertNil(status.hands[0].model)
         XCTAssertNil(status.lastCommand)
-        XCTAssertEqual(status.lastResult, .ok)
+        XCTAssertNil(status.lastResult)
     }
 
-    func testAShortValueIsRejectedNotGuessed() {
+    func testAShortOrFutureVersionValueIsRejectedNotGuessed() {
         XCTAssertNil(WMRControllerStatusV2.parse(Data(repeating: 0, count: 19)))
+
+        var future = statusBytes()
+        future[0] = 2
+        XCTAssertNil(WMRControllerStatusV2.parse(future))
     }
 }
