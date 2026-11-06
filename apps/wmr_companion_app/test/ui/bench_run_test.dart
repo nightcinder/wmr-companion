@@ -205,6 +205,30 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
+  test('device summary does not report a zero hand rate', () async {
+    final source = FakeTrackingSource(
+      capabilities: const TrackingCapabilities(
+        features: {TrackingFeature.headPose6Dof, TrackingFeature.handJoints},
+        handJointCount: 26,
+      ),
+    );
+    final session = RealBenchSession(
+      tracking: source,
+      clock: MonotonicClock(),
+      captureStore: CaptureStore(Directory('${dir.path}/captures')),
+      latencyStore: LatencyStore(Directory('${dir.path}/latency')),
+      durations: const BenchDurations(),
+    );
+
+    final outcome = await session.deviceSummary();
+
+    expect(outcome.ok, isTrue);
+    expect(outcome.summary, contains('26 hand joints'));
+    expect(outcome.summary, isNot(contains('0 Hz')));
+    expect(outcome.summary, contains('hand rate not declared'));
+    expect(outcome.data['max_hand_rate_hz'], 0);
+  });
+
   test('runs every measured step against the fake bridge', () async {
     final session = await open();
 

@@ -214,6 +214,29 @@ void main() {
     expect(coverage, contains('4/4 | 1/1 |'));
   });
 
+  test('a pilot plan accepts one run per scored class per hand', () {
+    final pilot = [
+      for (final hand in TrackedHand.values)
+        for (final segment in _segments)
+          _input(
+            runtime: TrackingVendor.viture,
+            hand: hand,
+            segment: segment,
+            run: 1,
+          ),
+    ];
+
+    final corpus = prepareCorpus(
+      pilot,
+      plan: const PoseCorpusPlan(runsPerClass: 1),
+    );
+
+    expect(corpus.isComplete, isTrue);
+    expect(corpus.captures, hasLength(12));
+    expect(corpus.paths, contains('viture/left/fastFlick/run1.json'));
+    expect(corpus.paths, contains('viture/right/occlusion/run1.json'));
+  });
+
   test('refuses an incomplete corpus and names the missing cell', () async {
     final captures = Directory('${temp.path}/captures')..createSync();
     final corpus = [
@@ -258,6 +281,60 @@ void main() {
         ? out.listSync(recursive: true).whereType<File>()
         : const <File>[];
     expect(written, isEmpty);
+  });
+
+  test('--allow-incomplete writes a partial corpus and exits 3', () async {
+    final captures = Directory('${temp.path}/captures')..createSync();
+    for (final hand in TrackedHand.values) {
+      for (final segment in _segments) {
+        for (var run = 1; run <= _runFor(segment); run++) {
+          if (hand == TrackedHand.right &&
+              segment == 'medium_pan' &&
+              run == 4) {
+            continue;
+          }
+          final name =
+              'pose_capture_viture_${hand.name}_$segment'
+              '${run > 1 ? '_run$run' : ''}.json';
+          File('${captures.path}/$name').writeAsStringSync(
+            _recording(
+              runtime: TrackingVendor.viture,
+              hand: hand,
+              segment: segment,
+              run: run,
+            ).encode(),
+          );
+        }
+      }
+    }
+
+    final out = Directory('${temp.path}/out');
+    final result = await Process.run(Platform.resolvedExecutable, [
+      'run',
+      'tool/pose_capture_prepare.dart',
+      '--captures',
+      captures.path,
+      '--out',
+      out.path,
+      '--full',
+      '--allow-incomplete',
+    ], workingDirectory: Directory.current.path);
+
+    expect(result.exitCode, 3, reason: '${result.stderr}');
+    expect(result.stdout, contains('viture/right/mediumPan: 3 of 4 runs'));
+    expect(File('${out.path}/coverage.md').existsSync(), isTrue);
+    expect(
+      File('${out.path}/coverage.md').readAsStringSync(),
+      contains('**missing**'),
+    );
+    expect(
+      File('${out.path}/viture/right/still/run1.json').existsSync(),
+      isTrue,
+    );
+    expect(
+      File('${out.path}/viture/right/mediumPan/run4.json').existsSync(),
+      isFalse,
+    );
   });
 
   test('refuses a complete cell whose run is shorter than 30 s', () {

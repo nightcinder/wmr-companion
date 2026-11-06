@@ -259,14 +259,24 @@ class PoseFilterMetrics {
     this.step90Ms = 0,
     this.addedDelayMs = 0,
     this.samples = 0,
+    this.jitterSamples = 0,
+    this.driftSamples = 0,
   });
 
-  /// J: RMS distance of the filtered position from its 1 s moving mean.
+  /// J: RMS distance of the filtered position from its 1 s moving mean, scored
+  /// on the last 10 s of segment S and only on samples at or below 2 cm/s.
   final double jitterMm;
 
   /// J_D: RMS of the filtered position's residual from a local quadratic
-  /// (Savitzky-Golay, 1 s window, order 2) fit.
+  /// (Savitzky-Golay, 1 s window, order 2) fit, scored only on samples in the
+  /// 10-50 cm/s segment D band.
   final double jitterDriftMm;
+
+  /// Samples that passed the S speed gate and contributed to [jitterMm].
+  final int jitterSamples;
+
+  /// Samples that passed the D speed band and contributed to [jitterDriftMm].
+  final int driftSamples;
 
   /// Best-fit time shift between raw and filtered over the whole capture.
   final double lagMedianMs;
@@ -290,6 +300,8 @@ class PoseFilterMetrics {
     'step90_ms': _round(step90Ms),
     'added_delay_ms': _round(addedDelayMs),
     'samples': samples,
+    'jitter_samples': jitterSamples,
+    'drift_samples': driftSamples,
   };
 }
 
@@ -489,6 +501,9 @@ class TuningRow {
     required this.lagSlowMedianMs,
     required this.lagMedianMs,
     required this.step90Ms,
+    this.scored = true,
+    this.jitterSamples = 1,
+    this.driftSamples = 1,
   });
 
   final TuningPoint point;
@@ -498,7 +513,23 @@ class TuningRow {
   final double lagMedianMs;
   final double step90Ms;
 
+  /// Samples that passed the S speed gate. Zero means the capture had no
+  /// scorable still samples, so the row cannot pass.
+  final int jitterSamples;
+
+  /// Samples that passed the D speed band. Zero means the capture had no
+  /// scorable drifting samples, so the row cannot pass.
+  final int driftSamples;
+
+  /// Whether every scored motion class was present when this row was
+  /// evaluated. A partial corpus can compute some bars but not all, so its
+  /// rows must never read as passing.
+  final bool scored;
+
   bool get passes =>
+      scored &&
+      jitterSamples > 0 &&
+      driftSamples > 0 &&
       jitterMm <= poseFilterJitterLimitMm &&
       jitterDriftMm <= poseFilterDriftJitterLimitMm &&
       lagMedianMs <= poseFilterLagLimitMs;
@@ -515,6 +546,9 @@ class TuningRow {
     'lag_slow_median_ms': _round(lagSlowMedianMs),
     'lag_median_ms': _round(lagMedianMs),
     'step90_ms': _round(step90Ms),
+    'scored': scored,
+    'jitter_samples': jitterSamples,
+    'drift_samples': driftSamples,
     'passes': passes,
     'slow_lag_regression_ok': slowLagRegressionOk,
   };
@@ -559,7 +593,10 @@ class TuningReport {
     required this.rows,
     required this.chosen,
     required this.rawJitterMm,
+    required this.rawJitterDriftMm,
     required this.bypass,
+    required this.jitterSamples,
+    required this.driftSamples,
     required this.captureCount,
     required this.missingMotions,
     required this.inconclusive,
@@ -571,20 +608,39 @@ class TuningReport {
   final List<TuningRow> rows;
   final TuningRow? chosen;
   final double rawJitterMm;
+  final double rawJitterDriftMm;
   final bool bypass;
+  final int jitterSamples;
+  final int driftSamples;
   final int captureCount;
   final List<String> missingMotions;
   final bool inconclusive;
   final TuningExtension? extension;
 
+  /// `passed` requires scorable samples in both gated classes: a zero-sample
+  /// score reads as 0 and must never satisfy the addendum bars.
   bool get passed =>
-      !inconclusive && missingMotions.isEmpty && (bypass || chosen != null);
+      !inconclusive &&
+      missingMotions.isEmpty &&
+      jitterSamples > 0 &&
+      driftSamples > 0 &&
+      (bypass || chosen != null);
+
+  /// Whether every scored motion class was present. A partial corpus is
+  /// reported for the classes it has, but never selects constants.
+  bool get complete => missingMotions.isEmpty;
 
   Map<String, Object?> toJson() => {
     'runtime': runtime.name,
     'captures': captureCount,
-    'raw_jitter_mm': _round(rawJitterMm),
+    'raw_jitter_mm': rawJitterMm.isFinite ? _round(rawJitterMm) : null,
+    'raw_jitter_drift_mm': rawJitterDriftMm.isFinite
+        ? _round(rawJitterDriftMm)
+        : null,
+    'jitter_samples': jitterSamples,
+    'drift_samples': driftSamples,
     'bypass': bypass,
+    'complete': complete,
     'missing_motions': missingMotions,
     'passed': passed,
     'inconclusive': inconclusive,
@@ -612,16 +668,31 @@ PoseFilterMetrics analyzeCapture(
   }
   final raw = [for (final sample in capture.samples) sample.position];
   final originNs = capture.samples.first.timeNs;
+  final speeds = _speedsCmS(times, raw);
 
   switch (capture.motion) {
     case PoseMotion.still:
+      final scored = _gatedJitter(
+        times,
+        filtered,
+        originNs: originNs,
+        speeds: speeds,
+      );
       return PoseFilterMetrics(
-        jitterMm: _jitterMm(times, filtered, originNs: originNs),
+        jitterMm: scored.value,
+        jitterSamples: scored.used,
         samples: filtered.length,
       );
     case PoseMotion.heldDrift:
+      final scored = _gatedDrift(
+        times,
+        filtered,
+        originNs: originNs,
+        speeds: speeds,
+      );
       return PoseFilterMetrics(
-        jitterDriftMm: _jitterDriftMm(times, filtered, originNs: originNs),
+        jitterDriftMm: scored.value,
+        driftSamples: scored.used,
         samples: filtered.length,
       );
     case PoseMotion.slowPan:
@@ -676,10 +747,27 @@ List<TuningReport> tunePoseFilter(
       if (medium.isEmpty) PoseMotion.mediumPan.name,
       if (fast.isEmpty) PoseMotion.fastFlick.name,
     ];
+    final stillScores = [for (final capture in still) _rawJitterScore(capture)];
+    final driftScores = [for (final capture in drift) _rawDriftScore(capture)];
     final rawJitter = still.isEmpty
         ? double.nan
-        : _worst([for (final capture in still) _rawJitterMm(capture)]);
-    final bypass = rawJitter.isFinite && rawJitter <= poseFilterJitterLimitMm;
+        : _worst([for (final score in stillScores) score.value]);
+    final rawJitterDrift = drift.isEmpty
+        ? double.nan
+        : _worst([for (final score in driftScores) score.value]);
+    final jitterSamples = stillScores.fold<int>(0, (sum, s) => sum + s.used);
+    final driftSamples = driftScores.fold<int>(0, (sum, s) => sum + s.used);
+    // A bypass means the filter is pass-through, so the raw input must clear
+    // both gated bars *and* have samples that were actually scored. Zero
+    // scorable samples read as 0 mm and must not fabricate a pass.
+    final bypass =
+        rawJitter.isFinite &&
+        rawJitter <= poseFilterJitterLimitMm &&
+        rawJitterDrift.isFinite &&
+        rawJitterDrift <= poseFilterDriftJitterLimitMm &&
+        jitterSamples > 0 &&
+        driftSamples > 0;
+    final complete = missing.isEmpty;
 
     final base = _evaluateGrid(
       grid: grid,
@@ -687,6 +775,7 @@ List<TuningReport> tunePoseFilter(
       drift: drift,
       slow: slow,
       moving: moving,
+      complete: complete,
       minDt: minDt,
     );
     var chosen = base.chosen;
@@ -706,6 +795,7 @@ List<TuningReport> tunePoseFilter(
             drift: drift,
             slow: slow,
             moving: moving,
+            complete: complete,
             minDt: minDt,
           );
           chosen = rerun.chosen;
@@ -721,6 +811,15 @@ List<TuningReport> tunePoseFilter(
       }
     }
 
+    if (!complete) {
+      // A still-only or otherwise partial file set can satisfy some bars by
+      // accident (an absent class contributes zero lag and zero drift), so it
+      // must never publish a winner.
+      chosen = null;
+      extension = null;
+      inconclusive = false;
+    }
+
     reports.add(
       TuningReport(
         runtime: entry.key,
@@ -728,7 +827,10 @@ List<TuningReport> tunePoseFilter(
         rows: base.rows,
         chosen: chosen,
         rawJitterMm: rawJitter,
+        rawJitterDriftMm: rawJitterDrift,
         bypass: bypass,
+        jitterSamples: jitterSamples,
+        driftSamples: driftSamples,
         captureCount: runtimeCaptures.length,
         missingMotions: missing,
         inconclusive: inconclusive,
@@ -753,6 +855,7 @@ _Evaluation _evaluateGrid({
   required List<PoseCapture> drift,
   required List<PoseCapture> slow,
   required List<PoseCapture> moving,
+  required bool complete,
   required Duration minDt,
 }) {
   final rows = <TuningRow>[];
@@ -772,6 +875,9 @@ _Evaluation _evaluateGrid({
         lagSlowMedianMs: slowMetrics.lagMedianMs,
         lagMedianMs: movingMetrics.lagMedianMs,
         step90Ms: movingMetrics.step90Ms,
+        scored: complete,
+        jitterSamples: stillMetrics.jitterSamples,
+        driftSamples: driftMetrics.driftSamples,
       ),
     );
   }
@@ -1003,13 +1109,55 @@ _StepResponse _stepResponse(
   );
 }
 
-/// RMS distance of [values] from a 1 s moving mean, after a 1 s warmup.
-double _jitterMm(
+/// A gated jitter score: the RMS and how many samples contributed.
+class _Scored {
+  const _Scored(this.value, this.used);
+
+  final double value;
+  final int used;
+}
+
+/// Speed at each sample in cm/s, measured over a centred 0.5 s window.
+///
+/// `filter-spec` rev 4 section 8 gates samples by their measured speed. The
+/// window is truncated at the ends of the trace; the first two seconds of a
+/// capture are excluded from scoring anyway.
+List<double> _speedsCmS(List<int> times, List<Vector3> values) {
+  const halfWindowNs = 250000000;
+  final speeds = List<double>.filled(times.length, 0);
+  var left = 0;
+  var right = 0;
+  for (var i = 0; i < times.length; i++) {
+    final low = times[i] - halfWindowNs;
+    final high = times[i] + halfWindowNs;
+    while (left < i && times[left] < low) {
+      left++;
+    }
+    if (right < i) right = i;
+    while (right + 1 < times.length && times[right + 1] <= high) {
+      right++;
+    }
+    final span = times[right] - times[left];
+    if (span <= 0) continue;
+    speeds[i] = (values[right] - values[left]).length / (span / 1e9) * 100;
+  }
+  return speeds;
+}
+
+/// J: RMS distance of [values] from a 1 s moving mean.
+///
+/// ONY-501's addendum scores only the last 10 s of segment S, drops the first
+/// 2 s settle, and drops samples moving faster than 2 cm/s. The moving mean
+/// still uses every sample so the local level is correct at the window edge.
+_Scored _gatedJitter(
   List<int> times,
   List<Vector3> values, {
   required int originNs,
+  required List<double> speeds,
+  double maxSpeedCmS = 2,
 }) {
-  final start = originNs + 1000000000;
+  final endNs = times.last;
+  final start = math.max(originNs + 2000000000, endNs - 10000000000);
   var sum = Vector3.zero();
   var left = 0;
   var used = 0;
@@ -1020,13 +1168,13 @@ double _jitterMm(
       sum -= values[left];
       left++;
     }
-    if (times[i] < start) continue;
+    if (times[i] < start || speeds[i] > maxSpeedCmS) continue;
     final mean = sum / (i - left + 1).toDouble();
     residual += (values[i] - mean).length2;
     used++;
   }
-  if (used == 0) return 0;
-  return math.sqrt(residual / used) * 1000;
+  if (used == 0) return const _Scored(0, 0);
+  return _Scored(math.sqrt(residual / used) * 1000, used);
 }
 
 /// J_D: RMS of the residual from a local quadratic fit, 1 s window, order 2.
@@ -1034,10 +1182,14 @@ double _jitterMm(
 /// The window is centred on each sample and fitted by least squares, which is
 /// the Savitzky-Golay quadratic filter for non-uniform timestamps. The value at
 /// the centre is the constant term of the fit, so no kernel table is needed.
-double _jitterDriftMm(
+/// Only samples in segment D's 10-50 cm/s band are scored.
+_Scored _gatedDrift(
   List<int> times,
   List<Vector3> values, {
   required int originNs,
+  required List<double> speeds,
+  double minSpeedCmS = 10,
+  double maxSpeedCmS = 50,
 }) {
   final start = originNs + 1000000000;
   final halfWindowNs = 500000000;
@@ -1047,6 +1199,7 @@ double _jitterDriftMm(
   var residual = 0.0;
   for (var i = 0; i < times.length; i++) {
     if (times[i] < start) continue;
+    if (speeds[i] < minSpeedCmS || speeds[i] > maxSpeedCmS) continue;
     final low = times[i] - halfWindowNs;
     final high = times[i] + halfWindowNs;
     while (left < i && times[left] < low) {
@@ -1106,8 +1259,8 @@ double _jitterDriftMm(
     residual += dx * dx + dy * dy + dz * dz;
     used++;
   }
-  if (used == 0) return 0;
-  return math.sqrt(residual / used) * 1000;
+  if (used == 0) return const _Scored(0, 0);
+  return _Scored(math.sqrt(residual / used) * 1000, used);
 }
 
 /// Constant term of the least-squares quadratic `a + b*u + c*u^2`.
@@ -1167,13 +1320,37 @@ PoseFilterMetrics _metricsFor(
     step90Ms: _median(steps),
     addedDelayMs: _median(delays),
     samples: metrics.fold<int>(0, (sum, metric) => sum + metric.samples),
+    jitterSamples: metrics.fold<int>(
+      0,
+      (sum, metric) => sum + metric.jitterSamples,
+    ),
+    driftSamples: metrics.fold<int>(
+      0,
+      (sum, metric) => sum + metric.driftSamples,
+    ),
   );
 }
 
-double _rawJitterMm(PoseCapture capture) {
+_Scored _rawJitterScore(PoseCapture capture) {
   final times = [for (final sample in capture.samples) sample.timeNs];
   final raw = [for (final sample in capture.samples) sample.position];
-  return _jitterMm(times, raw, originNs: capture.samples.first.timeNs);
+  return _gatedJitter(
+    times,
+    raw,
+    originNs: capture.samples.first.timeNs,
+    speeds: _speedsCmS(times, raw),
+  );
+}
+
+_Scored _rawDriftScore(PoseCapture capture) {
+  final times = [for (final sample in capture.samples) sample.timeNs];
+  final raw = [for (final sample in capture.samples) sample.position];
+  return _gatedDrift(
+    times,
+    raw,
+    originNs: capture.samples.first.timeNs,
+    speeds: _speedsCmS(times, raw),
+  );
 }
 
 double _median(List<double> values) {

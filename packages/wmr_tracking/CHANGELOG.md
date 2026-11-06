@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- ONY-502: the second complete 6-run hardware corpus (Android XR / Google
+  Aura, 2026-11-05, app commit `903f03f`) is committed under
+  `test/fixtures/pose_filter_captures/hardware/androidXr-20261105/`. The full
+  4,264-point grid still has no passing point: `J = 1.009 mm` against 0.5 mm,
+  and `J_D` is unscorable because the drifting run never reaches 10-50 cm/s
+  after warm-up. The build predates this branch's rev 4 bench prompts, so the
+  capture does not follow section 8. No constant is chosen.
+- ONY-502: the first complete 6-run hardware corpus (Android XR / Google Aura,
+  2026-11-03, app commit `591ac18`) is committed under
+  `test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`. ONY-501's
+  addendum scores `J` on the last 10 s of S without the first 2 s or samples
+  above 2 cm/s, and `J_D` only on the 10-50 cm/s D band; the tuner now reports
+  the scored sample counts. The full 4,264-point grid still has no passing
+  point (`J = 1.514 mm`, `J_D = 7.576 mm`), so no constant is chosen. Also
+  fixes the guided-bench device summary reporting "up to 0 Hz" when a runtime
+  does not declare a hand rate, and clarifies the braced-still, drifting and
+  pan/flick prompts.
 - ONY-669: the Android XR runtime profile now lists `CAMERA`,
   `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`, matching
   the plugin's required set.
@@ -14,6 +31,12 @@
   `<runtime>/<hand>/<motion>/run<N>.json`. It prints the `filter-spec` rev 4
   section 8 coverage matrix and refuses an incomplete corpus with exit 1,
   naming every missing cell. `pose_filter_tune.dart` reads the split tree.
+- ONY-502: ingestion for the first hardware pilot. `pose_capture_prepare.dart`
+  gains `--allow-incomplete` (write an interrupted corpus and exit 3); the
+  tuner marks rows from a partial corpus unscored and chooses no constants.
+  The two accepted Android XR left-hand still traces are committed under
+  `test/fixtures/pose_filter_captures/hardware/`; they are evidence, not a
+  tuning result. ONY-869 later replaced the pilot plan with the 6-run default.
 - ONY-502: the hand-anchor `OneEuroFilter` now runs on the anchor sample's own
   clock, once per new anchor sample, and the fuser holds the filtered value
   between samples. `minDt` follows the anchor rate (11 ms) instead of the

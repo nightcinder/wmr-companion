@@ -101,7 +101,9 @@ void main(List<String> args) {
             'passed': report.passed,
             'inconclusive': report.inconclusive,
             'missing_motions': report.missingMotions,
-            'raw_jitter_mm': report.rawJitterMm,
+            'raw_jitter_mm': report.rawJitterMm.isFinite
+                ? report.rawJitterMm
+                : null,
             'chosen': report.chosen?.point.toJson(),
             'jitter_mm': report.chosen?.jitterMm,
             'jitter_drift_mm': report.chosen?.jitterDriftMm,
@@ -183,6 +185,12 @@ String _markdown(List<TuningReport> reports, int captureCount) {
     )
     ..writeln()
     ..writeln(
+      'ONY-501 addendum: J is scored on the last 10 s of S, drops the first '
+      '2 s settle and samples above 2 cm/s; J_D is scored only on samples in '
+      'the 10-50 cm/s D band. The bars and the grid are unchanged.',
+    )
+    ..writeln()
+    ..writeln(
       'A winner on a bar-limiting boundary is inconclusive. The tool '
       'extends that axis 50 % at the same step and reruns the whole grid.',
     );
@@ -192,7 +200,12 @@ String _markdown(List<TuningReport> reports, int captureCount) {
       ..writeln('## ${report.runtime.name}')
       ..writeln()
       ..writeln(
-        report.bypass
+        report.missingMotions.isNotEmpty
+            ? '**Partial corpus:** missing '
+                  '${report.missingMotions.join(', ')}. The grid below is '
+                  'published for the classes present, but no constant is '
+                  'chosen and this is neither a pass nor a failure.'
+            : report.bypass
             ? 'Raw input already meets the jitter bound; bypass the filter.'
             : report.inconclusive
             ? '**Inconclusive:** the extended grid still selects a point on a '
@@ -204,11 +217,6 @@ String _markdown(List<TuningReport> reports, int captureCount) {
                   'J_D ${report.chosen!.jitterDriftMm.toStringAsFixed(3)} mm, '
                   'lag ${report.chosen!.lagMedianMs.toStringAsFixed(1)} ms.',
       );
-    if (report.missingMotions.isNotEmpty) {
-      buffer.writeln(
-        'Missing motion classes: ${report.missingMotions.join(', ')}.',
-      );
-    }
     _writeGridTable(buffer, report.rows);
     final extension = report.extension;
     if (extension != null) {

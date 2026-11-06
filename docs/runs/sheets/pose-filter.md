@@ -1,10 +1,16 @@
 # Pose filter tuning against recorded captures (ONY-502)
 
-> **Status: blocked awaiting captures. No constants were chosen.** ONY-501
-> requires the grid search to run on recorded anchor traces, not on reasoning.
-> No complete corpus exists yet, so `minCutoff`, `beta` and `dCutoff` are still
-> the published defaults. The structural fix and the 4,264-point harness are
-> implemented and tested; the tables below are deliberately unfilled.
+> **Status: blocked awaiting captures. No constants were chosen.** Two complete
+> 6-run Android XR corpora have been replayed. The 2026-11-03 corpus (app
+> 0.3.15, `591ac18`) gave `J = 1.514 mm` and `J_D = 7.576 mm`. The 2026-11-05
+> corpus (app 0.3.16, `903f03f`) brings S to `J = 1.009 mm`, but D is
+> **unscorable**: its median speed is 1.16 cm/s, and the 42 samples that touch
+> the 10-50 cm/s band are all in the first second's settle, so none pass the
+> tuner's warm-up gate. Neither full 4,264-point grid has a passing point; the
+> 2026-11-05 `J` spread is 0.005 mm, so the filter is not limiting. Both app
+> builds predate this branch's section 8 bench prompts, so the tester was told
+> to brace an arm and "wander slowly", not to rest the forearm on a table and
+> move at 10-50 cm/s. Lag passes with margin. Bars and grid are unchanged.
 >
 > Normative source: ONY-501's `filter-spec` **revision 4**, including its note on
 > the 6-run default. Where this sheet and that document disagree, the document
@@ -66,14 +72,102 @@ grounds to escalate. The harness extends that axis by 50 % at the same step,
 reruns the whole grid and writes both runs. If the extended run still selects a
 boundary point, it exits 3 and says to take both grids to ONY-501.
 
+## Result: Android XR, 2026-11-03
+
+Source: `wmr-aura-0.3.15-test-20261103.zip` from the external tester, Android XR
+on a Google Aura (Android 14 / API 34), app 0.3.15 (versionCode 2020) at commit
+`591ac18`, no bridge attached so `firmware_sha` is null. Six runs, one per
+class, hands alternating, 143 Hz and 26 joints. The prepared corpus is
+committed under
+`packages/wmr_tracking/test/fixtures/pose_filter_captures/hardware/androidXr-20261103/`
+and passes `pose_capture_prepare.dart` coverage (6 of 6 cells, exit 0).
+
+The full 4,264-point grid was replayed twice. Under rev 4's original
+full-window score no point passes (`J = 7.644 mm`, `J_D = 1.703 mm`). Under
+ONY-501's addendum no point passes either: `J = 1.514 mm` and
+`J_D = 7.576 mm`. `J` ranges only 1.514-1.525 mm across the grid and `J_D`
+7.562-7.594 mm, so the filter is not the limiting factor. The tuner chose no
+constant and exited 1. The addendum grid is in
+[pose-filter-grid-androidXr-20261103.md](pose-filter-grid-androidXr-20261103.md).
+
+Lag is not the problem: median `L` is 10 ms on the slow sweep, 1 ms on medium
+and 7 ms on fast, all inside their bars. The still trace moves 41 x 66 x 30 mm
+peak to peak over 15 s, with a 43.7 mm settle in the first second; the last
+10 s still wander about 1.5 mm RMS. That is the hand-held palm anchor, not a
+braced source-noise hold. The drifting trace's median speed is 2.9 cm/s, so
+only 43 of 2138 samples fall in segment D's 10-50 cm/s band; the gated `J_D`
+is therefore not representative of D.
+
+## Result: Android XR, 2026-11-05
+
+Source: `wmr-ext-20261105.zip` from the external tester, Android XR on a Google
+Aura (Android 14 / API 34), app 0.3.16 (versionCode 2021) at commit `903f03f`,
+no bridge attached so `firmware_sha` is null. Six runs, one per class, hands
+alternating, 144 Hz and 26 joints. The prepared corpus is committed under
+`packages/wmr_tracking/test/fixtures/pose_filter_captures/hardware/androidXr-20261105/`
+and passes `pose_capture_prepare.dart` coverage (6 of 6 cells, exit 0).
+
+The full 4,264-point grid was replayed. No point passes: `J` is 1.009-1.014 mm
+against 0.5 mm, and `J_D` is 0.000 mm because **no sample is scorable**. The
+tuner chose no constant and exited 1. The grid is in
+[pose-filter-grid-androidXr-20261105.md](pose-filter-grid-androidXr-20261105.md).
+
+Lag is inside every bar: median `L` is 10 ms on the slow sweep, 2 ms on medium
+and 7 ms on fast. S is 15 x 8 x 16 mm peak to peak over 15 s (was 41 x 66 x
+30 mm), so the bracing helped, but the last 10 s still wander about 1.0 mm RMS
+and the filter changes that by at most 0.005 mm across the whole grid. D has a
+median speed of 1.16 cm/s: 42 samples touch the 10-50 cm/s band between 0.0 and
+0.96 s, and none survive the tuner's one-second warm-up gate. That is a slow
+wander, not a 10-50 cm/s drift.
+
+Both corpora were recorded on released builds, whose prompts still said to
+brace an arm and let the controller wander slowly. This branch carries the
+section 8 prompts (forearm on a table; 10-50 cm/s, "not a slow drift"), but
+they were not in `591ac18` or `903f03f`. The next capture must be recorded with
+a build that contains them, or the tester must be given the section 8 speeds in
+writing.
+
+No tuned point exists, so `after` repeats the published defaults
+(`minCutoff = 1 Hz`, `beta = 0.02`, `dCutoff = 1 Hz`). `before` is the pre-ONY-502
+paper default (`minDt = 4.167 ms`). The still row uses the addendum gates; the
+drifting row has zero scorable samples, so its `—` is "not measured", not zero
+jitter.
+
+| Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| still | 1.010 | 1.010 | — | — | — | — | — | — | — | — |
+| held, drifting | — | — | — | — | — | — | — | — | — | — |
+| slow pan | — | — | — | — | 10 | 10 | 10 | 10 | — | — |
+| medium pan | — | — | — | — | 2 | 2 | 2 | 2 | — | — |
+| fast flick | — | — | — | — | 7 | 7 | 7 | 7 | 76.4 | 76.4 |
+| occlusion | — | — | — | — | 1 | 1 | 3 | 3 | — | — |
+
+## ONY-501 addendum (2026-11-03)
+
+The design owner's decision after the first full-window failure:
+
+1. Score `J` only on S's last 10 s. Drop the first 2 s settle and any sample
+   whose measured speed is above 2 cm/s. Speed is a centred 0.5 s difference
+   of the raw anchor position.
+2. Capture S braced: forearm on a table and hand relaxed, so the run measures
+   source sigma, not tremor. D stays hand-held, but score `J_D` only on samples
+   at 10-50 cm/s.
+3. Rescore the existing corpus first; if braced S still exceeds 0.5 mm with
+   sigma well above 1 mm, escalate again with the measured sigma.
+4. The bars and the section 7 grid stay as they are.
+
+The EKF or fixed-lag branch reopens only if a braced, gated capture fails and
+the grid spread is wider than 0.1 mm. This corpus is not that test: S was
+hand-held and D was below its speed band. The next capture must fix both.
+
 ## Acceptance
 
 Per runtime, from ONY-501's `filter-spec` rev 4 sections 1 and 8:
 
 | Metric | Bar | Applies to |
 |---|---|---|
-| Jitter `J` (RMS from 1 s moving mean) | <= 0.5 mm | segment S, every runtime |
-| Jitter `J_D` (residual from 1 s quadratic) | <= 0.75 mm | segment D, every runtime |
+| Jitter `J` (RMS from 1 s moving mean; last 10 s of S, first 2 s and >2 cm/s dropped) | <= 0.5 mm | segment S, every runtime |
+| Jitter `J_D` (residual from 1 s quadratic; 10-50 cm/s samples only) | <= 0.75 mm | segment D, every runtime |
 | Median lag `L` | <= 20 ms | medium and fast sweeps |
 | Median lag `L` | <= 160 ms | slow sweeps, regression check only |
 
@@ -82,19 +176,22 @@ The whole grid is published, not just the winner. The synthetic vectors under
 harness vectors, not captures: they say `kind: synthetic`, `app_commit: null`,
 `firmware_sha: null`, and must not be used to choose constants.
 
-## Before and after (pending captures)
+## Before and after (Android XR, 2026-11-03)
 
-Every cell stays empty until the hardware runs exist. Fill one row group per
-runtime; the tuner writes the numbers in this shape.
+No tuned point exists, so the `after` column repeats the published defaults
+(`minCutoff = 1 Hz`, `beta = 0.02`, `dCutoff = 1 Hz`). `before` is the pre-ONY-502
+paper default (`minDt = 4.167 ms`). The still and drifting rows use the
+addendum gates: 1425 still samples and 43 drifting samples were scored. The
+table is evidence of the failure, not a tuning result.
 
 | Runtime | Segment | `J` before | `J` after | `J_D` before | `J_D` after | `L` median before | `L` median after | Peak `L` before | Peak `L` after | `t90` before | `t90` after |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Android XR | still | | | — | — | — | — | — | — | — | — |
-| Android XR | held, drifting | — | — | | | — | — | — | — | — | — |
-| Android XR | slow pan | — | — | — | — | | | | | — | — |
-| Android XR | medium pan | — | — | — | — | | | | | — | — |
-| Android XR | fast flick | — | — | — | — | | | | | | |
-| Android XR | occlusion | — | — | — | — | | | | | — | — |
+| Android XR | still | 1.514 | 1.514 | — | — | — | — | — | — | — | — |
+| Android XR | held, drifting | — | — | 7.576 | 7.576 | — | — | — | — | — | — |
+| Android XR | slow pan | — | — | — | — | 10 | 10 | 10 | 10 | — | — |
+| Android XR | medium pan | — | — | — | — | 1 | 1 | 7 | 7 | — | — |
+| Android XR | fast flick | — | — | — | — | 7 | 7 | 9 | 9 | 91.6 | 91.6 |
+| Android XR | occlusion | — | — | — | — | 1 | 1 | 8 | 8 | — | — |
 | VITURE | still | | | — | — | — | — | — | — | — | — |
 | VITURE | held, drifting | — | — | | | — | — | — | — | — | — |
 | VITURE | slow pan | — | — | — | — | | | | | — | — |
@@ -122,11 +219,11 @@ Hands alternate so both hands appear in the bundle.
 
 | # | Hand | Segment | Sheet name | Nominal speed | How to perform | Duration | Scores |
 |---|---|---|---|---|---|---|---|
-| 1 | LEFT | S | still | 0 | Rest the hand with the arm braced | 15 s | J |
-| 2 | RIGHT | D | held, drifting | 10-50 cm/s | Hold as if aiming, let it wander slowly | 15 s | J_D |
-| 3 | LEFT | slow | slow pan | 10 cm/s | 30 cm sideways in 3 s, back and forth | 18 s | L <= 160 ms |
-| 4 | RIGHT | M | medium pan | 50 cm/s | 50 cm sideways in 1 s, back and forth | 15 s | L <= 20 ms |
-| 5 | LEFT | F | fast flick | 150 cm/s | 45 cm flick in 0.3 s, pause, return | 20 s | L <= 20 ms |
+| 1 | LEFT | S | still | 0 | Rest the hand with the forearm braced on a table; hand relaxed | 15 s | J |
+| 2 | RIGHT | D | held, drifting | 10-50 cm/s | Hold as if aiming; let the hand wander at 10-50 cm/s, not a slow drift | 15 s | J_D |
+| 3 | LEFT | slow | slow pan | 10 cm/s | Move the hand 30 cm sideways in 3 s, back and forth; keep the body still | 18 s | L <= 160 ms |
+| 4 | RIGHT | M | medium pan | 50 cm/s | Move the hand 50 cm sideways in 1 s, back and forth; keep the body still | 15 s | L <= 20 ms |
+| 5 | LEFT | F | fast flick | 150 cm/s | Flick the hand 45 cm in 0.3 s, pause, return; keep the body still | 20 s | L <= 20 ms |
 | 6 | RIGHT | occ | occlusion | n/a | Aim, then hide the hand for a second or two | 15 s | diagnostic |
 
 The occlusion run has no acceptance bar. It records reacquisition gaps for
