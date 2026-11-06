@@ -18,6 +18,7 @@ class _FlakyTransport extends FakeTransport {
 
   int failuresRemaining = 0;
   int connectCalls = 0;
+  int ioCalls = 0;
 
   @override
   Future<void> connect(String deviceId) async {
@@ -27,6 +28,34 @@ class _FlakyTransport extends FakeTransport {
       throw StateError('radio busy');
     }
     await super.connect(deviceId);
+  }
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    ioCalls++;
+    return super.read(deviceId, serviceUuid, characteristicUuid);
+  }
+
+  @override
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) {
+    ioCalls++;
+    return super.write(
+      deviceId,
+      serviceUuid,
+      characteristicUuid,
+      value,
+      withoutResponse: withoutResponse,
+    );
   }
 }
 
@@ -358,4 +387,106 @@ void main() {
       expect(companion.deviceId, fakeBridgeDeviceId);
     },
   );
+
+  test('reconnect reports failed once every backoff attempt is used', () async {
+    final flaky = _FlakyTransport(devices: const [fakeBridgeDevice]);
+    transport = flaky;
+    fakeBridge = FakeWmrBridge(flaky);
+    companion = WmrCompanion(
+      ble: flaky,
+      config: const WmrCompanionConfig(
+        reconnectBackoff: [
+          Duration(milliseconds: 10),
+          Duration(milliseconds: 20),
+          Duration(milliseconds: 30),
+        ],
+      ),
+    );
+    await companion.connect(_bridge);
+    expect(flaky.connectCalls, 1);
+
+    final states = <WmrConnectionState>[];
+    companion.connection.listen(states.add);
+    flaky.failuresRemaining = 3;
+    await flaky.disconnect(fakeBridgeDeviceId);
+    await _settle(200);
+
+    expect(flaky.connectCalls, 4);
+    expect(
+      states.where((state) => state == WmrConnectionState.reconnecting),
+      hasLength(3),
+    );
+    expect(states.last, WmrConnectionState.failed);
+    expect(companion.state, WmrConnectionState.failed);
+  });
+
+  test('an empty backoff fails without retrying', () async {
+    final flaky = _FlakyTransport(devices: const [fakeBridgeDevice]);
+    transport = flaky;
+    fakeBridge = FakeWmrBridge(flaky);
+    companion = WmrCompanion(
+      ble: flaky,
+      config: const WmrCompanionConfig(reconnectBackoff: []),
+    );
+    await companion.connect(_bridge);
+    final states = <WmrConnectionState>[];
+    companion.connection.listen(states.add);
+
+    await flaky.disconnect(fakeBridgeDeviceId);
+    await _settle(50);
+
+    expect(flaky.connectCalls, 1);
+    expect(states, isNot(contains(WmrConnectionState.reconnecting)));
+    expect(companion.state, WmrConnectionState.failed);
+  });
+
+  test(
+    'controllerStatus is re-subscribed after an automatic reconnect',
+    () async {
+      companion = WmrCompanion(ble: transport);
+      await companion.connect(_bridge);
+      final statuses = <ControllerStatusV2>[];
+      companion.controllerStatus.listen(statuses.add);
+      await _settle();
+
+      await transport.disconnect(fakeBridgeDeviceId);
+      await _settle(700);
+      expect(companion.state, WmrConnectionState.ready);
+
+      statuses.clear();
+      final outcome = await companion.sendControllerCommand(
+        ControllerCommand.connect,
+        hand: Hand.left,
+      );
+      expect(outcome.isOk, isTrue);
+      await _settle();
+
+      expect(statuses, isNotEmpty);
+      expect(statuses.last.lastCommand, ControllerCommand.connect);
+    },
+  );
+
+  test('an unexpected disconnect discards the session clients', () async {
+    final flaky = _FlakyTransport(devices: const [fakeBridgeDevice]);
+    transport = flaky;
+    fakeBridge = FakeWmrBridge(flaky);
+    companion = WmrCompanion(
+      ble: flaky,
+      config: const WmrCompanionConfig(autoReconnect: false),
+    );
+    await companion.connect(_bridge);
+    await flaky.disconnect(fakeBridgeDeviceId);
+    await _settle();
+    flaky.ioCalls = 0;
+
+    expect(companion.state, WmrConnectionState.failed);
+    expect(() => companion.readConfig(Hand.left), throwsStateError);
+    expect(
+      () => companion.sendControllerCommand(ControllerCommand.discover),
+      throwsStateError,
+    );
+    await expectLater(companion.readControllerStatus(), throwsStateError);
+    await expectLater(companion.ping(), throwsStateError);
+    expect(flaky.ioCalls, 0);
+  });
 }

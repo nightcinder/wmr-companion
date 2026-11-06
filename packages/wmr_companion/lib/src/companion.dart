@@ -715,6 +715,12 @@ class WmrCompanion {
     _lastStats = null;
     _lastInfo = null;
     _protocol = null;
+    _controllerControl = null;
+    _configClient = null;
+    final echo = _echoClient;
+    _echoClient = null;
+    if (echo != null) unawaited(echo.dispose());
+    _stopControllerStatusSubscription();
     if (!_config.autoReconnect) {
       _setState(WmrConnectionState.failed);
       return;
