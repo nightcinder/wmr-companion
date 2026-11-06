@@ -626,14 +626,11 @@ List<RecordingInput> readTesterBundle(File bundle) {
   }
   final Archive archive;
   try {
-    // archive 4.6 stopped throwing on damaged data unless asked: without the
-    // flag a corrupt entry decodes as empty and surfaces later as malformed
-    // JSON. Ask, and force every entry to decompress here so the damage is
-    // reported as an archive error in one place.
-    archive = ZipDecoder().decodeBytes(
-      bundle.readAsBytesSync(),
-      throwOnError: true,
-    );
+    // archive 4.6 stopped throwing on damaged data unless asked: without
+    // verify a corrupt entry decodes as empty, or to the wrong bytes, and
+    // surfaces later as malformed JSON. Verify checksums, throw on damage, and
+    // force every entry to decompress here so it is reported in one place.
+    archive = ZipDecoder().decodeBytes(bundle.readAsBytesSync(), verify: true);
     for (final file in archive.files) {
       if (file.isFile) file.readBytes();
     }

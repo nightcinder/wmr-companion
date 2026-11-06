@@ -429,8 +429,7 @@ void main() {
     // First byte of the entry's compressed data: damage the deflate stream
     // itself, not the local header or the central directory.
     corrupt[30 + utf8.encode(name).length] ^= 0xff;
-    final bundle = File('${temp.path}/bundle.zip')
-      ..writeAsBytesSync(corrupt);
+    final bundle = File('${temp.path}/bundle.zip')..writeAsBytesSync(corrupt);
 
     expect(
       () => readTesterBundle(bundle),
