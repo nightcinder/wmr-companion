@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:wmr_companion/testing.dart';
@@ -9,6 +10,25 @@ Future<void> _settle([int millis = 20]) =>
     Future<void>.delayed(Duration(milliseconds: millis));
 
 const _bridge = WmrBridgeDevice(id: fakeBridgeDeviceId, name: 'WMR Bridge');
+
+/// A fake transport whose [connect] can fail a set number of times, to
+/// exercise the reconnect schedule without a radio.
+class _FlakyTransport extends FakeTransport {
+  _FlakyTransport({super.devices});
+
+  int failuresRemaining = 0;
+  int connectCalls = 0;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    connectCalls++;
+    if (failuresRemaining > 0) {
+      failuresRemaining--;
+      throw StateError('radio busy');
+    }
+    await super.connect(deviceId);
+  }
+}
 
 void main() {
   late FakeTransport transport;
@@ -245,4 +265,97 @@ void main() {
     await companion.dispose();
     await sub.cancel();
   });
+
+  test('FF17 status, read and commands go through the facade', () async {
+    companion = WmrCompanion(ble: transport);
+    await companion.connect(_bridge);
+    final statuses = <ControllerStatusV2>[];
+    companion.controllerStatus.listen(statuses.add);
+
+    final initial = await companion.readControllerStatus();
+    expect(initial.version, ControllerStatusV2.version1);
+    expect(initial.hands.first.connected, isFalse);
+
+    final outcome = await companion.sendControllerCommand(
+      ControllerCommand.connect,
+      hand: Hand.left,
+    );
+    expect(outcome.isOk, isTrue);
+    await _settle();
+
+    expect(statuses, isNotEmpty);
+    expect(statuses.last.lastCommand, ControllerCommand.connect);
+    expect(statuses.last.lastResult, ControllerResult.ok);
+    final after = await companion.readControllerStatus();
+    expect(after.hands.first.connected, isTrue);
+  });
+
+  test('readConfig reads a hand block over FF13', () async {
+    final blob = Uint8List.fromList([for (var i = 0; i < 64; i++) i]);
+    await transport.dispose();
+    transport = FakeTransport(devices: const [fakeBridgeDevice]);
+    fakeBridge = FakeWmrBridge(transport, configBlobs: [blob, null]);
+    companion = WmrCompanion(ble: transport);
+    await companion.connect(_bridge);
+
+    final result = await companion.readConfig(Hand.left);
+    expect(result.failure, isNull);
+    expect(result.blob, blob);
+    expect(result.crc, isNotNull);
+  });
+
+  test('ping round-trips over FF15 and reuses the subscription', () async {
+    companion = WmrCompanion(ble: transport);
+    await companion.connect(_bridge);
+
+    final first = await companion.ping();
+    expect(first.failure, isNull);
+    expect(first.sample, isNotNull);
+    expect(first.sample!.answer.pingId, isPositive);
+
+    final second = await companion.ping();
+    expect(second.failure, isNull);
+  });
+
+  test('default reconnect backoff is 500 ms to 8 s', () {
+    expect(const WmrCompanionConfig().reconnectBackoff, const [
+      Duration(milliseconds: 500),
+      Duration(seconds: 1),
+      Duration(seconds: 2),
+      Duration(seconds: 4),
+      Duration(seconds: 8),
+    ]);
+  });
+
+  test(
+    'reconnect retries with the configured backoff until it succeeds',
+    () async {
+      final flaky = _FlakyTransport(devices: const [fakeBridgeDevice]);
+      transport = flaky;
+      fakeBridge = FakeWmrBridge(flaky);
+      companion = WmrCompanion(
+        ble: flaky,
+        config: const WmrCompanionConfig(
+          reconnectBackoff: [
+            Duration(milliseconds: 10),
+            Duration(milliseconds: 20),
+            Duration(milliseconds: 30),
+          ],
+        ),
+      );
+      await companion.connect(_bridge);
+      expect(flaky.connectCalls, 1);
+
+      final states = <WmrConnectionState>[];
+      companion.connection.listen(states.add);
+      flaky.failuresRemaining = 2;
+      await flaky.disconnect(fakeBridgeDeviceId);
+      await _settle(200);
+
+      expect(flaky.connectCalls, 4);
+      expect(states, contains(WmrConnectionState.reconnecting));
+      expect(companion.state, WmrConnectionState.ready);
+      expect(companion.deviceId, fakeBridgeDeviceId);
+    },
+  );
 }

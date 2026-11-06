@@ -42,7 +42,17 @@ class WmrCompanionConfig {
     this.gamepad = const GamepadConfig(),
     this.sticks = const StickConfig(),
     this.autoReconnect = true,
+    this.reconnectBackoff = defaultReconnectBackoff,
   });
+
+  /// The production reconnect schedule: five attempts over about 15.5 s.
+  static const List<Duration> defaultReconnectBackoff = [
+    Duration(milliseconds: 500),
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+  ];
 
   /// FF11 raw, FF12 decoded, FF14 batched or none.
   final StreamMode streamMode;
@@ -51,8 +61,13 @@ class WmrCompanionConfig {
   final GamepadConfig gamepad;
   final StickConfig sticks;
 
-  /// Retry once after an unexpected disconnect (state [reconnecting]).
+  /// Reconnect after an unexpected disconnect, using [reconnectBackoff].
   final bool autoReconnect;
+
+  /// Delay before each automatic reconnect attempt (state [reconnecting]).
+  /// One attempt per entry; an empty list disables retries. After the last
+  /// attempt fails the state becomes `failed`.
+  final List<Duration> reconnectBackoff;
 
   WmrCompanionConfig copyWith({
     StreamMode? streamMode,
@@ -61,6 +76,7 @@ class WmrCompanionConfig {
     GamepadConfig? gamepad,
     StickConfig? sticks,
     bool? autoReconnect,
+    List<Duration>? reconnectBackoff,
   }) => WmrCompanionConfig(
     streamMode: streamMode ?? this.streamMode,
     fusion: fusion ?? this.fusion,
@@ -68,5 +84,6 @@ class WmrCompanionConfig {
     gamepad: gamepad ?? this.gamepad,
     sticks: sticks ?? this.sticks,
     autoReconnect: autoReconnect ?? this.autoReconnect,
+    reconnectBackoff: reconnectBackoff ?? this.reconnectBackoff,
   );
 }

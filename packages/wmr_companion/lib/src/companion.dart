@@ -6,8 +6,12 @@ import 'package:wmr_core/domain/gamepad.dart';
 import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/imu_calibration.dart';
 import 'package:wmr_core/domain/stick_centre.dart';
+import 'package:wmr_core/protocol/controller_control.dart';
 import 'package:wmr_core/protocol/firmware_version.dart';
+import 'package:wmr_core/services/config_client.dart';
+import 'package:wmr_core/services/controller_control_client.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_core/services/echo_client.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
 import 'config.dart';
@@ -51,6 +55,11 @@ class WmrCompanion {
   final StreamController<ControllerPose> _poses = StreamController.broadcast();
   final StreamController<WmrLinkSnapshot> _link = StreamController.broadcast();
   final StreamController<WmrException> _failures = StreamController.broadcast();
+  late final StreamController<ControllerStatusV2> _controllerStatuses =
+      StreamController.broadcast(
+        onListen: _startControllerStatusSubscription,
+        onCancel: _stopControllerStatusSubscription,
+      );
 
   final Map<String, WmrBridgeDevice> _seen = {};
   final List<List<double>?> _stickCentres = [null, null];
@@ -64,6 +73,9 @@ class WmrCompanion {
   String? _deviceId;
   WmrBridgeDevice? _bridge;
   ControllerService? _service;
+  ControllerControlClient? _controllerControl;
+  ConfigClient? _configClient;
+  EchoClient? _echoClient;
   BleConnectionInfo? _lastInfo;
   DecodedStats? _lastStats;
   WmrProtocolVersion? _protocol;
@@ -77,8 +89,10 @@ class WmrCompanion {
   StreamSubscription<ModeState>? _modeSub;
   StreamSubscription<TrackingFrame>? _trackingSub;
   StreamSubscription<Map<String, WmrProtocolVersion>>? _protocolSub;
+  StreamSubscription<ControllerStatusV2>? _controllerStatusSub;
   Timer? _linkTimer;
   Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
   TrackingSource? _trackingSource;
   SourceClockAligner? _trackingAligner;
   SixDofFuser? _fuser;
@@ -101,6 +115,70 @@ class WmrCompanion {
   /// after connect. Null before the first read completes, and when service
   /// discovery failed. Prefer [link], which republishes this on every snapshot.
   WmrProtocolVersion? get protocol => _protocol;
+
+  /// FF17 controller status notifications (WMR_Bridge #70, firmware 0.1.1).
+  ///
+  /// The subscription is opened when the first listener attaches and is
+  /// replaced after an automatic reconnect. A bridge without FF17 delivers no
+  /// events; use [readControllerStatus] or [sendControllerCommand] to try it
+  /// directly.
+  Stream<ControllerStatusV2> get controllerStatus => _controllerStatuses.stream;
+
+  /// Sends [command] over FF17, optionally addressed to [hand].
+  ///
+  /// Throws [StateError] when nothing is connected. A missing hand for a
+  /// command that needs one, a firmware refusal and a write failure are all
+  /// reported as a failed [ControllerCommandOutcome], not thrown.
+  Future<ControllerCommandOutcome> sendControllerCommand(
+    ControllerCommand command, {
+    Hand? hand,
+  }) {
+    _ensureUsable();
+    return _requireControllerControl().send(command, hand: hand?.wireIndex);
+  }
+
+  /// Reads the FF17 status once. See [controllerStatus] for notifications.
+  ///
+  /// Throws [StateError] when nothing is connected, [WmrTransportException]
+  /// when the read fails and [FormatException] when the bridge returns a
+  /// malformed value.
+  Future<ControllerStatusV2> readControllerStatus() async {
+    _ensureUsable();
+    final client = _requireControllerControl();
+    try {
+      return await client.readStatus();
+    } on FormatException {
+      rethrow;
+    } catch (error) {
+      throw WmrTransportException('Could not read FF17 status', cause: error);
+    }
+  }
+
+  /// Reads [hand]'s controller configuration block over FF13.
+  ///
+  /// Throws [StateError] when nothing is connected. A missing FF13, a block
+  /// that never becomes ready, a bad CRC or a transport error is reported in
+  /// the returned [ConfigReadResult].
+  Future<ConfigReadResult> readConfig(Hand hand) {
+    _ensureUsable();
+    final client = _configClient;
+    if (client == null) throw StateError('WmrCompanion is not connected');
+    return client.read(hand.wireIndex);
+  }
+
+  /// Sends one FF15 echo ping and waits for its answer.
+  ///
+  /// [EchoClient.start] runs on the first call and the subscription is kept
+  /// for later pings until the next connect or disconnect. Throws [StateError]
+  /// when nothing is connected; a missing FF15 or a setup failure is reported
+  /// as [EchoFailure.cancelled], a lost answer as [EchoFailure.timeout].
+  Future<EchoResult> ping() async {
+    _ensureUsable();
+    final client = _echoClient;
+    if (client == null) throw StateError('WmrCompanion is not connected');
+    await client.start();
+    return client.ping();
+  }
 
   /// Scan results, strongest first, de-duplicated by id.
   Stream<List<WmrBridgeDevice>> get bridges => _bridges.stream;
@@ -232,7 +310,12 @@ class WmrCompanion {
     if (_disposed || !identical(_service, service)) return;
 
     _linkUp = true;
+    _reconnectAttempt = 0;
     _setState(WmrConnectionState.ready);
+    _controllerControl = ControllerControlClient(_transport, bridge.id);
+    _configClient = ConfigClient(_transport, bridge.id);
+    _echoClient = EchoClient(_transport, bridge.id);
+    _restartControllerStatusSubscription();
     _startLinkPolling();
     final fault = service.fault;
     if (fault != null) {
@@ -468,6 +551,7 @@ class WmrCompanion {
     await _gamepad.close();
     await _poses.close();
     await _link.close();
+    await _controllerStatuses.close();
     await _failures.close();
   }
 
@@ -635,12 +719,24 @@ class WmrCompanion {
       _setState(WmrConnectionState.failed);
       return;
     }
+    _reconnectAttempt = 0;
+    _scheduleReconnect();
+  }
+
+  void _scheduleReconnect() {
+    if (_disposed) return;
+    final delays = _config.reconnectBackoff;
+    if (_reconnectAttempt >= delays.length) {
+      _setState(WmrConnectionState.failed);
+      return;
+    }
+    final delay = delays[_reconnectAttempt++];
     _setState(WmrConnectionState.reconnecting);
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(
-      const Duration(milliseconds: 500),
-      _attemptReconnect,
-    );
+    _reconnectTimer = Timer(delay, () {
+      _reconnectTimer = null;
+      _attemptReconnect();
+    });
   }
 
   Future<void> _attemptReconnect() async {
@@ -649,7 +745,61 @@ class WmrCompanion {
     try {
       await connect(bridge);
     } catch (_) {
-      // connect already published the typed failure and state.
+      // connect already published the typed failure and state. A stream fault
+      // leaves the link ready, so it is not a reason to dial again.
+      if (!_disposed && _state != WmrConnectionState.ready) {
+        _scheduleReconnect();
+      }
+    }
+  }
+
+  ControllerControlClient _requireControllerControl() {
+    final client = _controllerControl;
+    if (client == null) throw StateError('WmrCompanion is not connected');
+    return client;
+  }
+
+  void _startControllerStatusSubscription() {
+    final client = _controllerControl;
+    if (client == null || _controllerStatusSub != null) return;
+    try {
+      _controllerStatusSub = client.statusStream().listen(
+        (status) {
+          if (!_controllerStatuses.isClosed) _controllerStatuses.add(status);
+        },
+        onError: (Object error) {
+          if (!_failures.isClosed) {
+            _failures.add(
+              WmrTransportException(
+                'FF17 status subscription failed',
+                cause: error,
+              ),
+            );
+          }
+        },
+      );
+    } catch (error) {
+      if (!_failures.isClosed) {
+        _failures.add(
+          WmrTransportException(
+            'FF17 status subscription failed',
+            cause: error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _stopControllerStatusSubscription() {
+    final sub = _controllerStatusSub;
+    _controllerStatusSub = null;
+    unawaited(sub?.cancel());
+  }
+
+  void _restartControllerStatusSubscription() {
+    _stopControllerStatusSubscription();
+    if (_controllerStatuses.hasListener) {
+      _startControllerStatusSubscription();
     }
   }
 
@@ -741,6 +891,11 @@ class WmrCompanion {
     _linkTimer = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _stopControllerStatusSubscription();
+    final echo = _echoClient;
+    _echoClient = null;
+    _configClient = null;
+    _controllerControl = null;
     await _connectionSub?.cancel();
     _connectionSub = null;
     await _frameSub?.cancel();
@@ -761,6 +916,7 @@ class WmrCompanion {
     _protocol = null;
     _linkUp = false;
     if (service != null) await service.dispose();
+    if (echo != null) await echo.dispose();
   }
 
   void _ensureUsable() {

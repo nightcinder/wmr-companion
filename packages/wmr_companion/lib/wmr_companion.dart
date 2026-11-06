@@ -23,6 +23,16 @@ export 'package:wmr_core/domain/imu_calibration.dart' show ImuCalibration;
 export 'package:wmr_core/domain/loss_window.dart' show LossWindowStats;
 export 'package:wmr_core/domain/stick_centre.dart' show StickConfig;
 export 'package:wmr_core/domain/tick_timer.dart' show DtStats;
+export 'package:wmr_core/protocol/config_block.dart' show ConfigState;
+export 'package:wmr_core/protocol/controller_control.dart'
+    show
+        ControllerAddressSource,
+        ControllerCommand,
+        ControllerDiscoveryState,
+        ControllerModel,
+        ControllerResult,
+        ControllerStatusV2,
+        HandControllerStatus;
 export 'package:wmr_core/protocol/decoded_record.dart'
     show
         DecodedRecord,
@@ -36,8 +46,14 @@ export 'package:wmr_core/protocol/decoded_record.dart'
 export 'package:wmr_core/protocol/firmware_version.dart'
     show WmrBridgeFeature, WmrBridgeFeatures, WmrProtocolVersion;
 export 'package:wmr_core/protocol/wmr_fragment.dart' show WmrFrame;
+export 'package:wmr_core/services/config_client.dart'
+    show ConfigReadFailure, ConfigReadResult;
+export 'package:wmr_core/services/controller_control_client.dart'
+    show ControllerCommandOutcome;
 export 'package:wmr_core/services/controller_service.dart'
     show DecodedStats, StreamMode;
+export 'package:wmr_core/services/echo_client.dart'
+    show EchoFailure, EchoResult, EchoSample;
 export 'package:wmr_tracking/wmr_tracking.dart';
 
 export 'src/companion.dart';
