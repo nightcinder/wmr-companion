@@ -690,6 +690,7 @@ void main() {
             configBlock: true,
             echo: true,
             firmwareVersion: true,
+            controllerControl: true,
           ),
         ),
       );
@@ -697,7 +698,7 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware 0.2.4  '
-          'FF11+ FF12+ FF13+ FF14+ FF15+ FF16+',
+          'FF11+ FF12+ FF13+ FF14+ FF15+ FF16+ FF17+',
         ),
         findsOneWidget,
       );
@@ -714,7 +715,7 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware n/a (no FF16, older firmware)  '
-          'FF11+ FF12+ FF13- FF14- FF15- FF16-',
+          'FF11+ FF12+ FF13- FF14- FF15- FF16- FF17-',
         ),
         findsOneWidget,
       );
@@ -736,7 +737,7 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware malformed (FF16 present)  '
-          'FF11+ FF12+ FF13- FF14- FF15- FF16+',
+          'FF11+ FF12+ FF13- FF14- FF15- FF16+ FF17-',
         ),
         findsOneWidget,
       );
@@ -750,7 +751,7 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware reading...  '
-          'FF11- FF12- FF13- FF14- FF15- FF16-',
+          'FF11- FF12- FF13- FF14- FF15- FF16- FF17-',
         ),
         findsOneWidget,
       );
@@ -773,7 +774,7 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware n/a (FF16 read failed)  '
-          'FF11+ FF12+ FF13- FF14- FF15- FF16+',
+          'FF11+ FF12+ FF13- FF14- FF15- FF16+ FF17-',
         ),
         findsOneWidget,
       );
@@ -787,7 +788,7 @@ void main() {
       expect(
         find.text(
           'bridge-left  firmware n/a (discovery failed)  '
-          'FF11- FF12- FF13- FF14- FF15- FF16-',
+          'FF11- FF12- FF13- FF14- FF15- FF16- FF17-',
         ),
         findsOneWidget,
       );

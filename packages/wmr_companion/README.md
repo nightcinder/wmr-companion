@@ -191,6 +191,7 @@ so the characteristics are the reliable signal:
 | `configBlock` | FF13 | firmware with the config block (`WMR_Bridge` #17) |
 | `echo` | FF15 | firmware with echo (`WMR_Bridge` #13) |
 | `firmwareVersion` | FF16 | firmware with #38 (`41771f8`) and later |
+| `controllerControl` | FF17 | firmware with WMR_Bridge #70 (`v0.1.1`) |
 
 A bridge with no FF16 is an older firmware and a normal status:
 `protocol.firmwareVersion` is null and `features.firmwareVersion` is false. The

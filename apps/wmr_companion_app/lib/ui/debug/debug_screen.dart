@@ -448,7 +448,7 @@ class BridgeLinkTable extends StatelessWidget {
       : '${transportKinds[bridgeId]!.label}  ';
 }
 
-/// The FF16 firmware string and the FF11-FF16 feature matrix of each bridge.
+/// The FF16 firmware string and the FF11-FF17 feature matrix of each bridge.
 ///
 /// Every state is explicit: a bridge without FF16 is older firmware, a value
 /// that did not decode is malformed, and a protocol that has not arrived yet
@@ -487,6 +487,7 @@ class BridgeFirmwareView extends StatelessWidget {
     'FF14${features.batchedStream ? '+' : '-'}',
     'FF15${features.echo ? '+' : '-'}',
     'FF16${features.firmwareVersion ? '+' : '-'}',
+    'FF17${features.controllerControl ? '+' : '-'}',
   ].join(' ');
 
   @override
