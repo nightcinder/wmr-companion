@@ -16,7 +16,7 @@ hardware; these are compile/packaging facts only.
 | Flavor | `unified`, linking one shared `unityLibrary` with VITURE 0.9.0 and XREAL 3.1.0; the vendor is selected at runtime |
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
-| Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified. The 0.3.15 and 0.3.16 builds ran on a Google Aura headset for pose-filter captures (`runs/sheets/pose-filter.md`) |
+| Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified. The 0.3.15 and 0.3.16 builds ran on a Google Aura headset for pose-filter captures (`../runs/sheets/pose-filter.md`) |
 | Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution (ONY-354) |
 
 Release notes: [`v0.3.17`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.17).
@@ -25,7 +25,7 @@ This is the signed (project-key) cut at commit `e431a39`. It adds report-only Se
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
 metadata and the tracking/session classes in the dex. The last recorded pass is
-on the v0.3.12 artifact. The open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
+on the v0.3.17 artifact. The open gaps are listed in [PREFLIGHT.md](PREFLIGHT.md).
 
 ## Release signing
 
