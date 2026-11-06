@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.17+22
+
+- The guided-bench still, drifting and pan/flick prompts now say to brace a
+  forearm on a table, move at 10-50 cm/s, and keep the body still, matching the
+  6-run protocol that WMR_Bridge triage expects (ONY-502).
+- The device summary no longer reports "up to 0 Hz" when a runtime does not
+  declare a hand rate; it says the rate is not declared and records 0 (ONY-502).
+- The first two complete 6-run Android XR pose corpora are committed with the
+  rev 4 tuning harness. Neither the 2026-11-03 nor the 2026-11-05 corpus has a
+  passing grid point, so the filter constants remain the published defaults
+  (ONY-502).
+- Semgrep, gitleaks and Dependabot scan the repository; both scanners are
+  report-only (ONY-890).
+
 ## 0.3.16+21
 
 - Detect an Android XR host before USB IDs and host markers, and refuse to
