@@ -57,6 +57,10 @@ public final class WMRBridgeSession: @unchecked Sendable {
     // Config block tracking
     public let configWindowPublisher = PassthroughSubject<ConfigWindow, Never>()
 
+    // FF16 firmware version and FF17 controller status
+    public let firmwareVersionPublisher = PassthroughSubject<WMRFirmwareVersion, Never>()
+    public let controllerStatusPublisher = PassthroughSubject<WMRControllerStatusV2, Never>()
+
     public init(
         bleManager: WMRBleCentralManager = WMRBleCentralManager(),
         leftPipeline: WMRHandPipeline? = nil,
@@ -124,6 +128,18 @@ public final class WMRBridgeSession: @unchecked Sendable {
                 configWindowPublisher.send(window)
             }
 
+        case WMRConstants.versionCharUUID:
+            // FF16 firmware version (also delivered by an explicit read)
+            firmwareVersionPublisher.send(
+                WMRFirmwareVersion.parse(notif.data, features: bleManager.features)
+            )
+
+        case WMRConstants.controllerControlCharUUID:
+            // FF17 status v2 (also delivered by an explicit read)
+            if let status = WMRControllerStatusV2.parse(notif.data) {
+                controllerStatusPublisher.send(status)
+            }
+
         default:
             break
         }
@@ -137,6 +153,28 @@ public final class WMRBridgeSession: @unchecked Sendable {
         } else {
             rightStatePublisher.send(state)
         }
+    }
+
+    // MARK: - Firmware Version and Controller Control
+
+    /// Reads FF16. The decoded value arrives on `firmwareVersionPublisher`.
+    public func readFirmwareVersion() {
+        bleManager.readFirmwareVersion()
+    }
+
+    /// Reads the FF17 status. The decoded value arrives on `controllerStatusPublisher`.
+    public func readControllerStatus() {
+        bleManager.readControllerStatus()
+    }
+
+    /// Encodes and writes an FF17 command. Throws for a hand-addressed command
+    /// with no hand.
+    public func sendControllerCommand(
+        _ command: WMRControllerCommand,
+        hand: WMRHand? = nil
+    ) throws {
+        let data = try encodeControllerCommand(command, hand: hand)
+        bleManager.writeControllerCommand(data)
     }
 
     // MARK: - Echo Latency Testing

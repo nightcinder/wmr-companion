@@ -28,6 +28,12 @@ public enum WMRConstants {
     /// Echo latency probe characteristic (FF15). Write without response (ping) and notify (pong).
     public static let echoCharUUID = CBUUID(string: "0000FF15-0000-1000-8000-00805F9B34FB")
 
+    /// Firmware version characteristic (FF16). Read-only UTF-8 string, no terminator.
+    public static let versionCharUUID = CBUUID(string: "0000FF16-0000-1000-8000-00805F9B34FB")
+
+    /// Controller scan and status v2 characteristic (FF17). Read, write and notify.
+    public static let controllerControlCharUUID = CBUUID(string: "0000FF17-0000-1000-8000-00805F9B34FB")
+
     /// Client Characteristic Configuration Descriptor (0x2902).
     public static let cccDescriptorUUID = CBUUID(string: "00002902-0000-1000-8000-00805F9B34FB")
 
@@ -73,6 +79,18 @@ public enum WMRConstants {
     public static let echoVersion: UInt8 = 1
     public static let echoRequestSize: Int = 4
     public static let echoAnswerSize: Int = 20
+
+    // MARK: - Firmware Version (FF16) Wire Sizes
+
+    /// `esp_app_desc_t.version` is 32 bytes including its terminator, so the
+    /// FF16 value is at most 31 bytes.
+    public static let firmwareVersionMaxBytes: Int = 31
+
+    // MARK: - Controller Control (FF17) Wire Sizes
+
+    public static let controllerStatusSize: Int = 20
+    public static let controllerStatusVersion: UInt8 = 1
+    public static let controllerCommandMaxSize: Int = 2
 
     // MARK: - Config Block (FF13) Wire Sizes
 

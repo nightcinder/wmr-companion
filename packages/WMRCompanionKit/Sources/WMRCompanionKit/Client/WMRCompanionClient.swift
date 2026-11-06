@@ -43,6 +43,21 @@ public final class WMRCompanionClient: @unchecked Sendable {
         session.bleManager.streamErrorPublisher.eraseToAnyPublisher()
     }
 
+    /// The FF11-FF17 feature matrix discovered from the connected bridge.
+    public var bridgeFeatures: WMRBridgeFeatures {
+        session.bleManager.features
+    }
+
+    /// Decoded FF16 firmware version, delivered after connect and on an explicit read.
+    public var firmwareVersionPublisher: AnyPublisher<WMRFirmwareVersion, Never> {
+        session.firmwareVersionPublisher.eraseToAnyPublisher()
+    }
+
+    /// Decoded FF17 status v2, delivered after connect, on an explicit read and on notifications.
+    public var controllerStatusPublisher: AnyPublisher<WMRControllerStatusV2, Never> {
+        session.controllerStatusPublisher.eraseToAnyPublisher()
+    }
+
     public func startScanning() {
         discoveredBridges.removeAll()
         session.bleManager.startScanning()
@@ -66,6 +81,25 @@ public final class WMRCompanionClient: @unchecked Sendable {
 
     public func sendEchoPing() {
         session.sendEchoPing()
+    }
+
+    /// Reads FF16 and publishes the decoded value on `firmwareVersionPublisher`.
+    public func readFirmwareVersion() {
+        session.readFirmwareVersion()
+    }
+
+    /// Reads the FF17 status and publishes it on `controllerStatusPublisher`.
+    public func readControllerStatus() {
+        session.readControllerStatus()
+    }
+
+    /// Encodes and writes an FF17 command. Throws for a hand-addressed command
+    /// with no hand.
+    public func sendControllerCommand(
+        _ command: WMRControllerCommand,
+        hand: WMRHand? = nil
+    ) throws {
+        try session.sendControllerCommand(command, hand: hand)
     }
 
     /// Reads controller config block over FF13 for specified hand and de-obfuscates with key.
