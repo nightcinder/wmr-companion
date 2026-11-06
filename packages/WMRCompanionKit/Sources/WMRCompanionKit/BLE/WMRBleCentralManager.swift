@@ -39,6 +39,11 @@ public final class WMRBleCentralManager: NSObject, @unchecked Sendable {
     public private(set) var configChar: CBCharacteristic?    // FF13
     public private(set) var batchedChar: CBCharacteristic?   // FF14
     public private(set) var echoChar: CBCharacteristic?      // FF15
+    public private(set) var versionChar: CBCharacteristic?   // FF16
+    public private(set) var controllerChar: CBCharacteristic? // FF17
+
+    /// The FF11-FF17 feature matrix derived from the discovered GATT table.
+    public private(set) var features: WMRBridgeFeatures = .none
 
     // Stream state tracking
     public private(set) var activeStreamChar: CBCharacteristic?
@@ -138,6 +143,24 @@ public final class WMRBleCentralManager: NSObject, @unchecked Sendable {
         p.readValue(for: c)
     }
 
+    /// Reads the FF16 firmware version.
+    public func readFirmwareVersion() {
+        guard let p = activePeripheral, let c = versionChar else { return }
+        p.readValue(for: c)
+    }
+
+    /// Reads the FF17 status v2 value.
+    public func readControllerStatus() {
+        guard let p = activePeripheral, let c = controllerChar else { return }
+        p.readValue(for: c)
+    }
+
+    /// Writes an FF17 command (1-2 bytes) with response so the ATT result is observable.
+    public func writeControllerCommand(_ data: Data) {
+        guard let p = activePeripheral, let c = controllerChar else { return }
+        p.writeValue(data, for: c, type: .withResponse)
+    }
+
     public func readRSSI() {
         activePeripheral?.readRSSI()
     }
@@ -185,6 +208,9 @@ extension WMRBleCentralManager: CBCentralManagerDelegate {
         configChar = nil
         batchedChar = nil
         echoChar = nil
+        versionChar = nil
+        controllerChar = nil
+        features = .none
         activeStreamChar = nil
         negotiatedMTU = 23
     }
@@ -200,7 +226,9 @@ extension WMRBleCentralManager: CBPeripheralDelegate {
                 WMRConstants.decodedCharUUID,
                 WMRConstants.configCharUUID,
                 WMRConstants.batchedCharUUID,
-                WMRConstants.echoCharUUID
+                WMRConstants.echoCharUUID,
+                WMRConstants.versionCharUUID,
+                WMRConstants.controllerControlCharUUID
             ], for: service)
         }
     }
@@ -221,9 +249,24 @@ extension WMRBleCentralManager: CBPeripheralDelegate {
             case WMRConstants.echoCharUUID:
                 self.echoChar = c
                 peripheral.setNotifyValue(true, for: c)
+            case WMRConstants.versionCharUUID:
+                self.versionChar = c
+            case WMRConstants.controllerControlCharUUID:
+                self.controllerChar = c
+                peripheral.setNotifyValue(true, for: c)
             default:
                 break
             }
+        }
+
+        features = WMRBridgeFeatures(characteristicUUIDs: characteristics.map { $0.uuid })
+
+        // Read the informational version and the initial status once.
+        if let c = versionChar {
+            peripheral.readValue(for: c)
+        }
+        if let c = controllerChar {
+            peripheral.readValue(for: c)
         }
 
         // Query MTU *after* services and characteristics are discovered
@@ -232,6 +275,12 @@ extension WMRBleCentralManager: CBPeripheralDelegate {
 
         // Enable target stream mode
         setStreamMode(targetStreamMode)
+    }
+
+    /// FF11/FF12/FF14 are the mutually exclusive stream characteristics; FF13,
+    /// FF15 and FF17 subscribe independently and must not become the active stream.
+    private func isStreamCharacteristic(_ characteristic: CBCharacteristic) -> Bool {
+        characteristic == streamChar || characteristic == decodedChar || characteristic == batchedChar
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
@@ -248,7 +297,9 @@ extension WMRBleCentralManager: CBPeripheralDelegate {
         }
 
         if characteristic.isNotifying {
-            activeStreamChar = characteristic
+            if isStreamCharacteristic(characteristic) {
+                activeStreamChar = characteristic
+            }
         } else if activeStreamChar == characteristic {
             activeStreamChar = nil
             // Transition: active disabled, now enable target characteristic

@@ -13,6 +13,8 @@ A Swift framework for building iOS, macOS, and visionOS companion applications t
   - `FF14`: Parses batched decoded records (version 2, up to 9 records per notification at MTU 517).
   - `FF15`: Round-trip echo ping/pong latency measurement (version 1, client timestamp, ESP32 turnaround us, queue depth).
   - `FF13`: Reads controller config blobs, validates CRC-32 (IEEE 802.3), de-obfuscates with Monado key table, and parses sensor calibration (mixing matrix, bias, rotation).
+  - `FF16`: Decodes the bridge's 31-byte UTF-8 firmware version and exposes the FF11-FF17 GATT feature matrix.
+  - `FF17`: Parses the 20-byte controller status v2 (per-hand flags, address source, model, address tail, discovery state/round, last command/result) and encodes the 1-2 byte control commands.
 - **Stream Exclusion Engine**: Enforces the bridge's mutual exclusion rule across FF11, FF12, and FF14 (disables active CCC before enabling target stream; handles ATT error `0x80`).
 - **Orientation Fusion**: Pure Swift implementations of **Madgwick** and **Mahony** AHRS algorithms running at ~200 Hz with timestep $dt$ derived from 100 ns sensor hardware ticks.
 - **Multi-Bridge Coordination**: Seamlessly manages concurrent connections to two independent ESP32 bridges (e.g., Left Bridge and Right Bridge) to eliminate upstream Classic Bluetooth radio contention.
