@@ -494,6 +494,32 @@ void main() {
     expect(prepared.capture.run, 2);
   });
 
+  test('rejects a corrupt tester bundle as an archive error', () {
+    const name = 'pose_capture_viture_left_still.json';
+    final archive = Archive();
+    // Large enough that ZipEncoder deflates it: a damaged deflate stream is
+    // exactly what archive 4.6 stopped throwing on by default.
+    final payload = utf8.encode('{"note":"${'x' * 4000}"}');
+    archive.addFile(ArchiveFile(name, payload.length, payload));
+    final encoded = ZipEncoder().encodeBytes(archive);
+    final corrupt = List<int>.from(encoded);
+    // First byte of the entry's compressed data: damage the deflate stream
+    // itself, not the local header or the central directory.
+    corrupt[30 + utf8.encode(name).length] ^= 0xff;
+    final bundle = File('${temp.path}/bundle.zip')..writeAsBytesSync(corrupt);
+
+    expect(
+      () => readTesterBundle(bundle),
+      throwsA(
+        isA<PosePrepareException>().having(
+          (error) => error.cause,
+          'cause',
+          isA<ArchiveException>(),
+        ),
+      ),
+    );
+  });
+
   test('falls back to the bundle file name when provenance is missing', () {
     final input = _input(
       runtime: TrackingVendor.xreal,
