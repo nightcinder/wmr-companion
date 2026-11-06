@@ -312,7 +312,7 @@ and measure it.
 
 **Phase 2 (when measurements justify it): native iOS transport.** ONY-38 (PR
 #37) already built `packages/WMRCompanionKit`: CoreBluetooth central,
-FF11–FF15 parsing, fusion, multi-bridge and a Combine/async facade, with a
+FF11–FF17 parsing, fusion, multi-bridge and a Combine/async facade, with a
 SwiftUI probe. For the Flutter library, reuse its **transport** and, if needed,
 its native pipeline behind a platform channel or FFI. Two viable shapes:
 

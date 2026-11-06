@@ -69,6 +69,8 @@ The core framework is implemented in `packages/WMRCompanionKit` as a modular Swi
   - `WMRDecodedBatch`: Parses batched version-2 decoded notifications (1 to 9 records).
   - `WMREcho`: Encodes 4-byte ping requests and parses 20-byte pong answers (ping ID, client send timestamp, ESP32 turnaround µs, queue depth).
   - `WMRConfigBlock` & `WMRConfigDecoder`: CRC-32 (IEEE 802.3), Monado XOR key de-obfuscation, and JSON sensor calibration extraction.
+  - `WMRFirmwareVersion`: Decodes the FF16 31-byte UTF-8 firmware version and derives the FF11–FF17 feature matrix from the GATT table.
+  - `WMRControllerControl`: Parses the FF17 20-byte controller status v2 and encodes the 1–2 byte discover/connect/disconnect/forget commands.
 - **`Fusion/`**:
   - `WMRMadgwickFilter` & `WMRMahonyFilter`: Pure Swift 6-axis orientation fusion.
   - `WMRHandPipeline`: Integrates sensor samples using true $dt$ computed from 100 ns sensor ticks, applies axis mapping, and tracks sequence gaps and tick-based packet loss %.
