@@ -48,16 +48,20 @@ the exact notifications the ESP32 sends.
   and the raw debug view. Orientation comes from FF12 (see "FF12 decoded
   stream" below); the fake bridge in raw mode still runs on `SyntheticMotion`.
 
-## universal_ble 3.1.2 coverage
+## universal_ble 3.2.0 coverage
 
-Read from the 3.1.2 source in the pub cache, not from memory.
+Read from the 3.2.0 source in the pub cache, not from memory. The central-mode
+API surface this table names is unchanged from 3.1.2; 3.2.0's Android changes
+are fixes, not new calls — dropping one characteristic's subscription no longer
+disturbs another instance's, a service removal no longer breaks the client, and
+value updates without subscribers are no longer errors.
 
 | Need | API | Notes |
 | --- | --- | --- |
 | MTU | `requestMtu(deviceId, mtu)` | Returns the value the stack reports afterwards; the transport records that, never the request. Android 13 and older: one request per connection; Android 14+: the stack drives the MTU, later requests are ignored. iOS/macOS: the app cannot request an MTU, the OS value comes back (and is only meaningful after service discovery, which the package does on demand). Windows/Linux: query only. Web: unsupported. |
 | Connection priority | `requestConnectionPriority(.., highPerformance)` | Android only; throws `notSupported` elsewhere, so the transport skips the call when `BleCapabilities.supportsConnectionPriorityApi` is false and `priorityRequested` stays null. |
 | RSSI | `readRssi` | Read on demand in `connectionInfo`. |
-| Notifications | `subscribeNotifications`, `characteristicValueStream` | The value stream carries no timestamp; the transport stamps in its own listener. `onValueChange` has a platform timestamp, unused (not comparable across platforms, and the rule is to use our monotonic clock). |
+| Notifications | `subscribeNotifications`, `characteristicValueStream` | The value stream carries no timestamp; the transport stamps in its own listener. `onValueChange` has a platform timestamp, unused (not comparable across platforms, and the rule is to use our monotonic clock). 3.2.0 keeps each characteristic's subscription independent on Android, so the FF11–FF15 subscriptions do not disturb each other. |
 | Permissions | `hasPermissions`, `requestPermissions` | Handled by the plugin: Android 12+ BLUETOOTH_SCAN/BLUETOOTH_CONNECT (and older location) are requested from the activity, based on what the manifest declares; iOS via CoreBluetooth authorization. `permission_handler` is not needed and not added. Needs an activity in the foreground; denial throws `UniversalBleException`. |
 | Bluetooth state | `getBluetoothAvailabilityState`, `availabilityStream` | Maps to `bluetoothOff` / `permissionDenied` (unauthorized) / `bluetoothUnavailable`. |
 | Connection interval | `onConnectionParametersChange` | Android API 26+ only, a global static callback fired when the stack reports an update. `connectionIntervalUs` is filled only after the first such callback and stays null on iOS and before any update. Not queryable on demand. |
