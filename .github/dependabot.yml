@@ -10,18 +10,51 @@ updates:
   # Independent Gradle builds in this repo. The app and the example both pull
   # in the Flutter Gradle plugin; the GATT probe is a plain Android/Kotlin
   # project.
+  #
+  # Dependencies in one build root arrive as a single PR: a lone AGP bump
+  # cannot build (AGP 9.5 needs Gradle >= 9.6.0), so the versions that travel
+  # together are updated together.
+  #
+  # The Android toolchain (Gradle wrapper, AGP, Kotlin) is ignored rather than
+  # grouped. Flutter 3.47 validates only Gradle 9.3.1 / AGP 9.2 / KGP 2.4.0,
+  # so moving past that is a deliberate wave with its own build, not a weekly
+  # PR. See ONY-905.
   - package-ecosystem: gradle
     directory: /apps/wmr_companion_app/android
     schedule:
       interval: weekly
+    groups:
+      gradle:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "gradle-wrapper"
+      - dependency-name: "com.android.application"
+      - dependency-name: "org.jetbrains.kotlin.android"
   - package-ecosystem: gradle
     directory: /example/android
     schedule:
       interval: weekly
+    groups:
+      gradle:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "gradle-wrapper"
+      - dependency-name: "com.android.application"
+      - dependency-name: "org.jetbrains.kotlin.android"
   - package-ecosystem: gradle
     directory: /tool/gatt_probe
     schedule:
       interval: weekly
+    groups:
+      gradle:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "gradle-wrapper"
+      - dependency-name: "com.android.application"
+      - dependency-name: "org.jetbrains.kotlin.android"
 
   # Workflow actions are pinned to major tags, so Dependabot keeps them current
   # one grouped PR at a time instead of one PR per action.
