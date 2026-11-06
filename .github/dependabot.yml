@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # The pub workspace has one lockfile at the root (`pubspec.yaml`); package
+  # members and the example do not keep their own.
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Independent Gradle builds in this repo. The app and the example both pull
+  # in the Flutter Gradle plugin; the GATT probe is a plain Android/Kotlin
+  # project.
+  - package-ecosystem: gradle
+    directory: /apps/wmr_companion_app/android
+    schedule:
+      interval: weekly
+  - package-ecosystem: gradle
+    directory: /example/android
+    schedule:
+      interval: weekly
+  - package-ecosystem: gradle
+    directory: /tool/gatt_probe
+    schedule:
+      interval: weekly
+
+  # Workflow actions are pinned to major tags, so Dependabot keeps them current
+  # one grouped PR at a time instead of one PR per action.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
