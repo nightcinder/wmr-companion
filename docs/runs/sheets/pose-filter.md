@@ -112,7 +112,7 @@ against 0.5 mm, and `J_D` is 0.000 mm because **no sample is scorable**. The
 tuner chose no constant and exited 1. The grid is in
 [pose-filter-grid-androidXr-20261105.md](pose-filter-grid-androidXr-20261105.md).
 
-Lag is inside every bar: median `L` is 11 ms on the slow sweep, 6 ms on medium
+Lag is inside every bar: median `L` is 10 ms on the slow sweep, 2 ms on medium
 and 7 ms on fast. S is 15 x 8 x 16 mm peak to peak over 15 s (was 41 x 66 x
 30 mm), so the bracing helped, but the last 10 s still wander about 1.0 mm RMS
 and the filter changes that by at most 0.005 mm across the whole grid. D has a

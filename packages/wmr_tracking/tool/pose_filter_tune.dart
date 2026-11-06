@@ -101,7 +101,9 @@ void main(List<String> args) {
             'passed': report.passed,
             'inconclusive': report.inconclusive,
             'missing_motions': report.missingMotions,
-            'raw_jitter_mm': report.rawJitterMm,
+            'raw_jitter_mm': report.rawJitterMm.isFinite
+                ? report.rawJitterMm
+                : null,
             'chosen': report.chosen?.point.toJson(),
             'jitter_mm': report.chosen?.jitterMm,
             'jitter_drift_mm': report.chosen?.jitterDriftMm,

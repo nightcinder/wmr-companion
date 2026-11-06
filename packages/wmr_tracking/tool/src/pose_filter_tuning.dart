@@ -593,7 +593,10 @@ class TuningReport {
     required this.rows,
     required this.chosen,
     required this.rawJitterMm,
+    required this.rawJitterDriftMm,
     required this.bypass,
+    required this.jitterSamples,
+    required this.driftSamples,
     required this.captureCount,
     required this.missingMotions,
     required this.inconclusive,
@@ -605,14 +608,23 @@ class TuningReport {
   final List<TuningRow> rows;
   final TuningRow? chosen;
   final double rawJitterMm;
+  final double rawJitterDriftMm;
   final bool bypass;
+  final int jitterSamples;
+  final int driftSamples;
   final int captureCount;
   final List<String> missingMotions;
   final bool inconclusive;
   final TuningExtension? extension;
 
+  /// `passed` requires scorable samples in both gated classes: a zero-sample
+  /// score reads as 0 and must never satisfy the addendum bars.
   bool get passed =>
-      !inconclusive && missingMotions.isEmpty && (bypass || chosen != null);
+      !inconclusive &&
+      missingMotions.isEmpty &&
+      jitterSamples > 0 &&
+      driftSamples > 0 &&
+      (bypass || chosen != null);
 
   /// Whether every scored motion class was present. A partial corpus is
   /// reported for the classes it has, but never selects constants.
@@ -621,7 +633,12 @@ class TuningReport {
   Map<String, Object?> toJson() => {
     'runtime': runtime.name,
     'captures': captureCount,
-    'raw_jitter_mm': _round(rawJitterMm),
+    'raw_jitter_mm': rawJitterMm.isFinite ? _round(rawJitterMm) : null,
+    'raw_jitter_drift_mm': rawJitterDriftMm.isFinite
+        ? _round(rawJitterDriftMm)
+        : null,
+    'jitter_samples': jitterSamples,
+    'drift_samples': driftSamples,
     'bypass': bypass,
     'complete': complete,
     'missing_motions': missingMotions,
@@ -730,10 +747,26 @@ List<TuningReport> tunePoseFilter(
       if (medium.isEmpty) PoseMotion.mediumPan.name,
       if (fast.isEmpty) PoseMotion.fastFlick.name,
     ];
+    final stillScores = [for (final capture in still) _rawJitterScore(capture)];
+    final driftScores = [for (final capture in drift) _rawDriftScore(capture)];
     final rawJitter = still.isEmpty
         ? double.nan
-        : _worst([for (final capture in still) _rawJitterMm(capture)]);
-    final bypass = rawJitter.isFinite && rawJitter <= poseFilterJitterLimitMm;
+        : _worst([for (final score in stillScores) score.value]);
+    final rawJitterDrift = drift.isEmpty
+        ? double.nan
+        : _worst([for (final score in driftScores) score.value]);
+    final jitterSamples = stillScores.fold<int>(0, (sum, s) => sum + s.used);
+    final driftSamples = driftScores.fold<int>(0, (sum, s) => sum + s.used);
+    // A bypass means the filter is pass-through, so the raw input must clear
+    // both gated bars *and* have samples that were actually scored. Zero
+    // scorable samples read as 0 mm and must not fabricate a pass.
+    final bypass =
+        rawJitter.isFinite &&
+        rawJitter <= poseFilterJitterLimitMm &&
+        rawJitterDrift.isFinite &&
+        rawJitterDrift <= poseFilterDriftJitterLimitMm &&
+        jitterSamples > 0 &&
+        driftSamples > 0;
     final complete = missing.isEmpty;
 
     final base = _evaluateGrid(
@@ -794,7 +827,10 @@ List<TuningReport> tunePoseFilter(
         rows: base.rows,
         chosen: chosen,
         rawJitterMm: rawJitter,
+        rawJitterDriftMm: rawJitterDrift,
         bypass: bypass,
+        jitterSamples: jitterSamples,
+        driftSamples: driftSamples,
         captureCount: runtimeCaptures.length,
         missingMotions: missing,
         inconclusive: inconclusive,
@@ -1295,7 +1331,7 @@ PoseFilterMetrics _metricsFor(
   );
 }
 
-double _rawJitterMm(PoseCapture capture) {
+_Scored _rawJitterScore(PoseCapture capture) {
   final times = [for (final sample in capture.samples) sample.timeNs];
   final raw = [for (final sample in capture.samples) sample.position];
   return _gatedJitter(
@@ -1303,7 +1339,18 @@ double _rawJitterMm(PoseCapture capture) {
     raw,
     originNs: capture.samples.first.timeNs,
     speeds: _speedsCmS(times, raw),
-  ).value;
+  );
+}
+
+_Scored _rawDriftScore(PoseCapture capture) {
+  final times = [for (final sample in capture.samples) sample.timeNs];
+  final raw = [for (final sample in capture.samples) sample.position];
+  return _gatedDrift(
+    times,
+    raw,
+    originNs: capture.samples.first.timeNs,
+    speeds: _speedsCmS(times, raw),
+  );
 }
 
 double _median(List<double> values) {

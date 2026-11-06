@@ -26,6 +26,32 @@ List<PoseCapture> _loadCaptures({TrackingVendor? runtime, int? run}) {
       .toList();
 }
 
+PoseCapture _trace(
+  PoseMotion motion,
+  Vector3 Function(double seconds) position, {
+  double seconds = 15,
+  double rateHz = 100,
+}) {
+  const origin = 1000000000;
+  final samples = <PoseCaptureSample>[];
+  for (var i = 0; i <= (seconds * rateHz).round(); i++) {
+    final t = i / rateHz;
+    samples.add(
+      PoseCaptureSample(
+        timeNs: origin + (t * 1000000000).round(),
+        position: position(t),
+      ),
+    );
+  }
+  return PoseCapture(
+    runtime: TrackingVendor.androidXr,
+    motion: motion,
+    run: 1,
+    provenance: const {'kind': 'test'},
+    samples: samples,
+  );
+}
+
 void main() {
   group('pose filter captures', () {
     test('the committed fixtures decode with provenance', () {
@@ -291,6 +317,57 @@ void main() {
       expect(report.missingMotions, contains(PoseMotion.mediumPan.name));
       expect(report.rows, isNotEmpty);
       expect(report.rows.every((row) => !row.passes), isTrue);
+      // A missing class reports `null`, not NaN, so the JSON evidence writes.
+      expect(() => jsonEncode(report.toJson()), returnsNormally);
+    });
+
+    test('a clean still trace with no scorable D samples cannot bypass', () {
+      const grid = PoseGrid(
+        minCutoff: PoseAxis(min: 0.10, max: 1.00, step: 0.10),
+        beta: PoseAxis(min: 0.00, max: 0.20, step: 0.02),
+        dCutoff: PoseAxis(min: 0.5, max: 2.0, step: 0.5),
+      );
+      final captures = [
+        _trace(PoseMotion.still, (t) => Vector3(0.2, -0.25, -0.35)),
+        // D below the 10 cm/s band: nothing is scored, so the zero it reports
+        // is not a measurement.
+        _trace(PoseMotion.heldDrift, (t) => Vector3(0.02 * t, 0, 0)),
+        _trace(PoseMotion.slowPan, (t) => Vector3(0.10 * t, 0, 0)),
+        _trace(PoseMotion.mediumPan, (t) => Vector3(0.50 * t, 0, 0)),
+        _trace(PoseMotion.fastFlick, (t) => Vector3(1.50 * t, 0, 0)),
+      ];
+
+      final report = tunePoseFilter(captures, grid: grid).single;
+
+      expect(report.complete, isTrue);
+      expect(report.jitterSamples, greaterThan(0));
+      expect(report.driftSamples, 0);
+      expect(report.bypass, isFalse);
+      expect(report.passed, isFalse);
+    });
+
+    test('a still trace with no scorable S samples cannot bypass', () {
+      const grid = PoseGrid(
+        minCutoff: PoseAxis(min: 0.10, max: 1.00, step: 0.10),
+        beta: PoseAxis(min: 0.00, max: 0.20, step: 0.02),
+        dCutoff: PoseAxis(min: 0.5, max: 2.0, step: 0.5),
+      );
+      final captures = [
+        // Shorter than the 2 s settle gate, so J scores nothing.
+        _trace(PoseMotion.still, (t) => Vector3.zero(), seconds: 1),
+        _trace(PoseMotion.heldDrift, (t) => Vector3(0.20 * t, 0, 0)),
+        _trace(PoseMotion.slowPan, (t) => Vector3(0.10 * t, 0, 0)),
+        _trace(PoseMotion.mediumPan, (t) => Vector3(0.50 * t, 0, 0)),
+        _trace(PoseMotion.fastFlick, (t) => Vector3(1.50 * t, 0, 0)),
+      ];
+
+      final report = tunePoseFilter(captures, grid: grid).single;
+
+      expect(report.complete, isTrue);
+      expect(report.jitterSamples, 0);
+      expect(report.driftSamples, greaterThan(0));
+      expect(report.bypass, isFalse);
+      expect(report.passed, isFalse);
     });
 
     test('the slow-sweep bound is a regression metric, not a grid gate', () {
