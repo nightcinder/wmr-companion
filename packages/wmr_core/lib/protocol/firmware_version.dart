@@ -37,6 +37,9 @@ enum WmrBridgeFeature {
 
   /// FF16: the packaged firmware version (WMR_Bridge #38).
   firmwareVersion,
+
+  /// FF17: controller control and status v2 (WMR_Bridge #70).
+  controllerControl,
 }
 
 /// Which characteristics the connected bridge's GATT table offers.
@@ -53,6 +56,7 @@ class WmrBridgeFeatures {
     this.configBlock = false,
     this.echo = false,
     this.firmwareVersion = false,
+    this.controllerControl = false,
   });
 
   /// A bridge whose characteristics were not discovered.
@@ -69,6 +73,7 @@ class WmrBridgeFeatures {
       configBlock: seen.contains(wmrBridgeConfigCharUuid),
       echo: seen.contains(wmrBridgeEchoCharUuid),
       firmwareVersion: seen.contains(wmrBridgeVersionCharUuid),
+      controllerControl: seen.contains(wmrBridgeControllerCharUuid),
     );
   }
 
@@ -78,6 +83,7 @@ class WmrBridgeFeatures {
   final bool configBlock;
   final bool echo;
   final bool firmwareVersion;
+  final bool controllerControl;
 
   /// Whether [feature] is offered.
   bool supports(WmrBridgeFeature feature) => switch (feature) {
@@ -87,6 +93,7 @@ class WmrBridgeFeatures {
     WmrBridgeFeature.configBlock => configBlock,
     WmrBridgeFeature.echo => echo,
     WmrBridgeFeature.firmwareVersion => firmwareVersion,
+    WmrBridgeFeature.controllerControl => controllerControl,
   };
 
   /// The offered features, in enum order.

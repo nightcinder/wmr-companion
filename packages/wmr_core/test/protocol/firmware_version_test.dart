@@ -12,6 +12,7 @@ const _all = WmrBridgeFeatures(
   configBlock: true,
   echo: true,
   firmwareVersion: true,
+  controllerControl: true,
 );
 
 Uint8List _bytes(String text) => Uint8List.fromList(utf8.encode(text));
@@ -26,6 +27,7 @@ void main() {
         wmrBridgeConfigCharUuid,
         wmrBridgeEchoCharUuid,
         wmrBridgeVersionCharUuid,
+        wmrBridgeControllerCharUuid,
         '0000abcd-0000-1000-8000-00805f9b34fb',
       ]);
       expect(features.rawStream, isTrue);
@@ -34,6 +36,7 @@ void main() {
       expect(features.configBlock, isTrue);
       expect(features.echo, isTrue);
       expect(features.firmwareVersion, isTrue);
+      expect(features.controllerControl, isTrue);
       expect(features.offered, WmrBridgeFeature.values.toSet());
       for (final feature in WmrBridgeFeature.values) {
         expect(features.supports(feature), isTrue);
@@ -49,7 +52,7 @@ void main() {
       expect(WmrBridgeFeatures.none.offered, isEmpty);
     });
 
-    test('an older bridge without FF13-FF16 still reports FF11/FF12', () {
+    test('an older bridge without FF13-FF17 still reports FF11/FF12', () {
       final features = WmrBridgeFeatures.fromCharacteristics([
         wmrBridgeStreamCharUuid,
         wmrBridgeDecodedCharUuid,
@@ -60,6 +63,7 @@ void main() {
       expect(features.configBlock, isFalse);
       expect(features.echo, isFalse);
       expect(features.firmwareVersion, isFalse);
+      expect(features.controllerControl, isFalse);
     });
   });
 

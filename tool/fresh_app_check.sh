@@ -39,13 +39,21 @@ host = (
     "wmr_companion_ui",
     "wmr_companion_hid_android",
 )
+# The tracking adapters are published too. Depend on them so `pub get`
+# resolves all twelve workspace packages, not just the host-facing five.
+tracking = (
+    "wmr_tracking_dispatch",
+    "wmr_tracking_android_xr",
+    "wmr_tracking_viture",
+    "wmr_tracking_xreal",
+)
 deps = "\n".join(
-    f"  {name}:\n    path: {root}/packages/{name}" for name in host
+    f"  {name}:\n    path: {root}/packages/{name}" for name in host + tracking
 )
 # The packages depend on each other by hosted constraints, which are not on
 # pub.dev yet. A host using them by path must override the whole internal
 # closure, because dependency overrides are not transitive.
-closure = host + ("wmr_core", "wmr_fusion", "wmr_tracking")
+closure = host + tracking + ("wmr_core", "wmr_fusion", "wmr_tracking")
 overrides = "dependency_overrides:\n" + "\n".join(
     f"  {name}:\n    path: {root}/packages/{name}" for name in closure
 )
