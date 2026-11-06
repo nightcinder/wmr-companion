@@ -203,7 +203,7 @@ void main() {
     expect(companion.config.streamMode, StreamMode.none);
   });
 
-  test('an unexpected disconnect reconnects once', () async {
+  test('an unexpected disconnect reconnects after the first delay', () async {
     companion = WmrCompanion(ble: transport);
     await companion.connect(_bridge);
     companion.setStickCentre(Hand.left, 0.12, -0.34);
