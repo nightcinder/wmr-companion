@@ -7,7 +7,7 @@ import 'ble_adapter.dart';
 
 import 'package:wmr_core/ble/ble_transport.dart';
 
-/// [BleAdapter] backed by the `universal_ble` package (3.1.x).
+/// [BleAdapter] backed by the `universal_ble` package (3.2.x).
 ///
 /// Untested on hardware. Each method is a direct call; the sequencing lives
 /// in `UniversalBleTransport`.

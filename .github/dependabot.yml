@@ -55,6 +55,10 @@ updates:
       - dependency-name: "gradle-wrapper"
       - dependency-name: "com.android.application"
       - dependency-name: "org.jetbrains.kotlin.android"
+      # androidx.core:core-ktx 1.19.1 demands compileSdk 37 and AGP 9.1
+      # (checkDebugAarMetadata), while the probe is pinned to compileSdk 35 and
+      # AGP 8.7.3. It moves with the probe's toolchain, not before.
+      - dependency-name: "androidx.core:core-ktx"
 
   # Workflow actions are pinned to major tags, so Dependabot keeps them current
   # one grouped PR at a time instead of one PR per action.
