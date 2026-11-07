@@ -8,10 +8,12 @@ import '../domain/imu_calibration.dart';
 import '../domain/loss_window.dart';
 import '../domain/stick_centre.dart';
 import '../domain/tick_timer.dart';
+import '../protocol/controller_control.dart';
 import '../protocol/decoded_batch.dart';
 import '../protocol/decoded_record.dart';
 import '../protocol/firmware_version.dart';
 import '../protocol/gatt.dart';
+import '../protocol/switch_burst.dart';
 import '../protocol/wmr_fragment.dart';
 
 /// A reassembled frame with the phone-side receive time of its last fragment.
@@ -406,6 +408,9 @@ class _DecodedBridgeState {
   final List<LossWindow> lossWindows = [
     for (var h = 0; h < wmrNumControllers; h++) LossWindow(),
   ];
+  final List<SwitchBurstTimestamps> bursts = [
+    for (var h = 0; h < wmrNumControllers; h++) SwitchBurstTimestamps(),
+  ];
 
   // Parse counters, FF12 and FF14 alike.
   int wrongLength = 0;
@@ -420,6 +425,9 @@ class _DecodedBridgeState {
     lastSeq.fillRange(0, lastSeq.length, null);
     for (final t in timers) {
       t.rebaseline();
+    }
+    for (final b in bursts) {
+      b.reset();
     }
     for (final w in lossWindows) {
       w.reset();
@@ -519,6 +527,10 @@ class ControllerService {
   final List<int> _dGaps = List.filled(wmrNumControllers, 0);
   final List<int> _dOutOfOrder = List.filled(wmrNumControllers, 0);
   final List<int> _dRecords = List.filled(wmrNumControllers, 0);
+  final List<ControllerModel> _models = List.filled(
+    wmrNumControllers,
+    ControllerModel.wmr,
+  );
   final List<LossWindow> _lossWindows = [
     for (var h = 0; h < wmrNumControllers; h++) LossWindow(),
   ];
@@ -990,20 +1002,31 @@ class ControllerService {
     }
     final hand = r.hand;
 
+    // Switch 0x30 reports carry three IMU samples in one raw frame, so the
+    // three FF12/FF14 records share a sequence. The burst clock gives them
+    // the 5 ms sensor spacing and marks the repeats so they are not counted
+    // as out-of-order records.
+    final burst = bridge.bursts[hand];
+    final isSwitch = _models[hand] == ControllerModel.nintendoSwitch;
+    final timed = isSwitch ? burst.apply(r) : r;
+    final burstRepeat = isSwitch && burst.isBurstRepeat;
+
     // Per-bridge figures: this bridge's sequence line, timing and loss.
-    final bridgeLast = bridge.lastSeq[hand];
-    if (bridgeLast != null) {
-      final delta = sequenceDelta(bridgeLast, r.sequence);
-      if (delta > 1) {
-        bridge.gaps[hand] += delta - 1;
-      } else if (delta <= 0) {
-        bridge.outOfOrder[hand]++;
+    if (!burstRepeat) {
+      final bridgeLast = bridge.lastSeq[hand];
+      if (bridgeLast != null) {
+        final delta = sequenceDelta(bridgeLast, r.sequence);
+        if (delta > 1) {
+          bridge.gaps[hand] += delta - 1;
+        } else if (delta <= 0) {
+          bridge.outOfOrder[hand]++;
+        }
       }
     }
     bridge.lastSeq[hand] = r.sequence;
     bridge.records[hand]++;
     bridge.rates[hand].add(receivedAtUs);
-    bridge.timers[hand].advance(r.deviceTicks, r.rxTimeUs);
+    bridge.timers[hand].advance(timed.deviceTicks, timed.rxTimeUs);
     bridge.lossWindows[hand].add(
       receivedAtUs,
       bridge.records[hand],
@@ -1012,20 +1035,22 @@ class ControllerService {
 
     // Merged figures: the fused view stays per hand.
     _checkSourceDevice(hand, sourceDeviceId);
-    final last = _dLastSeq[hand];
-    if (last != null) {
-      final delta = sequenceDelta(last, r.sequence);
-      if (delta > 1) {
-        _dGaps[hand] += delta - 1;
-      } else if (delta <= 0) {
-        _dOutOfOrder[hand]++;
+    if (!burstRepeat) {
+      final last = _dLastSeq[hand];
+      if (last != null) {
+        final delta = sequenceDelta(last, r.sequence);
+        if (delta > 1) {
+          _dGaps[hand] += delta - 1;
+        } else if (delta <= 0) {
+          _dOutOfOrder[hand]++;
+        }
       }
     }
     _dLastSeq[hand] = r.sequence;
     _dRecords[hand]++;
     _rates[hand].add(receivedAtUs);
     final sample = _pipelines[hand].add(
-      r,
+      timed,
       receivedAtUs,
       bridgeId: sourceDeviceId,
     );
@@ -1045,6 +1070,24 @@ class ControllerService {
       p.mapping = m;
     }
   }
+
+  /// Tells the service which controller model FF17 reports for [hand].
+  ///
+  /// Switch hands need the 3-sample burst clock: their FF12/FF14 records
+  /// share a sequence number and the report itself carries no per-sample
+  /// time. Every other model keeps the plain tick path. Safe to call on
+  /// every FF17 status notification.
+  void setControllerModel(int hand, ControllerModel model) {
+    if (hand < 0 || hand >= wmrNumControllers) return;
+    if (_models[hand] == model) return;
+    _models[hand] = model;
+    for (final bridge in _decodedBridges.values) {
+      bridge.bursts[hand].reset();
+    }
+  }
+
+  /// The FF17 model last set for [hand], WMR until [setControllerModel].
+  ControllerModel controllerModel(int hand) => _models[hand];
 
   /// Applies [calibration] to [hand]'s samples when [apply] is true, and
   /// clears it otherwise. The pipeline ignores it for CALIBRATED-flagged

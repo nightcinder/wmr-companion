@@ -110,7 +110,7 @@ plan was written:
 
 | Layer | Files | Dependencies | Reuse |
 | --- | --- | --- | --- |
-| Protocol | `lib/protocol/` (GATT ids, FF11 fragments, FF12/FF14 records and batches, FF13 block, FF15 echo, bridge status) | pure Dart | **Direct.** Golden-vector tests already exist |
+| Protocol | `lib/protocol/` (GATT ids, FF11 fragments, FF12/FF14 records and batches, FF13 block, Switch calibration and burst timing, FF15 echo, bridge status) | pure Dart | **Direct.** Golden-vector tests already exist |
 | Domain | `lib/domain/` (tick timing, gyro bias, axis mapping, hand pipeline, orientation, stick centre, gamepad mapping) | pure Dart + `vector_math` | **Direct.** `gamepad.dart` is already stateless |
 | Fusion | `packages/wmr_fusion/` | pure Dart, own vector/quaternion types | **Direct.** Optional; see math-type note in §9 |
 | Service | `lib/services/controller_service.dart` | `dart:async` + domain/protocol | **Direct**, after a small transport-injection pass |

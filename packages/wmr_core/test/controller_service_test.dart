@@ -3,6 +3,8 @@ import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/domain/imu_calibration.dart';
 import 'package:wmr_core/protocol/config_decode.dart';
+import 'package:wmr_core/protocol/controller_control.dart';
+import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
 import 'package:wmr_core/services/controller_service.dart';
@@ -95,6 +97,40 @@ void main() {
     await service.setMode(StreamMode.decoded);
     expect(service.mode, StreamMode.decoded);
     expect(t.cccLog.last, 'on $wmrBridgeDecodedCharUuid');
+  });
+
+  test('a Switch hand spaces a 3-sample burst and does not call it out of '
+      'order', () async {
+    await service.setMode(StreamMode.decoded);
+    expect(service.controllerModel(0), ControllerModel.wmr);
+    service.setControllerModel(0, ControllerModel.nintendoSwitch);
+    expect(service.controllerModel(0), ControllerModel.nintendoSwitch);
+
+    // One 0x30 report: three samples, one sequence, one packet time.
+    for (var i = 0; i < 3; i++) {
+      t.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeDecodedCharUuid,
+        encodeDecodedRecord(
+          DecodedRecord(
+            hand: 0,
+            sequence: 3,
+            rxTimeUs: 1000,
+            deviceTicks: 9000,
+            gyro: const [0, 0, 0],
+            accel: const [0, 0, 9.8],
+          ),
+        ),
+      );
+    }
+    await Future<void>.delayed(Duration.zero);
+
+    final hand = service.decodedStats.hands[0];
+    expect(hand.records, 3);
+    expect(hand.outOfOrder, 0);
+    expect(hand.sequenceGaps, 0);
+    expect(hand.dt.count, 2);
+    expect(hand.dt.p50, closeTo(0.005, 1e-9));
   });
 
   test('a bridge without FF10 is unavailable, not still reading', () async {
