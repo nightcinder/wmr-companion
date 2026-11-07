@@ -114,4 +114,5 @@ Capture per gate: logcat `pose-androidxr-<gate>-<timestamp>.log`; exported JSON/
 - Gate 1 recorded.
 - Gate 2: permission outcome recorded; if `SPATIAL` is unsupported, the path is not 6DoF-capable.
 - Gate 7 pass.
-- Gate 8: failure of `headRelative` recorded.- Android XR needs joints arriving while gripping. If gripping kills tracking, the path is "head-relative fallback only (grip kills tracking)".
+- Gate 8: failure of `headRelative` recorded.
+- Android XR needs joints arriving while gripping. If gripping kills tracking, the path is "head-relative fallback only (grip kills tracking)".
