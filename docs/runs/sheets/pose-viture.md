@@ -1,325 +1,114 @@
-# Run sheet: pose validation — VITURE (Pro Neckband + Luma Ultra)
+# Run sheet: pose validation - VITURE (Pro Neckband + Luma Ultra)
+Status: proposed, not run. The Unity-in-Flutter relay is implemented and host-tested; no Neckband run has happened. Result tables are empty. Code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1.
 
-> **Proposed sheet, not yet run.** Nothing here is a hardware result. Every figure is recorded by the owner; all result tables are empty and must not be pre-filled. The Unity-in-Flutter relay is implemented and host-tested, but no Neckband run has happened. Current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1; v0.7.0 is historical.
+Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.17 runs these gates.
 
-Companion documents:
-
-- App [`docs/tracking/GATES.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/tracking/GATES.md) — gates 1, 3, 4, 7, 8, 9 (this sheet).
-- App [`docs/STATUS.md`](https://github.com/nightcinder/wmr-companion/blob/main/docs/STATUS.md)
-- VITURE XR Glasses SDK (C) and VITURE XR SDK for Unity (links in RESEARCH.md Sources).
-
-Gates covered: **1** (capture one frame), **3** (Unity-in-Flutter smoke test), **4** (VITURE Neckband hand test), **7** (clock), **8** (fallback quality), **9** (VITURE C path, optional).
-
-## 0. What this sheet settles
-
-- Whether the Luma Ultra stereo grayscale frames show the WMR controller LEDs (gate 1).
-- Whether a one-scene Unity UaaL plugin survives Flutter hot restart, activity recreation and pause/resume (gate 3).
-- Whether `VitureXR.HandTracking` delivers 26 joints on a Pro Neckband + Luma Ultra, and whether a gripping hand stays tracked (gate 4).
-- Whether the aligner is stable (gate 7) and `headRelative` is honest (gate 8).
-- Optionally, whether the phone-only C SDK head-pose path works (gate 9).
-
-## 1. Prerequisites and builds
-
+**The Pro Neckband has no D-pad.** Controls are Power, Volume Up/Down, Settings, the pointer/air-mouse, hand gestures, the Neckband Remote app, or a paired Bluetooth controller.
+## 1. Prerequisites
 | Item | Required |
 |---|---|
-| Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) are rejected by the adapter for hand tracking and must not be used for gate 4. An unreported model is not an error: `create()` succeeds and the Unity `start` handshake reports the real model. |
-| Host | **VITURE Pro Neckband** (Android, wireless ADB) for gates 3/4/7/8 stereo checks. The app runs on the Neckband, not on a paired phone. Gate 9 (optional C path) needs an Android phone with USB host instead. |
-| Unity | Unity 6000.0+ with Android build support, `com.unity.xr.hands`, VITURE XR SDK for Unity v0.9.0 (`com.viture.xr`, `Viture.XR.VitureXR`; v0.7.0 is historical). External SDK gate; not redistributable. |
-| App build | Debug APK from wmr-companion `main` after ONY-612/ONY-617, built with `--dart-define=WMR_VITURE_TRACKING=true`, with the `unityLibrary` AAR linked (export pinned by CI). The VITURE slice requests `android.permission.CAMERA` only. Record app commit and export SHA. |
-| Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
-| Tooling | `adb` (wireless for the Neckband), terminal, logcat capture, and a way to screenshot the debug overlay. |
-
-Build the APK (after exporting the Unity `unityLibrary` AAR per FRAMEWORK.md "Packaging"):
-
-```bash
-cd apps/wmr_companion_app
-flutter build apk --debug --dart-define=WMR_VITURE_TRACKING=true
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
-```
-
-Confirm the flag is live: the debug overlay shows "VITURE tracking: available" when the plugin reports the AAR linked; otherwise Auto keeps controller 3DoF and the status names the missing Unity runtime and the unified release APK to install.
+| Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (One, OneLite, Pro, Pro2, Luma, LumaPro, LumaCyber, Beast) are rejected for hand tracking. |
+| Host | VITURE Pro Neckband (Android, wireless ADB) for gates 3/4/7/8. Gate 9 needs an Android phone with USB host. |
+| App | Signed v0.3.17 unified APK (versionCode 2022). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1); no export or debug flags are needed. Record version, export SHA and firmware SHA. |
+| Bridge | One board on `main`, both controllers paired and awake. |
+| Tooling | `adb` (wireless for the Neckband), terminal, logcat, screenshots. |
+| Checkerboard | Gate 1: flat, rigid, at least 8x6 inner corners, known square size. |
 
 ## 2. Setup, once per sitting
+1. Power the Neckband, enable wireless ADB, confirm `adb connect <ip>:5555`.
+2. Put the bridge in place, controllers on taped marks ~0.5 m away. Photo the setup.
+3. Start the bridge serial monitor and a Neckband logcat capture.
+4. Connect the app, select **Batched FF14**, confirm `STREAM` shows `stream=batched`, `sub=1`, live `rate_rx`, and `bridge_hands=0`.
+5. Confirm the glasses model is `LumaUltra` before gate 4; a 3DoF model fails gate 4 with `unsupported`.
+6. From the debug overlay record `playerHosted`, `stereoMode` and `stage`. Healthy: `playerHosted` then `loaderStarted` then `firstFrame`, with `stereoMode` one of `multiPass`/`singlePass`/`singlePassInstanced`. If `stereoMode` is `unknown` or the stage stops early, record it and stop; the loader is not rendering stereo 3D (SpaceWalker).
 
-1. Power the Neckband, enable wireless ADB, confirm `adb connect <ip>:5555` succeeds.
-2. Put the bridge in its usual place, controllers on taped marks ~0.5 m from it. Photo the setup.
-3. Start the serial monitor (bridge) and a logcat capture (Neckband).
-4. Connect the app to the bridge, select **Batched FF14**, confirm `STREAM` shows `stream=batched`, `sub=1`, live `rate_rx`. Confirm `bridge_hands=0`.
-5. Confirm the glasses model reported by the app is `LumaUltra` before gate 4; if it is a 3DoF model, gate 4 fails with `unsupported` and must be recorded as such.
-6. From the debug overlay, record the VITURE `start` reply fields: `playerHosted`, `stereoMode` and `stage`. A healthy run reaches `playerHosted` → `loaderStarted` → `firstFrame` with `stereoMode` one of `multiPass`/`singlePass`/`singlePassInstanced`. If `stereoMode` is `unknown` or the stage stops at `playerHosted`/`loaderStarted`, record it and stop; the loader is not rendering in stereo 3D (SpaceWalker mode). A 2D/mono player fails closed with `unavailable`.
-7. Capture logcat for every gate (see §9): `adb logcat -v threadtime > pose-viture-gate<N>-<timestamp>.log`, then filter with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted"`.
+If the app drops to 0DoF with **6DoF only** greyed out, check the status line. 6DoF needs the VITURE source running in stereo 3D; a 2D/mono player fails closed with `unavailable`. Record the line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Use the controls listed at the top, not ADB touches.
+## 3. Gate 1 - LED visibility and checkerboard
+`carinaLeds` runs 12 captures: 4 distances (0.3, 0.5, 0.8, 1.0 m) x 3 orientations (front, rotated, tilted), 12 s each. Each capture walks an exposure ladder (0.1, 0.3, 1.0, 3.0 ms) at gain 6, about 3 s and ~75 frames per rung at 25 Hz. It writes one PGM per channel per rung plus `carina-diagnostics.json`, and retains 16 stills per capture.
 
-### 2.1 Neckband 0DoF / 6DoF status (v0.3.11)
+1. Power both controllers (LEDs active). Dim the room.
+2. Connect the Luma Ultra over USB and accept the permission prompt.
+3. Run `carinaLeds`. Hold one orientation per capture; the rung advances by time, so mixing orientations confounds exposure with pose.
 
-On a Luma Ultra with a Pro Neckband the app can open and then drop to 0DoF, with
-the **6DoF only** button greyed out. Two causes, both fixed in v0.3.11:
+| Item | 0.3 m | 0.5 m | 0.8 m | 1.0 m |
+|---|---|---|---|---|
+| Frames per rung / total | | | | |
+| FPS observed | | | | |
+| Width x height | | | | |
+| Retained stills (48 per distance) | | | | |
+| LEDs visible? | | | | |
+| Approx. LED blobs per still | | | | |
+| Distance at which LEDs disappear | | | | |
 
-1. The Unity player is created lazily during a VITURE start, after
-   `MainActivity` has already run `onResume` and `onWindowFocusChanged`, so the
-   first host left it paused and unfocused and the VITURE XR loader never
-   became active. v0.3.11 resumes and focuses the player once per successful
-   host and runs Flutter in transparent background mode so the Unity surface
-   keeps compositing.
-2. 6DoF needs the VITURE XR source to be running and rendering in stereo 3D
-   (SpaceWalker mode). Until that source starts, the app is 0DoF. A 2D / mono
-   player fails closed with `unavailable`.
+Pass: at least 5 LED blobs in at least 90% of frames at 0.8 m. The tester returns the raw PGMs and telemetry; ONY-736 counts blobs.
 
-**Hand tracking source.** The bench screen has a **Hand tracking source**
-dropdown: `None`, `Simulated`, `Auto (USB)`, `Android XR`, `VITURE`, `XREAL`.
-On a Neckband host the app auto-selects `Auto (USB)` on screen open, so VITURE
-attaches without a manual pick; the detector only runs when a vendor flag is
-built in. A manual pick made while the probe runs wins. **6DoF only** is
-enabled only while a started source reports hand joints. A status line above the
-dropdown always shows the current state:
+Checkerboard (`carinaCheckerboard`): 10 captures, 2 distances (0.5, 0.8 m) x 5 angles (fronto-parallel, left, right, up, down), 4 s each. Power the controllers off so their blobs do not confuse the corner detector. Record the square size (mm), inner corners and distances; return the images with pose labels.
+## 4. Gate 3 - Unity-in-Flutter smoke test
+1. From the debug overlay tap **Start tracking (VITURE)**.
+2. Confirm the Unity player starts and C# receives `start` via `UnitySendMessage`.
+3. Confirm poses arrive in Dart as `TrackingFrameCodec` JSON; record the frame rate for 60 s.
+4. Hot restart (`r`), force activity recreation, then background for 30 s and foreground: tracking must stop and restart without a crash, report `unavailable` on recreation and recover, and never deadlock.
 
-- `6DoF: Auto (USB) hand tracking attached (viture runtime).` when 6DoF is available.
-- `0DoF: no hand-tracking source attached.` when the source is `None`.
-- `0DoF: <source> is not built into this app.` when the flag is off.
-- `0DoF: Starting <source>...` while it starts.
-- `0DoF: VITURE hand tracking is not available in this build; continuing with controller 3DoF.` when the APK has no Unity runtime; install the unified release APK.
-- `0DoF: <source> failed to start (<kind>).` on any other start failure.
-- `0DoF: VITURE XR stereo is inactive, so hand tracking cannot start. Switch the glasses to 3D (SpaceWalker) and select the source again.` when the glasses are in 2D mode.
-- `0DoF: <source> does not report hand joints.` when the source runs but reports no joints.
-- `0DoF: <message>.` for any other failure.
-
-Record the status line in the run log. If the app still shows 0DoF on v0.3.11, capture logs with the filter above plus `0DoF`, `6DoF`, `spacewalker`, `running in 2d`.
-
-## 3. Gate 1 — capture one frame per device (IR question)
-
-**Question:** do the Luma Ultra stereo grayscale frames show the WMR controller LEDs?
-
-Procedure:
-
-1. Power on both WMR controllers (LEDs active). Dim the room.
-2. Run the companion's VITURE camera preview (or a minimal Unity scene reading `register_callbacks_carina`) to capture the four grayscale buffers (left/right primary and secondary) at 25 Hz.
-3. Capture frames with controllers at ~0.3 m, ~0.5 m, ~1.0 m, in three orientations each.
-4. Save as `pose-viture-gate1-<distance>-<orientation>.png`.
-
-Record:
-
-| Item | Value (user-reported) |
+| Item | Value |
 |---|---|
-| Glasses model | Luma Ultra |
-| Frames captured? (yes/no) | |
-| LEDs visible in grayscale? | |
-| Distance at which LEDs disappear | |
-| Frame rate observed (Hz) | |
-| Exposure/gain used | |
-
-**Pass for 1.0:** frames captured and LED visibility recorded for at least three distances.
-
-## 4. Gate 3 — Unity-in-Flutter smoke test
-
-**Question:** does a one-scene UaaL plugin survive Flutter hot restart, activity recreation and Unity pause/resume, and do JSON frames round-trip?
-
-Procedure:
-
-1. Launch the app with the flag on. From the debug overlay tap **Start tracking (VITURE)**.
-2. Confirm the Unity player starts and the C# bridge receives `start` via `UnitySendMessage`.
-3. Confirm poses arrive in Dart via the JNI callback as `TrackingFrameCodec` JSON.
-4. Run for 60 s; record frame rate and any dropped frames.
-5. Trigger Flutter hot restart (`r` in `flutter run`); confirm tracking stops and restarts without a crash.
-6. Force activity recreation (rotate the device / relaunch); confirm `unavailable` is reported and a manual restart recovers.
-7. Background the app for 30 s, then foreground; confirm Unity pause/resume does not deadlock the channel.
-
-Capture logcat:
-
-```bash
-adb logcat -v threadtime > pose-viture-gate3-<YYYYMMDD-HHMMSS>.log
-```
-
-Record:
-
-| Item | Value (user-reported) |
-|---|---|
-| Unity player starts? (yes/no) | |
-| `start` command received by C#? | |
+| Unity player starts? | |
+| `start` received by C#? | |
 | JSON frames arrive in Dart? | |
 | Frame rate (Hz) | |
 | Hot restart survives? | |
 | Activity recreation recovers? | |
 | Pause/resume deadlocks? | |
-| Unity→OpenXR conversion within 1e-6? | |
-| `playerHosted` (true/false) | |
-| `stereoMode` (multiPass/singlePass/singlePassInstanced/unknown) | |
-| Highest stage reached (playerHosted/loaderStarted/firstFrame) | |
-| Stereo timeout error (10 s loader / 20 s frame)? | |
+| Unity->OpenXR within 1e-6? | |
+| `playerHosted` / `stereoMode` / highest stage | |
 
-**Pass for 1.0:** commands round-trip, frames arrive, and no deadlock across hot restart / recreation / pause-resume. If the AAR is not linked, record `unavailable` and stop; the gate is not failed, it is blocked on the SDK gate.
+Pass: commands round-trip, frames arrive, no deadlock. If the AAR is not linked, record `unavailable` and stop; the gate is blocked on the SDK, not failed.
+## 5. Gate 4 - hand tracking while gripping
+The bench runs `handEmpty` and `handGrip`, 60 s each. Grip dropout is the share of the run with no hand joints while gripping.
 
-## 5. Gate 4 — VITURE Neckband hand test
-
-**Question:** does `VitureXR.HandTracking.Start()` deliver 26 joints, and is a hand tracked while gripping a WMR controller?
-
-Procedure:
-
-1. Confirm glasses model is `LumaUltra` (gate fails with `unsupported` otherwise).
-2. Start tracking. With the hand empty and visible, log for 60 s.
-3. Record joint count and rate.
-4. Repeat with the hand gripping a WMR controller (controller awake, not streaming). Record whether joints still arrive.
-5. Tap recenter and confirm `VitureXR.HeadTracking.SetWorldOrigin()` recentres the head pose.
-6. Stop and dispose; confirm no leak on repeat.
-
-Capture logcat:
-
-```bash
-adb logcat -v threadtime > pose-viture-gate4-<YYYYMMDD-HHMMSS>.log
-```
-
-Record:
-
-| Item | Value (user-reported) |
+| Item | Value |
 |---|---|
 | Glasses model | |
 | Head-pose rate (Hz) | |
 | Joint rate, empty hand (Hz) | |
-| Joint rate, gripping controller (Hz) | |
-| Hand tracked while gripping? (yes/no/partial) | |
-| Joints present (count of 26) | |
+| Joint rate, gripping (Hz) | |
+| Hand tracked while gripping? | |
+| Joints present (of 26) | |
+| Grip dropout (%) | |
 | Recenter works? | |
 | Errors / exceptions | |
-| `playerHosted` (true/false) | |
-| `stereoMode` | |
-| Highest stage reached | |
 
-**Pass for 1.0:** joints arrive at >0 Hz for an empty hand and the gripping-hand result is recorded. "No" for gripping is a valid recorded result.
+Pass: dropout under 5%. Marginal: 5-15%. Fail: over 15%. Joints must arrive for an empty hand.
+## 6. Gate 7 - clock test
+Same procedure as [pose-androidxr.md](pose-androidxr.md) section 6, with the VITURE source.
 
-## 6. Gate 7 — clock test
+| Duration (s) | Offset mean (ms) | Offset std (ms) | Max age (ms) | Frames >100 ms | Rebases |
+|---|---|---|---|---|---|
+| | | | | | |
 
-Same procedure as the Android XR sheet §6, with the VITURE source. Log controller `receivedAtUs` and tracking host timestamps for 60 s; record offset mean/std, max frame age, stale-frame count, rebases.
+Pass: offset std < 5 ms and < 1% of frames older than 100 ms.
+## 7. Gate 8 - fallback quality
+Same procedure as [pose-androidxr.md](pose-androidxr.md) section 7, with the VITURE source.
 
-Record:
+Record the six motions from that section: static at arm's length, nod +/-20 deg, walk 2 m and back, turn 90 deg in place, then static and nod while gripping (headRelative).
 
-| Item | Value (user-reported) |
-|---|---|
-| Duration (s) | |
-| Offset mean (ms) | |
-| Offset std (ms) | |
-| Max frame age (ms) | |
-| Frames older than 100 ms (count / %) | |
-| Offset rebases (count) | |
+Pass: the test is run and the failure of `headRelative` as positional tracking is recorded.
+## 8. Gate 9 - VITURE C path (optional, phone)
+1. Connect a Luma Ultra to an Android phone with USB host (OTG) and accept the permission prompt.
+2. Run `carinaPose`: one 60 s capture polling `xr_device_provider_get_gl_pose_carina` every 10 ms.
+3. Record pose rate, status flag, USB permission behaviour, and whether `set_dof_type_carina` (3DoF/6DoF) is required.
 
-**Pass for 1.0:** offset std < 5 ms and <1% stale frames.
+| Pose rate (Hz) | Successes / polls | Status flag | Pose valid? | USB prompt? | 6DoF selectable? | Errors |
+|---|---|---|---|---|---|---|
+| | | | | | | |
 
-## 7. Gate 8 — fallback quality test
-
-Same procedure as the Android XR sheet §7, with the VITURE source (head pose + hand anchor when available). Record reported position error vs. physical mark while nodding and walking, with and without the hand anchor.
-
-Record:
-
-| Motion | Anchor available? | Reported position error (cm) | Notes |
-|---|---|---|---|
-| Static, arm's length | yes | | |
-| Nod ±20° | yes | | |
-| Walk 2 m and back | yes | | |
-| Turn 90° in place | yes | | |
-| Static, gripping controller | no (headRelative) | | |
-| Nod, gripping controller | no (headRelative) | | |
-
-**Pass for 1.0:** test run and the failure of `headRelative` as positional tracking recorded.
-
-## 8. Gate 9 — VITURE C path (optional, phone-only head pose)
-
-Only if a Luma Ultra and an Android phone with USB host are available and the Neckband path is not.
-
-Procedure:
-
-1. Wrap `libglasses` via FFI (or use a test harness) and call `get_gl_pose_carina` (Carina/Luma Ultra) on a background thread.
-2. Measure pose rate and status flag for 60 s.
-3. Record USB permission behaviour (`UsbDeviceConnection` fd hand-off, permission prompt).
-4. Record whether `set_dof_type_carina` (3DoF vs 6DoF) is required and what happens if it is skipped.
-
-Record:
-
-| Item | Value (user-reported) |
-|---|---|
-| Pose rate (Hz) | |
-| Status flag behaviour | |
-| USB permission prompt? | |
-| 6DoF selectable? | |
-| Errors | |
-
-**Pass for 1.0:** if it works, recorded as the lowest-friction phone-only head-pose source. If it fails, recorded as blocked; the Neckband path remains the only VITURE hand path.
-
-## 9. How to attach recorded pose files
-
-During each gate, capture:
-
-1. `adb logcat -v threadtime > pose-viture-<gate>-<YYYYMMDD-HHMMSS>.log` (wireless ADB for the Neckband). Read it with `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted|0DoF|6DoF|spacewalker|running in 2d"`; record the highest stage and `stereoMode`.
-2. Screenshot the debug overlay showing `playerHosted`, `stereoMode` and `stage` for each start attempt (this is the field a tester can read without parsing logs).
-3. Any app-exported JSON/CSV tracking frames, via Share or `adb pull <path>`; name them `pose-viture-<gate>-<timestamp>.json`.
-4. The bridge serial capture as `pose-viture-serial-<timestamp>.txt`.
-5. Unity player logs if available (`pose-viture-unity-<timestamp>.log`).
-6. Photos of the setup.
-
-After the sitting:
-
-1. Put all files in a folder `pose-viture-<YYYYMMDD>/`.
-2. Zip: `zip -r pose-viture-<YYYYMMDD>.zip pose-viture-<YYYYMMDD>/`.
-3. Compute `sha256sum pose-viture-<YYYYMMDD>.zip`.
-4. Attach the zip to the issue/PR thread and record filename + SHA-256 in the run log.
-5. If attaching is impossible, paste the logcat excerpt and `STREAM` lines and state which files are missing.
-
-## 10. Result tables (user-reported)
-
-All values filled by the owner after the sitting. None pre-filled.
-
-### Gate 1 — frame capture
-
-| Distance | LEDs visible? | Frame file |
-|---|---|---|
-| 0.3 m | | |
-| 0.5 m | | |
-| 1.0 m | | |
-
-### Gate 3 — UaaL smoke test
-
-(see §4 record table)
-
-### Gate 4 — hand test
-
-(see §5 record table)
-
-### Gate 7 — clock
-
-(see §6 record table)
-
-### Gate 8 — fallback quality
-
-(see §7 record table)
-
-### Gate 9 — C path (optional)
-
-(see §8 record table)
-
-### Invalid / repeated runs
-
-| Gate | Run id | Reason | Repeated as |
-|---|---|---|---|
-| | | | |
-
-## 11. Pass/fail criteria for 1.0
-
+Pass: at least 30 Hz sustained for 60 s with a valid pose. Fail: no pose or no USB.
+## 9. Send
+Capture per gate: logcat `pose-viture-<gate>-<timestamp>.log` (wireless ADB for the Neckband); the debug overlay screenshot showing `playerHosted`, `stereoMode` and `stage`; exported JSON/CSV; bridge serial; Unity logs; photos. Zip as `pose-viture-<YYYYMMDD>.zip`, record its SHA-256, and attach it with the filled tables. If a file is missing, say which; do not reconstruct numbers.
+## 10. Pass/fail for 1.0
 - Gate 1 recorded.
-- Gate 3: pass (UaaL survives restart/recreation/pause-resume) or blocked on the SDK gate (recorded).
-- Gate 4: joints arrive at >0 Hz for an empty hand; gripping result recorded.
-- Gate 7: pass (offset stable, <1% stale).
+- Gate 3 pass, or blocked on the SDK gate and recorded.
+- Gate 4: joints arrive for an empty hand; the gripping result is recorded.
+- Gate 7 pass.
 - Gate 8: failure of `headRelative` recorded.
 
-VITURE counts as "6DoF supported" for 1.0 only if gates 3 and 4 pass with joints arriving while gripping. Otherwise "head-relative fallback only" (if head pose works) or "not supported".
-
-## 12. Paste-back block
-
-1. Every logcat file and exported JSON/CSV from gates 1, 3, 4, 7, 8 (and 9 if run), with the run log.
-2. The `STREAM ...` block at the start and end of every run and the link lines.
-3. Zip filename and SHA-256 per gate.
-4. Filled result tables.
-5. Any invalid or repeated run with reason.
-
-## 13. What this sheet cannot show
-
-- Whether the Unity player survives a real production load (only a minimal tracking scene here).
-- VITURE vendor SDK internals (black box).
-- Behaviour on 3DoF glasses for hand tracking (rejected by design).
-- Whether a gripping hand stays tracked over a long session.
-- Any firmware or app change.
+VITURE counts as "6DoF supported" only if gates 3 and 4 pass with joints arriving while gripping. Otherwise it is "head-relative fallback only" (if head pose works) or "not supported".
