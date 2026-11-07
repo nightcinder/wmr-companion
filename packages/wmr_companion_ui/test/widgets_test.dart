@@ -65,6 +65,57 @@ void main() {
     expect(find.textContaining('fault mtuTooSmall: need 61'), findsOneWidget);
   });
 
+  testWidgets('renders firmware version and offered FF tokens', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        const LinkStatusView(
+          WmrLinkSnapshot(
+            state: WmrConnectionState.ready,
+            protocol: WmrProtocolVersion(
+              firmwareVersion: 'v0.3.5',
+              features: WmrBridgeFeatures(
+                rawStream: true,
+                decodedStream: true,
+                configBlock: true,
+                batchedStream: true,
+                echo: true,
+                firmwareVersion: true,
+                controllerControl: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('firmware v0.3.5'), findsOneWidget);
+    expect(
+      find.textContaining('features FF11 FF12 FF13 FF14 FF15 FF16 FF17'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('renders malformed firmware and only the offered tokens', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(
+        const LinkStatusView(
+          WmrLinkSnapshot(
+            state: WmrConnectionState.ready,
+            protocol: WmrProtocolVersion(
+              firmwareVersionMalformed: true,
+              features: WmrBridgeFeatures(rawStream: true, echo: true),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('firmware malformed'), findsOneWidget);
+    expect(find.textContaining('features FF11 FF15'), findsOneWidget);
+  });
+
   testWidgets('renders raw and decoded hand counters', (tester) async {
     await tester.pumpWidget(
       _host(

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:wmr_companion/testing.dart';
 import 'package:wmr_companion/wmr_companion.dart';
+import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 
 void main() => runApp(const WmrExampleApp());
 
@@ -90,6 +91,15 @@ class _WmrExampleAppState extends State<WmrExampleApp> {
                     'R ${pad?.rightTrigger.toStringAsFixed(2) ?? '-'}',
                   ),
                   Text('Buttons: ${pad?.buttons.join(', ') ?? '-'}'),
+                  const SizedBox(height: 12),
+                  StreamBuilder<WmrLinkSnapshot>(
+                    stream: _wmr.link,
+                    builder: (context, snapshot) {
+                      final link = snapshot.data;
+                      if (link == null) return const Text('Link: -');
+                      return LinkStatusView(link);
+                    },
+                  ),
                 ],
               );
             },
