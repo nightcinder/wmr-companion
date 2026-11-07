@@ -143,9 +143,10 @@ apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), De
   |     +-- wmr_core                    pure Dart: protocol + domain + services
   |     |     +-- wmr_fusion            pure Dart: Madgwick/Mahony
   |     +-- wmr_tracking                pure Dart: head/hand tracking seam, 6DoF fusion
+  |     |     +-- wmr_tracking_dispatch Flutter plugin: vendor detection and UnityPlayer dispatch
   |     +-- wmr_tracking_android_xr     optional: Android XR Kotlin tracking plugin
-  |     +-- wmr_tracking_viture         optional: VITURE Pro Neckband Unity UaaL relay plugin
-  |     +-- wmr_tracking_xreal          optional: XREAL Air 2 Ultra Unity UaaL relay plugin
+  |     +-- wmr_tracking_viture         optional: VITURE Pro Neckband Unity UaaL relay plugin (uses dispatch)
+  |     +-- wmr_tracking_xreal          optional: XREAL Air 2 Ultra Unity UaaL relay plugin (uses dispatch)
   |     +-- wmr_ble                     Flutter plugin: universal_ble + native
   |     +-- wmr_ws                      pure Dart: WebSocket transport (Linux/Pi Wi-Fi daemon)
   +-- wmr_companion_hid_android         optional: phone-as-HID-gamepad output
@@ -156,6 +157,7 @@ apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), De
 | `wmr_core` | Dart | yes (after API freeze) | GATT ids, parsers, reassembler, config decode, echo, hand pipeline, loss/latency maths, gamepad mapping, `BleTransport` interface, `ControllerService` | Flutter, Riverpod, plugins, `dart:ui` |
 | `wmr_fusion` | Dart | yes | 3DoF filters only | any package (zero dependencies) |
 | `wmr_tracking` | Dart | yes (on hold) | `TrackingSource` seam, normalised head/hand frames, clock alignment, 6DoF controller fusion, vendor profiles | any plugin, Flutter, BLE, the facade |
+| `wmr_tracking_dispatch` | Flutter plugin | yes | Vendor detection and single-owner `UnityPlayer` dispatch for the VITURE and XREAL tracking plugins | Core internals, the facade |
 | `wmr_ble` | Flutter plugin | yes | `UniversalBleTransport`, native iOS/Android transports, permissions, adapter-state and app-lifecycle handling | UI, Riverpod, app settings |
 | `wmr_ws` | Dart | yes | `WmrWsTransport`: WebSocket transport for Linux/Pi Wi-Fi daemon behind `BleTransport` seam | Flutter, Riverpod, plugins, `dart:ui` |
 | `wmr_companion` | Dart (Flutter once the BLE plugin lands) | yes | Facade (`WmrCompanion`), models/DTOs, defaults, lifecycle, capture/latency recorders with injected sinks | UI widgets, Riverpod |

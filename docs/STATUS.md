@@ -37,7 +37,7 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 | Item | Value |
 |---|---|
 | Tag / commit | `v0.3.17` (release tag) at `e431a391cd2a91b8fbcc3da1f0fc69bd6df0f83c` |
-| App version | `0.3.17+22` (`versionName 0.3.17`, `versionCode 2022` for `arm64-v8a`). The Dart packages remain at `0.3.0` |
+| App version | `0.3.17+22` (`versionName 0.3.17`, `versionCode 2022` for `arm64-v8a`). The Dart packages at this tag are `0.2.2`. `main` now carries `0.3.0` (ONY-911) |
 | Android artifact | `wmr-companion-0.3.17-unified-arm64-v8a.apk`, size 430,490,614 B, SHA-256 `1efe4c1f2e9c8ca885f9b698b6415a3eab2f817fe3cd5e29ab5541baadd03d78` (verified against the published release asset) |
 | Flavor | `unified` : one shared Unity `unityLibrary` carrying VITURE 0.9.0 and XREAL 3.1.0, with the vendor selected at runtime. Per-vendor flavors were dropped in 0.3.2; the unified flavor is the only one published |
 | Signing | Project release key (signed by CI on `v*` tags). Updates in place across release builds |
