@@ -1,6 +1,7 @@
 package com.onyxlens.wmr.gattprobe
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -112,5 +113,19 @@ class ProtocolTest {
         assertTrue(Protocol.isWmrBridgeAdvertisement(null, listOf(Protocol.WMR_SERVICE_UUID)))
         assertEquals(false, Protocol.isWmrBridgeAdvertisement("Other Device", emptyList()))
         assertEquals(false, Protocol.isWmrBridgeAdvertisement(null, null))
+    }
+
+    @Test
+    fun testPickBondedBridge() {
+        // A HID gamepad link stops advertising, so the bond list is the only
+        // way to reach the bridge. Prefer the both-hands image over L/R.
+        assertEquals(
+            1,
+            Protocol.pickBondedBridge(listOf("Headphones", "WMR Bridge", "WMR Bridge L"))
+        )
+        assertEquals(0, Protocol.pickBondedBridge(listOf("WMR Bridge R", "WMR Bridge L")))
+        assertEquals(2, Protocol.pickBondedBridge(listOf("Headphones", null, "WMR Bridge")))
+        assertNull(Protocol.pickBondedBridge(listOf("Headphones", null)))
+        assertNull(Protocol.pickBondedBridge(emptyList()))
     }
 }

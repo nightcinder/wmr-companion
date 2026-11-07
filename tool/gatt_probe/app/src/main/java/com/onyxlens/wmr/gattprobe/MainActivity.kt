@@ -244,7 +244,9 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         targetDevice = null
         scanner.startScan(filters, settings, scanCallback)
 
-        // Stop scan after 10 s timeout
+        // Stop scan after 10 s timeout. A bridge the phone holds as a BLE HID
+        // gamepad does not advertise, so fall back to the system bond list
+        // before giving up.
         mainHandler.postDelayed({
             if (isScanning) {
                 isScanning = false
@@ -254,11 +256,36 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                     Log.w(TAG, "Error stopping scan", e)
                 }
                 btnConnect.isEnabled = true
-                if (targetDevice == null) {
+                if (targetDevice == null && !connectToBondedBridge()) {
                     tvConnectionStatus.text = "Status: Scan timed out (Bridge not found)"
                 }
             }
         }, 10000L)
+    }
+
+    /**
+     * The bridge stops advertising once the phone holds its BLE HID (gamepad)
+     * link, but HOGP bonds it and Android shares the existing link, so a GATT
+     * client can attach to the bonded device. The Companion's scan lists
+     * system-connected devices the same way. Returns false when no bonded
+     * `WMR Bridge` entry exists, leaving the caller's timeout message alone.
+     */
+    private fun connectToBondedBridge(): Boolean {
+        val bonded = try {
+            bluetoothAdapter?.bondedDevices?.toList().orEmpty()
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot read bonded devices", e)
+            emptyList()
+        }
+        val index = Protocol.pickBondedBridge(bonded.map { it.name }) ?: return false
+        val device = bonded[index]
+        targetDevice = device
+        tvConnectionStatus.text =
+            "Status: Found bonded ${device.name ?: "WMR Bridge"} (gamepad link). Connecting..."
+        val client = gattClient ?: return false
+        client.streamMode = if (rbStreamBatched.isChecked) StreamMode.BATCHED else StreamMode.NONE
+        client.connect(device)
+        return true
     }
 
     private val scanCallback = object : ScanCallback() {
@@ -288,6 +315,7 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
 
         override fun onScanFailed(errorCode: Int) {
             isScanning = false
+            if (connectToBondedBridge()) return
             btnConnect.isEnabled = true
             tvConnectionStatus.text = "Scan failed with error $errorCode"
         }

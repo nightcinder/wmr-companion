@@ -15,6 +15,23 @@ object Protocol {
         }
         return deviceName?.startsWith(WMR_BRIDGE_NAME, ignoreCase = true) == true
     }
+
+    /**
+     * Index in [names] of the bonded Bridge to fall back to when no
+     * advertisement was seen. A bridge the phone holds as a BLE HID gamepad
+     * stops advertising, but it stays bonded and Android shares the existing
+     * link, so a GATT client can still attach to it. Prefer the both-hands
+     * name when a left/right image is bonded too; null when none match.
+     */
+    fun pickBondedBridge(names: List<String?>): Int? {
+        val matches = names.withIndex().filter {
+            isWmrBridgeAdvertisement(it.value, null)
+        }
+        val preferred = matches.firstOrNull {
+            it.value.equals(WMR_BRIDGE_NAME, ignoreCase = true)
+        }
+        return (preferred ?: matches.firstOrNull())?.index
+    }
     val WMR_STREAM_CHAR_UUID: UUID = UUID.fromString("0000ff11-0000-1000-8000-00805f9b34fb")
     val WMR_DECODED_CHAR_UUID: UUID = UUID.fromString("0000ff12-0000-1000-8000-00805f9b34fb")
     val WMR_BATCHED_CHAR_UUID: UUID = UUID.fromString("0000ff14-0000-1000-8000-00805f9b34fb")

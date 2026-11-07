@@ -91,6 +91,7 @@ Run the 3 interleaved blocks alternating between App and Probe to eliminate drif
 
 ### 3. Running a Probe Measurement
 1. Open **WMR GATT Probe** on the phone. On launch, the probe automatically requests Bluetooth permissions and starts scanning for `WMR Bridge`.
+   A bridge the phone holds as a BLE HID (gamepad) link does not advertise, so when the 10 s scan sees nothing the probe falls back to the bonded `WMR Bridge` entry and attaches a GATT client to the link the phone already holds. The gamepad can stay connected. If the status reports a link failure instead, remove the `WMR Bridge` bond in Android Bluetooth settings before the run (the probe pairs again on connect) and pair the gamepad again afterwards.
 2. Once connected (or tap **Scan & Connect** to re-scan), configure the run parameters:
    - **Stream Subscription**: Select **FF14 (Batched)** for streamed runs, or **None (Echo only)** for no-stream runs.
    - **Ping Interval**: Select **250 ms** for main blocks (or **50 ms** / **1000 ms** for the interval pass).
