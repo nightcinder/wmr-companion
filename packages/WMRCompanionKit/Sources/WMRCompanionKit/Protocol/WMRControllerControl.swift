@@ -45,6 +45,7 @@ public enum WMRControllerAddressSource: UInt8, Sendable {
 public enum WMRControllerModel: UInt8, Sendable {
     case wmr = 0
     case psvr2 = 1
+    case nintendoSwitch = 2
 }
 
 public enum WMRControllerDiscoveryState: UInt8, Sendable {

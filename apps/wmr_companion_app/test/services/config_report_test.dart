@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/config_block.dart';
+import 'package:wmr_core/protocol/switch_calibration.dart';
 import 'package:wmr_core/services/config_client.dart';
 import 'package:wmr_companion_app/services/config_key_store.dart';
 import 'package:wmr_companion_app/services/config_report.dart';
@@ -98,4 +99,33 @@ void main() {
     )).lines;
     expect(lines.first, contains('bridgeFailed'));
   });
+
+  test(
+    'a Switch block needs no key and yields its factory calibration',
+    () async {
+      final blob = Uint8List(switchConfigSize);
+      blob[0] = switchConfigVersion;
+      blob[1] = SwitchDeviceType.joyConLeft.code;
+      const words = [
+        -123, 45, 1000, // accel origin
+        16384, 16000, 17000, // accel sensitivity
+        10, -20, 30, // gyro origin
+        13371, 13000, 14000, // gyro sensitivity
+      ];
+      final d = ByteData.sublistView(blob);
+      for (var i = 0; i < words.length; i++) {
+        d.setInt16(2 + 2 * i, words[i], Endian.little);
+      }
+      final report = await readConfigReport(
+        await client(blob),
+        0,
+        keyLoader: () async =>
+            throw StateError('a Switch block has no XOR key'),
+      );
+      expect(report.lines.any((l) => l.contains('Switch joyConLeft')), isTrue);
+      expect(report.switchCalibration, isNotNull);
+      expect(report.imuCalibration, isNotNull);
+      expect(report.calibration, isNull);
+    },
+  );
 }

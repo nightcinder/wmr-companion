@@ -92,6 +92,14 @@ final class WMRControllerControlTests: XCTestCase {
         XCTAssertEqual(status.lastResult, .busy)
     }
 
+    func testModelCodeTwoIsNintendoSwitch() throws {
+        let status = try XCTUnwrap(
+            WMRControllerStatusV2.parse(statusBytes(leftModel: 2))
+        )
+
+        XCTAssertEqual(status.hands[0].model, .nintendoSwitch)
+    }
+
     func testAnUnknownLastCommandResultAndModelAreNil() throws {
         let status = try XCTUnwrap(
             WMRControllerStatusV2.parse(

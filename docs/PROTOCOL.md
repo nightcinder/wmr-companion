@@ -275,6 +275,58 @@ The calibration has no scale factor. Synthetic tests show that a pure rotation
 preserves the accel magnitude, so it neither explains nor corrects the
 about-10 vs 9.81 accel scale (WMR_Bridge #19).
 
+## Switch calibration and burst timing
+
+**Not verified on hardware, and the bridge driver is not merged yet.** These
+are the `wmr_core` side of the Switch Joy-Con/Pro support
+(`packages/wmr_core/lib/protocol/switch_calibration.dart` and
+`switch_burst.dart`); the firmware half is WMR_Bridge ONY-946.
+
+FF17 reports a Switch hand as model `2` (`ControllerModel.nintendoSwitch`).
+For that hand only:
+
+- **FF13 blob.** The bridge reads the controller's SPI factory calibration
+  and packs it as 44 bytes:
+
+  | Offset | Size | Meaning |
+  | --- | --- | --- |
+  | 0 | 1 | version, `1` |
+  | 1 | 1 | device type: `1` Joy-Con (L), `2` Joy-Con (R), `3` Pro |
+  | 2 | 24 | SPI `0x6020`: 6-axis factory calibration, 12 x int16 LE |
+  | 26 | 9 | SPI `0x603D`: left stick factory calibration |
+  | 35 | 9 | SPI `0x6046`: right stick factory calibration |
+
+  The 6-axis values are accel origin X/Y/Z, accel sensitivity X/Y/Z, gyro
+  origin X/Y/Z and gyro sensitivity X/Y/Z. `SwitchCalibration.parse` rejects
+  a blob with another length, version or device type. Its `imuCalibration`
+  returns the same `ImuCalibration` the WMR JSON block produces (with the
+  nominal Switch scales, `4/16384` G and `0.06103` dps per count, that decoded
+  FF12/FF14 records already carry), so a caller that has decoded either kind
+  of block can use `ControllerService.setFf13Calibration` unchanged:
+  `calibrated = M * raw + bias`. A zero factory denominator yields `null`,
+  never a division by zero. The debug screen's "Read config" button detects
+  the 44-byte blob before trying the WMR JSON path, so a Switch hand needs no
+  config key and shows its factory values.
+- **Stick blocks.** Left (`0x603D`) stores travel above the centre X/Y,
+  centre X/Y, travel below the centre X/Y. Right (`0x6046`) stores centre X/Y,
+  travel below the centre X/Y, travel above the centre X/Y. `normalize`
+  removes the centre and rescales each half to its own end stop. The app's
+  `StickNormalizer` is unchanged; the block is available for a caller that
+  wants the factory limits.
+- **FF12/FF14 timing.** One `0x30` report holds three 6-axis samples, and all
+  three FF12/FF14 records share the raw frame's sequence number. The nominal
+  spacing is 5 ms (a 15 ms Joy-Con push); a Pro Controller that pushes every
+  8-11 ms fits three samples into that shorter period. With the hand marked
+  as Switch (through FF17), `ControllerService` runs each record through
+  `SwitchBurstTimestamps`, which gives the second and third samples
+  `anchor + interval` and `anchor + 2 * interval`. The interval is taken from
+  the offset the bridge already supplies, or from the previous burst's
+  anchor-to-anchor period divided by three, clamped to 1-5 ms; the first
+  burst of a stream uses the nominal 5 ms. Repeated records are not counted
+  as out-of-order. Records that already carry the spacing are unchanged. The
+  debug screen feeds the FF17 model in; a hand that is never marked Switch
+  keeps the plain WMR tick path.
+
 ## FF12 in the app
 
 **Not verified on hardware.** Everything here is built against the spec above
@@ -516,9 +568,10 @@ and the debug screen's "Controller control" panel.
   (`busy`, `noAddress`, `nothingToDo`, `notConnected`, `notEnabled`,
   `invalidParam`) instead of the platform's wording.
 - **Status** is 20 bytes: version, per-hand flags (connected, connecting, HID
-  descriptor), address source, model, last 3 address bytes, discovery state
-  and round, last command and result. Subscribed on open, then read once, so
-  no transition between the two is lost.
+  descriptor), address source, model (0 WMR, 1 PSVR2, 2 Switch), last 3
+  address bytes, discovery state and round, last command and result.
+  Subscribed on open, then read once, so no transition between the two is
+  lost.
 - **Detection.** The client checks service discovery for FF17; an older bridge
   shows "does not expose FF17 (firmware before v0.1.1)" and disables the
   buttons rather than writing to a missing characteristic.

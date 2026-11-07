@@ -105,6 +105,22 @@ void main() {
     test('a short value is rejected, not guessed', () {
       expect(ControllerStatusV2.parse(Uint8List(19)), isNull);
     });
+
+    test('recognises the Switch model code', () {
+      final status = ControllerStatusV2.parse(
+        statusBytes(leftModel: 2, rightModel: 2),
+      )!;
+      expect(status.hands[0].model, ControllerModel.nintendoSwitch);
+      expect(status.hands[1].model, ControllerModel.nintendoSwitch);
+      expect(status.hands[0].model.label, 'Switch');
+    });
+
+    test('an unknown model code still reads as WMR', () {
+      final status = ControllerStatusV2.parse(statusBytes(rightModel: 9))!;
+      expect(status.hands[1].model, ControllerModel.wmr);
+      expect(status.hands[1].model.label, 'WMR');
+      expect(ControllerModel.psvr2.label, 'PSVR2');
+    });
   });
 
   group('ControllerControlClient', () {

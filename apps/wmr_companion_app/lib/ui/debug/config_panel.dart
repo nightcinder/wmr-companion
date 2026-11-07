@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:wmr_core/ble/ble_transport.dart';
-import 'package:wmr_core/domain/imu_calibration.dart';
 import 'package:wmr_core/services/config_client.dart';
 
 import '../../services/config_key_store.dart';
@@ -48,9 +47,7 @@ class _ConfigPanelState extends ConsumerState<ConfigPanel> {
       keyLoader: widget.keyLoader,
     );
     if (!mounted) return;
-    final calibration = report.calibration == null
-        ? null
-        : ImuCalibration.fromController(report.calibration!);
+    final calibration = report.imuCalibration;
     ref
         .read(ff13SettingsProvider.notifier)
         .setCalibration(widget.hand, calibration);
@@ -89,7 +86,7 @@ class _ConfigPanelState extends ConsumerState<ConfigPanel> {
             calibration == null
                 ? 'Read the config first; calibration is not applied.'
                 : applying
-                ? 'Active for $handName: mix matrix, bias and inverse Rt '
+                ? 'Active for $handName: the decoded calibration is applied '
                       'before the axis map.'
                 : 'Read and ready; off for $handName.',
           ),
