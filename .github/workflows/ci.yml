@@ -602,6 +602,7 @@ jobs:
             --release-tag "v${version}" \
             --version "$version" \
             --asset "wmr-companion-${version}-unified-arm64-v8a.apk" \
+            --asset "wmr-gatt-probe-${version}-debug.apk" \
             --asset SHA256SUMS \
             --output release-notes.md
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"

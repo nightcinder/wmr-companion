@@ -9,7 +9,7 @@
   reconnects with a backoff instead of failing the session (ONY-909).
 - The app depends on the `0.3.0` Dart packages (ONY-911).
 - The release workflow now also publishes `wmr-gatt-probe-<version>-debug.apk`,
-  the standalone GATT latency probe, on every `v*` tag (ONY-932).
+  the standalone GATT latency probe, on every release tag (ONY-932).
 
 ## 0.3.17+22
 

@@ -18,7 +18,7 @@ This tool provides the baseline measurement for Milestone 7.1 to resolve Milesto
 ## Building and Installing
 
 ### 1. From a Release
-Every `v*` tag publishes `wmr-gatt-probe-<version>-debug.apk` next to the companion APK, for example:
+Every release tag publishes `wmr-gatt-probe-<version>-debug.apk` next to the companion APK, for example:
 ```bash
 gh release download v0.3.18 --pattern 'wmr-gatt-probe-*.apk'
 adb install -r wmr-gatt-probe-0.3.18-debug.apk
