@@ -12,6 +12,7 @@ dependencies:
   flutter:
     sdk: flutter
   wmr_companion: ^0.2.2
+  wmr_companion_ui: ^0.2.2
   wmr_ble: ^0.2.2
 
 dev_dependencies:

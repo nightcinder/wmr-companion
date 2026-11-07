@@ -12,6 +12,11 @@ void main() {
     expect(find.text('wmr_companion example'), findsOneWidget);
     expect(find.textContaining('Connection:'), findsOneWidget);
     expect(find.textContaining('Sticks: L ['), findsOneWidget);
+    expect(find.textContaining('firmware fake-1.0.0'), findsOneWidget);
+    expect(
+      find.textContaining('features FF11 FF12 FF13 FF14 FF15 FF16 FF17'),
+      findsOneWidget,
+    );
 
     // Dispose the app so the fake bridge timer does not outlive the test.
     await tester.pumpWidget(const SizedBox());
