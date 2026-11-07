@@ -250,7 +250,8 @@ class WmrCompanionConfig {
   final AxisMapping axisMapping;
   final GamepadConfig gamepad;
   final StickConfig sticks;
-  final bool autoReconnect;        // one retry after an unexpected drop
+  final bool autoReconnect;        // retry after an unexpected drop
+  final List<Duration> reconnectBackoff; // one attempt per entry
 }
 ```
 

@@ -29,7 +29,7 @@ final wmr = WmrCompanion(ble: transport);
 the negotiated value), high connection priority where the platform supports
 it, service discovery, an FF10/FF11 check, then notification setup. After an
 unexpected drop it reports `BleLinkPhase.connectionLost`; reconnection is the
-caller's job (`WmrCompanion` does one retry).
+caller's job (`WmrCompanion` retries with its configurable backoff).
 
 `FakeBleAdapter` is available from `package:wmr_ble/testing.dart` for hosts
 that test their own adapter-level code without a phone.

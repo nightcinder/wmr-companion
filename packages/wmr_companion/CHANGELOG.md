@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `WmrCompanion` now wraps the FF17 controller-control client: `controllerStatus`
+  notifications, `readControllerStatus()` and `sendControllerCommand()`, with
+  the `ControllerStatusV2`, `ControllerCommand`, `ControllerCommandOutcome` and
+  `ControllerResult` types re-exported.
+- `WmrCompanion.readConfig(Hand)` reads the FF13 configuration block and returns
+  a `ConfigReadResult` (CRC checked, unsupported/not-ready/failed reported).
+- `WmrCompanion.ping()` measures one FF15 echo round trip and returns an
+  `EchoResult`.
+- Automatic reconnect now uses the configurable `WmrCompanionConfig.reconnectBackoff`
+  list instead of one fixed 500 ms retry. The default is
+  `[500 ms, 1 s, 2 s, 4 s, 8 s]`; after the last attempt the state is `failed`.
+
 ## 0.2.2
 
 - `WmrCompanion` now takes the FF16 `WmrProtocolVersion` from `ControllerService` instead of issuing a second GATT discovery and read. No public API change.

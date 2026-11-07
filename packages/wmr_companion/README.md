@@ -124,12 +124,19 @@ One class, one config, a handful of models.
 | `setStickCentre` / `clearStickCentre` / `recentreStick` | Stick rest centre, before or after connecting. |
 | `setFf13Calibration` | Per-hand FF13 calibration, stored across reconnects. |
 | `recalibrate` / `resetYaw` | Gyro bias and yaw, per hand. |
+| `controllerStatus` | FF17 status notifications: discovery state, per-hand connection flags and the last command result. |
+| `readControllerStatus()` | One FF17 status read (`ControllerStatusV2`). |
+| `sendControllerCommand(ControllerCommand, {Hand? hand})` | FF17 discover, connect, disconnect and forget commands; returns a `ControllerCommandOutcome`. |
+| `readConfig(Hand)` | Reads one hand's FF13 configuration block into a `ConfigReadResult` with its CRC-32. |
+| `ping()` | One FF15 echo round trip, returned as an `EchoResult`. |
 | `dispose()` | Close the BLE link and release the session, subscriptions and timers. The transport is the caller's. |
 
 State machine: `idle → scanning → connecting → ready`, with `reconnecting`
-after an unexpected drop (one retry when `autoReconnect` is on) and `failed`
-when the link or the scan cannot be established. `reconnecting` is a state,
-not an exception.
+after an unexpected drop (configurable backoff when `autoReconnect` is on) and
+`failed` when the link or the scan cannot be established. `reconnecting` is a
+state, not an exception. The default `reconnectBackoff` is
+`[500 ms, 1 s, 2 s, 4 s, 8 s]`; each entry is one reconnect attempt and an
+empty list disables retries.
 
 Errors are typed: `WmrConnectionException`, `WmrStreamModeException` (with a
 `WmrStreamModeFaultKind`), `WmrTransportException`, `WmrConfigException`. Raw
@@ -201,6 +208,46 @@ app does not know instead of treating them as fatal.
 
 None of this is a hardware claim: the firmware change is merged, and this client
 is exercised against the fake bridge only.
+
+## FF17 control, FF13 config and FF15 echo
+
+The facade also wraps the three control characteristics that sit outside the
+FF11/FF12/FF14 stream exclusion:
+
+```dart
+// FF17: controller discover/connect/disconnect/forget and status.
+final statuses = wmr.controllerStatus.listen((status) {
+  final left = status.hands[0]; // connected, connecting, model, address tail
+});
+final status = await wmr.readControllerStatus();
+final outcome = await wmr.sendControllerCommand(
+  ControllerCommand.connect,
+  hand: Hand.left,
+);
+if (!outcome.isOk) {
+  // outcome.result is the firmware's code; outcome.error is the transport
+  // failure when the write itself failed.
+}
+
+// FF13: one hand's configuration block, CRC checked.
+final config = await wmr.readConfig(Hand.left);
+final block = config.blob; // null when config.failure is set
+
+// FF15: one measured echo round trip.
+final echo = await wmr.ping();
+final rttUs = echo.sample?.rttUs; // null on timeout or a failed write
+```
+
+`controllerStatus` opens its FF17 notification subscription when the first
+listener attaches and replaces it after an automatic reconnect. All three
+clients belong to the current connection: they are discarded on disconnect or
+reconnect, and the methods throw `StateError` when nothing is connected. A
+bridge without FF13 or FF15 reports a normal unsupported result rather than
+failing the stream (FF13 `ConfigReadFailure.unsupported`, FF15
+`EchoFailure.cancelled`). An FF17 refusal is returned in the outcome, not
+thrown.
+
+None of these paths have been run on hardware.
 
 ## Platform notes
 
