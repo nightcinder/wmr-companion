@@ -304,9 +304,9 @@ For that hand only:
   FF12/FF14 records already carry), so a caller that has decoded either kind
   of block can use `ControllerService.setFf13Calibration` unchanged:
   `calibrated = M * raw + bias`. A zero factory denominator yields `null`,
-  never a division by zero. The debug screen's "Read config" button still
-  decodes only the WMR JSON block; choosing the Switch parser there is
-  follow-up work.
+  never a division by zero. The debug screen's "Read config" button detects
+  the 44-byte blob before trying the WMR JSON path, so a Switch hand needs no
+  config key and shows its factory values.
 - **Stick blocks.** Six 12-bit values each: travel above the centre X/Y,
   centre X/Y, travel below the centre X/Y. `normalize` removes the centre and
   rescales each half to its own end stop. The app's `StickNormalizer` is
