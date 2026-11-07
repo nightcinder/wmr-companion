@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- Version aligned with the v0.3.0 release.
+
 ## 0.2.2
 
 - Version aligned with the v0.2.2 release; no breaking public API change.

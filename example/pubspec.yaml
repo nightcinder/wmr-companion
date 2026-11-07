@@ -11,9 +11,9 @@ resolution: workspace
 dependencies:
   flutter:
     sdk: flutter
-  wmr_companion: ^0.2.2
-  wmr_companion_ui: ^0.2.2
-  wmr_ble: ^0.2.2
+  wmr_companion: ^0.3.0
+  wmr_companion_ui: ^0.3.0
+  wmr_ble: ^0.3.0
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Version aligned with the v0.3.0 release; `wmr_tracking` and `wmr_tracking_dispatch` constraints raised to `^0.3.0`.
 
 - Add a bench-only Carina C-SDK diagnostic spike
   (`--dart-define=WMR_VITURE_CARINA_DIAG=true`): opens the glasses USB fd,

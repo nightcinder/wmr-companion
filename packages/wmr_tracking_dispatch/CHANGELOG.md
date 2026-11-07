@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Version aligned with the v0.3.0 release; `wmr_tracking` constraint raised to `^0.3.0`.
 
 - Detect an Android XR host before USB IDs and host markers, and refuse to
   construct the vendor Unity player on one. Google Aura exposes the headset as

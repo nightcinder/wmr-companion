@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Version aligned with the v0.3.0 release.
 
 - ONY-502: the second complete 6-run hardware corpus (Android XR / Google
   Aura, 2026-11-05, app commit `903f03f`) is committed under

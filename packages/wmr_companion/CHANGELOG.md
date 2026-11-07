@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Version aligned with the v0.3.0 release; `wmr_core` and `wmr_tracking` constraints raised to `^0.3.0`.
 
 - `WmrCompanion` now wraps the FF17 controller-control client: `controllerStatus`
   notifications, `readControllerStatus()` and `sendControllerCommand()`, with
