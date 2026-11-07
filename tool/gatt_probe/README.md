@@ -17,13 +17,20 @@ This tool provides the baseline measurement for Milestone 7.1 to resolve Milesto
 
 ## Building and Installing
 
-### 1. From CI Artifacts
+### 1. From a Release
+Every release tag publishes `wmr-gatt-probe-<version>-debug.apk` next to the companion APK, for example:
+```bash
+gh release download v0.3.18 --pattern 'wmr-gatt-probe-*.apk'
+adb install -r wmr-gatt-probe-0.3.18-debug.apk
+```
+
+### 2. From CI Artifacts
 Download the `wmr-gatt-probe-debug-apk` artifact from the latest GitHub Actions CI run on `main` or the PR branch, then install via `adb`:
 ```bash
 adb install -r app-debug.apk
 ```
 
-### 2. Building from Source
+### 3. Building from Source
 Requires JDK 17 and the Android SDK (API 35, build-tools 35.0.0):
 ```bash
 cd tool/gatt_probe

@@ -7,7 +7,7 @@ keeps its own changelog; this file records the release as a whole.
 
 The first release since 0.2.2. All twelve packages move to 0.3.0 and their
 inter-package constraints to `^0.3.0`. The reference app stays on its own
-release line (`0.3.17+22`).
+release line (`0.3.18+23`).
 
 - FF16 protocol version and feature-matrix reporting in `wmr_core` and
   `wmr_companion` (`WmrProtocolVersion`, `WmrBridgeFeatures`).

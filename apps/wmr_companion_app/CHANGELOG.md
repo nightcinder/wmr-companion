@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.18+23
+
+- The Debug screen names the connected bridge's FF16 firmware version and
+  shows the FF11-FF17 feature bits, including FF17 controller control
+  (ONY-907, ONY-910).
+- `WmrCompanion` exposes FF17 controller control alongside FF13/FF15 and
+  reconnects with a backoff instead of failing the session (ONY-909).
+- The app depends on the `0.3.0` Dart packages (ONY-911).
+- A Nintendo Switch hand is named as a Switch from its FF17 model, and its
+  FF13 factory calibration and `0x30` burst timing are decoded so the debug
+  panels no longer show it as WMR (ONY-948).
+- The release workflow now also publishes `wmr-gatt-probe-<version>-debug.apk`,
+  the standalone GATT latency probe, on every release tag (ONY-932).
+
 ## 0.3.17+22
 
 - The guided-bench still, drifting and pan/flick prompts now say to brace a

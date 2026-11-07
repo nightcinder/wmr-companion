@@ -161,16 +161,20 @@ Release assets for tag `vX.Y.Z`:
 
 ```text
 wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
+wmr-gatt-probe-X.Y.Z-debug.apk               # standalone GATT latency probe
 SHA256SUMS
 ```
 
 `wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
-XREAL glasses install. The unified flavor is published for `arm64-v8a` only:
+XREAL glasses install. `wmr-gatt-probe-X.Y.Z-debug.apk` is the standalone GATT
+latency probe testers install beside the companion app for the bench comparison.
+The unified flavor is published for `arm64-v8a` only:
 the approved export ships `arm64-v8a` natives, so a 32-bit or x86_64 unified
 split would install without any Unity runtime and report VITURE and XREAL as
-`unavailable`. The job fails if an APK is debug-signed, lacks a
+`unavailable`. The job fails if the unified APK is debug-signed, lacks a
 `CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so a
-green tag run means the published APK matches this document.
+green tag run means the published unified APK matches this document. The probe
+APK is debug-signed by design and is not part of that check.
 
 ## Release body
 

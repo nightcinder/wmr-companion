@@ -155,6 +155,7 @@ class RenderBodyTest(unittest.TestCase):
         body = self.render(
             [
                 "wmr-companion-0.3.6-unified-arm64-v8a.apk",
+                "wmr-gatt-probe-0.3.6-debug.apk",
                 "SHA256SUMS",
             ],
             [
@@ -169,6 +170,8 @@ class RenderBodyTest(unittest.TestCase):
         self.assertIn("Fix a typo (`bbbbbbb`)", body)
         self.assertIn("`wmr-companion-0.3.6-unified-arm64-v8a.apk`", body)
         self.assertIn("unified tester APK (VITURE + XREAL, arm64-v8a)", body)
+        self.assertIn("`wmr-gatt-probe-0.3.6-debug.apk`", body)
+        self.assertIn("GATT probe debug APK (latency bench tool)", body)
         self.assertIn("`SHA256SUMS`", body)
         self.assertIn("sha256sum -c SHA256SUMS", body)
 

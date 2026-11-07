@@ -1,6 +1,6 @@
 # Run sheet: latency-2 — the Flutter app against the native GATT probe
 
-> **Proposed sheet, not yet run.** The native GATT probe it compares against (milestone 7.1) is merged (`tool/gatt_probe`, PR #36) and its CI job builds `wmr-gatt-probe-debug-apk`; the paired sitting has not run. Nothing here is a hardware result. Every figure quoted from an earlier run is user-reported and, unless stated otherwise, comes from a single run.
+> **Proposed sheet, not yet run.** The native GATT probe it compares against (milestone 7.1) is merged (`tool/gatt_probe`, PR #36) and its CI job builds `wmr-gatt-probe-debug-apk`, which every release tag also publishes as `wmr-gatt-probe-<version>-debug.apk`; the paired sitting has not run. Nothing here is a hardware result. Every figure quoted from an earlier run is user-reported and, unless stated otherwise, comes from a single run.
 
 Question: of the ~41 ms FF15 round trip and the ~250–300 inter-arrival stalls over 50 ms per hand per 120 s (both from single runs), how much is `universal_ble` plus the platform channel and Dart, and how much is the radio and the connection parameters? This sheet is the REF/VAR protocol that measures this app against a bare-Kotlin GATT client at one fixed position, so milestone 5 (Flutter against native) can be decided on evidence rather than on the size of the number.
 

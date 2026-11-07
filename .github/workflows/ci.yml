@@ -3,10 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
-    # A `v*` tag publishes the signed tester APKs: `release-unified` builds the
-    # both-vendors `unified` flavor (ONY-508, ONY-520) and
-    # `release-checksums` writes one SHA256SUMS for it. A `v*-dryrun` tag only
-    # renders the release body (`release-notes-dryrun`); it publishes nothing.
+    # A `v*` tag publishes the signed tester APKs and the GATT probe:
+    # `release-unified` builds the both-vendors `unified` flavor (ONY-508,
+    # ONY-520) and the probe's debug APK, and `release-checksums` writes one
+    # SHA256SUMS for them. A `v*-dryrun` tag only renders the release body
+    # (`release-notes-dryrun`); it publishes nothing.
     tags: ['v*']
   pull_request:
 
@@ -601,6 +602,7 @@ jobs:
             --release-tag "v${version}" \
             --version "$version" \
             --asset "wmr-companion-${version}-unified-arm64-v8a.apk" \
+            --asset "wmr-gatt-probe-${version}-debug.apk" \
             --asset SHA256SUMS \
             --output release-notes.md
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
@@ -1090,6 +1092,19 @@ jobs:
           done
           ls -l "$out"
 
+      # The probe is a separate Gradle project and a debug-only APK: the tester
+      # installs it beside the signed companion build, so it ships on the same
+      # tag with the release version in its name.
+      - name: Build and stage the GATT probe debug APK
+        working-directory: tool/gatt_probe
+        run: |
+          set -euo pipefail
+          ./gradlew assembleDebug --stacktrace
+          out="$RUNNER_TEMP/release-assets"
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "$out/wmr-gatt-probe-${VERSION#v}-debug.apk"
+          ls -l "$out/wmr-gatt-probe-${VERSION#v}-debug.apk"
+
       # The body comes from first-parent history: one bullet per pull request
       # merged since the previous tag, plus the assets this tag publishes. A
       # re-run refreshes it instead of leaving stale notes.
@@ -1099,6 +1114,7 @@ jobs:
           python3 tool/release_notes.py \
             --tag "$VERSION" \
             --asset "wmr-companion-${VERSION#v}-unified-arm64-v8a.apk" \
+            --asset "wmr-gatt-probe-${VERSION#v}-debug.apk" \
             --asset SHA256SUMS \
             --output "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
@@ -1141,9 +1157,9 @@ jobs:
           rmdir -p apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a 2>/dev/null || true
 
   release-checksums:
-    # `release-unified` uploads the unified APKs; once it has finished, write
-    # one SHA256SUMS file that covers every APK on the release. The build job
-    # writes no digest of its own.
+    # `release-unified` uploads the unified APKs and the GATT probe; once it
+    # has finished, write one SHA256SUMS file that covers every APK on the
+    # release. The build job writes no digest of its own.
     needs: [release-unified]
     if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dryrun') && needs['release-unified'].result == 'success' }}
     runs-on: ubuntu-latest
@@ -1162,7 +1178,7 @@ jobs:
           mkdir -p "$out"
           gh release download "$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'wmr-companion-*.apk' \
+            --pattern '*.apk' \
             --dir "$out"
           (cd "$out" && sha256sum ./*.apk | sed 's| \./| |' > SHA256SUMS)
           cat "$out/SHA256SUMS"
