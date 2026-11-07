@@ -89,7 +89,31 @@ client.echoLatencyPublisher
 client.sendEchoPing()
 ```
 
-### 4. Dual-Bridge Setup (Zero Contention)
+### 4. Read the firmware version and control controllers (FF16/FF17)
+
+```swift
+// FF16: firmware version and the GATT feature matrix.
+client.firmwareVersionPublisher
+    .sink { version in
+        print("Firmware: \(version.version ?? "unknown")")
+        print("FF17 control: \(version.features.controllerControl)")
+    }
+    .store(in: &cancellables)
+
+// FF17: status v2 notifications and commands.
+client.controllerStatusPublisher
+    .sink { status in
+        print("LEFT connected: \(status.hands[0].connected)")
+        print("Discovery: \(status.discoveryState)")
+    }
+    .store(in: &cancellables)
+
+client.readControllerStatus()
+try client.sendControllerCommand(.discover)
+try client.sendControllerCommand(.connect, hand: .left)
+```
+
+### 5. Dual-Bridge Setup (Zero Contention)
 
 ```swift
 let multiBridge = WMRMultiBridgeSession()

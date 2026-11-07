@@ -1,27 +1,35 @@
 # Companion as a Flutter library
 
-Status: **phases 1–4 and 7 have landed, and phase 8's packaging half is done.** `packages/wmr_core`
-holds the pure-Dart protocol, domain, `BleTransport` interface, controller
-service and the pure services; `packages/wmr_companion` is the public facade
-(`WmrCompanion`, config, models, typed errors) with an API README and tests;
-`packages/wmr_ble` owns the `universal_ble` adapter/transport and the app
-lifecycle hook; `packages/wmr_ws` provides the pure-Dart WebSocket transport for
-the Linux/Raspberry Pi Wi-Fi bridge daemon; `packages/wmr_companion_ui` holds optional orientation, link,
-stats and gamepad widgets; `packages/wmr_companion_hid_android` holds the
-optional Android HID output; and `example/` is a minimal Flutter host. The app
-depends on the packages by path and drives its real connection through the
-facade. The repository is a Dart pub workspace with one lockfile, and all eleven
-packages are publishable (clean `pub publish --dry-run`, export-boundary
-tests, fresh-app check in CI). `packages/wmr_tracking` provides the
-head/hand tracking seam and 6DoF controller fusion; it is publishable but no
-vendor adapter has been run on hardware (see [TRACKING.md](TRACKING.md)). Note: `BleTransport` is currently GATT-shaped, but its name is settled for `0.1.0`; the owner decided on ONY-146 to keep it as-is.
+Status: **phases 1–4 and 7 have landed, and phase 8's packaging half is done.**
+The repository is a Dart pub workspace with one lockfile and twelve packages at
+`0.3.0`. All twelve are publishable: the dry-runs are clean, the export-boundary
+tests pass, and CI runs a fresh-app check.
 
-**Release status (owner, 2026-10-23 on ONY-41).** `0.2.2` is **not published**
-to pub.dev: publication is on hold. The iOS 18 device gate (phase 5) is
-**waived for this release line**, so this release ships without iOS hardware
+`packages/wmr_core` holds the pure-Dart protocol, domain, `BleTransport`
+interface, controller service and pure services. `packages/wmr_companion` is the
+public facade (`WmrCompanion`, config, models, typed errors) with an API README
+and tests. `packages/wmr_ble` owns the `universal_ble` adapter and transport.
+`packages/wmr_ws` provides the WebSocket transport for the Linux/Raspberry Pi
+Wi-Fi bridge daemon. `packages/wmr_companion_ui` holds optional orientation,
+link, stats and gamepad widgets. `packages/wmr_companion_hid_android` holds the
+optional Android HID output. `packages/wmr_fusion` holds the Madgwick and Mahony
+filters. `packages/wmr_tracking` provides the head/hand tracking seam and 6DoF
+controller fusion. Its vendor adapters are `wmr_tracking_android_xr`,
+`wmr_tracking_viture` and `wmr_tracking_xreal`, and `wmr_tracking_dispatch`
+selects the vendor source for them. No vendor adapter has run on hardware (see
+[TRACKING.md](TRACKING.md)).
+
+The reference app depends on the packages through the workspace and drives its
+real connection through `ControllerService`. `example/` is a minimal Flutter host
+that uses the facade. `BleTransport` is GATT-shaped. Its name is settled for
+`0.1.0` and later. The owner decided on ONY-146 to keep it, so no rename is made.
+
+**Release status (owner, 2026-10-23 on ONY-41).** `0.3.0` is **not published**
+to pub.dev. Publication is on hold. The iOS 18 device gate (phase 5) is
+**waived for this release line**. This release ships without iOS hardware
 evidence. That waives the gate, not the fact: **nothing here has been run on
-iOS hardware**, and the phase-6 native transport stays unstarted because it was
-conditional on measurements that do not exist.
+iOS hardware**. The phase-6 native transport stays unstarted because its
+measurements do not exist.
 
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
@@ -156,10 +164,10 @@ apps/wmr_companion_app                  reference app: Connect (BLE & Wi-Fi), De
 | `wmr_tracking_android_xr` | Flutter plugin | optional | Android XR head + 26-joint hand `TrackingSource` (default off) | Core internals, the facade |
 | `wmr_tracking_viture` | Flutter plugin | optional | VITURE Pro Neckband Unity UaaL head + 26-joint hand `TrackingSource` (default off) | Core internals, the facade |
 | `wmr_tracking_xreal` | Flutter plugin | optional | XREAL Air 2 Ultra Unity UaaL head + 26-joint hand `TrackingSource` (default off) | Core internals, the facade |
-| `apps/wmr_companion_app` | Flutter app | no | The current app; dogfoods every package | n/a |
+| `apps/wmr_companion_app` | Flutter app | no | The current app; uses `ControllerService` and the optional UI and HID packages directly | n/a |
 
 Use a Dart pub workspace (SDK is already `^3.13.5`) rather than adding Melos.
-Internal dependencies are hosted constraints (`wmr_core: ^0.2.2`) resolved to
+Internal dependencies are hosted constraints (`wmr_core: ^0.3.0`) resolved to
 the local members by the workspace; no `path:` dependencies remain. Keep
 the package names unpretentious and stable: `wmr_core`, `wmr_ble`,
 `wmr_companion`, `wmr_companion_ui`, `wmr_companion_hid_android`.
@@ -255,6 +263,15 @@ class WmrCompanionConfig {
 }
 ```
 
+The `0.3.0` facade also wraps the control characteristics outside the stream set:
+
+- `controllerStatus`, `readControllerStatus()` and `sendControllerCommand()` for FF17.
+- `readConfig(Hand)` for the FF13 configuration block, with CRC-32 checking.
+- `ping()` for one FF15 echo round trip.
+
+Reconnect uses `WmrCompanionConfig.reconnectBackoff`. Its default is
+`[500 ms, 1 s, 2 s, 4 s, 8 s]`, with one attempt per entry.
+
 `requestedMtu` and `requestHighPriority` are deliberately **not** in the
 phase-2 config: `BleTransport` has no request call, and a config field that
 does nothing is a lie. `wmr_ble` requests MTU 517 and high priority on
@@ -314,8 +331,10 @@ and measure it.
 **Phase 2 (when measurements justify it): native iOS transport.** ONY-38 (PR
 #37) already built `packages/WMRCompanionKit`: CoreBluetooth central,
 FF11–FF17 parsing, fusion, multi-bridge and a Combine/async facade, with a
-SwiftUI probe. For the Flutter library, reuse its **transport** and, if needed,
-its native pipeline behind a platform channel or FFI. Two viable shapes:
+SwiftUI probe. `WMRCompanionClient` publishes `firmwareVersionPublisher` and
+`controllerStatusPublisher`, and exposes `readControllerStatus()` and
+`sendControllerCommand(_:hand:)`. For the Flutter library, reuse its **transport**
+and, if needed, its native pipeline behind a platform channel or FFI. Two viable shapes:
 
 | Shape | Native side does | Dart side does | Trade-off |
 | --- | --- | --- | --- |
@@ -392,7 +411,7 @@ wmr-companion/
 ```
 
 The app lives in `apps/wmr_companion_app` (M10.5, ONY-71) and depends on the
-packages by path (`../../packages/*`). Its pubspec package name is already
+packages through the workspace. Its pubspec package name is already
 `wmr_companion_app` (phase 2) so the facade can own the `wmr_companion` name;
 the directory move changed paths, not imports.
 
@@ -419,9 +438,9 @@ the directory move changed paths, not imports.
      FF16), `protocol: 1`, and `streams: ["raw", "decoded", "batched"]` (synthesized as FF10
      GATT services FF11, FF12, FF14, FF15, FF16; no FF13 config block). Wi-Fi link is
      host-tested/loopback-only until the Pi hardware sitting (P6).
-  All eleven packages at `0.2.2` in source speak to every era. Two critical statuses
+  All twelve packages at `0.3.0` in source speak to every era. Two critical statuses
   must be stated, not implied:
-  - **The library is not published:** All eleven packages are at `0.2.2` in source/git
+  - **The library is not published:** All twelve packages are at `0.3.0` in source/git
     only; publication to pub.dev is on hold by owner decision (2026-10-23, ONY-41;
     see [PUBLISHING.md](PUBLISHING.md) §5). Nothing is available on pub.dev.
   - **The firmware release is a prerelease:** `v0.1.0-rc1` is flagged prerelease
@@ -429,8 +448,8 @@ the directory move changed paths, not imports.
     been flashed or confirmed by CI).
   Unknown fields or characteristics are ignored, so a newer bridge does not crash
   an older client.
-- **Publish on pub.dev** after the API freeze. The eleven packages no longer carry
-  `publish_to: none` and their dry-runs are clean (#49/#54/#61); the actual `0.2.2`
+- **Publish on pub.dev** after the API freeze. The twelve packages no longer carry
+  `publish_to: none` and their dry-runs are clean (#49/#54/#61). The actual `0.3.0`
   upload is on hold by owner decision (2026-10-23), see [PUBLISHING.md](PUBLISHING.md) §5.
   Keep the app's and `example/`'s `publish_to: none`.
 - **License:** MIT for the Dart packages and app. The Monado XOR key table is
@@ -531,7 +550,7 @@ Sequencing notes:
    `wmr_companion_hid_android`) the names to freeze, and is publishing to
    pub.dev intended, or private/path-only for now? : **settled: `wmr_fusion`,
    `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
-   `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` (now `0.2.2`) is held.**
+   `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` (now `0.3.0`) is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
    straight to the ONY-38 `WMRCompanionKit` transport on iOS? : **settled that
    `universal_ble` is the v1 transport on both platforms. It is still
@@ -548,7 +567,7 @@ Sequencing notes:
 
 Settled: **iOS 18 is the minimum** (owner, ONY-38). **Android and iOS are both
 in v1 scope** (owner, 2026-10-23 on ONY-41). **Publication to pub.dev is the
-release target and `0.1.0` (now `0.2.2`) is held for now** (owner, ONY-50 and ONY-41,
+release target and `0.1.0` (now `0.3.0`) is held for now** (owner, ONY-50 and ONY-41,
 2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
 2026-10-23 on ONY-41).
 
@@ -556,7 +575,7 @@ release target and `0.1.0` (now `0.2.2`) is held for now** (owner, ONY-50 and ON
 
 - Phases 1–4, 7 and the packaging half of phase 8 are implemented. The iOS
   device run (phase 5) was waived for this release rather than passed, and
-  `0.2.2` is not published.
+  `0.3.0` is not published.
 - It is not an iOS virtual gamepad and cannot make one appear.
 - It does not promise iOS background operation, MTU, or connection interval.
 - It does not fix the upstream controller-to-ESP32 report loss
