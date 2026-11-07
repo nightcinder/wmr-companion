@@ -1,5 +1,5 @@
 # Run sheet: latency-2 - the Flutter app against the native GATT probe
-Status: proposed, not run. The native probe is merged (`tool/gatt_probe`) and CI publishes `wmr-gatt-probe-<version>.apk`; the paired sitting has not run. Every earlier figure is a user-reported single run.
+Status: archived 2026-11-07. The standalone native probe was retired with ONY-1012, so this sheet cannot run as written and no probe APK is published; the paired sitting never ran. Every earlier figure is a user-reported single run.
 
 Question: of the ~41 ms FF15 round trip and the ~250-300 stalls over 50 ms per hand per 120 s, how much is `universal_ble` plus the platform channel and Dart, and how much is the radio and connection parameters?
 

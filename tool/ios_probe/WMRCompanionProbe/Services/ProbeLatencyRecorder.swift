@@ -2,7 +2,7 @@ import Foundation
 import WMRCompanionKit
 
 /// Latency and link-quality recorder matching the `wmr-latency` v2 schema.
-/// Exports both JSON summary and echo CSV for cross-platform analysis against Android GATT probe and Flutter app.
+/// Exports both JSON summary and echo CSV for cross-platform analysis against the Flutter app.
 public final class ProbeLatencyRecorder: @unchecked Sendable {
     public struct Config: Sendable {
         public var streamMode: WMRStreamMode = .batchedFF14

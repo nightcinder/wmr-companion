@@ -8,8 +8,7 @@ updates:
       interval: weekly
 
   # Independent Gradle builds in this repo. The app and the example both pull
-  # in the Flutter Gradle plugin; the GATT probe is a plain Android/Kotlin
-  # project.
+  # in the Flutter Gradle plugin.
   #
   # Dependencies in one build root arrive as a single PR: a lone AGP bump
   # cannot build (AGP 9.5 needs Gradle >= 9.6.0), so the versions that travel
@@ -43,23 +42,6 @@ updates:
       - dependency-name: "gradle-wrapper"
       - dependency-name: "com.android.application"
       - dependency-name: "org.jetbrains.kotlin.android"
-  - package-ecosystem: gradle
-    directory: /tool/gatt_probe
-    schedule:
-      interval: weekly
-    groups:
-      gradle:
-        patterns:
-          - "*"
-    ignore:
-      - dependency-name: "gradle-wrapper"
-      - dependency-name: "com.android.application"
-      - dependency-name: "org.jetbrains.kotlin.android"
-      # androidx.core:core-ktx 1.19.1 demands compileSdk 37 and AGP 9.1
-      # (checkDebugAarMetadata), while the probe is pinned to compileSdk 35 and
-      # AGP 8.7.3. It moves with the probe's toolchain, not before.
-      - dependency-name: "androidx.core:core-ktx"
-
   # Workflow actions are pinned to major tags, so Dependabot keeps them current
   # one grouped PR at a time instead of one PR per action.
   - package-ecosystem: github-actions
