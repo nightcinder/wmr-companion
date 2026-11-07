@@ -30,9 +30,10 @@ table-braced hold. D stays at a median 1.16 cm/s: 42 samples touch the
 10-50 cm/s band, all during the first second's settle, so none pass the
 tuner's one-second warm-up gate and `J_D` is **unscorable**, not 0 mm.
 
-The full 4,264-point grid is committed at
-`docs/runs/sheets/pose-filter-grid-androidXr-20261105.md`. No point passes and
-no constant was chosen. Do not tune from this corpus; record again with a
+The full 4,264-point grid is summarised in
+`docs/runs/sheets/pose-filter.md` and is reproducible with the command there.
+No point passes and no constant was chosen. Do not tune from this corpus;
+record again with a
 build that contains the section 8 prompts.
 
 ## Android XR / Google Aura, 2026-11-03 — complete 6-run corpus
@@ -58,8 +59,7 @@ passes.** `J` is 1.514 mm against 0.5 mm and `J_D` is 7.576 mm against
 0.75 mm; the grid spread is under 0.04 mm. Lag passes (slow 10 ms, medium
 1 ms, fast 7 ms). The still run was hand-held, not braced, and the drifting
 run's median speed was 2.9 cm/s, so only 43 samples were in segment D's
-10-50 cm/s band. The grid is committed at
-`docs/runs/sheets/pose-filter-grid-androidXr-20261103.md`. Do not choose
+10-50 cm/s band. The grid is summarised in `docs/runs/sheets/pose-filter.md`. Do not choose
 constants from this corpus; recapture S braced and D in band first.
 
 ## Android XR / Google Aura, 2026-11-02
