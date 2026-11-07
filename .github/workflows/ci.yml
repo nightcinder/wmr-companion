@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
-    # A `v*` tag publishes the signed tester APKs and the GATT probe:
-    # `release-unified` builds the both-vendors `unified` flavor (ONY-508,
-    # ONY-520) and the signed probe APK, and `release-checksums` writes one
-    # SHA256SUMS for them. A `v*-dryrun` tag only renders the release body
+    # A `v*` tag publishes the signed tester APKs: `release-unified` builds
+    # the both-vendors `unified` flavor (ONY-508, ONY-520) and
+    # `release-checksums` writes one SHA256SUMS for them. A `v*-dryrun` tag
+    # only renders the release body
     # (`release-notes-dryrun`); it publishes nothing.
     tags: ['v*']
   pull_request:
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   # Path filter for the expensive Android jobs. The gate jobs below depend on
   # it, so a docs-only PR still reports every required context while skipping
-  # the APK and GATT-probe builds. A push to main always builds (see the
+  # the APK build. A push to main always builds (see the
   # `-build` jobs), so main can never miss a regression the filter hides.
   changes:
     # Tag pushes build only the release job; these gates run on branches/PRs.
@@ -30,7 +30,6 @@ jobs:
       pull-requests: read
     outputs:
       android_flavors: ${{ steps.filter.outputs.android_flavors }}
-      gatt_probe: ${{ steps.filter.outputs.gatt_probe }}
       r8_dex: ${{ steps.filter.outputs.r8_dex }}
       app_code: ${{ steps.filter.outputs.app_code }}
     steps:
@@ -47,9 +46,6 @@ jobs:
               - 'tool/fetch_wmr_config_key.dart'
               - 'pubspec.yaml'
               - 'pubspec.lock'
-              - '.github/workflows/ci.yml'
-            gatt_probe:
-              - 'tool/gatt_probe/**'
               - '.github/workflows/ci.yml'
             # ONY-782: only paths that can change what R8 keeps, or that
             # change this job, pay for a minified release build. The whole
@@ -468,65 +464,6 @@ jobs:
             /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
 
-  gatt-probe:
-    # Required context. Same contract as android-flavors: green only when the
-    # path filter ran and the probe build succeeded or was skipped by it.
-    needs: [changes, gatt-probe-build]
-    if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Gate on the path filter and the GATT probe build
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          BUILD: ${{ needs.gatt-probe-build.result }}
-        run: |
-          set -eu
-          echo "changes: $CHANGES"
-          echo "gatt-probe-build: $BUILD"
-          if [ "$CHANGES" != "success" ]; then
-            echo "::error::changes did not succeed ($CHANGES); refusing to report gatt-probe green."
-            exit 1
-          fi
-          case "$BUILD" in
-            success|skipped) ;;
-            *)
-              echo "::error::gatt-probe-build did not succeed ($BUILD)."
-              exit 1
-              ;;
-          esac
-
-  gatt-probe-build:
-    needs: changes
-    # A push to main always builds, whatever the path filter says; PRs build
-    # only when the probe changed.
-    if: ${{ (needs.changes.outputs.gatt_probe == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: gradle/actions/setup-gradle@v6
-
-      - name: Run GATT probe unit tests
-        working-directory: tool/gatt_probe
-        run: ./gradlew test --stacktrace
-
-      - name: Build GATT probe APK
-        working-directory: tool/gatt_probe
-        run: ./gradlew assembleDebug --stacktrace
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: wmr-gatt-probe-debug-apk
-          path: tool/gatt_probe/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
-
   ios:
     # Tag pushes build only the release job; these gates run on branches/PRs.
     # A push to main always builds, whatever the filter says: the app_code list
@@ -602,7 +539,6 @@ jobs:
             --release-tag "v${version}" \
             --version "$version" \
             --asset "wmr-companion-${version}-unified-arm64-v8a.apk" \
-            --asset "wmr-gatt-probe-${version}.apk" \
             --asset SHA256SUMS \
             --output release-notes.md
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
@@ -1092,54 +1028,6 @@ jobs:
           done
           ls -l "$out"
 
-      # The probe is a separate Gradle project but the sideloadable release
-      # asset, so it must carry the same project key as the companion app
-      # (ONY-961). A debug key is minted fresh on every CI runner, and Android
-      # refuses to update an installed probe signed by a different key.
-      - name: Build and stage the signed GATT probe APK
-        working-directory: tool/gatt_probe
-        env:
-          WMR_RELEASE_STORE_FILE: ${{ github.workspace }}/apps/wmr_companion_app/android/wmr-release.keystore
-          WMR_RELEASE_STORE_PASSWORD: ${{ secrets.WMR_RELEASE_STORE_PASSWORD }}
-          WMR_RELEASE_KEY_ALIAS: wmr-companion
-          WMR_RELEASE_KEY_PASSWORD: ${{ secrets.WMR_RELEASE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          version="${VERSION#v}"
-          numeric="${version%%-*}"
-          IFS=. read -r major minor patch <<<"$numeric"
-          if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
-            echo "::error::cannot derive a probe versionCode from $VERSION"
-            exit 1
-          fi
-          code=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))
-          ./gradlew assembleRelease --stacktrace \
-            -PprobeVersionCode="$code" \
-            -PprobeVersionName="$version"
-          apk=app/build/outputs/apk/release/app-release.apk
-          if [ ! -f "$apk" ]; then
-            echo "::error::$apk is missing; release signing was not configured."
-            exit 1
-          fi
-          apksigner="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
-          certs="$("$apksigner" verify --print-certs "$apk")"
-          echo "$certs"
-          if grep -q 'CN=Android Debug' <<<"$certs"; then
-            echo "::error::$apk is signed with the Android debug key"
-            exit 1
-          fi
-          if ! grep -q 'CN=WMR Companion' <<<"$certs"; then
-            echo "::error::$apk has no CN=WMR Companion signer"
-            exit 1
-          fi
-          if ! grep -qi 'bdaa32b51ad3afd267d0f80f28a473b85319f8c37e26289cf1dc1ff7cfaae256' <<<"$certs"; then
-            echo "::error::$apk certificate SHA-256 does not match the documented key"
-            exit 1
-          fi
-          out="$RUNNER_TEMP/release-assets"
-          cp "$apk" "$out/wmr-gatt-probe-$version.apk"
-          ls -l "$out/wmr-gatt-probe-$version.apk"
-
       # The body comes from first-parent history: one bullet per pull request
       # merged since the previous tag, plus the assets this tag publishes. A
       # re-run refreshes it instead of leaving stale notes.
@@ -1149,7 +1037,6 @@ jobs:
           python3 tool/release_notes.py \
             --tag "$VERSION" \
             --asset "wmr-companion-${VERSION#v}-unified-arm64-v8a.apk" \
-            --asset "wmr-gatt-probe-${VERSION#v}.apk" \
             --asset SHA256SUMS \
             --output "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
@@ -1192,9 +1079,9 @@ jobs:
           rmdir -p apps/wmr_companion_app/android/app/src/main/jniLibs/arm64-v8a 2>/dev/null || true
 
   release-checksums:
-    # `release-unified` uploads the unified APKs and the GATT probe; once it
-    # has finished, write one SHA256SUMS file that covers every APK on the
-    # release. The build job writes no digest of its own.
+    # `release-unified` uploads the unified APKs; once it has finished, write
+    # one SHA256SUMS file that covers every APK on the release. The build job
+    # writes no digest of its own.
     needs: [release-unified]
     if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dryrun') && needs['release-unified'].result == 'success' }}
     runs-on: ubuntu-latest
