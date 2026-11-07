@@ -18,17 +18,35 @@ This tool provides the baseline measurement for Milestone 7.1 to resolve Milesto
 ## Building and Installing
 
 ### 1. From a Release
-Every release tag publishes `wmr-gatt-probe-<version>-debug.apk` next to the companion APK, for example:
+Every release tag publishes `wmr-gatt-probe-<version>.apk` next to the companion APK, for example:
 ```bash
-gh release download v0.3.18 --pattern 'wmr-gatt-probe-*.apk'
-adb install -r wmr-gatt-probe-0.3.18-debug.apk
+gh release download v0.3.19 --pattern 'wmr-gatt-probe-*.apk'
+adb install -r wmr-gatt-probe-0.3.19.apk
 ```
+
+The release APK is signed with the project-owned release key (the same key as
+the companion app), so later probes update it in place. The `v0.3.18` probe was
+debug-signed with the CI runner's throwaway key: a phone that installed it, an
+earlier CI artifact, or a local build cannot update it and must remove the old
+probe once:
+
+```bash
+adb uninstall com.onyxlens.wmr.gattprobe
+adb install wmr-gatt-probe-0.3.18-debug.apk
+```
+
+`adb push` only copies a file to the device; it does not install an APK. Use
+`adb install` (or open the file on the phone).
 
 ### 2. From CI Artifacts
 Download the `wmr-gatt-probe-debug-apk` artifact from the latest GitHub Actions CI run on `main` or the PR branch, then install via `adb`:
 ```bash
 adb install -r app-debug.apk
 ```
+
+CI artifacts and local builds keep the Android debug key, which changes from
+run to run. Uninstall `com.onyxlens.wmr.gattprobe` before switching between a
+CI artifact, a local build and a release APK.
 
 ### 3. Building from Source
 Requires JDK 17 and the Android SDK (API 35, build-tools 35.0.0):
@@ -43,6 +61,12 @@ To run unit tests:
 cd tool/gatt_probe
 ./gradlew test
 ```
+
+`assembleRelease` needs the project keystore in `tool/gatt_probe/key.properties`
+(gitignored) or `WMR_RELEASE_STORE_FILE`, `WMR_RELEASE_STORE_PASSWORD`,
+`WMR_RELEASE_KEY_ALIAS` and `WMR_RELEASE_KEY_PASSWORD`, plus
+`-PprobeVersionCode=<n>`. Without the key Gradle emits an unsigned APK, never a
+debug-signed one.
 
 ---
 

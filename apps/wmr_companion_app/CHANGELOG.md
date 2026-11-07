@@ -11,8 +11,10 @@
 - A Nintendo Switch hand is named as a Switch from its FF17 model, and its
   FF13 factory calibration and `0x30` burst timing are decoded so the debug
   panels no longer show it as WMR (ONY-948).
-- The release workflow now also publishes `wmr-gatt-probe-<version>-debug.apk`,
-  the standalone GATT latency probe, on every release tag (ONY-932).
+- The release workflow now also publishes `wmr-gatt-probe-<version>.apk`,
+  the standalone GATT latency probe, on every release tag (ONY-932). It is
+  signed with the project release key, so later probes update in place
+  (ONY-961).
 
 ## 0.3.17+22
 
