@@ -153,7 +153,12 @@ class GattClient(
         negotiatedMtu = null
         priorityRequested = null
         connectionIntervalUs = null
-        updateState(GattState.DISCONNECTED, "Disconnected")
+        // Keep a specific failure ("Link failed with status N") visible: on
+        // the bench that status is the only clue why the bridge refused the
+        // client. Only the generic teardown gets the generic message.
+        if (state != GattState.DISCONNECTED) {
+            updateState(GattState.DISCONNECTED, "Disconnected")
+        }
     }
 
     private fun updateState(newState: GattState, message: String) {
