@@ -102,8 +102,11 @@ Run the 3 interleaved blocks alternating between App and Probe to eliminate drif
    Before the first ping it re-writes the FF15 CCC (and FF14 when batched). This is
    required on the gamepad link: the Companion app unsubscribes FF15 when its own
    latency run stops, and the bridge then ignores FF15 pings from every client on
-   the shared link. A run that still reports 100 % timeouts means the re-subscribe
-   failed; the probe says so and does not start.
+   the shared link. If that descriptor write fails, the probe reports it and
+   refuses to start, so a run cannot begin with a known-dead echo. A run that did
+   start and still reports 100 % timeouts means the re-subscribe did not reach the
+   bridge (for example the Companion cleared the CCC again mid-run); reconnect the
+   probe and start a new run.
 6. At 120 s, the run stops automatically and records the end RSSI and summary.
 
 ---

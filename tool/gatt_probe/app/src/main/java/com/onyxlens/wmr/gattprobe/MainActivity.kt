@@ -456,7 +456,10 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
                     if (isFinishing || isDestroyed) return@prepareForRun
                     if (!ok) {
                         tvRunMetrics.text = "Run: Idle"
-                        btnStartRun.isEnabled = true
+                        // A link drop during the refresh posts a DISCONNECTED
+                        // state after this callback's setup, so only re-enable
+                        // Start when the link is still ready.
+                        btnStartRun.isEnabled = client.isReady
                         Toast.makeText(
                             this,
                             "Could not re-subscribe FF15/FF14; reconnect the probe",
