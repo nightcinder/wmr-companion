@@ -38,6 +38,20 @@ object Protocol {
     val WMR_ECHO_CHAR_UUID: UUID = UUID.fromString("0000ff15-0000-1000-8000-00805f9b34fb")
     val CCC_DESCRIPTOR_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
+    /**
+     * Characteristics whose CCC must be re-asserted before a run, in write
+     * order. FF15 is always included: the Companion app unsubscribes FF15
+     * when its own latency run stops, and the bridge then ignores pings for
+     * every client on the shared link. FF14 is included in batched mode so a
+     * CCC cleared by another client cannot leave the run without a stream.
+     */
+    fun runSubscriptionUuids(streamMode: StreamMode): List<UUID> =
+        if (streamMode == StreamMode.BATCHED) {
+            listOf(WMR_ECHO_CHAR_UUID, WMR_BATCHED_CHAR_UUID)
+        } else {
+            listOf(WMR_ECHO_CHAR_UUID)
+        }
+
     const val REQUESTED_MTU = 517
 
     const val WMR_ECHO_VERSION = 1

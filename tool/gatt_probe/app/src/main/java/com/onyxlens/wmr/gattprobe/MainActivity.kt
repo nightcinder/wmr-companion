@@ -446,7 +446,27 @@ class MainActivity : AppCompatActivity(), GattClient.Listener {
         Thread {
             client.readRssiSafe(1000L)
             mainHandler.post {
-                if (!isFinishing && !isDestroyed) {
+                if (isFinishing || isDestroyed) return@post
+                // The Companion app unsubscribes FF15 when its latency run
+                // stops. On the shared gamepad link that clears the bridge's
+                // CCC for this client too, so re-assert the run's CCCs
+                // immediately before the first ping.
+                tvRunMetrics.text = "Re-subscribing FF15${if (client.streamMode == StreamMode.BATCHED) "/FF14" else ""}..."
+                client.prepareForRun { ok ->
+                    if (isFinishing || isDestroyed) return@prepareForRun
+                    if (!ok) {
+                        tvRunMetrics.text = "Run: Idle"
+                        // A link drop during the refresh posts a DISCONNECTED
+                        // state after this callback's setup, so only re-enable
+                        // Start when the link is still ready.
+                        btnStartRun.isEnabled = client.isReady
+                        Toast.makeText(
+                            this,
+                            "Could not re-subscribe FF15/FF14; reconnect the probe",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@prepareForRun
+                    }
                     actualStartRun()
                 }
             }

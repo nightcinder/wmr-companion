@@ -121,6 +121,15 @@ class GattClient(
     private var currentPendingPing: PendingPing? = null
     private var pingTimeoutRunnable: Runnable? = null
 
+    // Run-start CCC refresh. On the shared LE link the Companion app writes
+    // FF15 CCC=0 when its latency run stops; the bridge then ignores FF15 pings
+    // from every client until a CCC=1 write arrives again. This client's local
+    // notification registration survives that, so without a re-subscribe the
+    // run reports 100 % timeouts with no error.
+    private val cccRefreshQueue = ArrayDeque<BluetoothGattCharacteristic>()
+    private var cccRefreshAwaiting: BluetoothGattCharacteristic? = null
+    private var cccRefreshDone: ((Boolean) -> Unit)? = null
+
     // End of run RSSI latch
     private var rssiLatch: CountDownLatch? = null
 
@@ -138,6 +147,7 @@ class GattClient(
 
     fun disconnect() {
         cancelPendingPing()
+        finishCccRefresh(false)
         val g = gatt
         gatt = null
         if (g != null) {
@@ -183,6 +193,108 @@ class GattClient(
             rssiLatch = null
         }
         return lastRssi
+    }
+
+    /**
+     * Re-writes the CCC descriptors this run needs and calls [onDone] once the
+     * last write has completed. Another client on the shared gamepad link can
+     * clear a CCC between connect and Start; the bridge gates FF15 answers on
+     * its CCC, so a stale 0 disables echo for this client too. Calls
+     * [onDone] with false when the link, a characteristic or a write is
+     * missing, so the UI never starts a run against a known-dead echo.
+     */
+    fun prepareForRun(onDone: (Boolean) -> Unit) {
+        val currentGatt = gatt
+        if (currentGatt == null || state != GattState.READY) {
+            onDone(false)
+            return
+        }
+        val targets = ArrayList<BluetoothGattCharacteristic>(2)
+        for (uuid in Protocol.runSubscriptionUuids(streamMode)) {
+            val characteristic = when (uuid) {
+                Protocol.WMR_ECHO_CHAR_UUID -> echoChar
+                Protocol.WMR_BATCHED_CHAR_UUID -> batchedChar
+                else -> null
+            }
+            if (characteristic == null) {
+                onDone(false)
+                return
+            }
+            targets.add(characteristic)
+        }
+
+        val busy = synchronized(this) {
+            if (cccRefreshDone != null) {
+                true
+            } else {
+                cccRefreshDone = onDone
+                cccRefreshQueue.clear()
+                cccRefreshQueue.addAll(targets)
+                cccRefreshAwaiting = null
+                false
+            }
+        }
+        if (busy) {
+            onDone(false)
+            return
+        }
+        writeNextCccRefresh(currentGatt)
+    }
+
+    private fun writeNextCccRefresh(currentGatt: BluetoothGatt) {
+        val next = synchronized(this) {
+            cccRefreshAwaiting =
+                if (cccRefreshQueue.isEmpty()) null else cccRefreshQueue.removeFirst()
+            cccRefreshAwaiting
+        }
+        if (next == null) {
+            finishCccRefresh(true)
+            return
+        }
+        if (!currentGatt.setCharacteristicNotification(next, true)) {
+            finishCccRefresh(false)
+            return
+        }
+        val ccc = next.getDescriptor(Protocol.CCC_DESCRIPTOR_UUID)
+        if (ccc == null) {
+            finishCccRefresh(false)
+            return
+        }
+        if (!writeDescriptor(currentGatt, ccc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
+            finishCccRefresh(false)
+        }
+    }
+
+    private fun finishCccRefresh(ok: Boolean) {
+        val done = synchronized(this) {
+            cccRefreshQueue.clear()
+            cccRefreshAwaiting = null
+            val callback = cccRefreshDone
+            cccRefreshDone = null
+            callback
+        }
+        if (done != null) mainHandler.post { done(ok) }
+    }
+
+    /** True when this descriptor write was issued by [prepareForRun]. */
+    private fun handleCccRefreshWrite(
+        currentGatt: BluetoothGatt,
+        descriptor: BluetoothGattDescriptor,
+        status: Int
+    ): Boolean {
+        val isRefresh = synchronized(this) {
+            val awaiting = cccRefreshAwaiting ?: return@synchronized false
+            if (awaiting.uuid != descriptor.characteristic.uuid) return@synchronized false
+            cccRefreshAwaiting = null
+            true
+        }
+        if (!isRefresh) return false
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            finishCccRefresh(false)
+        } else {
+            writeNextCccRefresh(currentGatt)
+        }
+        return true
     }
 
     fun sendPing(pingId: Int, timeoutMs: Long = 1000L): Boolean {
@@ -349,6 +461,7 @@ class GattClient(
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            if (handleCccRefreshWrite(gatt, descriptor, status)) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 updateState(GattState.DISCONNECTED, "Descriptor write failed with status $status")
                 return
