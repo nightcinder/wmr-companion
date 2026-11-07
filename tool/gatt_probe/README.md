@@ -99,6 +99,11 @@ Run the 3 interleaved blocks alternating between App and Probe to eliminate drif
 3. The probe negotiates MTU 517, requests `CONNECTION_PRIORITY_HIGH`, and subscribes to the requested characteristics.
 4. Wait ~30 s for link settle. Check the ESP32 serial console for the `STREAM` line (verify `conn=[15.00ms lat=… to=…]`, `mtu=517`, `sub=1`).
 5. Tap **Start 120s Run**. The probe runs for exactly 120 seconds, updating metrics live.
+   Before the first ping it re-writes the FF15 CCC (and FF14 when batched). This is
+   required on the gamepad link: the Companion app unsubscribes FF15 when its own
+   latency run stops, and the bridge then ignores FF15 pings from every client on
+   the shared link. A run that still reports 100 % timeouts means the re-subscribe
+   failed; the probe says so and does not start.
 6. At 120 s, the run stops automatically and records the end RSSI and summary.
 
 ---

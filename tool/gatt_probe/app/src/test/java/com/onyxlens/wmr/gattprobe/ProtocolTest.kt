@@ -20,6 +20,22 @@ class ProtocolTest {
     }
 
     @Test
+    fun testRunSubscriptionsAlwaysRefreshEcho() {
+        assertEquals(
+            listOf(Protocol.WMR_ECHO_CHAR_UUID),
+            Protocol.runSubscriptionUuids(StreamMode.NONE)
+        )
+    }
+
+    @Test
+    fun testBatchedRunRefreshesEchoAndBatchedSubscription() {
+        assertEquals(
+            listOf(Protocol.WMR_ECHO_CHAR_UUID, Protocol.WMR_BATCHED_CHAR_UUID),
+            Protocol.runSubscriptionUuids(StreamMode.BATCHED)
+        )
+    }
+
+    @Test
     fun testEchoAnswerParsing() {
         val buffer = ByteBuffer.allocate(20).order(ByteOrder.LITTLE_ENDIAN)
         buffer.put(1) // version
