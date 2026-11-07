@@ -164,6 +164,10 @@ wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
 SHA256SUMS
 ```
 
+The standalone GATT latency probe is not in this asset list; its retirement is
+tracked in ONY-1012. Until that lands, the tag job still builds and publishes
+it.
+
 `wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
 XREAL glasses install.
 The unified flavor is published for `arm64-v8a` only:

@@ -1,6 +1,6 @@
 # Run sheet: latency-2 - the Flutter app against the native GATT probe
 
-Status: **Archived 2026-11-07: ONY-23 closed, Stay Flutter (ONY-1010).** The standalone native probe was retired with ONY-1012. No further runs are scheduled; this sheet is the record of the rule and the two sessions that decided ONY-23.
+Status: **Archived 2026-11-07: ONY-23 closed, Stay Flutter (ONY-1010).** The standalone native probe's retirement is tracked in ONY-1012. No further runs are scheduled; this sheet is the record of the rule and the two sessions that decided ONY-23.
 
 Question (answered): of the ~41 ms FF15 round trip and the ~250-300 stalls over 50 ms per hand per 120 s, how much is `universal_ble` plus the platform channel and Dart, and how much is the radio and connection parameters?
 
@@ -15,7 +15,7 @@ ONY-23 is closed: keep `universal_ble`; do not move the BLE receive hot path to 
 | 2026-11-07 | FF14, 50 ms | -2.6 ms | | |
 | 2026-11-07 | FF14, 1000 ms | -9.9 ms | | |
 
-Neither session reaches the Move native trigger (`d >= +10 ms`, or probe stalls `p < 0.5 * a`). The 2026-11-07 session scored "In between" only under the old two-sided `abs(d) <= 5 ms`, which penalized the app for being faster than the probe; under the one-sided rule both sessions are Stay Flutter. Both outcomes prescribe the same action: stay on Flutter and track the `universal_ble` gaps upstream (app issue #20).
+Session 1 (2026-10-28) is Stay Flutter. Session 2 (2026-11-07) is **In between** on the stall clause: `d = -16.3 ms` passes the one-sided `d <= +5 ms` clause, but the right hand's app 440 vs probe 698 stalls give `abs(a - p) = 258 > 0.25 * 698 = 174.5` (the left hand, 490 vs 610, passes at `120 <= 152.5`). Neither session reaches the Move native trigger (`d >= +10 ms`, or probe stalls `p < 0.5 * a`). The two sessions therefore do not repeat the same label, but both labels prescribe the same action: stay on Flutter and track the `universal_ble` gaps upstream (app issue #20). ONY-23 is closed on that converging prescription, not on a repeated label.
 
 ## Decision rule (amended by ONY-1010)
 - **Test condition:** a normal warm/stable power state across two separate sittings. No reboot: users launch the app from a warm phone, and a cold boot hides warm-transition faults. Disconnect and reconnect between runs, which negotiates a fresh BLE link.
@@ -30,9 +30,9 @@ Neither session reaches the Move native trigger (`d >= +10 ms`, or probe stalls 
 | "within 25% of the probe's" | `abs(a - p) <= 0.25 * p` |
 | "more than half its stalls are missing" | `p < 0.5 * a` |
 
-Check in this order: Move if `d >= 10 ms` or either hand has `p < 0.5a`; Stay only if `d <= 5 ms` AND both hands have `abs(a-p) <= 0.25p`; otherwise In between. Only the FF14 pair decides; the no-stream pair is context. One session is not a verdict: the same outcome must repeat in a second session in the normal warm/stable power state.
+Check in this order: Move if `d >= 10 ms` or either hand has `p < 0.5a`; Stay only if `d <= 5 ms` AND both hands have `abs(a-p) <= 0.25p`; otherwise In between. Only the FF14 pair decides; the no-stream pair is context. One session is not a verdict: the same outcome must repeat in a second session in the normal warm/stable power state. ONY-23 was closed on the prescription instead: session 1 was Stay Flutter and session 2 was In between on the stall clause, and both prescribe staying on Flutter.
 
-## Archived protocol (kept for the record; the probe no longer exists)
+## Archived protocol (kept for the record; the probe's retirement is tracked in ONY-1012)
 
 ### Setup, once per session
 - Tape the phone stand ~**1.0 m** from the bridge; controllers face down and still ~**0.5 m** away. Photo start and end; do not move anything during the session.
@@ -64,4 +64,4 @@ Per run: the app `wmr-latency` v3 JSON and echo CSV, or the probe v2 JSON and ec
 
 ## Outcome
 
-Stay Flutter. ONY-23 is closed; the per-run result cells were never filled because the verdict is taken from the two recorded sessions above, and the probe has been retired.
+Stay Flutter. ONY-23 is closed; the per-run result cells were never filled because the verdict is taken from the two recorded sessions above, and the probe's retirement is tracked in ONY-1012.

@@ -229,7 +229,7 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 
 Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
 
-**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). ONY-23 is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions). The standalone probe was retired with ONY-1012; the sheet is archived.
+**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). ONY-23 is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions; the second is In between on the stall clause, and both sessions prescribe staying on Flutter). The standalone probe's retirement is tracked in ONY-1012; the sheet is archived.
 
 ## Flutter library / iOS v1 run (phase 5)
 
