@@ -6,17 +6,17 @@ controller input **in-process**. Android and iOS are both v1 targets.
 This package is the umbrella API from `docs/LIBRARY.md`. It wraps
 `packages/wmr_core` (protocol, fusion, gamepad mapping) and takes any
 `BleTransport`; it has no Flutter, Riverpod or widget dependency, so a host app
-can adapt the streams to whatever state layer it already uses. The reference
-app in this repository is the first consumer.
+can adapt the streams to whatever state layer it already uses. `example/` is
+the first consumer. The reference app uses `ControllerService` directly.
 
-Status: **0.2.2, landed**. All twelve packages — `wmr_core`, `wmr_companion`,
+Status: **0.3.0, landed**. All twelve packages — `wmr_core`, `wmr_companion`,
 `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_tracking_dispatch`,
 `wmr_tracking_android_xr`, `wmr_tracking_viture`, `wmr_tracking_xreal`,
 `wmr_companion_ui` and `wmr_companion_hid_android` — are in the pub workspace at
-0.2.2 and pass their export boundary checks; publishing to pub.dev is on hold per
-the owner's decision. The facade works on the fake transport and is dogfooded by
-the app's real connection path, including `WmrWsTransport` alongside
-`UniversalBleTransport` and `FakeTransport`. Nothing here has been run on iOS
+0.3.0 and pass their export boundary checks. Publishing to pub.dev is on hold per
+the owner's decision. The facade works on the fake transport and `example/` uses
+it. The reference app drives `ControllerService` directly with
+`UniversalBleTransport` and `WmrWsTransport`. Nothing here has been run on iOS
 hardware.
 
 The optional, publishable `wmr_tracking` package (covered by the release
