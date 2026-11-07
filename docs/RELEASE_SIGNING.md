@@ -161,20 +161,27 @@ Release assets for tag `vX.Y.Z`:
 
 ```text
 wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
-wmr-gatt-probe-X.Y.Z-debug.apk               # standalone GATT latency probe
+wmr-gatt-probe-X.Y.Z.apk                     # standalone GATT latency probe
 SHA256SUMS
 ```
 
 `wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
-XREAL glasses install. `wmr-gatt-probe-X.Y.Z-debug.apk` is the standalone GATT
+XREAL glasses install. `wmr-gatt-probe-X.Y.Z.apk` is the standalone GATT
 latency probe testers install beside the companion app for the bench comparison.
 The unified flavor is published for `arm64-v8a` only:
 the approved export ships `arm64-v8a` natives, so a 32-bit or x86_64 unified
 split would install without any Unity runtime and report VITURE and XREAL as
 `unavailable`. The job fails if the unified APK is debug-signed, lacks a
 `CN=WMR Companion` signer, or its certificate SHA-256 is not the one above, so a
-green tag run means the published unified APK matches this document. The probe
-APK is debug-signed by design and is not part of that check.
+green tag run means the published unified APK matches this document.
+
+The probe is built as a release APK and signed with the same project key, so a
+new probe installs over the previous one. Its `versionCode` is derived from the
+tag (`X.Y.Z` -> `X*10000 + Y*100 + Z`) because Android also rejects a downgrade.
+The tag job verifies the probe's `CN=WMR Companion` signer before uploading it.
+The `v0.3.18` probe predates this and is debug-signed by the CI runner's
+throwaway key; remove that install once with
+`adb uninstall com.onyxlens.wmr.gattprobe` before installing a later probe.
 
 ## Release body
 

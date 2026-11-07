@@ -3,4 +3,5 @@ build/
 app/build/
 *.iml
 .idea/
+key.properties
 local.properties

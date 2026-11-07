@@ -5,7 +5,7 @@ on:
     branches: [main]
     # A `v*` tag publishes the signed tester APKs and the GATT probe:
     # `release-unified` builds the both-vendors `unified` flavor (ONY-508,
-    # ONY-520) and the probe's debug APK, and `release-checksums` writes one
+    # ONY-520) and the signed probe APK, and `release-checksums` writes one
     # SHA256SUMS for them. A `v*-dryrun` tag only renders the release body
     # (`release-notes-dryrun`); it publishes nothing.
     tags: ['v*']
@@ -602,7 +602,7 @@ jobs:
             --release-tag "v${version}" \
             --version "$version" \
             --asset "wmr-companion-${version}-unified-arm64-v8a.apk" \
-            --asset "wmr-gatt-probe-${version}-debug.apk" \
+            --asset "wmr-gatt-probe-${version}.apk" \
             --asset SHA256SUMS \
             --output release-notes.md
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
@@ -1092,18 +1092,53 @@ jobs:
           done
           ls -l "$out"
 
-      # The probe is a separate Gradle project and a debug-only APK: the tester
-      # installs it beside the signed companion build, so it ships on the same
-      # tag with the release version in its name.
-      - name: Build and stage the GATT probe debug APK
+      # The probe is a separate Gradle project but the sideloadable release
+      # asset, so it must carry the same project key as the companion app
+      # (ONY-961). A debug key is minted fresh on every CI runner, and Android
+      # refuses to update an installed probe signed by a different key.
+      - name: Build and stage the signed GATT probe APK
         working-directory: tool/gatt_probe
+        env:
+          WMR_RELEASE_STORE_FILE: ${{ github.workspace }}/apps/wmr_companion_app/android/wmr-release.keystore
+          WMR_RELEASE_STORE_PASSWORD: ${{ secrets.WMR_RELEASE_STORE_PASSWORD }}
+          WMR_RELEASE_KEY_ALIAS: wmr-companion
+          WMR_RELEASE_KEY_PASSWORD: ${{ secrets.WMR_RELEASE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ./gradlew assembleDebug --stacktrace
+          version="${VERSION#v}"
+          numeric="${version%%-*}"
+          IFS=. read -r major minor patch <<<"$numeric"
+          if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
+            echo "::error::cannot derive a probe versionCode from $VERSION"
+            exit 1
+          fi
+          code=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))
+          ./gradlew assembleRelease --stacktrace \
+            -PprobeVersionCode="$code" \
+            -PprobeVersionName="$version"
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$apk" ]; then
+            echo "::error::$apk is missing; release signing was not configured."
+            exit 1
+          fi
+          apksigner="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
+          certs="$("$apksigner" verify --print-certs "$apk")"
+          echo "$certs"
+          if grep -q 'CN=Android Debug' <<<"$certs"; then
+            echo "::error::$apk is signed with the Android debug key"
+            exit 1
+          fi
+          if ! grep -q 'CN=WMR Companion' <<<"$certs"; then
+            echo "::error::$apk has no CN=WMR Companion signer"
+            exit 1
+          fi
+          if ! grep -qi 'bdaa32b51ad3afd267d0f80f28a473b85319f8c37e26289cf1dc1ff7cfaae256' <<<"$certs"; then
+            echo "::error::$apk certificate SHA-256 does not match the documented key"
+            exit 1
+          fi
           out="$RUNNER_TEMP/release-assets"
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            "$out/wmr-gatt-probe-${VERSION#v}-debug.apk"
-          ls -l "$out/wmr-gatt-probe-${VERSION#v}-debug.apk"
+          cp "$apk" "$out/wmr-gatt-probe-$version.apk"
+          ls -l "$out/wmr-gatt-probe-$version.apk"
 
       # The body comes from first-parent history: one bullet per pull request
       # merged since the previous tag, plus the assets this tag publishes. A
@@ -1114,7 +1149,7 @@ jobs:
           python3 tool/release_notes.py \
             --tag "$VERSION" \
             --asset "wmr-companion-${VERSION#v}-unified-arm64-v8a.apk" \
-            --asset "wmr-gatt-probe-${VERSION#v}-debug.apk" \
+            --asset "wmr-gatt-probe-${VERSION#v}.apk" \
             --asset SHA256SUMS \
             --output "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"

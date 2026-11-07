@@ -131,7 +131,7 @@ def describe_asset(name: str) -> str:
         if "unified-arm64-v8a" in name:
             return "unified tester APK (VITURE + XREAL, arm64-v8a)"
         if "gatt-probe" in name:
-            return "GATT probe debug APK (latency bench tool)"
+            return "GATT probe APK (latency bench tool)"
         return "release APK"
     if name == "SHA256SUMS":
         return "SHA-256 digest of every APK above"
