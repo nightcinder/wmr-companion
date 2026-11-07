@@ -227,6 +227,13 @@ class DebugScreen extends ConsumerWidget {
               deviceId: source == DebugSource.fake
                   ? fakeBridgeDeviceId
                   : ref.watch(realDeviceProvider).deviceId,
+              onStatus: (status) {
+                final service = ref.read(controllerServiceProvider(source));
+                if (service == null) return;
+                for (var h = 0; h < status.hands.length; h++) {
+                  service.setControllerModel(h, status.hands[h].model);
+                }
+              },
             ),
           const SizedBox(height: 16),
           ConfigPanel(

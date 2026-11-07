@@ -15,10 +15,15 @@ class ControllerPanel extends StatefulWidget {
     super.key,
     required this.transport,
     required this.deviceId,
+    this.onStatus,
   });
 
   final BleTransport? transport;
   final String? deviceId;
+
+  /// Called with every FF17 status the panel receives, so the caller can
+  /// feed the per-hand model into [ControllerService].
+  final void Function(ControllerStatusV2 status)? onStatus;
 
   @override
   State<ControllerPanel> createState() => _ControllerPanelState();
@@ -79,6 +84,7 @@ class _ControllerPanelState extends State<ControllerPanel> {
       final sub = client.statusStream().listen(
         (status) {
           if (mounted && generation == _generation) {
+            widget.onStatus?.call(status);
             setState(() => _status = status);
           }
         },
@@ -102,6 +108,7 @@ class _ControllerPanelState extends State<ControllerPanel> {
         _error = null;
         _canRetry = false;
       });
+      widget.onStatus?.call(status);
     } catch (error) {
       await _sub?.cancel();
       _sub = null;
@@ -138,6 +145,7 @@ class _ControllerPanelState extends State<ControllerPanel> {
         _error = '${_label(command, hand)}: $reason';
       }
     });
+    if (status != null) widget.onStatus?.call(status);
   }
 
   static String _label(ControllerCommand command, int? hand) {
@@ -148,7 +156,7 @@ class _ControllerPanelState extends State<ControllerPanel> {
   String _summary(HandControllerStatus hand) {
     if (hand.connecting) return 'connecting...';
     if (!hand.connected) return 'not connected';
-    final model = hand.model == ControllerModel.psvr2 ? 'PSVR2' : 'WMR';
+    final model = hand.model.label;
     final hid = hand.descriptorReceived ? 'HID ready' : 'no HID descriptor';
     return 'connected - $model - $hid${_source(hand)}';
   }

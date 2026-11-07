@@ -57,9 +57,23 @@ enum ControllerAddressSource {
 
 enum ControllerModel {
   wmr,
-  psvr2;
+  psvr2,
+  nintendoSwitch;
 
-  static ControllerModel fromCode(int code) => code == 1 ? psvr2 : wmr;
+  /// FF17 `left_model`/`right_model`: 0 WMR, 1 PSVR2, 2 Switch. An unknown
+  /// code reads as WMR, which is what firmware before the new model did.
+  static ControllerModel fromCode(int code) => switch (code) {
+    1 => psvr2,
+    2 => nintendoSwitch,
+    _ => wmr,
+  };
+
+  /// Short name for the debug panel.
+  String get label => switch (this) {
+    wmr => 'WMR',
+    psvr2 => 'PSVR2',
+    nintendoSwitch => 'Switch',
+  };
 }
 
 enum ControllerDiscoveryState {

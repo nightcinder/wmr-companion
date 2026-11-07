@@ -76,6 +76,25 @@ class DecodedRecord {
   final int battery;
 
   bool get calibrated => flags & wmrDecodedFlagCalibrated != 0;
+
+  /// A copy with the timing fields replaced. Used by
+  /// `SwitchBurstTimestamps`, which derives the three sample times of one
+  /// Switch report; every other field, including the sequence, is kept.
+  DecodedRecord copyWith({int? rxTimeUs, int? deviceTicks}) => DecodedRecord(
+    hand: hand,
+    flags: flags,
+    buttons: buttons,
+    sequence: sequence,
+    rxTimeUs: rxTimeUs ?? this.rxTimeUs,
+    deviceTicks: deviceTicks ?? this.deviceTicks,
+    gyro: gyro,
+    accel: accel,
+    temperatureRaw: temperatureRaw,
+    stick: stick,
+    trackpad: trackpad,
+    trigger: trigger,
+    battery: battery,
+  );
 }
 
 class DecodedParseResult {
