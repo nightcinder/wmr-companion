@@ -29,6 +29,37 @@ void main() {
     expect(out.map((r) => r.rxTimeUs), [5000, 5000, 5000]);
   });
 
+  test('derives a faster Pro Controller spacing from the report period', () {
+    final clock = SwitchBurstTimestamps();
+    for (var i = 0; i < 3; i++) {
+      clock.apply(record(sequence: 1, deviceTicks: 1000));
+    }
+    // The next report is 8 ms after the previous anchor: 8/3 ms per sample.
+    final out = [
+      for (var i = 0; i < 3; i++)
+        clock.apply(record(sequence: 2, deviceTicks: 81000)),
+    ];
+    expect(out.map((r) => r.deviceTicks), [81000, 107666, 134332]);
+    final next = clock.apply(record(sequence: 3, deviceTicks: 161000));
+    expect(next.deviceTicks, 161000);
+    expect(
+      (next.deviceTicks - out.last.deviceTicks) & 0xffffffff,
+      greaterThan(0),
+    );
+  });
+
+  test('clamps a long report period to the nominal 5 ms', () {
+    final clock = SwitchBurstTimestamps();
+    for (var i = 0; i < 3; i++) {
+      clock.apply(record(sequence: 1, deviceTicks: 0));
+    }
+    final out = [
+      for (var i = 0; i < 3; i++)
+        clock.apply(record(sequence: 2, deviceTicks: 500000)),
+    ];
+    expect(out.map((r) => r.deviceTicks), [500000, 550000, 600000]);
+  });
+
   test('a new sequence starts a new burst at its own anchor', () {
     final clock = SwitchBurstTimestamps();
     clock.apply(record(sequence: 7, deviceTicks: 1000));

@@ -33,13 +33,16 @@
 /// count and `0.06103` dps per count. FF12/FF14 Switch records are therefore
 /// expected in those nominal units, rad/s and m/s^2 like every other model.
 ///
-/// The stick blocks are the 9-byte factory layout: six 12-bit values packed
-/// as max-above-centre X/Y, centre X/Y, min-below-centre X/Y.
+/// The stick blocks are the 9-byte factory layout: six 12-bit values, low
+/// nibble first. The left block (`0x603D`) stores max-above-centre X/Y,
+/// centre X/Y, min-below-centre X/Y; the right block (`0x6046`) stores centre
+/// X/Y, min-below-centre X/Y, max-above-centre X/Y.
 ///
 /// Nothing here has been run on a Switch controller; the layout and the math
 /// follow the public reverse-engineering notes, not a capture from this
-/// bridge. The FF13 packing is the contract in WMR_Bridge docs/PROTOCOL.md,
-/// "Controller config block, FF13".
+/// bridge. The FF13 packing is documented in this repository's
+/// docs/PROTOCOL.md, "Switch calibration and burst timing"; the bridge driver
+/// is WMR_Bridge ONY-946.
 library;
 
 import 'dart:math' as math;
@@ -115,19 +118,31 @@ class SwitchStickCalibration {
     return (d / span).clamp(-1.0, 1.0).toDouble();
   }
 
-  /// Parses one 9-byte factory block from SPI `0x603D`/`0x6046`: six 12-bit
-  /// values, low nibble first, in the order above/centre/below X then Y.
-  static SwitchStickCalibration parse(Uint8List bytes, int offset) {
+  /// Parses one 9-byte factory block from SPI `0x603D` (left) or `0x6046`
+  /// (right). Both store six 12-bit values, low nibble first; the left block
+  /// is above/centre/below X then Y, the right block is centre/below/above X
+  /// then Y.
+  static SwitchStickCalibration parse(
+    Uint8List bytes,
+    int offset, {
+    bool rightStick = false,
+  }) {
     final b = offset;
     int low(int i) => bytes[b + i] & 0x0f;
     int high(int i) => (bytes[b + i] >> 4) & 0x0f;
+    // One X/Y pair from three bytes.
+    int x(int i) => bytes[b + i] | (low(i + 1) << 8);
+    int y(int i) => high(i + 1) | (bytes[b + i + 2] << 4);
+    final first = (x: x(0), y: y(0));
+    final second = (x: x(3), y: y(3));
+    final third = (x: x(6), y: y(6));
     return SwitchStickCalibration(
-      aboveX: bytes[b] | (low(1) << 8),
-      aboveY: high(1) | (bytes[b + 2] << 4),
-      centerX: bytes[b + 3] | (low(4) << 8),
-      centerY: high(4) | (bytes[b + 5] << 4),
-      belowX: bytes[b + 6] | (low(7) << 8),
-      belowY: high(7) | (bytes[b + 8] << 4),
+      aboveX: (rightStick ? third : first).x,
+      aboveY: (rightStick ? third : first).y,
+      centerX: (rightStick ? first : second).x,
+      centerY: (rightStick ? first : second).y,
+      belowX: (rightStick ? second : third).x,
+      belowY: (rightStick ? second : third).y,
     );
   }
 }
@@ -258,7 +273,7 @@ class SwitchCalibration {
       deviceType: type,
       imu: SwitchSixAxisCalibration.parse(blob, 2),
       leftStick: SwitchStickCalibration.parse(blob, 26),
-      rightStick: SwitchStickCalibration.parse(blob, 35),
+      rightStick: SwitchStickCalibration.parse(blob, 35, rightStick: true),
     );
   }
 }

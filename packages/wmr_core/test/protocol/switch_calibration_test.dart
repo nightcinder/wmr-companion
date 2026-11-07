@@ -13,7 +13,7 @@ Uint8List blob({
   List<int> gyroOrigin = const [10, -20, 30],
   List<int> gyroSensitivity = const [13371, 13000, 14000],
   List<int> leftStick = const [44, 161, 15, 0, 40, 128, 94, 1, 25],
-  List<int> rightStick = const [0, 0, 0, 0, 0, 0, 0, 0, 0],
+  List<int> rightStick = const [44, 161, 15, 0, 40, 128, 94, 1, 25],
 }) {
   final out = Uint8List(switchConfigSize);
   out[0] = version;
@@ -74,6 +74,18 @@ void main() {
       expect(s.belowY, 400);
       expect(s.maxX, 2348);
       expect(s.minY, 1650);
+    });
+
+    test('decodes the right block in centre/below/above order', () {
+      final r = SwitchCalibration.parse(blob(deviceType: 2))!.rightStick!;
+      expect(r.centerX, 300);
+      expect(r.centerY, 250);
+      expect(r.belowX, 2048);
+      expect(r.belowY, 2050);
+      expect(r.aboveX, 350);
+      expect(r.aboveY, 400);
+      expect(r.maxX, 650);
+      expect(r.minX, -1748);
     });
 
     test('normalizes each half to its own end stop', () {

@@ -307,19 +307,25 @@ For that hand only:
   never a division by zero. The debug screen's "Read config" button detects
   the 44-byte blob before trying the WMR JSON path, so a Switch hand needs no
   config key and shows its factory values.
-- **Stick blocks.** Six 12-bit values each: travel above the centre X/Y,
-  centre X/Y, travel below the centre X/Y. `normalize` removes the centre and
-  rescales each half to its own end stop. The app's `StickNormalizer` is
-  unchanged; the block is available for a caller that wants the factory
-  limits.
-- **FF12/FF14 timing.** One `0x30` report holds three 6-axis samples 5 ms
-  apart, and all three FF12/FF14 records share the raw frame's sequence
-  number. With the hand marked as Switch (through FF17), `ControllerService`
-  runs each record through `SwitchBurstTimestamps`, which gives the second
-  and third samples `anchor + 5 ms` and `anchor + 10 ms` and does not count
-  them as out-of-order. Records that already carry that spacing are
-  unchanged. The debug screen feeds the FF17 model in; a hand that is never
-  marked Switch keeps the plain WMR tick path.
+- **Stick blocks.** Left (`0x603D`) stores travel above the centre X/Y,
+  centre X/Y, travel below the centre X/Y. Right (`0x6046`) stores centre X/Y,
+  travel below the centre X/Y, travel above the centre X/Y. `normalize`
+  removes the centre and rescales each half to its own end stop. The app's
+  `StickNormalizer` is unchanged; the block is available for a caller that
+  wants the factory limits.
+- **FF12/FF14 timing.** One `0x30` report holds three 6-axis samples, and all
+  three FF12/FF14 records share the raw frame's sequence number. The nominal
+  spacing is 5 ms (a 15 ms Joy-Con push); a Pro Controller that pushes every
+  8-11 ms fits three samples into that shorter period. With the hand marked
+  as Switch (through FF17), `ControllerService` runs each record through
+  `SwitchBurstTimestamps`, which gives the second and third samples
+  `anchor + interval` and `anchor + 2 * interval`. The interval is taken from
+  the offset the bridge already supplies, or from the previous burst's
+  anchor-to-anchor period divided by three, clamped to 1-5 ms; the first
+  burst of a stream uses the nominal 5 ms. Repeated records are not counted
+  as out-of-order. Records that already carry the spacing are unchanged. The
+  debug screen feeds the FF17 model in; a hand that is never marked Switch
+  keeps the plain WMR tick path.
 
 ## FF12 in the app
 
