@@ -229,7 +229,7 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 
 Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
 
-**Next: latency-2, the app against the native probe.** The comparison that decides milestone 5 is not stream against stream but this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). The probe is merged (`tool/gatt_probe`, PR #36) and its APK is built by CI (`wmr-gatt-probe-debug-apk`); the sitting itself has not run.
+**Next: latency-2, the app against the native probe.** The comparison that decides milestone 5 is not stream against stream but this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). The probe is merged (`tool/gatt_probe`, PR #36) and its APK is built by CI (`wmr-gatt-probe-debug-apk`) and published on every `v*` tag (`wmr-gatt-probe-<version>-debug.apk`); the sitting itself has not run.
 
 ## Flutter library / iOS v1 run (phase 5)
 
