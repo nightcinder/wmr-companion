@@ -32,8 +32,12 @@ probe once:
 
 ```bash
 adb uninstall com.onyxlens.wmr.gattprobe
-adb install wmr-gatt-probe-0.3.18-debug.apk
+adb install wmr-gatt-probe-0.3.19.apk
 ```
+
+To install the historical `v0.3.18` debug APK itself, use the same sequence
+with `wmr-gatt-probe-0.3.18-debug.apk`; installing the first release-signed
+probe over an existing `0.3.18` build also needs the one-time `adb uninstall`.
 
 `adb push` only copies a file to the device; it does not install an APK. Use
 `adb install` (or open the file on the phone).
