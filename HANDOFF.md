@@ -112,8 +112,8 @@ Refreshed 2026-11-06. The "checked" column is strictly what Nick reported on har
 | Reusable Flutter library (ONY-41) | Phases 1–4 merged on `main` (`packages/wmr_core` #39, `packages/wmr_companion` facade #41, `packages/wmr_ble` #42, `example/` host #43); phase 5 iOS example compile / run sheet (#44); phase 7 UI package merged (#45) | Android debug APK connects and streams on hardware (user-reported); the app drives its real connection through `ControllerService`. iOS device run not yet done |
 | iOS companion framework & probe (ONY-38) | `packages/WMRCompanionKit` Swift framework, SwiftUI probe (`tool/ios_probe`), iOS 18 deployment target, macOS CI compile job (#37, #44) | Unit-tested and CI-compiled; **no iOS device run has happened** |
 | Multi-bridge support (ONY-18, PR #34) | Concurrent multi-bridge connections (e.g. Left and Right ESP32 bridges), merging notification streams into shared hand pipelines; Connect screen UI and Riverpod providers updated | Fake/unit tested; **not yet run on hardware** (needs second ESP32) |
-| Native Android GATT probe (M7.1, PR #36) | Native Android GATT probe app (`tool/gatt_probe`) and CI job for latency baseline | Built and unit tested; not yet run on hardware |
-| Latency run sheet v2 (M7.2, PR #35) | Run sheet with Flutter vs native decision rule in `docs/LATENCY.md` | Doc landed; waiting for sitting |
+| Native Android GATT probe (M7.1, PR #36) | Probe app and CI latency baseline; retirement tracked in ONY-1012 | Ran in the 2026-10-28 session; not needed after ONY-23 closed Stay Flutter |
+| Latency run sheet v2 (M7.2, PR #35) | Run sheet with the Flutter vs native rule in `docs/LATENCY.md` | Closed 2026-11-07: **Stay Flutter** (ONY-23); sheet archived |
 | Stick settings persistence (ONY-12, PR #30) | Stick calibration and dead zone persistence across app restarts | Yes (user-reported working) |
 | App debug loss & signal quality (PR #29) | Show report loss % and BLE signal quality in debug panel | Yes (user-reported) |
 | Live fusion filter tuning (PR #33) | Madgwick beta & Mahony gains live tuning in debug screen | Built; not yet run on hardware |
@@ -148,7 +148,7 @@ Reports are lost between the controller and the ESP32 (Classic Bluetooth), befor
 | WMR_Bridge | #19 | Unknowns in `docs/DECODING.md` | Deep dive into Monado decoding merged (#26); tracking quality run sheet merged (#35). Open: hardware sitting M12.2 / Sitting A |
 | WMR_Bridge | #20 | Build/flash framework and browser installer | One-command `build.py` and browser installer variants landed (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`); M13.1 prerelease done |
 | wmr-companion | #19 | iOS build | **Superseded by ONY-38 and ONY-41.** iOS 18 settled as floor, both platforms in v1; `WMRCompanionKit`, probe, and macOS CI compile check landed (#37, #44) |
-| wmr-companion | #20 | `universal_ble` gaps | Android GATT probe built (#36); latency run sheet v2 with decision rule merged (#35). Open: hardware sitting A (M12.2) |
+| wmr-companion | #20 | `universal_ble` gaps | Latency comparison closed 2026-11-07: **Stay Flutter** (ONY-23); run sheet v2 archived and the probe's retirement tracked in ONY-1012. Track the `universal_ble` gaps upstream |
 | wmr-companion | ONY-41 | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package merged (#45); phase 7b HID Android package merged (#48); release hygiene merged (#49/#50/#52/#54). Open: iOS device run (device gate waived for the release line) |
 | Both | ONY-56 | FF16 firmware version reporting | Firmware reports packaged version over FF16 (`WMR_Bridge` #38); app/facade `WmrProtocolVersion` and feature matrix landed in #46 |
 
@@ -179,7 +179,7 @@ All milestone planning and ordering is governed by **ONY-50's plan document** (`
 ### M12 — The verification campaign: turn six run sheets into one answer
 *Question: of everything merged since 2026-10-22, what actually works?*
 - **12.1 Campaign index**: single index in `WMR_Bridge` `docs/runs/README.md` ordered by reflash cost — **merged (#42)**.
-- **12.2 Sitting A (one bridge, no reflash)**: latency v2 (app vs probe) + tracking quality.
+- **12.2 Sitting A (one bridge, no reflash)**: latency v2 closed 2026-11-07: **Stay Flutter** (ONY-23); tracking quality open.
 - **12.3 Sitting B (two bridges)**: multi-bridge A/B/A/B protocol, twice on separate power-ups (needs a second ESP32) — **parked, no second Classic ESP32**.
 - **12.4 Sitting C**: robustness soak + gamepad HID checklist on a PC.
 - **12.5 Write-ups**: #18 disposition, M7 decision, M8 defaults, STATUS in both repos.

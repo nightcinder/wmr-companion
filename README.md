@@ -59,7 +59,7 @@ Android and iOS are both in v1 scope (iOS 18 floor). There is still no iOS devic
 | `packages/wmr_tracking_viture/` | Default-off VITURE Pro Neckband Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 6000.0.27f1 / VITURE XR SDK v0.9.0 (`Viture.XR.VitureXR`) is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/wmr_tracking_xreal/` | Default-off XREAL Air 2 Ultra Unity UaaL head and 26-joint hand relay source; Kotlin/Dart host-tested, Unity 2021.3+/6000.0 / XREAL SDK 3.x is an external SDK gate ([docs/TRACKING.md](docs/TRACKING.md)) |
 | `packages/WMRCompanionKit/` | Native Swift framework: iOS 18+, macOS 12+, visionOS 1+ CoreBluetooth & parsers |
-| `tool/` | Monado config-key fetch, `fresh_app_check.sh`, and the native Android GATT / iOS probe apps |
+| `tool/` | Monado config-key fetch, `fresh_app_check.sh`, and the probe apps; ONY-1012 removes the native Android GATT probe |
 | `docs/` | Status, plan, protocol notes, capture, latency, gamepad, iOS, publishing, camera and headset-tracking research; [LIBRARY.md](docs/LIBRARY.md) frames the reusable package split |
 | `HANDOFF.md` | Rules, environment, state, not-yet-run list, cleanup list |
 
