@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Version aligned with the v0.3.0 release; `wmr_tracking` and `wmr_tracking_dispatch` constraints raised to `^0.3.0`.
 
 - Start tracking when the glasses model has not been reported yet: the unified
   Unity scene keeps the XREAL backend inactive until `start`, so capabilities

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+- Version aligned with the v0.3.0 release; `wmr_tracking` constraint raised to `^0.3.0`.
 
 - ONY-669: the Android XR `capabilities` hand probe and `Config.Builder`
   construction are wrapped as `Throwable` so a runtime fault becomes a typed

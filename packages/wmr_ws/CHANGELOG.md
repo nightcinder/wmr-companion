@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- Version aligned with the v0.3.0 release; `wmr_core` constraint raised to `^0.3.0`.
+
 ## 0.2.2
 
 - Version aligned with the v0.2.2 release; `wmr_core` constraint raised to `^0.2.2`. No breaking public API change.
