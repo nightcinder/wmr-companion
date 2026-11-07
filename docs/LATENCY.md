@@ -229,7 +229,7 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 
 Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
 
-**Retired: latency-2, the app against the native probe.** The comparison that would have decided milestone 5 was this app against a bare-Kotlin GATT client, with the decision rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). The standalone probe was retired with ONY-1012, so the sheet is archived and no probe APK is published; the comparison was not run.
+**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data: [runs/sheets/latency-2.md](runs/sheets/latency-2.md). ONY-23 is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions; the second is In between on the stall clause, and both sessions prescribe staying on Flutter). The standalone probe's retirement is tracked in ONY-1012; the sheet is archived.
 
 ## Flutter library / iOS v1 run (phase 5)
 
@@ -251,7 +251,7 @@ support; this release does not have that evidence.
    runs above on each platform. Record the exported JSON/echo files, firmware
    hash, app commit, phone model, iOS version and whether MTU/RSSI are
    visible.
-4. **Decision.** Apply the fixed rule in [runs/sheets/latency-2.md](runs/sheets/latency-2.md):
+4. **Decision.** Apply the rule recorded in the archived [runs/sheets/latency-2.md](runs/sheets/latency-2.md):
    if `universal_ble` meets the latency/background requirement, phase 6 (the
    native iOS transport) never runs; if not, the numbers decide it. Record
    the outcome here and in `docs/STATUS.md`.
