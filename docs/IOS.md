@@ -100,7 +100,7 @@ Architecture:
 - `VisionOSTrackingProvider` is a protocol with a simulated implementation. On visionOS, `ARKitVisionOSTrackingProvider` wraps `ARKitSession` with `WorldTrackingProvider` and `HandTrackingProvider`.
 - `VisionOSCompanionViewModel` is `@MainActor`. It joins `WMRControllerState` updates with the latest wrist poses and publishes per-hand 6DoF controller poses.
 - `WMRVisionOSApp` is the SwiftUI `App` scene. It contains `CompanionDashboardView` for BLE scan and connect, stream selection, ping telemetry, and controller status. It also contains `ControllerRealityView` for the 6DoF `ImmersiveSpace`. RealityKit compiles under `#if os(visionOS)`.
-- `Resources/Info.plist` declares the four privacy keys listed below.
+- `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist` declares the four privacy keys listed below.
 
 ARKit plus BLE 6DoF fusion:
 
@@ -113,14 +113,14 @@ Required Info.plist privacy keys:
 - `NSHandsTrackingUsageDescription`
 - `NSWorldSensingUsageDescription`
 
-The app shows a permission prompt for each key on first use. The text in `Resources/Info.plist` states why the app needs the access.
+Three keys prompt the user: Bluetooth always, hand tracking, and world sensing. `NSBluetoothPeripheralUsageDescription` is the legacy key and produces no prompt; it remains for back-compat. The text in `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist` states why the app needs the access.
 
 Simulator and hardware:
 
 - The package builds and tests on macOS. Run `cd apps/wmr_visionos_app && swift build && swift test`.
 - The ARKit and RealityKit paths compile only on visionOS. macOS tests use the simulated provider.
 - ARKit hand tracking does not run in the visionOS Simulator. A physical Apple Vision Pro is required to exercise 6DoF composition.
-- `WorldTrackingProvider.isSupported` must be checked before starting a session. Unsupported providers return no data.
+- The shipped provider does not check `WorldTrackingProvider.isSupported`. `ARKitSession.run` throws `ARKitError.providerNotSupported` when a provider is unsupported. Handle that error when starting tracking.
 - BLE needs a physical WMR Bridge. The Simulator cannot reach it.
 
 No-Unity boundary:
@@ -137,7 +137,7 @@ The package has no Xcode project. To run it on a device, wrap it in an Xcode app
 4. Set a unique bundle identifier for the target.
 5. Open Signing & Capabilities and select your team. Turn on automatic signing for development.
 6. Set the deployment target to visionOS 1.0 or later.
-7. Copy the four privacy keys from `Resources/Info.plist` into the app target's Info.plist.
+7. Copy the four privacy keys from `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist` into the app target's Info.plist.
 8. Add the local package and link `WMRVisionOSApp`.
 9. Select an Apple Vision Pro device or the visionOS Simulator as the destination. Build and run.
 10. On the device, accept the Bluetooth, hand tracking, and world sensing prompts.

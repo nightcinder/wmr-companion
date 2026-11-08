@@ -30,7 +30,7 @@ The bridge sends 3DoF orientation over BLE. ARKit sends wrist position. The app 
 
 Permissions:
 
-The app declares four privacy keys in `Resources/Info.plist`: `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, `NSHandsTrackingUsageDescription`, and `NSWorldSensingUsageDescription`.
+The app declares four privacy keys in `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist`: `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, `NSHandsTrackingUsageDescription`, and `NSWorldSensingUsageDescription`.
 
 Simulator limits:
 
