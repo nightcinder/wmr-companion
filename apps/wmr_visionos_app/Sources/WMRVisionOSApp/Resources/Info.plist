@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Connects to the WMR Bridge over Bluetooth Low Energy to stream controller telemetry.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Connects to the WMR Bridge over Bluetooth Low Energy to stream controller telemetry.</string>
+	<key>NSHandsTrackingUsageDescription</key>
+	<string>Tracks wrist position so controller 6DoF poses can be placed in your space.</string>
+	<key>NSWorldSensingUsageDescription</key>
+	<string>Tracks head and world pose so controller 6DoF poses stay anchored while you move.</string>
+</dict>
+</plist>
