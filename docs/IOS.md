@@ -89,8 +89,18 @@ A native SwiftUI application is provided in `tool/ios_probe/` to serve as a late
 - Real-time FF15 echo round-trip measurement with p50, p95, p99 percentiles and turnaround time readout.
 - Exports standardized `wmr-latency` v2 JSON summaries and per-ping CSV files via the iOS system share sheet.
 
-## 5. Flutter iOS Integration & CI
+## 5. visionOS Companion Scaffold (`apps/wmr_visionos_app`)
+
+`apps/wmr_visionos_app` is a Swift package that links `packages/WMRCompanionKit` and targets visionOS 1+, iOS 18 and macOS 14:
+
+- `VisionOSTrackingTypes`: head, hand and controller pose snapshots plus `VisionOSControllerPoseComposer`, which takes translation from the tracked wrist and orientation from the bridge's fused 3DoF state.
+- `VisionOSTrackingProvider`: the provider seam with a simulated implementation and, under `#if os(visionOS)`, `ARKitVisionOSTrackingProvider` wrapping `ARKitSession` with `WorldTrackingProvider` and `HandTrackingProvider`.
+- `VisionOSCompanionViewModel`: joins `WMRControllerState` updates with the latest wrist poses and publishes per-hand 6DoF controller poses.
+
+`cd apps/wmr_visionos_app && swift test` runs the suite. The ARKit provider compiles only on visionOS; macOS tests exercise the simulated seam.
+
+## 6. Flutter iOS Integration & CI
 
 - `apps/wmr_companion_app/ios/Runner.xcodeproj`: Links the generated `Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage`, and every iOS plugin (`universal_ble`, `device_info_plus`, `package_info_plus`, `share_plus`) ships its own `Package.swift`. The project is therefore Swift-Package-only: there is no `Podfile` (and `example/ios` follows the same layout), so a build never runs CocoaPods. If a pod-only plugin is ever added, Flutter regenerates a standard `Podfile`; restore the iOS 18.0 `IPHONEOS_DEPLOYMENT_TARGET` pin in its `post_install` hook.
 - `apps/wmr_companion_app/ios/Runner/Info.plist`: Includes `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, and `UIBackgroundModes` (`bluetooth-central`).
-- `.github/workflows/ci.yml`: Includes a dedicated `ios` job running on `macos-latest` that validates `WMRCompanionKit` unit tests (`swift test`) and Flutter iOS project build configuration (`flutter build ios --config-only --no-codesign`).
+- `.github/workflows/ci.yml`: Includes a dedicated `ios` job running on `macos-latest` that validates `WMRCompanionKit` unit tests (`swift test`), the `apps/wmr_visionos_app` package tests (`swift test`), and Flutter iOS project build configuration (`flutter build ios --config-only --no-codesign`).
