@@ -483,7 +483,11 @@ jobs:
         working-directory: tool/ios_probe
         run: swift build
 
-      - name: Test WMRVisionOSCore Swift Package
+      - name: Build WMRVisionOS Swift Package
+        working-directory: apps/wmr_visionos_app
+        run: swift build
+
+      - name: Test WMRVisionOS Swift Package
         working-directory: apps/wmr_visionos_app
         run: swift test
 

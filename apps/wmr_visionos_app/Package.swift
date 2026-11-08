@@ -13,6 +13,10 @@ let package = Package(
             name: "WMRVisionOSCore",
             targets: ["WMRVisionOSCore"]
         ),
+        .library(
+            name: "WMRVisionOSApp",
+            targets: ["WMRVisionOSApp"]
+        ),
     ],
     dependencies: [
         .package(path: "../../packages/WMRCompanionKit")
@@ -25,10 +29,24 @@ let package = Package(
             ],
             path: "Sources/WMRVisionOSCore"
         ),
+        .target(
+            name: "WMRVisionOSApp",
+            dependencies: [
+                "WMRVisionOSCore",
+                .product(name: "WMRCompanionKit", package: "WMRCompanionKit")
+            ],
+            path: "Sources/WMRVisionOSApp",
+            resources: [.copy("Resources")]
+        ),
         .testTarget(
             name: "WMRVisionOSCoreTests",
             dependencies: ["WMRVisionOSCore"],
             path: "Tests/WMRVisionOSCoreTests"
+        ),
+        .testTarget(
+            name: "WMRVisionOSAppTests",
+            dependencies: ["WMRVisionOSApp"],
+            path: "Tests/WMRVisionOSAppTests"
         ),
     ]
 )

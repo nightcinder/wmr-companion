@@ -27,6 +27,11 @@ public final class WMRCompanionClient: @unchecked Sendable {
         session.bleManager.statePublisher.eraseToAnyPublisher()
     }
 
+    /// Bridges discovered since `startScanning()`, as the full current list.
+    public var discoveredBridgesPublisher: AnyPublisher<[WMRDiscoveredBridge], Never> {
+        $discoveredBridges.eraseToAnyPublisher()
+    }
+
     public var leftControllerPublisher: AnyPublisher<WMRControllerState, Never> {
         session.leftStatePublisher.eraseToAnyPublisher()
     }
