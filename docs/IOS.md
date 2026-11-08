@@ -89,17 +89,63 @@ A native SwiftUI application is provided in `tool/ios_probe/` to serve as a late
 - Real-time FF15 echo round-trip measurement with p50, p95, p99 percentiles and turnaround time readout.
 - Exports standardized `wmr-latency` v2 JSON summaries and per-ping CSV files via the iOS system share sheet.
 
-## 5. visionOS Companion App (`apps/wmr_visionos_app`)
+## 5. Native visionOS Companion App (`apps/wmr_visionos_app`)
 
-`apps/wmr_visionos_app` is a Swift package that links `packages/WMRCompanionKit` and targets visionOS 1+, iOS 18 and macOS 14:
+`apps/wmr_visionos_app` is a Swift package. It links `packages/WMRCompanionKit` and targets visionOS 1, iOS 18, and macOS 14.
 
-- `VisionOSTrackingTypes`: head, hand and controller pose snapshots plus `VisionOSControllerPoseComposer`, which takes translation from the tracked wrist and orientation from the bridge's fused 3DoF state.
-- `VisionOSTrackingProvider`: the provider seam with a simulated implementation and, under `#if os(visionOS)`, `ARKitVisionOSTrackingProvider` wrapping `ARKitSession` with `WorldTrackingProvider` and `HandTrackingProvider`.
-- `VisionOSCompanionViewModel`: joins `WMRControllerState` updates with the latest wrist poses and publishes per-hand 6DoF controller poses. It is `@MainActor`-isolated, so provider updates and bound controller publishers all mutate the published state on the main actor.
-- `WMRVisionOSApp`: the SwiftUI `App` scene, with `CompanionDashboardView` for BLE scan/connect, `FF11`/`FF12`/`FF14` stream selection, `FF15` ping telemetry and controller status, and `ControllerRealityView` for the 6DoF `ImmersiveSpace` (RealityKit compiles under `#if os(visionOS)`).
-- `Resources/Info.plist`: declares `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`, `NSHandsTrackingUsageDescription` and `NSWorldSensingUsageDescription`.
+Architecture:
 
-`cd apps/wmr_visionos_app && swift build && swift test` builds every target and runs the core and dashboard suites. The ARKit and RealityKit paths compile only on visionOS; macOS tests exercise the simulated seam and the dashboard model.
+- `WMRVisionOSCore` holds `VisionOSTrackingTypes`, `VisionOSTrackingProvider`, and `VisionOSCompanionViewModel`.
+- `VisionOSTrackingTypes` defines head, hand, and controller pose snapshots. `VisionOSControllerPoseComposer` takes translation from the tracked wrist and orientation from the bridge's fused 3DoF state.
+- `VisionOSTrackingProvider` is a protocol with a simulated implementation. On visionOS, `ARKitVisionOSTrackingProvider` wraps `ARKitSession` with `WorldTrackingProvider` and `HandTrackingProvider`.
+- `VisionOSCompanionViewModel` is `@MainActor`. It joins `WMRControllerState` updates with the latest wrist poses and publishes per-hand 6DoF controller poses.
+- `WMRVisionOSApp` is the SwiftUI `App` scene. It contains `CompanionDashboardView` for BLE scan and connect, stream selection, ping telemetry, and controller status. It also contains `ControllerRealityView` for the 6DoF `ImmersiveSpace`. RealityKit compiles under `#if os(visionOS)`.
+- `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist` declares the four privacy keys listed below.
+
+ARKit plus BLE 6DoF fusion:
+
+The bridge reports a 3DoF orientation from its IMU over BLE. ARKit reports where the wrist is. The view model stores the latest controller state per hand. When a wrist pose arrives, it composes a 6DoF pose. The wrist supplies translation. The bridge supplies orientation. `VisionOSControllerPoseComposer` adds a fixed grip offset of about 8 cm in front of the wrist. The result is one 6DoF controller pose per hand.
+
+Required Info.plist privacy keys:
+
+- `NSBluetoothAlwaysUsageDescription`
+- `NSBluetoothPeripheralUsageDescription`
+- `NSHandsTrackingUsageDescription`
+- `NSWorldSensingUsageDescription`
+
+Three keys prompt the user: Bluetooth always, hand tracking, and world sensing. `NSBluetoothPeripheralUsageDescription` is the legacy key and produces no prompt; it remains for back-compat. The text in `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist` states why the app needs the access.
+
+Simulator and hardware:
+
+- The package builds and tests on macOS. Run `cd apps/wmr_visionos_app && swift build && swift test`.
+- The ARKit and RealityKit paths compile only on visionOS. macOS tests use the simulated provider.
+- ARKit hand tracking does not run in the visionOS Simulator. A physical Apple Vision Pro is required to exercise 6DoF composition.
+- The shipped provider does not check `WorldTrackingProvider.isSupported`. `ARKitSession.run` throws `ARKitError.providerNotSupported` when a provider is unsupported. Handle that error when starting tracking.
+- BLE needs a physical WMR Bridge. The Simulator cannot reach it.
+
+No-Unity boundary:
+
+The visionOS target is native Swift. It does not link Unity and has no Unity runtime. It does not use the Android `base` or `unified` flavors or `--dart-define` flags. The Flutter app and the Android XR path keep their own Unity gates.
+
+Building and signing in Xcode:
+
+The package has no Xcode project. To run it on a device, wrap it in an Xcode app target.
+
+1. Install Xcode with the visionOS SDK.
+2. Open the package in Xcode with `open apps/wmr_visionos_app/Package.swift`.
+3. Create a visionOS app target, or add the package to an existing visionOS app.
+4. Set a unique bundle identifier for the target.
+5. Open Signing & Capabilities and select your team. Turn on automatic signing for development.
+6. Set the deployment target to visionOS 1.0 or later.
+7. Copy the four privacy keys from `apps/wmr_visionos_app/Sources/WMRVisionOSApp/Resources/Info.plist` into the app target's Info.plist.
+8. Add the local package and link `WMRVisionOSApp`.
+9. Select an Apple Vision Pro device or the visionOS Simulator as the destination. Build and run.
+10. On the device, accept the Bluetooth, hand tracking, and world sensing prompts.
+11. For distribution, use an Apple Developer Program account. Archive the app with a distribution certificate and a matching provisioning profile. visionOS uses Apple signing, not the Android keystore.
+
+CI:
+
+The `ios` job in `.github/workflows/ci.yml` builds and tests the package on `macos-latest`.
 
 ## 6. Flutter iOS Integration & CI
 
