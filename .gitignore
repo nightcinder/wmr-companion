@@ -26,6 +26,10 @@ coverage/
 **/ios/Flutter/ephemeral/
 **/ios/**/xcuserdata/
 
+# Swift Package Manager
+**/.build/
+**/.swiftpm/
+
 # IDE / OS
 .idea/
 *.iml
