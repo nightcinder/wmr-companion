@@ -105,6 +105,35 @@ final class VisionOSCompanionViewModelTests: XCTestCase {
         XCTAssertEqual(model.rightControllerPose?.pose.orientation, .identity)
     }
 
+    func testWristUpdatesRecomposeStoredControllerState() {
+        let model = VisionOSCompanionViewModel(
+            composer: VisionOSControllerPoseComposer(wristOffset: .identity)
+        )
+        model.updateControllerState(
+            WMRControllerState(hand: .left, isConnected: true)
+        )
+        XCTAssertNil(model.leftControllerPose)
+
+        let firstWrist = VisionOSPose(position: WMRVector3(x: 0, y: 1, z: 0))
+        model.ingest(
+            VisionOSTrackingSnapshot(
+                hands: [.left: VisionOSHandPose(hand: .left, joints: [.wrist: firstWrist])],
+                timestamp: 31
+            )
+        )
+        XCTAssertEqual(model.leftControllerPose?.pose.position, firstWrist.position)
+
+        let secondWrist = VisionOSPose(position: WMRVector3(x: 0.3, y: 1.1, z: -0.4))
+        model.ingest(
+            VisionOSTrackingSnapshot(
+                hands: [.left: VisionOSHandPose(hand: .left, joints: [.wrist: secondWrist])],
+                timestamp: 32
+            )
+        )
+        XCTAssertEqual(model.leftControllerPose?.pose.position, secondWrist.position)
+        XCTAssertEqual(model.leftControllerPose?.pose.orientation, .identity)
+    }
+
     func testBindToClientAppliesControllerStatesFromSession() async {
         let model = VisionOSCompanionViewModel(
             composer: VisionOSControllerPoseComposer(wristOffset: .identity)
