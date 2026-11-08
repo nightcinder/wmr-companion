@@ -280,3 +280,14 @@ public final class ARKitVisionOSTrackingProvider: VisionOSTrackingProvider, @unc
     }
 }
 #endif
+
+/// Selects the provider for the platform: ARKit on visionOS, none elsewhere.
+public enum VisionOSTrackingProviderFactory {
+    public static func makeDefault() -> VisionOSTrackingProvider? {
+        #if os(visionOS)
+        return ARKitVisionOSTrackingProvider()
+        #else
+        return nil
+        #endif
+    }
+}

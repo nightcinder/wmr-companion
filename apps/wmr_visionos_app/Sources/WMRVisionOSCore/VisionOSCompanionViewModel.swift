@@ -22,7 +22,7 @@ public final class VisionOSCompanionViewModel: ObservableObject {
 
     public init(
         composer: VisionOSControllerPoseComposer = VisionOSControllerPoseComposer(),
-        provider: VisionOSTrackingProvider? = nil
+        provider: VisionOSTrackingProvider? = VisionOSTrackingProviderFactory.makeDefault()
     ) {
         self.composer = composer
         self.provider = provider
