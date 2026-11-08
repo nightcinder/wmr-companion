@@ -95,7 +95,7 @@ A native SwiftUI application is provided in `tool/ios_probe/` to serve as a late
 
 - `VisionOSTrackingTypes`: head, hand and controller pose snapshots plus `VisionOSControllerPoseComposer`, which takes translation from the tracked wrist and orientation from the bridge's fused 3DoF state.
 - `VisionOSTrackingProvider`: the provider seam with a simulated implementation and, under `#if os(visionOS)`, `ARKitVisionOSTrackingProvider` wrapping `ARKitSession` with `WorldTrackingProvider` and `HandTrackingProvider`.
-- `VisionOSCompanionViewModel`: joins `WMRControllerState` updates with the latest wrist poses and publishes per-hand 6DoF controller poses.
+- `VisionOSCompanionViewModel`: joins `WMRControllerState` updates with the latest wrist poses and publishes per-hand 6DoF controller poses. It is `@MainActor`-isolated, so provider updates and bound controller publishers all mutate the published state on the main actor.
 
 `cd apps/wmr_visionos_app && swift test` runs the suite. The ARKit provider compiles only on visionOS; macOS tests exercise the simulated seam.
 

@@ -7,6 +7,10 @@ import WMRCompanionKit
 /// The bridge reports a 3DoF orientation from its IMU; ARKit reports where the
 /// wrist is. This view model joins them into a tracked 6DoF controller pose per
 /// hand and publishes the latest head, hand and controller state.
+///
+/// Main-actor isolated: `@Published` updates drive SwiftUI, and the controller
+/// state dictionary is shared between provider updates and client bindings.
+@MainActor
 public final class VisionOSCompanionViewModel: ObservableObject {
     @Published public private(set) var headPose: VisionOSHeadPose?
     @Published public private(set) var trackingSnapshot = VisionOSTrackingSnapshot()
@@ -39,8 +43,9 @@ public final class VisionOSCompanionViewModel: ObservableObject {
         try await provider.start()
         trackingTask?.cancel()
         trackingTask = Task { [weak self] in
-            guard let self else { return }
+            guard let provider = self?.provider else { return }
             for await snapshot in provider.updates() {
+                guard let self else { return }
                 self.ingest(snapshot)
             }
         }
@@ -77,14 +82,18 @@ public final class VisionOSCompanionViewModel: ObservableObject {
         client.leftControllerPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                self?.updateControllerState(state)
+                Task { @MainActor in
+                    self?.updateControllerState(state)
+                }
             }
             .store(in: &cancellables)
 
         client.rightControllerPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                self?.updateControllerState(state)
+                Task { @MainActor in
+                    self?.updateControllerState(state)
+                }
             }
             .store(in: &cancellables)
     }

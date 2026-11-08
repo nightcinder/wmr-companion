@@ -1,7 +1,9 @@
+import Combine
 import XCTest
 @testable import WMRVisionOSCore
 import WMRCompanionKit
 
+@MainActor
 final class VisionOSCompanionViewModelTests: XCTestCase {
     func testTrackingSnapshotPublishesHeadAndHandPoses() {
         let model = VisionOSCompanionViewModel(
@@ -101,5 +103,44 @@ final class VisionOSCompanionViewModelTests: XCTestCase {
         XCTAssertEqual(model.rightControllerPose?.pose.position, WMRVector3(x: 0.2, y: 1, z: -0.1))
         XCTAssertEqual(model.leftControllerPose?.pose.orientation, .identity)
         XCTAssertEqual(model.rightControllerPose?.pose.orientation, .identity)
+    }
+
+    func testStartTrackingIngestsSnapshotsAndStopEndsStream() async throws {
+        let provider = SimulatedVisionOSTrackingProvider()
+        let model = VisionOSCompanionViewModel(
+            composer: VisionOSControllerPoseComposer(wristOffset: .identity),
+            provider: provider
+        )
+        try await model.startTracking()
+        XCTAssertTrue(provider.isRunning)
+
+        let ingested = expectation(description: "tracking snapshot ingested")
+        let subscription = model.$trackingSnapshot
+            .dropFirst()
+            .sink { snapshot in
+                if snapshot.head != nil { ingested.fulfill() }
+            }
+        defer { subscription.cancel() }
+
+        let head = VisionOSPose(position: WMRVector3(x: 0, y: 1.6, z: 0))
+        let wrist = VisionOSPose(position: WMRVector3(x: 0.25, y: 1, z: -0.5))
+        provider.send(head: head, hand: .left, wrist: wrist, timestamp: 7)
+        await fulfillment(of: [ingested], timeout: 2)
+
+        XCTAssertEqual(model.headPose?.pose, head)
+        XCTAssertEqual(model.trackingSnapshot.wrist(for: .left), wrist)
+        XCTAssertNotNil(
+            model.updateControllerState(WMRControllerState(hand: .left, isConnected: true))
+        )
+
+        model.stopTracking()
+        XCTAssertFalse(provider.isRunning)
+
+        let streamEnded = expectation(description: "update stream finishes after stop")
+        Task {
+            for await _ in provider.updates() {}
+            streamEnded.fulfill()
+        }
+        await fulfillment(of: [streamEnded], timeout: 2)
     }
 }

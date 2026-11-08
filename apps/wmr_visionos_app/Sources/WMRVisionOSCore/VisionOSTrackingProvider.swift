@@ -229,11 +229,16 @@ public final class ARKitVisionOSTrackingProvider: VisionOSTrackingProvider, @unc
             if let current = snapshot {
                 continuation.yield(current)
             }
-            let id = UUID()
-            continuations[id] = continuation
-            lock.unlock()
-            continuation.onTermination = { [weak self] _ in
-                self?.removeContinuation(id)
+            if running {
+                let id = UUID()
+                continuations[id] = continuation
+                lock.unlock()
+                continuation.onTermination = { [weak self] _ in
+                    self?.removeContinuation(id)
+                }
+            } else {
+                lock.unlock()
+                continuation.finish()
             }
         }
     }
