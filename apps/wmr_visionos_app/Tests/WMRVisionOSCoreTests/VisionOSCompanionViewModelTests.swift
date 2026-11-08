@@ -105,6 +105,47 @@ final class VisionOSCompanionViewModelTests: XCTestCase {
         XCTAssertEqual(model.rightControllerPose?.pose.orientation, .identity)
     }
 
+    func testBindToClientAppliesControllerStatesFromSession() async {
+        let model = VisionOSCompanionViewModel(
+            composer: VisionOSControllerPoseComposer(wristOffset: .identity)
+        )
+        let leftWrist = VisionOSPose(position: WMRVector3(x: -0.2, y: 1, z: -0.3))
+        let rightWrist = VisionOSPose(position: WMRVector3(x: 0.2, y: 1, z: -0.3))
+        model.ingest(
+            VisionOSTrackingSnapshot(
+                hands: [
+                    .left: VisionOSHandPose(hand: .left, joints: [.wrist: leftWrist]),
+                    .right: VisionOSHandPose(hand: .right, joints: [.wrist: rightWrist])
+                ],
+                timestamp: 21
+            )
+        )
+
+        let session = WMRBridgeSession()
+        let client = WMRCompanionClient(session: session)
+        model.bind(to: client)
+
+        let leftApplied = expectation(description: "left controller bound")
+        let rightApplied = expectation(description: "right controller bound")
+        let subscriptions = [
+            model.$leftControllerPose.dropFirst().sink { pose in
+                if pose != nil { leftApplied.fulfill() }
+            },
+            model.$rightControllerPose.dropFirst().sink { pose in
+                if pose != nil { rightApplied.fulfill() }
+            }
+        ]
+        defer { subscriptions.forEach { $0.cancel() } }
+
+        session.leftStatePublisher.send(WMRControllerState(hand: .left, isConnected: true))
+        session.rightStatePublisher.send(WMRControllerState(hand: .right, isConnected: true))
+
+        await fulfillment(of: [leftApplied, rightApplied], timeout: 2)
+
+        XCTAssertEqual(model.leftControllerPose?.pose.position, leftWrist.position)
+        XCTAssertEqual(model.rightControllerPose?.pose.position, rightWrist.position)
+    }
+
     func testStartTrackingIngestsSnapshotsAndStopEndsStream() async throws {
         let provider = SimulatedVisionOSTrackingProvider()
         let model = VisionOSCompanionViewModel(
