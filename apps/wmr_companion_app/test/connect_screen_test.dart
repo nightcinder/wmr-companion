@@ -91,4 +91,47 @@ void main() {
       await tester.pump();
     },
   );
+
+  testWidgets(
+    'shows a neutral active leg once the fallback link is disconnected',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final ble = UniversalBleTransport(
+        adapter: FakeBleAdapter(),
+        scanTimeout: const Duration(minutes: 5),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            realTransportProvider.overrideWithValue(ble),
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(_DisconnectedFallback.new),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Wi-Fi'));
+      await tester.pump();
+      expect(find.text('Active leg: -'), findsOneWidget);
+      expect(find.text('Active leg: connecting'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+}
+
+/// A Wi-Fi fallback link that is no longer connected, as it is after the user
+/// taps Disconnect.
+class _DisconnectedFallback extends RealDeviceController {
+  @override
+  RealDeviceState build() => const RealDeviceState(
+    activeTransport: BridgeTransportKind.wifi,
+    wifiDeviceId: '192.168.1.42:8765',
+    wifiFallback: true,
+  );
 }

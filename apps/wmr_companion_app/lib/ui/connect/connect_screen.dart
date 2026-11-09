@@ -314,7 +314,7 @@ class RealPanel extends ConsumerWidget {
           Text('Endpoint: ${s.wifiDeviceId}', style: mono),
           if (s.wifiFallback)
             Text(
-              'Active leg: ${s.wifiLeg?.label ?? 'connecting'}',
+              'Active leg: ${s.connected ? (s.wifiLeg?.label ?? '-') : '-'}',
               key: const Key('wifi-active-leg'),
               style: mono,
             ),

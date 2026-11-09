@@ -43,6 +43,7 @@ class CompositeBleTransport implements BleTransport {
     required this.tcp,
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
+    this.bleScanWait = const Duration(seconds: 5),
   }) : clock = tcp.clock;
 
   /// Primary WebSocket transport.
@@ -62,10 +63,19 @@ class CompositeBleTransport implements BleTransport {
   /// non-positive duration disables the automatic upgrade.
   final Duration upgradeInterval;
 
+  /// How long [connect] waits for a BLE scan hit when every TCP candidate
+  /// failed while a [scan] is still running. Zero disables the wait.
+  ///
+  /// Without this, a TCP refusal that returns faster than the radio scan can
+  /// leave the BLE leg with no candidate, so the failover never happens.
+  final Duration bleScanWait;
+
   final Map<String, _Route> _routes = {};
   final Map<String, String> _bridgeIds = {};
   final Map<String, _ScanHit> _scanHits = {};
   bool _disposed = false;
+  bool _scanning = false;
+  Completer<void>? _scanWake;
 
   /// The stable bridge id learned for [deviceId], when one is known.
   ///
@@ -96,6 +106,7 @@ class CompositeBleTransport implements BleTransport {
 
     void add(BleScanResult result, {required bool fromBle}) {
       _scanHits[result.deviceId] = _ScanHit(result, fromBle: fromBle);
+      if (fromBle) _wakeScanWaiters();
       final bridgeId = _bridgeIdForDevice(result.deviceId);
       if (bridgeId != null && !seenBridgeIds.add(bridgeId)) return;
       if (!seenIds.add(result.deviceId)) return;
@@ -104,8 +115,10 @@ class CompositeBleTransport implements BleTransport {
 
     void done() {
       sourcesDone++;
-      if (sourcesDone == 2 && !controller.isClosed) {
-        unawaited(controller.close());
+      if (sourcesDone == 2) {
+        _scanning = false;
+        _wakeScanWaiters();
+        if (!controller.isClosed) unawaited(controller.close());
       }
     }
 
@@ -115,6 +128,7 @@ class CompositeBleTransport implements BleTransport {
 
     controller = StreamController<BleScanResult>(
       onListen: () {
+        _scanning = true;
         try {
           subscriptions.add(
             tcp
@@ -145,6 +159,8 @@ class CompositeBleTransport implements BleTransport {
         }
       },
       onCancel: () async {
+        _scanning = false;
+        _wakeScanWaiters();
         for (final subscription in subscriptions) {
           await subscription.cancel();
         }
@@ -157,6 +173,8 @@ class CompositeBleTransport implements BleTransport {
   @override
   Future<void> stopScan() async {
     _ensureUsable();
+    _scanning = false;
+    _wakeScanWaiters();
     await tcp.stopScan();
     await ble.stopScan();
   }
@@ -187,11 +205,24 @@ class CompositeBleTransport implements BleTransport {
         }
       }
 
-      final bleCandidates = _bleCandidatesFor(
+      var bleCandidates = _bleCandidatesFor(
         route,
         deviceId,
         allowDeviceId: tcpCandidates.isEmpty,
       );
+      if (bleCandidates.isEmpty &&
+          tcpCandidates.isNotEmpty &&
+          _scanning &&
+          bleScanWait > Duration.zero) {
+        // The scan may still be running: a fast TCP refusal can beat the
+        // radio, and without a candidate the failover is impossible.
+        await _awaitBleScanHit(bleScanWait);
+        bleCandidates = _bleCandidatesFor(
+          route,
+          deviceId,
+          allowDeviceId: false,
+        );
+      }
       final requireIdentity =
           route.bridgeId != null && bleCandidates.length > 1;
       for (final bleId in bleCandidates) {
@@ -466,6 +497,9 @@ class CompositeBleTransport implements BleTransport {
     bool requireIdentity = false,
   }) async {
     route.bleDeviceId = bleId;
+    // Some stacks refuse a GATT connect while a scan is running. The hits
+    // already seen stay in `_scanHits`.
+    await ble.stopScan();
     final state = await ble.connectionState(bleId).first;
     if (state != BleConnectionState.connected) {
       await ble.connect(bleId);
@@ -752,6 +786,24 @@ class CompositeBleTransport implements BleTransport {
 
   String? _bridgeIdForDevice(String deviceId) =>
       _bridgeIds[deviceId] ?? _routes[deviceId]?.bridgeId;
+
+  /// Wakes [connect] waiters: a BLE hit arrived or the scan stopped.
+  void _wakeScanWaiters() {
+    final wake = _scanWake;
+    _scanWake = null;
+    if (wake != null && !wake.isCompleted) wake.complete();
+  }
+
+  Future<void> _awaitBleScanHit(Duration timeout) async {
+    final wake = _scanWake ??= Completer<void>();
+    try {
+      await wake.future.timeout(timeout);
+    } on TimeoutException {
+      // No BLE bridge advertised in time; the caller reports the TCP error.
+    } finally {
+      if (identical(_scanWake, wake)) _scanWake = null;
+    }
+  }
 
   void _setState(_Route route, BleConnectionState state) {
     if (route.state == state) return;

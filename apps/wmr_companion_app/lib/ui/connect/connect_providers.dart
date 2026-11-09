@@ -309,6 +309,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   WifiLink? _wifiLink;
   BleTransport? _wifiTransport;
   StreamSubscription<BleConnectionState>? _wifiStateSub;
+  StreamSubscription<BleScanResult>? _fallbackScanSub;
   String? _wifiDeviceId;
   BleLinkStatus _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
 
@@ -352,6 +353,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _scanSub?.cancel();
       _statusSub?.cancel();
       _wifiStateSub?.cancel();
+      _fallbackScanSub?.cancel();
       _statsTimer?.cancel();
       for (final t in _reconnectTimers.values) {
         t.cancel();
@@ -557,7 +559,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _connectingDeviceIds.contains(deviceId)) {
       return;
     }
-    await stopScan();
+    // A Wi-Fi composite may be scanning to learn its BLE fallback candidate;
+    // that scan must outlive the dial. BLE mode still stops its scan here.
+    if (state.activeTransport != BridgeTransportKind.wifi) {
+      await stopScan();
+    }
     final deviceDisconnectGen = _deviceDisconnectGenerations[deviceId] ?? 0;
     final globalDisconnectGen = _globalDisconnectGeneration;
     _connectingDeviceIds.add(deviceId);
@@ -666,6 +672,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _wifiDeviceId = null;
     final sub = _wifiStateSub;
     _wifiStateSub = null;
+    final scanSub = _fallbackScanSub;
+    _fallbackScanSub = null;
     final transport = _wifiTransport;
     _wifiTransport = null;
     _wifiLink = null;
@@ -675,7 +683,34 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     // Cancelling the async* connection-state stream can wait on a delivery
     // turn; the id guard above already makes late events harmless.
     unawaited(sub?.cancel());
+    unawaited(scanSub?.cancel());
     await transport?.dispose();
+  }
+
+  /// Scans through the composite so its `_scanHits` hold the BLE bridge that
+  /// a TCP failure can fall back to. The scan keeps running after a successful
+  /// TCP dial (until the transport's own scan timeout), so a later drop has a
+  /// candidate; the composite keeps the hits after the scan stops.
+  void _startFallbackScan(BleTransport transport) {
+    unawaited(_fallbackScanSub?.cancel());
+    _fallbackScanSub = transport.scan().listen((_) {}, onError: (Object _) {});
+  }
+
+  Future<void> _stopFallbackScan() async {
+    final sub = _fallbackScanSub;
+    _fallbackScanSub = null;
+    // Cancelling can wait on a delivery turn; the scan is best-effort and the
+    // transport stop below is what actually ends it.
+    unawaited(sub?.cancel());
+    // Stop the radio; the hits already seen stay with the composite.
+    final transport = _wifiTransport;
+    if (transport != null) {
+      try {
+        await transport.stopScan();
+      } catch (_) {
+        // A disposed transport has nothing left to stop.
+      }
+    }
   }
 
   /// Chooses the link the connect screen shows. Only one link is active at a
@@ -755,6 +790,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       activeTransport: BridgeTransportKind.wifi,
       wifiFallback: bleFallback,
     );
+    if (bleFallback) _startFallbackScan(transport);
     await connect(id);
   }
 
@@ -794,6 +830,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       return;
     }
 
+    await _stopFallbackScan();
     _globalDisconnectGeneration++;
     for (final t in _reconnectTimers.values) {
       t.cancel();

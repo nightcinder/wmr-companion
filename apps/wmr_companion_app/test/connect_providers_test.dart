@@ -1,12 +1,16 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
-import 'package:wmr_ws/wmr_ws.dart';
+import 'package:wmr_core/protocol/gatt.dart';
 
 import 'ui/raw_mode_notifier.dart';
 
@@ -123,4 +127,88 @@ void main() {
       expect(state.wifiLeg, WifiLinkLeg.ble);
     },
   );
+
+  test('fallback scans and switches a real composite to its BLE leg', () async {
+    const bridgeId = 'pi-1';
+    const bleDeviceId = 'ble-pi-1';
+    final endpoint = WmrWsEndpoint(
+      host: '192.168.1.42',
+      port: 8765,
+      bridgeId: bridgeId,
+    );
+    final tcp = _FailingTcp(endpoint);
+    final ble = FakeTransport(
+      devices: const [
+        FakeDevice(id: bleDeviceId, name: 'WMR Bridge', mtu: 244),
+      ],
+    );
+    ble.onRead = (deviceId, characteristic) {
+      if (characteristic == wmrBridgeVersionCharUuid) {
+        return Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': bridgeId,
+              'name': 'WMR Bridge',
+              'version': '0.2.4',
+              'hosts': ['192.168.1.42'],
+              'port': 8765,
+              'path': '/wmr',
+              'authRequired': false,
+            }),
+          ),
+        );
+      }
+      throw StateError('unexpected read $characteristic');
+    };
+    final composite = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: Duration.zero,
+      bleScanWait: const Duration(seconds: 2),
+    );
+    addTearDown(composite.dispose);
+
+    final container = makeContainer(
+      compositeFactory: (_) => WifiLink(
+        composite,
+        activeLeg: () =>
+            switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+              CompositeLeg.tcp => WifiLinkLeg.tcp,
+              CompositeLeg.ble => WifiLinkLeg.ble,
+              null => null,
+            },
+      ),
+    );
+
+    await container
+        .read(realDeviceProvider.notifier)
+        .connectWifi(
+          host: endpoint.host,
+          port: endpoint.port,
+          bridgeId: bridgeId,
+          bleFallback: true,
+        );
+
+    final state = container.read(realDeviceProvider);
+    expect(state.connected, isTrue);
+    expect(state.wifiFallback, isTrue);
+    expect(state.wifiLeg, WifiLinkLeg.ble);
+    expect(composite.activeLegFor(endpoint.resolvedDeviceId), CompositeLeg.ble);
+    expect(
+      await ble.connectionState(bleDeviceId).first,
+      BleConnectionState.connected,
+    );
+  });
+}
+
+/// A Wi-Fi leg that is reachable but refuses every dial, so the composite has
+/// to use its BLE fallback.
+class _FailingTcp extends WmrWsTransport {
+  _FailingTcp(WmrWsEndpoint endpoint) : super(endpoints: [endpoint]);
+
+  @override
+  Future<void> connect(String deviceId) async =>
+      throw StateError('tcp refused');
 }
