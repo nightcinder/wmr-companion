@@ -32,7 +32,10 @@ data class UsbDeviceFacts(
     )
 }
 
-/** One display the host reports, with its raw type wire name. */
+/**
+ * One display the host reports, classified as `external` when Android sets
+ * `Display.FLAG_PRESENTATION` and `builtIn` otherwise.
+ */
 data class DisplayFacts(
     val id: Int,
     val type: String,

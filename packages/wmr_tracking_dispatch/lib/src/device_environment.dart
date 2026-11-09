@@ -89,8 +89,9 @@ class UsbDeviceSnapshot {
 
 /// One display the host reports.
 ///
-/// [type] is the raw wire value, so a display type this build does not know
-/// about is preserved in the snapshot.
+/// [type] is the wire value verbatim: the Android probe classifies a display
+/// as `external` when `Display.FLAG_PRESENTATION` is set and `builtIn`
+/// otherwise, and any other value a host sends is preserved unchanged.
 class ExternalDisplaySnapshot {
   const ExternalDisplaySnapshot({
     required this.id,
@@ -108,9 +109,10 @@ class ExternalDisplaySnapshot {
   final int? height;
   final double? refreshRateHz;
 
-  /// Types Android exposes for a display that is not the headset's built-in
-  /// panel. Unknown type strings stay non-external but remain in the snapshot.
-  static const Set<String> externalTypes = {'external', 'hdmi', 'wifi'};
+  /// The one classification the Android probe emits for a display that is
+  /// not the headset's built-in panel. Any other value stays non-external but
+  /// remains in the snapshot.
+  static const Set<String> externalTypes = {'external'};
 
   bool get isExternal => externalTypes.contains(type);
 
@@ -216,7 +218,7 @@ class DeviceEnvironmentSnapshot {
   final List<ExternalDisplaySnapshot> displays;
   final List<XrSystemFeatureSnapshot> xrFeatures;
 
-  /// Displays whose raw type is a known external transport.
+  /// Displays the host classified as external.
   List<ExternalDisplaySnapshot> get externalDisplays => [
     for (final display in displays)
       if (display.isExternal) display,

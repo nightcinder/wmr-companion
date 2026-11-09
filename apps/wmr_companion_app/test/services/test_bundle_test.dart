@@ -483,4 +483,52 @@ void main() {
       );
     },
   );
+
+  test('names a failed environment probe as a missing artifact', () async {
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 11, 9, 12),
+        appVersion: '0.3.19+24',
+        phone: 'URXR One',
+        androidVersion: 'Android 16 (API 36)',
+        streamMode: 'none',
+        deviceEnvironment: DeviceEnvironmentSnapshot(
+          capturedAt: DateTime.utc(2026, 11, 9, 12),
+          status: DeviceEnvironmentProbeStatus.failed,
+          reason: DeviceEnvironmentReason.probeFailed,
+          detail: 'channel exploded',
+        ),
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    expect(
+      bundle.missing.join('\n'),
+      contains(
+        'Device environment — probe failed (probeFailed): channel exploded',
+      ),
+    );
+    expect(
+      bundle.present.join('\n'),
+      isNot(contains('device_environment.json')),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final environmentJson = jsonDecode(
+      text(archive, 'device_environment.json'),
+    ) as Map<String, Object?>;
+    expect(environmentJson['status'], 'failed');
+    expect(environmentJson['reason'], 'probeFailed');
+    expect(environmentJson['detail'], 'channel exploded');
+
+    final manifest = text(archive, 'manifest.md');
+    expect(
+      manifest,
+      contains(
+        '- Device environment: probe failed (probeFailed): channel exploded',
+      ),
+    );
+  });
 }

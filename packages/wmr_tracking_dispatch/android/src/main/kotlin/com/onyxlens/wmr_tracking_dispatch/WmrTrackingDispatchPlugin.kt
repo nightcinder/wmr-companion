@@ -93,11 +93,7 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
             UsbDeviceFacts(
                 vendorId = device.vendorId,
                 productId = device.productId,
-                deviceName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    device.deviceName
-                } else {
-                    null
-                },
+                deviceName = device.deviceName,
                 manufacturerName = device.manufacturerName,
                 productName = device.productName,
                 interfaces = (0 until device.interfaceCount).map { index ->

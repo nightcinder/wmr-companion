@@ -89,23 +89,22 @@ void main() {
     expect(roundTripped.toJson(), json);
   });
 
-  test('counts known external display transports without dropping others', () {
+  test('counts external displays without dropping other classifications', () {
     final snapshot = DeviceEnvironmentSnapshot.fromMap({
       'usb': {'host_available': false, 'devices': []},
       'displays': {
         'items': [
           {'id': 1, 'type': 'external'},
-          {'id': 2, 'type': 'hdmi'},
-          {'id': 3, 'type': 'builtIn'},
-          {'id': 4, 'type': 'type_42'},
+          {'id': 2, 'type': 'builtIn'},
+          {'id': 3, 'type': 'type_42'},
         ],
       },
       'xr_features': [],
     }, capturedAt: DateTime.utc(2026, 11, 9, 12));
 
-    expect(snapshot.externalDisplays.map((d) => d.id), [1, 2]);
-    expect(snapshot.displays, hasLength(4));
-    expect((snapshot.toJson()['displays'] as Map)['external_count'], 2);
+    expect(snapshot.externalDisplays.map((d) => d.id), [1]);
+    expect(snapshot.displays, hasLength(3));
+    expect((snapshot.toJson()['displays'] as Map)['external_count'], 1);
   });
 
   test('the platform probe parses the native map', () async {

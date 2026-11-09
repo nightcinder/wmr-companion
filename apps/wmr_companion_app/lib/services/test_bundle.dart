@@ -426,6 +426,11 @@ Future<TestBundle> writeTestBundle(
       'Device environment — the USB/display/XR probe did not run for this '
       'export.',
     );
+  } else if (environment.status != DeviceEnvironmentProbeStatus.ok) {
+    missing.add(
+      'Device environment — ${_environmentProbeStatus(environment)}; '
+      '`device_environment.json` records the failure.',
+    );
   } else {
     present.add(
       '`device_environment.json` — ${environment.usbDevices.length} USB '
@@ -543,6 +548,12 @@ String _firmwareReason(List<BundleBridge> bridges) {
   return 'FF16 had not been read yet (older firmware or a pending read).';
 }
 
+String _environmentProbeStatus(DeviceEnvironmentSnapshot environment) {
+  final reason = environment.reason == null ? '' : ' (${environment.reason})';
+  final detail = environment.detail == null ? '' : ': ${environment.detail}';
+  return 'probe ${environment.status.wireName}$reason$detail';
+}
+
 String? _mtuSummary(List<BundleBridge> bridges) {
   final values = <String>[];
   for (final bridge in bridges) {
@@ -558,9 +569,11 @@ String _manifest(TestBundleInput input) {
   final environment = input.deviceEnvironment;
   final environmentSummary = environment == null
       ? 'not probed'
-      : '${environment.usbDevices.length} USB device(s), '
+      : environment.status == DeviceEnvironmentProbeStatus.ok
+      ? '${environment.usbDevices.length} USB device(s), '
             '${environment.externalDisplays.length} external display(s), '
-            '${environment.xrFeatures.length} XR feature(s)';
+            '${environment.xrFeatures.length} XR feature(s)'
+      : _environmentProbeStatus(environment);
   final buffer = StringBuffer()
     ..writeln('# WMR external test bundle')
     ..writeln()
