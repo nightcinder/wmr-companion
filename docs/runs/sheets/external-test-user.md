@@ -101,7 +101,7 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.5
-- App: <versionName from ADB> unified (signed release) (expected 0.3.17)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.19)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
