@@ -17,13 +17,12 @@ concurrency:
 jobs:
   # Secret scan of the commits a PR adds (and of a push to `main`). The action
   # needs a GITLEAKS_LICENSE only for organisation-owned repositories, so none
-  # is needed while the repo belongs to a personal account. Report-only until we
-  # have a week of noise data: a finding is visible in the job summary and SARIF
-  # artifact but cannot block the merge.
+  # is needed while the repo belongs to a personal account. A finding fails the
+  # job and blocks the merge; it is also visible in the job summary and SARIF
+  # artifact.
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       # Job-level permissions replace the workflow-level set, so both scopes
       # must be listed. `pull-requests: read` lets the action list the PR's
@@ -54,7 +53,6 @@ jobs:
   semgrep:
     name: semgrep
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       # Job-level permissions replace the workflow-level set: `contents` for
       # the checkout, `security-events` for the SARIF upload below.
@@ -67,12 +65,12 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/semgrep-venv"
           "$RUNNER_TEMP/semgrep-venv/bin/pip" install --quiet semgrep
       - name: Scan
-        # semgrep exits non-zero when it reports findings, which is expected
-        # while the job is report-only. Keep the SARIF step running so the
-        # findings are still published as an artifact.
-        continue-on-error: true
+        # `--error` makes semgrep exit non-zero when it reports findings, so a
+        # regression fails the job and blocks the merge. The SARIF upload steps
+        # run with `if: always()` and still publish the findings.
         run: |
           "$RUNNER_TEMP/semgrep-venv/bin/semgrep" scan \
+            --error \
             --config p/security-audit \
             --config p/secrets \
             --sarif \
@@ -89,7 +87,6 @@ jobs:
       # keeps state across runs and dedupes a finding once it is fixed.
       - name: Publish to code scanning
         if: always()
-        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
@@ -105,9 +102,8 @@ jobs:
     name: osv-scanner
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Report-only while the repo has no triage history, matching gitleaks and
-    # semgrep. A finding fails the step, not the merge.
-    continue-on-error: true
+    # A finding fails the job and blocks the merge, matching gitleaks and
+    # semgrep.
     permissions:
       contents: read
       security-events: write
@@ -136,7 +132,6 @@ jobs:
           retention-days: 30
       - name: Publish to code scanning
         if: always()
-        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: osv.sarif
