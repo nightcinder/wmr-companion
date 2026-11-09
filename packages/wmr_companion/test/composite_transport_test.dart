@@ -347,6 +347,9 @@ void main() {
 
       states.clear();
       tcp.failConnect = false;
+      // The configured id was only a fallback for the initial attempt; this
+      // test follows the FF16 endpoint document to `_lanDeviceId`.
+      tcp.endpoints.remove(_tcpDeviceId);
       await _waitFor(
         () => tcp.connectCalls.contains(_lanDeviceId),
         reason: 'the FF16 endpoint was not probed',
@@ -406,5 +409,105 @@ void main() {
     await _settle();
     expect(received.last.value, [2]);
     expect(states, isNot(contains(BleConnectionState.disconnected)));
+  });
+
+  test(
+    're-promotes a configured TCP endpoint when FF16 is a version string',
+    () async {
+      tcp.failConnect = true;
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.bridgeIdFor(_tcpDeviceId), isNull);
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [7]), isTrue);
+      await _settle();
+      expect(received.single.value, [7]);
+
+      tcp.failConnect = false;
+      await _waitFor(
+        () => ble.cccLog.contains('off $wmrBridgeBatchedCharUuid'),
+        reason: 'the configured TCP endpoint was not retried',
+      );
+      expect(transport.bridgeIdFor(_tcpDeviceId), _bridgeId);
+
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [8]), isTrue);
+      await _settle();
+      expect(received.last.value, [8]);
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [9]), isFalse);
+    },
+  );
+
+  test('does not move a TCP session to a different BLE bridge', () async {
+    ble.dispose();
+    ble = FakeTransport(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+        FakeDevice(
+          id: 'ble-2',
+          name: 'Other Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+    );
+    ble.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return deviceId == _bleDeviceId
+            ? _versionString()
+            : _endpointDocument(bridgeId: 'pi-2');
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.bridgeIdFor(_tcpDeviceId), _bridgeId);
+
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+    await _settle();
+    states.clear();
+
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => states.contains(BleConnectionState.disconnected),
+      reason: 'the composite switched to a bridge it could not identify',
+    );
+    expect(
+      await ble.connectionState('ble-2').first,
+      BleConnectionState.disconnected,
+    );
+    expect(
+      await ble.connectionState(_bleDeviceId).first,
+      BleConnectionState.disconnected,
+    );
   });
 }

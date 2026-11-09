@@ -159,6 +159,7 @@ class CompositeBleTransport implements BleTransport {
     try {
       final tcpCandidates = _tcpCandidatesFor(route, deviceId);
       if (tcpCandidates.isNotEmpty) {
+        route.tcpCandidates.addAll(tcpCandidates);
         try {
           final id = await _tryTcp(route, tcpCandidates);
           if (id != null) {
@@ -170,14 +171,16 @@ class CompositeBleTransport implements BleTransport {
         }
       }
 
-      final bleId = _bleFallbackFor(
+      final bleCandidates = _bleCandidatesFor(
         route,
         deviceId,
         allowDeviceId: tcpCandidates.isEmpty,
       );
-      if (bleId != null) {
+      final requireIdentity =
+          route.bridgeId != null && bleCandidates.length > 1;
+      for (final bleId in bleCandidates) {
         try {
-          await _connectBle(route, bleId);
+          await _connectBle(route, bleId, requireIdentity: requireIdentity);
           await _activateBle(route);
           return;
         } catch (error) {
@@ -392,6 +395,7 @@ class CompositeBleTransport implements BleTransport {
     if (candidates.isEmpty) return null;
     Object? lastError;
     for (final id in candidates) {
+      route.tcpCandidates.add(id);
       try {
         await tcp.connect(id);
         route.tcpDeviceId = id;
@@ -404,24 +408,31 @@ class CompositeBleTransport implements BleTransport {
     throw lastError ?? StateError('No TCP endpoint answered');
   }
 
-  String? _bleFallbackFor(
+  List<String> _bleCandidatesFor(
     _Route route,
     String deviceId, {
     required bool allowDeviceId,
   }) {
-    if (route.bleDeviceId != null) return route.bleDeviceId;
-    if (allowDeviceId && !_claimedByOtherRoute(deviceId, route)) {
-      return deviceId;
+    final candidates = <String>[];
+    void add(String id) {
+      if (candidates.contains(id) || _claimedByOtherRoute(id, route)) return;
+      candidates.add(id);
     }
+
+    final current = route.bleDeviceId;
+    if (current != null) {
+      candidates.add(current);
+      return candidates;
+    }
+    if (allowDeviceId) add(deviceId);
     final hits = _scanHits.values.where((hit) => hit.fromBle).toList()
       ..sort(
         (a, b) => (b.result.rssi ?? -1000).compareTo(a.result.rssi ?? -1000),
       );
     for (final hit in hits) {
-      if (_claimedByOtherRoute(hit.result.deviceId, route)) continue;
-      return hit.result.deviceId;
+      add(hit.result.deviceId);
     }
-    return null;
+    return candidates;
   }
 
   bool _claimedByOtherRoute(String deviceId, _Route route) =>
@@ -433,14 +444,52 @@ class CompositeBleTransport implements BleTransport {
                 other.tcpDeviceId == deviceId),
       );
 
-  Future<void> _connectBle(_Route route, String bleId) async {
+  Future<void> _connectBle(
+    _Route route,
+    String bleId, {
+    bool requireIdentity = false,
+  }) async {
     route.bleDeviceId = bleId;
     final state = await ble.connectionState(bleId).first;
     if (state != BleConnectionState.connected) {
       await ble.connect(bleId);
     }
+    final endpoint = await _readBleEndpoint(bleId);
+    final knownId = route.bridgeId;
+    if (knownId != null) {
+      if (endpoint != null && endpoint.bridgeId != knownId) {
+        await _rejectBle(route);
+        throw StateError(
+          'BLE device $bleId is bridge ${endpoint.bridgeId}, expected $knownId',
+        );
+      }
+      if (endpoint == null && requireIdentity) {
+        await _rejectBle(route);
+        throw StateError(
+          'BLE device $bleId did not identify its bridge; refusing to switch',
+        );
+      }
+    }
     _watchBle(route);
-    await _learnBleEndpoint(route);
+    if (endpoint != null) {
+      await _learnBleEndpoint(route, endpoint);
+    } else {
+      _startUpgrade(route);
+    }
+  }
+
+  Future<void> _rejectBle(_Route route) async {
+    await route.bleStateSub?.cancel();
+    route.bleStateSub = null;
+    route.bleStateId = null;
+    final bleId = route.bleDeviceId;
+    route.bleDeviceId = null;
+    if (bleId == null) return;
+    try {
+      await ble.disconnect(bleId);
+    } catch (_) {
+      // The failed probe needs no further teardown.
+    }
   }
 
   Future<void> _activateTcp(_Route route, String tcpId) async {
@@ -529,18 +578,22 @@ class CompositeBleTransport implements BleTransport {
     if (_disposed || route.intentional || route.switching) return;
     route.switching = true;
     try {
-      final bleId = _bleFallbackFor(
+      final bleCandidates = _bleCandidatesFor(
         route,
         route.deviceId,
         allowDeviceId: false,
       );
-      if (bleId == null) {
-        await _lose(route);
-        return;
+      final requireIdentity =
+          route.bridgeId != null && bleCandidates.length > 1;
+      for (final bleId in bleCandidates) {
+        try {
+          await _connectBle(route, bleId, requireIdentity: requireIdentity);
+          await _activateBle(route);
+          return;
+        } catch (_) {
+          // Try the next scanned bridge before giving up the session.
+        }
       }
-      await _connectBle(route, bleId);
-      await _activateBle(route);
-    } catch (_) {
       await _lose(route);
     } finally {
       route.switching = false;
@@ -612,41 +665,43 @@ class CompositeBleTransport implements BleTransport {
     route.upgradeTimer = null;
   }
 
-  Future<void> _learnBleEndpoint(_Route route) async {
-    final bleId = route.bleDeviceId;
-    if (bleId == null) return;
+  Future<_LanEndpoint?> _readBleEndpoint(String bleId) async {
     try {
       final value = await ble.read(
         bleId,
         wmrBridgeServiceUuid,
         wmrBridgeVersionCharUuid,
       );
-      final endpoint = _LanEndpoint.parse(value);
-      if (endpoint == null) return;
-      _rememberBridge(route, endpoint.bridgeId);
-
-      String? token;
-      if (endpoint.authRequired) {
-        token = await _readBleToken(bleId);
-        if (token == null) return;
-      }
-      for (final host in endpoint.hosts) {
-        final candidate = WmrWsEndpoint(
-          host: host,
-          port: endpoint.port,
-          path: endpoint.path,
-          name: endpoint.name,
-          bridgeId: endpoint.bridgeId,
-          token: token,
-        );
-        tcp.registerEndpoint(candidate);
-        route.tcpCandidates.add(candidate.resolvedDeviceId);
-      }
-      _startUpgrade(route);
+      return _LanEndpoint.parse(value);
     } catch (_) {
       // FF16 is a plain version string on older bridges, not this document.
-      // Without LAN metadata the bridge stays on BLE.
+      return null;
     }
+  }
+
+  Future<void> _learnBleEndpoint(_Route route, _LanEndpoint endpoint) async {
+    final bleId = route.bleDeviceId;
+    if (bleId == null) return;
+    _rememberBridge(route, endpoint.bridgeId);
+
+    String? token;
+    if (endpoint.authRequired) {
+      token = await _readBleToken(bleId);
+      if (token == null) return;
+    }
+    for (final host in endpoint.hosts) {
+      final candidate = WmrWsEndpoint(
+        host: host,
+        port: endpoint.port,
+        path: endpoint.path,
+        name: endpoint.name,
+        bridgeId: endpoint.bridgeId,
+        token: token,
+      );
+      tcp.registerEndpoint(candidate);
+      route.tcpCandidates.add(candidate.resolvedDeviceId);
+    }
+    _startUpgrade(route);
   }
 
   Future<String?> _readBleToken(String bleId) async {
@@ -669,6 +724,8 @@ class CompositeBleTransport implements BleTransport {
 
   void _rememberBridge(_Route route, String? bridgeId) {
     if (bridgeId == null || bridgeId.isEmpty) return;
+    final known = route.bridgeId;
+    if (known != null && known != bridgeId) return;
     route.bridgeId = bridgeId;
     _bridgeIds[route.deviceId] = bridgeId;
     final tcpId = route.tcpDeviceId;
