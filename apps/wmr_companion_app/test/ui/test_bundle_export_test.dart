@@ -20,8 +20,17 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/latency_files.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import 'raw_mode_notifier.dart';
+
+class _FakeEnvironmentProbe implements DeviceEnvironmentProbe {
+  const _FakeEnvironmentProbe();
+
+  @override
+  Future<DeviceEnvironmentSnapshot> probe() async =>
+      DeviceEnvironmentSnapshot(capturedAt: DateTime.utc(2026, 10, 29, 12));
+}
 
 /// The fake adapter's read returns zeros; FF16 has to say something real for
 /// the manifest assertion.
@@ -93,6 +102,9 @@ void main() {
           shareTestBundleProvider.overrideWithValue((path) async {
             shared.add(path);
           }),
+          deviceEnvironmentProbeProvider.overrideWithValue(
+            const _FakeEnvironmentProbe(),
+          ),
         ],
         child: const MaterialApp(home: ConnectScreen()),
       ),

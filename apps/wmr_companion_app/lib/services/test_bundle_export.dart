@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import '../ui/capture/capture_providers.dart';
 import '../ui/connect/connect_providers.dart';
@@ -84,6 +85,14 @@ final bundleOutputDirectoryProvider = FutureProvider<Directory>((ref) async {
   return Directory('${documents.path}${Platform.pathSeparator}exports');
 });
 
+/// Reads the USB, display and XR facts the diagnostic bundle records.
+///
+/// The probe degrades to an unsupported snapshot when the native plugin is not
+/// linked, so an export never fails because the environment read did.
+final deviceEnvironmentProbeProvider = Provider<DeviceEnvironmentProbe>(
+  (ref) => const PlatformDeviceEnvironmentProbe(),
+);
+
 /// Builds the bundle input, with an explicit bench run when a wizard ends in
 /// the export.
 typedef TestBundleInputBuilder = Future<TestBundleInput> Function({
@@ -157,6 +166,13 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
             for (final bridge in bridges) bridge.id: bridge.firmwareVersion,
           });
 
+    DeviceEnvironmentSnapshot? environment;
+    try {
+      environment = await ref.read(deviceEnvironmentProbeProvider).probe();
+    } catch (_) {
+      // The bundle is still useful without the environment snapshot.
+    }
+
     final run = benchRun ?? ref.read(benchBundleProvider);
     return TestBundleInput(
       now: ref.read(bundleClockProvider)(),
@@ -176,6 +192,7 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       benchRun: run,
       poseCaptures: poseCapturesFromRun(run),
       benchRuntime: poseRuntimeFromRun(run),
+      deviceEnvironment: environment,
       firmwareSha: firmwareSha,
     );
   };

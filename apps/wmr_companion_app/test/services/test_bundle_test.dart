@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 void main() {
   late Directory dir;
@@ -35,6 +36,38 @@ void main() {
     mode: 'raw',
     rateHz: const [99.4, 98.8],
     loss: const [0.001, null],
+  );
+
+  DeviceEnvironmentSnapshot environment() => DeviceEnvironmentSnapshot(
+    capturedAt: DateTime.utc(2026, 11, 9, 12),
+    usbHostAvailable: true,
+    usbDevices: const [
+      UsbDeviceSnapshot(
+        vendorId: 0xFFFF,
+        productId: 0xEEEE,
+        productName: 'URXR One',
+        interfaces: [
+          UsbInterfaceSnapshot(
+            interfaceClass: 0xFF,
+            interfaceSubclass: 0x42,
+            interfaceProtocol: 0x99,
+          ),
+        ],
+      ),
+    ],
+    displays: const [
+      ExternalDisplaySnapshot(
+        id: 7,
+        type: 'type_99',
+        name: 'URXR One',
+        width: 2328,
+        height: 1728,
+        refreshRateHz: 90.0,
+      ),
+    ],
+    xrFeatures: const [
+      XrSystemFeatureSnapshot(name: 'vendor.urxr.spatial', present: false),
+    ],
   );
 
   test('adds pose captures with fixed names and provenance', () async {
@@ -149,6 +182,7 @@ void main() {
           bridges: [bridge('0.3.0')],
           latencyFiles: [latencyJson.path, latencyCsv.path],
           captureFiles: [capture.path],
+          deviceEnvironment: environment(),
         ),
         Directory('${dir.path}/out'),
       );
@@ -381,5 +415,120 @@ void main() {
     expect(manifest, contains('pose_capture_fake_left_still.json'));
     expect(manifest, contains('| LEFT | still | 1 | done | 30 |'));
     expect(manifest, contains('pose_capture_fake_right_fastFlick.json'));
+  });
+
+  test(
+    'writes device_environment.json for unknown environment fixtures',
+    () async {
+      final bundle = await writeTestBundle(
+        TestBundleInput(
+          now: DateTime(2026, 11, 9, 12),
+          appVersion: '0.3.19+24',
+          phone: 'URXR One',
+          androidVersion: 'Android 16 (API 36)',
+          streamMode: 'none',
+          deviceEnvironment: environment(),
+        ),
+        Directory('${dir.path}/out'),
+      );
+
+      expect(bundle.missing, isNot(contains(contains('Device environment'))));
+      expect(bundle.present.join('\n'), contains('device_environment.json'));
+
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final names = [for (final file in archive.files) file.name];
+      expect(names, contains('device_environment.json'));
+
+      final environmentJson = jsonDecode(
+        text(archive, 'device_environment.json'),
+      ) as Map<String, Object?>;
+      expect(environmentJson['format'], 'wmr-device-environment/1');
+      expect(environmentJson['captured_at'], '2026-11-09T12:00:00.000Z');
+      final usb = environmentJson['usb']! as Map<String, Object?>;
+      expect(usb['host_available'], isTrue);
+      final device = (usb['devices']! as List).single as Map<String, Object?>;
+      expect(device['vendor_id'], 0xFFFF);
+      expect(device['product_id'], 0xEEEE);
+      expect(device['product'], 'URXR One');
+      final usbInterface =
+          (device['interfaces']! as List).single as Map<String, Object?>;
+      expect(usbInterface['class'], 0xFF);
+      expect(usbInterface['subclass'], 0x42);
+      expect(usbInterface['protocol'], 0x99);
+
+      final displays = environmentJson['displays']! as Map<String, Object?>;
+      expect(displays['external_count'], 0);
+      final display =
+          (displays['items']! as List).single as Map<String, Object?>;
+      expect(display['type'], 'type_99');
+      expect(display['name'], 'URXR One');
+      expect(display['width'], 2328);
+      expect(display['refresh_rate_hz'], 90.0);
+
+      final feature =
+          (environmentJson['xr_features']! as List).single
+              as Map<String, Object?>;
+      expect(feature['name'], 'vendor.urxr.spatial');
+      expect(feature['present'], isFalse);
+
+      final manifest = text(archive, 'manifest.md');
+      expect(
+        manifest,
+        contains(
+          '- Device environment: 1 USB device(s), 0 external display(s), '
+          '1 XR feature(s)',
+        ),
+      );
+    },
+  );
+
+  test('names a failed environment probe as a missing artifact', () async {
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 11, 9, 12),
+        appVersion: '0.3.19+24',
+        phone: 'URXR One',
+        androidVersion: 'Android 16 (API 36)',
+        streamMode: 'none',
+        deviceEnvironment: DeviceEnvironmentSnapshot(
+          capturedAt: DateTime.utc(2026, 11, 9, 12),
+          status: DeviceEnvironmentProbeStatus.failed,
+          reason: DeviceEnvironmentReason.probeFailed,
+          detail: 'channel exploded',
+        ),
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    expect(
+      bundle.missing.join('\n'),
+      contains(
+        'Device environment — probe failed (probeFailed): channel exploded',
+      ),
+    );
+    expect(
+      bundle.present.join('\n'),
+      isNot(contains('device_environment.json')),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final environmentJson = jsonDecode(
+      text(archive, 'device_environment.json'),
+    ) as Map<String, Object?>;
+    expect(environmentJson['status'], 'failed');
+    expect(environmentJson['reason'], 'probeFailed');
+    expect(environmentJson['detail'], 'channel exploded');
+
+    final manifest = text(archive, 'manifest.md');
+    expect(
+      manifest,
+      contains(
+        '- Device environment: probe failed (probeFailed): channel exploded',
+      ),
+    );
   });
 }

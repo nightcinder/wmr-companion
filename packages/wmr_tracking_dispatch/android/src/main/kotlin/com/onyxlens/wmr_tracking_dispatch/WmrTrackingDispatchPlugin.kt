@@ -1,9 +1,11 @@
 package com.onyxlens.wmr_tracking_dispatch
 
 import android.content.Context
+import android.hardware.display.DisplayManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.view.Display
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -41,6 +43,7 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "detectGlasses" -> result.success(detector.detect(environment()).toMap())
+            "deviceEnvironment" -> result.success(readDeviceEnvironment())
             "configureIds" -> {
                 config = configFrom(call.arguments)
                 result.success(null)
@@ -82,6 +85,66 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
             config = config,
         )
     }
+
+    private fun readDeviceEnvironment(): Map<String, Any?> {
+        val context = appContext
+        val usbManager = context?.getSystemService(Context.USB_SERVICE) as? UsbManager
+        val usbDevices = usbManager?.deviceList?.values?.map { device ->
+            UsbDeviceFacts(
+                vendorId = device.vendorId,
+                productId = device.productId,
+                deviceName = device.deviceName,
+                manufacturerName = device.manufacturerName,
+                productName = device.productName,
+                interfaces = (0 until device.interfaceCount).map { index ->
+                    val usbInterface = device.getInterface(index)
+                    UsbInterfaceFacts(
+                        interfaceClass = usbInterface.interfaceClass,
+                        subclass = usbInterface.interfaceSubclass,
+                        protocol = usbInterface.interfaceProtocol,
+                    )
+                },
+            )
+        } ?: emptyList()
+        val displays = context
+            ?.getSystemService(Context.DISPLAY_SERVICE)
+            ?.let { it as? DisplayManager }
+            ?.displays
+            ?.map { display ->
+                DisplayFacts(
+                    id = display.displayId,
+                    type = displayTypeName(display),
+                    name = display.name,
+                    width = display.mode?.physicalWidth,
+                    height = display.mode?.physicalHeight,
+                    refreshRateHz = display.mode?.refreshRate?.toDouble(),
+                )
+            } ?: emptyList()
+        val packageManager = context?.packageManager
+        val features = if (packageManager == null) {
+            emptyList()
+        } else {
+            xrSystemFeatures(
+                packageManager.systemAvailableFeatures
+                    ?.mapNotNull { it.name }
+                    ?: emptyList(),
+                ANDROID_XR_FEATURES,
+            )
+        }
+        return DeviceEnvironmentFacts(
+            usbHostAvailable = usbManager != null,
+            usbDevices = usbDevices,
+            displays = displays,
+            xrFeatures = features,
+        ).toMap()
+    }
+
+    private fun displayTypeName(display: Display): String =
+        if ((display.flags and Display.FLAG_PRESENTATION) != 0) {
+            "external"
+        } else {
+            "builtIn"
+        }
 
     private fun configFrom(arguments: Any?): GlassesUsbConfig {
         val args = arguments as? Map<*, *> ?: return config
