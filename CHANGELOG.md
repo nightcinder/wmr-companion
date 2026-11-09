@@ -3,11 +3,31 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## 0.3.19+24
+
+WMR Companion release, paired with WMR_Bridge `v0.3.15`.
+
+- `wmr_ws` adds pure-Dart LAN discovery (UDP probe and mDNS), and
+  `wmr_companion` adds `CompositeBleTransport`, which prefers the Pi's TCP
+  link and falls back to BLE GATT, retrying TCP every 2 seconds. The fallback
+  is opt-in for library hosts; the reference app still connects through the
+  WebSocket transport directly. It is not yet tested on hardware and is
+  waiting on ONY-1070.
+- The Pi TCP/BLE fallback contract and LAN discovery are documented in
+  `docs/LIBRARY.md` and `packages/wmr_ws/README.md`.
+- A native visionOS app is scaffolded with an ARKit tracking seam, a SwiftUI
+  dashboard and a 6DoF scene, with architecture, permissions and signing
+  documented.
+- The GATT latency probe is retired, and its tool and release packaging are
+  removed.
+- CI adds CodeQL and OSV dependency scanning to code scanning, and scans the
+  published APK with MobSF plus a native-library inventory diff.
+
 ## 0.3.0
 
 The first release since 0.2.2. All twelve packages move to 0.3.0 and their
 inter-package constraints to `^0.3.0`. The reference app stays on its own
-release line (`0.3.18+23`).
+release line (`0.3.19+24`).
 
 - FF16 protocol version and feature-matrix reporting in `wmr_core` and
   `wmr_companion` (`WmrProtocolVersion`, `WmrBridgeFeatures`).
