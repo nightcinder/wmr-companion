@@ -2,10 +2,10 @@ import 'wmr_ws_protocol.dart';
 
 /// One Wi-Fi bridge the transport may connect to.
 ///
-/// There is no discovery in this package: the caller supplies the host and
-/// port, exactly as it would type them into a connection screen. `scan()`
-/// merely reports the configured endpoints so the existing scan flow keeps
-/// working.
+/// Endpoints come either from the caller (the host and port typed into a
+/// connection screen) or from `WmrWsDiscovery`. Both kinds are offered by
+/// `WmrWsTransport.scan()` after the transport has registered the discovered
+/// ones.
 class WmrWsEndpoint {
   WmrWsEndpoint({
     required this.host,
@@ -15,6 +15,7 @@ class WmrWsEndpoint {
     this.name,
     this.token,
     this.secure = false,
+    this.bridgeId,
   }) {
     if (host.trim().isEmpty) {
       throw ArgumentError.value(host, 'host', 'must not be empty');
@@ -50,6 +51,15 @@ class WmrWsEndpoint {
   /// Use `wss` (TLS) instead of `ws`. The daemon itself serves plaintext; this
   /// is for a TLS-terminating proxy in front of it.
   final bool secure;
+
+  /// Stable identity the bridge is expected to report in its WebSocket
+  /// `hello`.
+  ///
+  /// Null for an endpoint the caller configured by hand. A discovered endpoint
+  /// carries the `bridge_id` from its UDP or mDNS reply; [WmrWsTransport]
+  /// refuses to authenticate unless `hello.bridge_id` matches, so a stale or
+  /// wrong-host reply is not sent the token.
+  final String? bridgeId;
 
   /// `ws://host:port/path` or `wss://host:port/path`.
   Uri get uri =>

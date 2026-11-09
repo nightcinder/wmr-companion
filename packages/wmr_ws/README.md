@@ -41,11 +41,25 @@ final controller = ControllerService(transport, id, mode: StreamMode.batched);
 await controller.start();
 ```
 
-There is no discovery: `WmrWsEndpoint` carries the host and port, and
-`scan()` just reports the configured endpoints so the existing scan flow keeps
-working. mDNS/zeroconf and automatic endpoint discovery remain follow-ups, not
-part of this package; the reference app's Connect screen Wi-Fi `host:port` entry
-landed in PR #62 (M14.3).
+Discovery is opt-in and needs no plugin:
+
+```dart
+final transport = WmrWsTransport(
+  endpoints: const [],
+  enableDiscovery: true, // or inject WmrWsDiscovery(timeout: ...)
+);
+```
+
+`WmrWsDiscovery` runs two paths in parallel. It sends a
+`WMR_DISCOVER_V1 <nonce>` UDP probe to port 8765 and a
+`_wmr-bridge._tcp.local` DNS-SD query from an ephemeral port with the QU bit
+set; it never binds port 5353, so a unicast mDNS reply works on Android without
+a `MulticastLock`. Both replies are hints: they never carry the token. A
+discovered `WmrWsEndpoint` records the reply's stable `bridgeId`, and
+`connect()` refuses to send a token unless the WebSocket `hello` reports the
+same `bridge_id`. `scan()` yields the configured endpoints first, then the
+deduplicated discoveries. Static `WmrWsEndpoint` host/port entries remain
+supported as an override.
 
 ## The seam, and where it leaks
 
@@ -60,7 +74,7 @@ landed in PR #62 (M14.3).
 | FF15 | JSON `ping` / `pong`; the 20-byte FF15 answer is synthesized for `EchoClient` |
 | `connectionInfo().mtu` | `hello.fragmentCapacity` (raw fragment value size) |
 | `connectionInfo().rssi`, `.connectionIntervalUs`, `.phy` | **null**: a WebSocket has no link-layer measurements |
-| `scan` | the configured host:port only |
+| `scan` | configured endpoints, then UDP/mDNS discoveries when enabled |
 | FF11 status read | not synthesized; use `WmrWsTransport.status()` |
 | FF13 calibration | **not implemented by the daemon**; absent from `discoverServices`, and `read`/`write` throw `WmrWsUnsupportedException` |
 
