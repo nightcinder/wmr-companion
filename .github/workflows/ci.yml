@@ -126,6 +126,10 @@ jobs:
       - name: Unity export checker tests
         working-directory: apps/wmr_companion_app
         run: python3 -m unittest -v tool/test_check_unity_export.py
+      # Pure-stdlib tests for the MobSF inventory and release diff: synthetic
+      # APK zips, no MobSF, no network.
+      - name: MobSF inventory tests
+        run: python3 -m unittest -v tool/test_mobsf_scan.py
       # Each package's own test suite includes export_boundary_test.dart, which
       # asserts that its lib/ imports no Riverpod, file plugin or higher layer.
       - name: wmr_core package
@@ -1114,3 +1118,149 @@ jobs:
           cat "$out/SHA256SUMS"
           gh release upload "$VERSION" "$out/SHA256SUMS" --repo "$GITHUB_REPOSITORY" --clobber
           gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
+
+  release-mobsf:
+    # Static analysis of the APK that actually went out, plus a diff of its
+    # native libraries against the previous release.
+    #
+    # Two outputs, deliberately split. MobSF reports what one APK contains
+    # (manifest and appsec findings, exported components, secrets, network
+    # security config, trackers, and per-library ELF hardening). It cannot say
+    # where a shared object came from or what changed since last time, so
+    # `tool/mobsf_scan.py` hashes every lib/<abi>/*.so out of the archive and
+    # diffs that inventory against the `native-libs.json` attached to the
+    # previous release. A vendor blob that appears without a source change is
+    # the thing this job exists to make visible.
+    #
+    # Report-only: the release is already published when this runs, so a
+    # finding can inform but never block. Add `--fail-on-change` to the scan
+    # step once the diff has been quiet for a couple of releases.
+    #
+    # MobSF is a separate Portainer stack (mobsf-apk-scanner) on this host,
+    # joined to the runner's docker network, so the job talks to
+    # http://mobsf:8000 by container name: no published port, no firewall rule.
+    needs: [release-unified]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dryrun') && needs['release-unified'].result == 'success' }}
+    runs-on: [self-hosted, liesa, android]
+    # The scan itself is about a minute for a 411 MB APK; the allowance is for
+    # the download and for MobSF being slow to answer on a busy host.
+    timeout-minutes: 30
+    permissions:
+      # Attaching native-libs.json to the release makes it the next baseline.
+      contents: write
+    env:
+      VERSION: ${{ github.ref_name }}
+      MOBSF_URL: http://mobsf:8000
+      MOBSF_KEY: ${{ secrets.MOBSF_API_KEY }}
+    steps:
+      # previous_tag() walks first-parent history, and a depth-1 checkout has
+      # none.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Name what is missing before downloading 400 MB, in the same spirit as
+      # the preflight in release-unified.
+      - name: Preflight the self-hosted runner
+        run: |
+          set -euo pipefail
+          missing=()
+          for tool in curl python3 gh; do
+            command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::missing on the self-hosted runner: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Download the published APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mobsf"
+          # The split-per-abi release publishes one APK per ABI; only
+          # arm64-v8a ships to testers, so only it is scanned.
+          gh release download "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern '*-unified-arm64-v8a.apk' \
+            --dir "$RUNNER_TEMP/mobsf" \
+            --clobber
+          ls -l "$RUNNER_TEMP/mobsf"
+
+      # The baseline is the previous release's own inventory, not a file in the
+      # repository: it has to describe what shipped, and it cannot go stale.
+      - name: Fetch the previous release's inventory
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous="$(python3 -c 'import sys; sys.path.insert(0, "tool"); import release_notes; print(release_notes.previous_tag(sys.argv[1]))' "$VERSION" || true)"
+          echo "tag=$previous" >> "$GITHUB_OUTPUT"
+          if [ -z "$previous" ]; then
+            echo "no previous version tag reachable; this release establishes the baseline"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/mobsf/baseline"
+          if gh release download "$previous" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern native-libs.json \
+              --dir "$RUNNER_TEMP/mobsf/baseline" \
+              --clobber; then
+            mv "$RUNNER_TEMP/mobsf/baseline/native-libs.json" \
+              "$RUNNER_TEMP/mobsf/baseline.json"
+            echo "baseline from $previous"
+          else
+            echo "::warning::$previous carries no native-libs.json; this release establishes the baseline"
+          fi
+
+      - name: Inventory and scan
+        run: |
+          set -euo pipefail
+          args=(
+            --apk "$RUNNER_TEMP/mobsf/wmr-companion-${VERSION#v}-unified-arm64-v8a.apk"
+            --out-dir "$RUNNER_TEMP/mobsf"
+            --tag "$VERSION"
+            --url "$MOBSF_URL"
+          )
+          if [ -f "$RUNNER_TEMP/mobsf/baseline.json" ]; then
+            args+=(
+              --baseline "$RUNNER_TEMP/mobsf/baseline.json"
+              --baseline-tag "${{ steps.baseline.outputs.tag }}"
+            )
+          fi
+          if [ -n "$MOBSF_KEY" ]; then
+            python3 tool/mobsf_scan.py "${args[@]}" --api-key "$MOBSF_KEY"
+          else
+            # The inventory needs no service. Losing it because the scanner is
+            # not configured yet would leave the next release with no baseline.
+            echo "::warning::MOBSF_API_KEY is not set; recorded the inventory without a scan."
+            python3 tool/mobsf_scan.py "${args[@]}" --skip-scan
+          fi
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobsf-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/mobsf/native-libs.json
+            ${{ runner.temp }}/mobsf/native-libs-diff.md
+            ${{ runner.temp }}/mobsf/mobsf-report.json
+            ${{ runner.temp }}/mobsf/mobsf-report.pdf
+          if-no-files-found: warn
+          retention-days: 90
+
+      # Only a complete run becomes the next baseline; a partial inventory
+      # would report every library as added on the release after it.
+      - name: Attach the inventory to the release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$VERSION" \
+            "$RUNNER_TEMP/mobsf/native-libs.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
