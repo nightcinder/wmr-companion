@@ -311,6 +311,42 @@ void main() {
     expect(transport.endpointFor(mdnsId)?.bridgeId, 'pi-mdns');
   });
 
+  test('a restarted scan re-yields discovered endpoints', () async {
+    final udp = await _UdpResponder.start(
+      bridgeId: 'pi-udp',
+      metadataPort: 9321,
+    );
+    final mdns = await _MdnsResponder.start(
+      bridgeId: 'pi-mdns',
+      metadataPort: 9322,
+    );
+    addTearDown(udp.close);
+    addTearDown(mdns.close);
+    final staticEndpoint = WmrWsEndpoint(host: '127.0.0.1', port: 1);
+    final transport = WmrWsTransport(
+      endpoints: [staticEndpoint],
+      discovery: _loopbackDiscovery(
+        timeout: timeout,
+        udpPort: udp.port,
+        mdnsPort: mdns.port,
+      ),
+    );
+    addTearDown(transport.dispose);
+
+    final first = await transport.scan().toList();
+    final second = await transport.scan().toList();
+
+    expect(first, hasLength(3));
+    expect(second, hasLength(3));
+    expect(second.first.deviceId, staticEndpoint.resolvedDeviceId);
+    expect(
+      second.map((result) => result.deviceId),
+      containsAll(['127.0.0.1:9321', '127.0.0.1:9322']),
+    );
+    expect(transport.endpointFor('127.0.0.1:9321')?.bridgeId, 'pi-udp');
+    expect(transport.endpointFor('127.0.0.1:9322')?.bridgeId, 'pi-mdns');
+  });
+
   test('scan with an unsupported service skips discovery', () async {
     final responder = await _UdpResponder.start();
     addTearDown(responder.close);

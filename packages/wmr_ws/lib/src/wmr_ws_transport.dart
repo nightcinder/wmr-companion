@@ -124,6 +124,11 @@ class WmrWsTransport implements BleTransport {
   final List<WmrWsEndpoint> _endpoints;
   final Map<String, WmrWsEndpoint> _byDeviceId = {};
 
+  /// Endpoints yielded by the most recent discovery pass. Kept apart from
+  /// [_byDeviceId] so a later scan can replace them instead of mistaking them
+  /// for configured endpoints and skipping them.
+  final Map<String, WmrWsEndpoint> _discovered = {};
+
   final Map<String, _WmrWsSession> _sessions = {};
   final Map<String, BleConnectionState> _states = {};
   final Map<String, StreamController<BleConnectionState>> _stateControllers =
@@ -143,9 +148,16 @@ class WmrWsTransport implements BleTransport {
     final discovery = _discovery;
     if (discovery == null) return;
     final discovered = await discovery.discover();
+    // Drop the previous pass's discoveries before merging: they are hints,
+    // and a restarted scan must re-yield whatever the bridge still announces.
+    for (final id in _discovered.keys) {
+      _byDeviceId.remove(id);
+    }
+    _discovered.clear();
     for (final endpoint in discovered) {
       final id = endpoint.resolvedDeviceId;
       if (_byDeviceId.containsKey(id)) continue;
+      _discovered[id] = endpoint;
       _byDeviceId[id] = endpoint;
       yield _scanResult(endpoint);
     }
