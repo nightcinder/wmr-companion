@@ -137,7 +137,10 @@ class InventoryDiff:
         A removal is not new code, and a library that merely moved ABI is the
         same bytes in a different directory, so neither counts here.
         """
-        return bool(self.added or self.changed)
+        removed_digests = {lib.sha256 for lib in self.removed}
+        return bool(self.changed) or any(
+            lib.sha256 not in removed_digests for lib in self.added
+        )
 
 
 def diff_inventories(

@@ -1151,7 +1151,6 @@ jobs:
     env:
       VERSION: ${{ github.ref_name }}
       MOBSF_URL: http://mobsf:8000
-      MOBSF_KEY: ${{ secrets.MOBSF_API_KEY }}
     steps:
       # previous_tag() walks first-parent history, and a depth-1 checkout has
       # none.
@@ -1203,19 +1202,43 @@ jobs:
             exit 0
           fi
           mkdir -p "$RUNNER_TEMP/mobsf/baseline"
-          if gh release download "$previous" \
+          # Check the asset list before downloading: `gh release download`
+          # fails the same way for a missing asset and for an API/auth outage,
+          # and treating an outage as "this release had no baseline" would
+          # silently re-baseline and hide a diff.
+          assets="$RUNNER_TEMP/mobsf/baseline-assets.txt"
+          err="$RUNNER_TEMP/mobsf/baseline.err"
+          if gh release view "$previous" \
               --repo "$GITHUB_REPOSITORY" \
-              --pattern native-libs.json \
-              --dir "$RUNNER_TEMP/mobsf/baseline" \
-              --clobber; then
-            mv "$RUNNER_TEMP/mobsf/baseline/native-libs.json" \
-              "$RUNNER_TEMP/mobsf/baseline.json"
-            echo "baseline from $previous"
+              --json assets \
+              --jq '.assets[].name' > "$assets" 2> "$err"; then
+            :
+          elif grep -qi 'release not found' "$err"; then
+            echo "::warning::$previous has no published release; this release establishes the baseline"
+            exit 0
           else
-            echo "::warning::$previous carries no native-libs.json; this release establishes the baseline"
+            cat "$err"
+            echo "::error::could not read the assets of $previous"
+            exit 1
           fi
+          if ! grep -qx 'native-libs.json' "$assets"; then
+            echo "::warning::$previous carries no native-libs.json; this release establishes the baseline"
+            exit 0
+          fi
+          gh release download "$previous" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern native-libs.json \
+            --dir "$RUNNER_TEMP/mobsf/baseline" \
+            --clobber
+          mv "$RUNNER_TEMP/mobsf/baseline/native-libs.json" \
+            "$RUNNER_TEMP/mobsf/baseline.json"
+          echo "baseline from $previous"
 
       - name: Inventory and scan
+        # The key goes in the environment, not argv: this runner is persistent
+        # and shared, and the process list is readable by every local user.
+        env:
+          MOBSF_API_KEY: ${{ secrets.MOBSF_API_KEY }}
         run: |
           set -euo pipefail
           args=(
@@ -1230,8 +1253,8 @@ jobs:
               --baseline-tag "${{ steps.baseline.outputs.tag }}"
             )
           fi
-          if [ -n "$MOBSF_KEY" ]; then
-            python3 tool/mobsf_scan.py "${args[@]}" --api-key "$MOBSF_KEY"
+          if [ -n "$MOBSF_API_KEY" ]; then
+            python3 tool/mobsf_scan.py "${args[@]}"
           else
             # The inventory needs no service. Losing it because the scanner is
             # not configured yet would leave the next release with no baseline.
@@ -1252,15 +1275,21 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-      # Only a complete run becomes the next baseline; a partial inventory
-      # would report every library as added on the release after it.
+      # The inventory covers the whole APK and is written before the scan, so
+      # it is a valid baseline even when the scan itself failed: a MobSF outage
+      # must not cost the next release its diff. Attach it whenever it exists;
+      # a failed APK download leaves no file and no baseline.
       - name: Attach the inventory to the release
-        if: success()
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release upload "$VERSION" \
-            "$RUNNER_TEMP/mobsf/native-libs.json" \
+          inventory="$RUNNER_TEMP/mobsf/native-libs.json"
+          if [ ! -f "$inventory" ]; then
+            echo "no inventory was produced; nothing to attach"
+            exit 0
+          fi
+          gh release upload "$VERSION" "$inventory" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber

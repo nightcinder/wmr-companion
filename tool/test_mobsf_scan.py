@@ -136,6 +136,21 @@ class DiffTest(unittest.TestCase):
         self.assertFalse(diff.is_empty)
         self.assertFalse(diff.has_new_content)
 
+    def test_move_between_abis_is_not_new_content(self) -> None:
+        current = [
+            mobsf_scan.NativeLib("lib/arm64-v8a/keep.so", "arm64-v8a", 1, "1" * 64),
+            mobsf_scan.NativeLib("lib/x86_64/moved.so", "x86_64", 3, "3" * 64),
+        ]
+        diff = mobsf_scan.diff_inventories(self.base, current)
+
+        self.assertEqual([lib.path for lib in diff.added], ["lib/x86_64/moved.so"])
+        self.assertEqual(
+            [lib.path for lib in diff.removed],
+            ["lib/arm64-v8a/gone.so", "lib/arm64-v8a/moved.so"],
+        )
+        self.assertFalse(diff.is_empty)
+        self.assertFalse(diff.has_new_content)
+
     def test_render_lists_each_change(self) -> None:
         current = [
             mobsf_scan.NativeLib("lib/arm64-v8a/keep.so", "arm64-v8a", 1, "1" * 64),
