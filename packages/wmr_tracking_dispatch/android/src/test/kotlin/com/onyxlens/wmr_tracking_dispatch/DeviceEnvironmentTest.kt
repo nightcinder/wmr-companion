@@ -65,7 +65,7 @@ class DeviceEnvironmentTest {
         val features = xrSystemFeatures(
             installed = setOf(
                 "android.software.xr.api.openxr",
-                "vendor.urxr.spatial",
+                "android.software.xr.api.vendorSpecific",
                 "android.hardware.camera",
             ),
         )
@@ -73,7 +73,9 @@ class DeviceEnvironmentTest {
         val byName = features.associateBy { it.name }
         assertTrue(byName.getValue("android.software.xr.api.openxr").present)
         assertFalse(byName.getValue("android.software.xr.api.spatial").present)
-        assertTrue(byName.getValue("vendor.urxr.spatial").present)
+        assertTrue(
+            byName.getValue("android.software.xr.api.vendorSpecific").present,
+        )
         assertFalse(byName.containsKey("android.hardware.camera"))
     }
 }
