@@ -14,6 +14,7 @@ class WmrWsHello {
     required this.device,
     required this.version,
     required this.hostname,
+    this.bridgeId = '',
     required this.authRequired,
     required Set<String> streams,
     required this.recordSize,
@@ -50,6 +51,7 @@ class WmrWsHello {
       device: _string(json['device'], 'device', 'wmr-bridge'),
       version: _string(json['version'], 'version', ''),
       hostname: _string(json['hostname'], 'hostname', ''),
+      bridgeId: _string(json['bridge_id'], 'bridge_id', ''),
       authRequired: json['authRequired'] == true,
       streams: streams,
       recordSize: _int(json['recordSize'], 'recordSize', 56),
@@ -71,6 +73,10 @@ class WmrWsHello {
   final String version;
 
   final String hostname;
+
+  /// Stable bridge identity, when the daemon reports one. Empty for a daemon
+  /// that predates discovery.
+  final String bridgeId;
 
   /// When true the daemon closes the socket after five seconds unless
   /// `{"type":"auth","token":...}` arrives.

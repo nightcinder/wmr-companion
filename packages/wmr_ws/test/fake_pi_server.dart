@@ -165,6 +165,7 @@ class FakePiOptions {
     this.version = '0.1.0-test',
     this.hostname = 'fake-pi',
     this.device = 'wmr-pi',
+    this.bridgeId = '',
     this.streams = const ['raw', 'decoded', 'batched'],
     this.recordSize = 56,
     this.batchMax = 9,
@@ -181,6 +182,7 @@ class FakePiOptions {
   final String version;
   final String hostname;
   final String device;
+  final String bridgeId;
   final List<String> streams;
   final int recordSize;
   final int batchMax;
@@ -196,6 +198,7 @@ class FakePiOptions {
     'protocol': 1,
     'transport': 'wifi',
     'device': device,
+    if (bridgeId.isNotEmpty) 'bridge_id': bridgeId,
     'version': version,
     'hostname': hostname,
     'authRequired': authRequired,

@@ -7,6 +7,7 @@ import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/protocol/echo.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 
+import 'wmr_ws_discovery.dart';
 import 'wmr_ws_endpoint.dart';
 import 'wmr_ws_exceptions.dart';
 import 'wmr_ws_notification_sink.dart';
@@ -79,8 +80,11 @@ class WmrWsTransport implements BleTransport {
     this.authTimeout = const Duration(seconds: 5),
     this.requestTimeout = const Duration(seconds: 5),
     this.queueSize = 512,
+    WmrWsDiscovery? discovery,
+    bool enableDiscovery = false,
   }) : clock = clock ?? MonotonicClock(),
        _connector = connector ?? _defaultConnector,
+       _discovery = discovery ?? (enableDiscovery ? WmrWsDiscovery() : null),
        _endpoints = List.unmodifiable(endpoints) {
     for (final endpoint in _endpoints) {
       final id = endpoint.resolvedDeviceId;
@@ -116,6 +120,7 @@ class WmrWsTransport implements BleTransport {
   final int queueSize;
 
   final WmrWsConnector _connector;
+  final WmrWsDiscovery? _discovery;
   final List<WmrWsEndpoint> _endpoints;
   final Map<String, WmrWsEndpoint> _byDeviceId = {};
 
@@ -127,24 +132,33 @@ class WmrWsTransport implements BleTransport {
   bool _disposed = false;
 
   @override
-  Stream<BleScanResult> scan({List<String> withServices = const []}) {
+  Stream<BleScanResult> scan({List<String> withServices = const []}) async* {
     final wanted = {for (final uuid in withServices) uuid.toLowerCase()};
     if (wanted.isNotEmpty && !wanted.contains(wmrBridgeServiceUuid)) {
-      return const Stream<BleScanResult>.empty();
+      return;
     }
-    return Stream<BleScanResult>.fromIterable(
-      _endpoints.map(
-        (endpoint) => BleScanResult(
-          deviceId: endpoint.resolvedDeviceId,
-          name: endpoint.displayName,
-          // A Wi-Fi link has no RSSI in the BLE sense. Null is "not
-          // observable", not a made-up number.
-          rssi: null,
-          serviceUuids: const [wmrBridgeServiceUuid],
-        ),
-      ),
-    );
+    for (final endpoint in _endpoints) {
+      yield _scanResult(endpoint);
+    }
+    final discovery = _discovery;
+    if (discovery == null) return;
+    final discovered = await discovery.discover();
+    for (final endpoint in discovered) {
+      final id = endpoint.resolvedDeviceId;
+      if (_byDeviceId.containsKey(id)) continue;
+      _byDeviceId[id] = endpoint;
+      yield _scanResult(endpoint);
+    }
   }
+
+  static BleScanResult _scanResult(WmrWsEndpoint endpoint) => BleScanResult(
+    deviceId: endpoint.resolvedDeviceId,
+    name: endpoint.displayName,
+    // A Wi-Fi link has no RSSI in the BLE sense. Null is "not observable",
+    // not a made-up number.
+    rssi: null,
+    serviceUuids: const [wmrBridgeServiceUuid],
+  );
 
   @override
   Future<void> stopScan() async {}
@@ -650,6 +664,19 @@ class _WmrWsSession {
   void _onHello(Map<String, Object?> json) {
     if (isClosed) return;
     final parsed = WmrWsHello.fromJson(json);
+    final expectedBridgeId = endpoint.bridgeId;
+    if (expectedBridgeId != null &&
+        expectedBridgeId.isNotEmpty &&
+        parsed.bridgeId != expectedBridgeId) {
+      _completeReadyError(
+        WmrWsHandshakeException(
+          'bridge id mismatch: ${endpoint.uri} was discovered as '
+          '"$expectedBridgeId" but its hello reports '
+          '"${parsed.bridgeId}"',
+        ),
+      );
+      return;
+    }
     hello = parsed;
     if (phase == _SessionPhase.awaitingHello) {
       _helloTimer?.cancel();
