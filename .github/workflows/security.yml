@@ -95,11 +95,12 @@ jobs:
           sarif_file: semgrep.sarif
           category: semgrep
 
-  # Dependency CVEs for every lockfile the scanners above do not read. The pub
-  # workspace keeps one lockfile at the root; osv-scanner also picks up the
-  # NuGet files under packages/wmr_tracking_unity and the Gradle lockfiles.
-  # OSV carries the pub.dev advisories that the GitHub Advisory Database does
-  # not always mirror, so this is not a duplicate of Dependabot.
+  # Dependency CVEs for the pub workspace, which keeps one lockfile at the
+  # root. That lockfile is the only manifest here osv-scanner can read: the
+  # three csproj files under packages/wmr_tracking_unity declare no
+  # PackageReference and there is no NuGet or Gradle lockfile. OSV carries the
+  # pub.dev advisories that the GitHub Advisory Database does not always
+  # mirror, so this is not a duplicate of Dependabot.
   osv-scanner:
     name: osv-scanner
     runs-on: ubuntu-latest
@@ -112,12 +113,17 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v7
-      - name: Scan lockfiles
+      - name: Install osv-scanner
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/osv-scanner" \
+          curl -sSfL -o "$RUNNER_TEMP/osv-scanner_linux_amd64" \
             https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64
-          chmod +x "$RUNNER_TEMP/osv-scanner"
-          "$RUNNER_TEMP/osv-scanner" scan source -r . \
+          curl -sSfL -o "$RUNNER_TEMP/osv-scanner_SHA256SUMS" \
+            https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_SHA256SUMS
+          (cd "$RUNNER_TEMP" && grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS | sha256sum -c -)
+          chmod +x "$RUNNER_TEMP/osv-scanner_linux_amd64"
+      - name: Scan dependencies
+        run: |
+          "$RUNNER_TEMP/osv-scanner_linux_amd64" scan source -r . \
             --format sarif \
             --output osv.sarif
       - name: Upload SARIF
