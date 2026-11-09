@@ -2,6 +2,7 @@
 /// default-off VITURE and XREAL tracking plugins.
 library;
 
+export 'src/device_environment.dart';
 export 'src/glasses_detection.dart';
 export 'src/glasses_detector.dart';
 export 'src/tracking_source_selector.dart';

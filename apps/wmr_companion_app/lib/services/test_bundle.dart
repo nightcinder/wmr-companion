@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 /// One connected bridge, as the diagnostics and the manifest describe it.
 class BundleBridge {
@@ -205,6 +206,7 @@ class TestBundleInput {
     this.poseCaptures = const [],
     this.benchRun,
     this.benchRuntime,
+    this.deviceEnvironment,
     this.firmwareSha,
   });
 
@@ -248,6 +250,9 @@ class TestBundleInput {
 
   /// The attached hand-tracking runtime, when the capture step ran.
   final String? benchRuntime;
+
+  /// The USB, display and XR facts probed at export time.
+  final DeviceEnvironmentSnapshot? deviceEnvironment;
 
   /// The attached bridge's firmware identity, null without a bridge.
   final String? firmwareSha;
@@ -415,6 +420,20 @@ Future<TestBundle> writeTestBundle(
     );
   }
 
+  final environment = input.deviceEnvironment;
+  if (environment == null) {
+    missing.add(
+      'Device environment — the USB/display/XR probe did not run for this '
+      'export.',
+    );
+  } else {
+    present.add(
+      '`device_environment.json` — ${environment.usbDevices.length} USB '
+      'device(s), ${environment.externalDisplays.length} external display(s), '
+      '${environment.xrFeatures.length} XR feature(s)',
+    );
+  }
+
   final manifest = _manifest(input);
   final readme = _readme(input, present: present, missing: missing);
   final diagnostics = const JsonEncoder.withIndent('  ').convert({
@@ -453,6 +472,12 @@ Future<TestBundle> writeTestBundle(
   addText('manifest.md', manifest);
   addText('README.md', '$readme\n');
   addText('diagnostics.json', '$diagnostics\n');
+  if (environment != null) {
+    addText(
+      'device_environment.json',
+      '${const JsonEncoder.withIndent('  ').convert(environment.toJson())}\n',
+    );
+  }
   for (final entry in files.entries) {
     archive.addFile(ArchiveFile(entry.key, entry.value.length, entry.value));
   }
@@ -530,6 +555,12 @@ String? _mtuSummary(List<BundleBridge> bridges) {
 }
 
 String _manifest(TestBundleInput input) {
+  final environment = input.deviceEnvironment;
+  final environmentSummary = environment == null
+      ? 'not probed'
+      : '${environment.usbDevices.length} USB device(s), '
+            '${environment.externalDisplays.length} external display(s), '
+            '${environment.xrFeatures.length} XR feature(s)';
   final buffer = StringBuffer()
     ..writeln('# WMR external test bundle')
     ..writeln()
@@ -546,6 +577,7 @@ String _manifest(TestBundleInput input) {
     ..writeln('- Firmware SHA: ${input.firmwareSha ?? 'none (no bridge)'}')
     ..writeln('- Bench mode: ${input.benchRun?.mode ?? 'not selected'}')
     ..writeln('- Tracking runtime: ${input.benchRuntime ?? 'none'}')
+    ..writeln('- Device environment: $environmentSummary')
     ..writeln();
   final bench = input.benchRun;
   if (bench != null) {
