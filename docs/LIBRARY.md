@@ -657,5 +657,6 @@ Android host apps must declare these in `AndroidManifest.xml`:
 Android 11 (API 30) and older also need `ACCESS_FINE_LOCATION`,
 `BLUETOOTH` and `BLUETOOTH_ADMIN` with `maxSdkVersion=30`. iOS host apps need `NSBluetoothAlwaysUsageDescription`
 and, for background use, the `bluetooth-central` background mode. The
-`wmr_ble` package merges the Android permissions, but the host app must
-explain why it needs them.
+`universal_ble` package adds only `BLUETOOTH` and `BLUETOOTH_ADMIN` with
+`maxSdkVersion=30`; the host app must declare the rest and explain why it
+needs them.
