@@ -1,6 +1,6 @@
 # Handoff for a new orchestrator
 
-Written 2026-10-22 by the outgoing "director" session. General Helmuth von Moltke updated it 2026-10-23 for ONY-55, 2026-10-24 for ONY-135, 2026-10-27 for 0.2.1, 2026-10-31 for the 0.3.5 unified release (ONY-641), 2026-10-31 for the 0.3.6 release (ONY-695 / ONY-711), 2026-11-01 for the 0.3.7 release (ONY-713 / ONY-724), 2026-11-02 for the 0.3.11 release (ONY-777 / ONY-776), 2026-11-02 for the 0.3.12 release (ONY-802), 2026-11-02 for the 0.3.14 release (ONY-866), 2026-11-06 for the 0.3.17 release (ONY-894), and 2026-11-07 for the 0.3.0 Dart package version and docs refresh (ONY-912). Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
+Written 2026-10-22 by the outgoing "director" session. General Helmuth von Moltke updated it 2026-10-23 for ONY-55, 2026-10-24 for ONY-135, 2026-10-27 for 0.2.1, 2026-10-31 for the 0.3.5 unified release (ONY-641), 2026-10-31 for the 0.3.6 release (ONY-695 / ONY-711), 2026-11-01 for the 0.3.7 release (ONY-713 / ONY-724), 2026-11-02 for the 0.3.11 release (ONY-777 / ONY-776), 2026-11-02 for the 0.3.12 release (ONY-802), 2026-11-02 for the 0.3.14 release (ONY-866), 2026-11-06 for the 0.3.17 release (ONY-894), 2026-11-07 for the 0.3.0 Dart package version and docs refresh (ONY-912), and 2026-11-09 for the 0.3.19 release (ONY-1105). Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
 
 Everything the project owner (Nick) has not reported is **not verified on hardware**. Results below are labelled "user-reported" when Nick pasted or told us the figure.
 
@@ -104,7 +104,7 @@ Phone side: MTU 517 and High connection priority are needed every connection (th
 
 ## 5. State, as of this handoff
 
-Refreshed 2026-11-06. The "checked" column is strictly what Nick reported on hardware.
+Refreshed 2026-11-09. The "checked" column is strictly what Nick reported on hardware.
 
 | Area | Built | Checked on hardware |
 |---|---|---|
