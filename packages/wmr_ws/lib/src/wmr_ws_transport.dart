@@ -129,6 +129,11 @@ class WmrWsTransport implements BleTransport {
   /// for configured endpoints and skipping them.
   final Map<String, WmrWsEndpoint> _discovered = {};
 
+  /// Endpoints registered after construction, for a bridge whose LAN address
+  /// was learned on another transport. They are connectable but are not part
+  /// of the static scan list; the caller already discovered the bridge.
+  final Map<String, WmrWsEndpoint> _registered = {};
+
   final Map<String, _WmrWsSession> _sessions = {};
   final Map<String, BleConnectionState> _states = {};
   final Map<String, StreamController<BleConnectionState>> _stateControllers =
@@ -151,7 +156,7 @@ class WmrWsTransport implements BleTransport {
     // Drop the previous pass's discoveries before merging: they are hints,
     // and a restarted scan must re-yield whatever the bridge still announces.
     for (final id in _discovered.keys) {
-      _byDeviceId.remove(id);
+      if (!_registered.containsKey(id)) _byDeviceId.remove(id);
     }
     _discovered.clear();
     for (final endpoint in discovered) {
@@ -395,6 +400,19 @@ class WmrWsTransport implements BleTransport {
 
   /// The endpoint configured for [deviceId].
   WmrWsEndpoint? endpointFor(String deviceId) => _byDeviceId[deviceId];
+
+  /// Registers [endpoint] as a connectable target after construction.
+  ///
+  /// This is for a LAN address learned from another transport, such as the
+  /// FF16 endpoint document a companion reads over BLE. The endpoint is
+  /// available to [connect] but is not yielded by [scan]: the caller already
+  /// discovered the bridge. A later discovery pass keeps the registration
+  /// even when it reports the same device id.
+  void registerEndpoint(WmrWsEndpoint endpoint) {
+    final id = endpoint.resolvedDeviceId;
+    _registered[id] = endpoint;
+    _byDeviceId[id] = endpoint;
+  }
 
   @override
   Future<void> dispose() async {
