@@ -6,6 +6,9 @@ import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+/// Which leg of a [CompositeBleTransport] currently carries a bridge.
+enum CompositeLeg { tcp, ble }
+
 /// A [BleTransport] that prefers the Pi's WebSocket (TCP) link and falls back
 /// to BLE GATT, keeping one logical connection across the switch.
 ///
@@ -68,6 +71,19 @@ class CompositeBleTransport implements BleTransport {
   ///
   /// [deviceId] may be a TCP endpoint id (`host:port`) or a BLE device id.
   String? bridgeIdFor(String deviceId) => _bridgeIdForDevice(deviceId);
+
+  /// Which leg currently carries [deviceId], or null when the bridge is not
+  /// connected.
+  ///
+  /// A leg switch keeps the connection state `connected`, so a host that
+  /// shows the active leg should sample this instead of waiting for a state
+  /// change.
+  CompositeLeg? activeLegFor(String deviceId) =>
+      switch (_routes[deviceId]?.active) {
+        _Lane.tcp => CompositeLeg.tcp,
+        _Lane.ble => CompositeLeg.ble,
+        null => null,
+      };
 
   @override
   Stream<BleScanResult> scan({List<String> withServices = const []}) {

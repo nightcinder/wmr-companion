@@ -20,6 +20,9 @@ void main() {
     bool rawDefault = true,
     void Function(WmrWsEndpoint endpoint)? onEndpoint,
   }) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final ble = UniversalBleTransport(
       adapter: FakeBleAdapter(),
       scanTimeout: const Duration(minutes: 5),

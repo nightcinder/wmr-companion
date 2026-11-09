@@ -278,6 +278,7 @@ void main() {
     );
 
     await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
     expect(tcp.connectCalls, [_tcpDeviceId]);
     expect(
       await ble.connectionState(_bleDeviceId).first,
@@ -329,6 +330,7 @@ void main() {
         await ble.connectionState(_bleDeviceId).first,
         BleConnectionState.connected,
       );
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
       expect(transport.bridgeIdFor(_tcpDeviceId), _bridgeId);
 
       final received = <BleNotification>[];
@@ -361,6 +363,7 @@ void main() {
 
       expect(tcp.emit(_lanDeviceId, wmrBridgeBatchedCharUuid, [8]), isTrue);
       await _settle();
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
       expect(received.last.value, [8]);
       expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [9]), isFalse);
       expect(states, isNot(contains(BleConnectionState.disconnected)));

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_companion/wmr_companion.dart'
+    show CompositeBleTransport, CompositeLeg;
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
@@ -63,6 +65,57 @@ final wifiTransportFactoryProvider =
           (endpoint) => WmrWsTransport(endpoints: [endpoint]),
     );
 
+/// Which leg of an opt-in fallback link is carrying the bridge.
+enum WifiLinkLeg { tcp, ble }
+
+extension WifiLinkLegLabel on WifiLinkLeg {
+  String get label => switch (this) {
+    WifiLinkLeg.tcp => 'TCP',
+    WifiLinkLeg.ble => 'BLE',
+  };
+}
+
+/// A Wi-Fi link and, for the opt-in composite, the leg currently in use.
+class WifiLink {
+  const WifiLink(this.transport, {this.activeLeg});
+
+  final BleTransport transport;
+
+  /// Read on each state update, so a composite failover is reflected without
+  /// waiting for a connection-state change (the state stays `connected`).
+  final WifiLinkLeg? Function()? activeLeg;
+}
+
+/// Builds the opt-in TCP-first link with a BLE GATT fallback.
+///
+/// Production gives the composite its own BLE transport: the composite owns
+/// and disposes it, so it cannot tear down the Bluetooth screen's transport.
+/// Tests override this factory with a fake link.
+final compositeWifiTransportFactoryProvider =
+    Provider<WifiLink Function(WmrWsEndpoint)>((ref) {
+      return (endpoint) {
+        final composite = CompositeBleTransport(
+          tcp: WmrWsTransport(endpoints: [endpoint]),
+          ble: UniversalBleTransport(adapter: UniversalBleAdapter()),
+        );
+        return WifiLink(
+          composite,
+          activeLeg: () =>
+              switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+                CompositeLeg.tcp => WifiLinkLeg.tcp,
+                CompositeLeg.ble => WifiLinkLeg.ble,
+                null => null,
+              },
+        );
+      };
+    });
+
+/// One LAN discovery pass. Production runs [WmrWsDiscovery]; tests replace it
+/// with a fixed list so no socket is opened.
+final lanDiscoveryProvider = Provider<Future<List<WmrWsEndpoint>> Function()>(
+  (ref) => WmrWsDiscovery().discover,
+);
+
 /// The transport behind the selected link, recomputed when the link or its
 /// Wi-Fi device changes. Debug screens read live parameters through it.
 final realLinkTransportProvider = Provider<BleTransport>((ref) {
@@ -91,6 +144,11 @@ class RealDeviceState {
     this.disconnectEpoch = 0,
     this.activeTransport = BridgeTransportKind.ble,
     this.wifiDeviceId,
+    this.wifiFallback = false,
+    this.wifiLeg,
+    this.lanEndpoints = const [],
+    this.discoveringLan = false,
+    this.lanError,
   }) : _primaryDeviceId = deviceId;
 
   final BleLinkStatus status;
@@ -101,6 +159,22 @@ class RealDeviceState {
 
   /// The Wi-Fi bridge id, once a Wi-Fi transport exists. Null in BLE mode.
   final String? wifiDeviceId;
+
+  /// Whether the current Wi-Fi link is the opt-in TCP/BLE composite.
+  final bool wifiFallback;
+
+  /// Active leg of a [wifiFallback] link. Null otherwise, or while the
+  /// composite is still choosing one.
+  final WifiLinkLeg? wifiLeg;
+
+  /// Endpoints from the most recent LAN discovery pass.
+  final List<WmrWsEndpoint> lanEndpoints;
+
+  /// True while a LAN discovery pass is running.
+  final bool discoveringLan;
+
+  /// Why the last LAN discovery pass failed, if it did.
+  final String? lanError;
 
   /// Requested stream and its fault, from the service. Null before connect.
   final ModeState? mode;
@@ -232,6 +306,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
 
+  WifiLink? _wifiLink;
   BleTransport? _wifiTransport;
   StreamSubscription<BleConnectionState>? _wifiStateSub;
   String? _wifiDeviceId;
@@ -409,12 +484,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     List<BleScanResult>? results,
     String? deviceId,
     BridgeTransportKind? activeTransport,
+    bool? wifiFallback,
+    List<WmrWsEndpoint>? lanEndpoints,
+    bool? discoveringLan,
+    String? lanError,
+    bool clearLanError = false,
   }) {
     final activeStatus =
         status ??
         (_connectedDeviceIds.isNotEmpty
             ? (_deviceStatuses[_connectedDeviceIds.first] ?? _lastStatus)
             : _lastStatus);
+    final nextTransport = activeTransport ?? state.activeTransport;
     state = RealDeviceState(
       status: activeStatus,
       results: results ?? state.results,
@@ -432,8 +513,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       decodedStats: _service?.decodedStats ?? state.decodedStats,
       mode: _service?.modeState ?? state.mode,
       disconnectEpoch: _disconnectEpoch,
-      activeTransport: activeTransport ?? state.activeTransport,
+      activeTransport: nextTransport,
       wifiDeviceId: _wifiDeviceId,
+      wifiFallback: wifiFallback ?? state.wifiFallback,
+      wifiLeg: nextTransport == BridgeTransportKind.wifi
+          ? _wifiLink?.activeLeg?.call()
+          : null,
+      lanEndpoints: lanEndpoints ?? state.lanEndpoints,
+      discoveringLan: discoveringLan ?? state.discoveringLan,
+      lanError: clearLanError ? null : (lanError ?? state.lanError),
     );
   }
 
@@ -580,6 +668,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _wifiStateSub = null;
     final transport = _wifiTransport;
     _wifiTransport = null;
+    _wifiLink = null;
     if (id != null) {
       ref.read(bridgeTransportKindsProvider.notifier).remove(id);
     }
@@ -602,20 +691,47 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _update(activeTransport: kind);
   }
 
+  /// Runs one LAN discovery pass and publishes the results. Best-effort:
+  /// no network means an empty list, and a failure is shown in state rather
+  /// than thrown at the tap.
+  Future<void> discoverLan() async {
+    if (state.discoveringLan) return;
+    _update(discoveringLan: true, clearLanError: true);
+    try {
+      final found = await ref.read(lanDiscoveryProvider)();
+      _update(lanEndpoints: found);
+    } catch (error) {
+      _update(lanError: '$error');
+    } finally {
+      _update(discoveringLan: false);
+    }
+  }
+
   /// Connects to a Pi Wi-Fi bridge by host:port, with the optional shared
   /// token. The token is only handed to the transport; it is never logged or
   /// kept in app state.
+  ///
+  /// [bridgeId] and [name] come from LAN discovery and let the transport
+  /// verify the WebSocket `hello` before sending a token. [bleFallback] opts
+  /// into the TCP-first [CompositeBleTransport] instead of a plain WebSocket.
   Future<void> connectWifi({
     required String host,
     required int port,
     String? token,
     bool secure = false,
+    String? path,
+    String? bridgeId,
+    String? name,
+    bool bleFallback = false,
   }) async {
     final trimmedToken = token?.trim();
     final endpoint = WmrWsEndpoint(
       host: host.trim(),
       port: port,
+      path: path ?? wmrWsDefaultPath,
       secure: secure,
+      bridgeId: bridgeId,
+      name: name,
       token: trimmedToken == null || trimmedToken.isEmpty ? null : trimmedToken,
     );
     final id = endpoint.resolvedDeviceId;
@@ -624,16 +740,21 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     await _disposeWifiTransport();
     _lastStatus = const BleLinkStatus(BleLinkPhase.connecting);
     _wifiDeviceId = id;
-    final transport = _wifiTransport = ref.read(wifiTransportFactoryProvider)(
-      endpoint,
-    );
+    final link = bleFallback
+        ? ref.read(compositeWifiTransportFactoryProvider)(endpoint)
+        : WifiLink(ref.read(wifiTransportFactoryProvider)(endpoint));
+    _wifiLink = link;
+    final transport = _wifiTransport = link.transport;
     _wifiStateSub = transport
         .connectionState(id)
         .listen((s) => _onWifiConnectionState(id, s));
     ref
         .read(bridgeTransportKindsProvider.notifier)
         .set(id, BridgeTransportKind.wifi);
-    _update(activeTransport: BridgeTransportKind.wifi);
+    _update(
+      activeTransport: BridgeTransportKind.wifi,
+      wifiFallback: bleFallback,
+    );
     await connect(id);
   }
 
