@@ -584,3 +584,79 @@ release target and `0.1.0` (now `0.3.0`) is held for now** (owner, ONY-50 and ON
   (WMR_Bridge issue #18); it exposes the statistics needed to see it.
 - Nothing here has been run on iOS hardware. ONY-38's Swift kit is unit-tested
   and CI-compiled; hardware behavior is still unverified.
+
+## 15. Pi TCP/BLE fallback and discovery
+
+The Pi daemon speaks the same FF11, FF12 and FF14 payloads over a WebSocket.
+A host app can use it instead of, or beside, BLE GATT. The `wmr_ws` package
+provides `WmrWsTransport`. The `CompositeBleTransport` in `wmr_companion`
+prefers TCP and falls back to BLE without closing the logical connection.
+
+### Discovery
+
+`WmrWsDiscovery` runs two paths in parallel for one second:
+
+1. A UDP probe to port 8765. The probe is `WMR_DISCOVER_V1 <nonce>`. The
+   daemon replies by unicast with JSON metadata. The reply echoes the nonce
+   and carries a stable `bridge_id`. It never carries the token.
+2. A DNS-SD query for `_wmr-bridge._tcp.local`. The query goes to the mDNS
+   group from an ephemeral port with the QU bit set. The caller never binds
+   port 5353, so Android needs no `MulticastLock`.
+
+Both replies are hints. `WmrWsTransport.connect()` refuses to send a token
+unless the WebSocket `hello` reports the same `bridge_id`.
+
+### Fallback state machine
+
+`CompositeBleTransport` connects in this order:
+
+1. Try TCP endpoints that are known from configuration or discovery.
+2. If TCP fails, connect over BLE GATT.
+3. While on BLE, retry TCP every 2 seconds by default.
+4. When TCP connects, move the notification subscriptions to TCP without
+   closing them.
+5. If TCP drops later, fall back to BLE again.
+
+The bridge is identified by `bridge_id` once a `hello` or an FF16 endpoint
+document supplies it. Two scan results that resolve to the same id are
+published once.
+
+BLE notifications are gated per central by CCCD state. The composite turns its
+own BLE notifications off when TCP becomes active. It writes 0x0000 only to the
+characteristics it enabled. It does not ask the bridge to silence other
+clients.
+
+BLE notifications are re-stamped onto the TCP transport's clock as the
+composite receives them. A failover does not move the timeline seen by
+`ControllerService`.
+
+### Library initialization snippet
+
+```dart
+import 'package:wmr_companion/wmr_companion.dart';
+import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_ws/wmr_ws.dart';
+
+final tcp = WmrWsTransport(endpoints: const [], enableDiscovery: true);
+final ble = UniversalBleTransport(adapter: UniversalBleAdapter());
+final transport = CompositeBleTransport(tcp: tcp, ble: ble);
+
+final wmr = WmrCompanion(ble: transport);
+await wmr.initialize();
+await wmr.startScan();
+```
+
+### Host permissions
+
+Android host apps must declare these in `AndroidManifest.xml`:
+
+- `android.permission.INTERNET`
+- `android.permission.BLUETOOTH_SCAN` with `android:usesPermissionFlags="neverForLocation"`
+- `android.permission.BLUETOOTH_CONNECT`
+
+Android 11 (API 30) and older also need `ACCESS_FINE_LOCATION`,
+`BLUETOOTH` and `BLUETOOTH_ADMIN` with `maxSdkVersion=30`. iOS host apps need `NSBluetoothAlwaysUsageDescription`
+and, for background use, the `bluetooth-central` background mode. The
+`universal_ble` package adds only `BLUETOOTH` and `BLUETOOTH_ADMIN` with
+`maxSdkVersion=30`; the host app must declare the rest and explain why it
+needs them.

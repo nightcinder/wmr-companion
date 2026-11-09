@@ -153,3 +153,31 @@ It needs a WMR_Bridge checkout (for `samples/controller_frames.txt` and the
 daemon) and Python 3.10+. It is not part of Dart CI because it is cross-repo;
 the output is pasted into the pull request instead. See the PR for the actual
 counters from the run used for this change.
+
+## BLE fallback
+
+The Pi daemon can also serve the same payloads over BlueZ BLE GATT when the
+Wi-Fi path is unreachable. A host app can prefer TCP and fall back to BLE with
+`CompositeBleTransport` from `wmr_companion`:
+
+```dart
+final transport = CompositeBleTransport(tcp: tcp, ble: bleTransport);
+```
+
+The composite keeps one logical connection across the switch. It turns its own
+BLE notifications off when TCP becomes active. It does not ask the bridge to
+silence other clients.
+
+## Host permissions
+
+A host app that uses discovery or BLE fallback needs these Android permissions:
+
+- `android.permission.INTERNET`
+- `android.permission.BLUETOOTH_SCAN`
+- `android.permission.BLUETOOTH_CONNECT`
+- On Android 11 (API 30) and older: `android.permission.ACCESS_FINE_LOCATION`,
+  `android.permission.BLUETOOTH` and `android.permission.BLUETOOTH_ADMIN`,
+  all with `maxSdkVersion=30`.
+
+See `docs/LIBRARY.md` §15 for the full manifest example. iOS needs
+`NSBluetoothAlwaysUsageDescription`.
