@@ -30,6 +30,11 @@ import 'models.dart';
 /// [setStreamMode] → [dispose]. No work starts in the constructor. The
 /// injected [BleTransport] stays owned by the caller: [dispose] closes the
 /// active link, subscriptions, service and timers, but not the transport.
+///
+/// A `CompositeBleTransport` can be passed as [BleTransport]. It keeps this
+/// session's subscriptions open while it moves the same bridge between the
+/// Pi's TCP WebSocket and BLE GATT, so the streams and state above do not
+/// restart on a fallback or an upgrade.
 class WmrCompanion {
   WmrCompanion({
     required BleTransport ble,
