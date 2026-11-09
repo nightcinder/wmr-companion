@@ -1,4 +1,4 @@
-# External tester quickstart: WMR Companion v0.3.17 (unified APK)
+# External tester quickstart: WMR Companion v0.3.19 (unified APK)
 Three setups, 20-40 minutes. Android 13+ host (phone, Neckband or headset). The bridge instructions are for the ESP32 bridge; Raspberry Pi is still in development.
 
 ## 0. Pick your setup
@@ -19,15 +19,15 @@ VITURE hand tracking runs only on a **VITURE Pro Neckband** with **Luma Ultra**.
 Android XR hand tracking runs on the headset. It requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`. A "Precise movement and area data" prompt (`SCENE_UNDERSTANDING_FINE`) must not appear; if it does, record a regression. The VITURE slice requests `CAMERA` only.
 
 ## 1. Get the APK
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.17/wmr-companion-0.3.17-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.17/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/SHA256SUMS
 
-Confirm the v0.3.17 release exists and the installed APK reports `versionName` 0.3.17 before testing. If it reports 0.3.16, the tag was cut from a bumped tree: record it and stop.
+Confirm the v0.3.19 release exists and the installed APK reports `versionName` 0.3.19 before testing. If it reports 0.3.18, the tag was cut from a bumped tree: record it and stop.
 
 One APK carries VITURE and XREAL and runs on a Galaxy XR. Uninstall an older WMR Companion first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
-Do not run an older build. v0.3.17 carries the 6-run pose capture (v0.3.15), Android XR detection before USB IDs (v0.3.16), and the Semgrep/gitleaks/Dependabot scans (ONY-890).
+Do not run an older build. v0.3.19 carries the 6-run pose capture (v0.3.15), Android XR detection before USB IDs (v0.3.16), the Semgrep/gitleaks/Dependabot scans (ONY-890), and the LAN discovery and TCP-to-BLE fallback (ONY-1071 and ONY-1072).
 
 ## 2. Install
 1. Download the APK and SHA256SUMS. Verify: `sha256sum -c SHA256SUMS` on a computer (or Termux), or compare the APK's SHA-256.
@@ -72,7 +72,7 @@ From **Connect**, tap **Run guided bench**. It ends with **Write test bundle**, 
 
 - **6C: PSVR2 Sense (experimental).** Support is on by default and compiled into every v0.3.3 image, but it has never run on a controller: treat it as data collection, not pass/fail. Pair as in section 4; the app labels it `PSVR2` (a `WMR` label is worth reporting). PSVR2 is raw-only: FF11 carries `0xA1 0x31` frames up to 79 bytes; FF12/FF14 have no PSVR2 decoder, FF13 is not read, and the 3D view may show nothing. Use FF11 raw and the serial log; record `model PSVR2`, the wake line and the first report's `frame_len`. One retry only.
 
-**6D: Luma Ultra + Pro Neckband black right eye.** On v0.3.7/v0.3.8 the app draws only in the left eye of the 32:9 (3840x1080) viewport. The app is not crashed; the UI fills one half. v0.3.9 and later mirror both eyes. If v0.3.17 still shows a black right eye, record a regression.
+**6D: Luma Ultra + Pro Neckband black right eye.** On v0.3.7/v0.3.8 the app draws only in the left eye of the 32:9 (3840x1080) viewport. The app is not crashed; the UI fills one half. v0.3.9 and later mirror both eyes. If v0.3.19 still shows a black right eye, record a regression.
 
 1. Switch the glasses to 2D mode with the glasses 2D/3D button; the app fills the view.
 2. In 3D mode use the Neckband controls (it has no D-pad): short Volume Up/Down move the focus ring, hold Volume Down selects, hold Volume Up goes back. With headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. Do not use ADB to inject touches.
@@ -80,7 +80,7 @@ From **Connect**, tap **Run guided bench**. It ends with **Write test bundle**, 
 
 Capture: `adb shell dumpsys package com.onyxlens.wmr_companion | grep -E "versionName|versionCode"`, `adb shell wm size`, `adb shell dumpsys display | grep -iE "DisplayDeviceInfo|size=|density=|mode="`, and `adb logcat -v threadtime > wmr-neckband-sbs-<YYYYMMDD-HHMMSS>.log`. Connect wireless ADB first: `adb connect <neckband-ip>:5555`.
 
-**6E: Neckband 0DoF / 6DoF triage.** On v0.3.10 and earlier the app could open and drop to 0DoF with **6DoF only** greyed out. v0.3.11 fixed two causes: the Unity player was paused/unfocused on first host, and 6DoF needs VITURE stereo 3D (SpaceWalker). **The Pro Neckband has no D-pad.** Use short Volume Up/Down to move focus, hold Volume Down to select, hold Volume Up to go back; with headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. If the app still shows 0DoF on v0.3.17, record the status line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
+**6E: Neckband 0DoF / 6DoF triage.** On v0.3.10 and earlier the app could open and drop to 0DoF with **6DoF only** greyed out. v0.3.11 fixed two causes: the Unity player was paused/unfocused on first host, and 6DoF needs VITURE stereo 3D (SpaceWalker). **The Pro Neckband has no D-pad.** Use short Volume Up/Down to move focus, hold Volume Down to select, hold Volume Up to go back; with headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. If the app still shows 0DoF on v0.3.19, record the status line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
 
 ## 7. Logs and files
 Capture for every run and include in the zip:
@@ -101,7 +101,7 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.5
-- App: <versionName from ADB> unified (signed release) (expected 0.3.17)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.19)
 - Host: Neckband / Android XR headset / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none

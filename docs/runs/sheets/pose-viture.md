@@ -1,7 +1,7 @@
 # Run sheet: pose validation - VITURE (Pro Neckband + Luma Ultra)
 Status: proposed, not run. The Unity-in-Flutter relay is implemented and host-tested; no Neckband run has happened. Result tables are empty. Code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1.
 
-Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.17 runs these gates.
+Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.19 runs these gates.
 
 **The Pro Neckband has no D-pad.** Controls are Power, Volume Up/Down, Settings, the pointer/air-mouse, hand gestures, the Neckband Remote app, or a paired Bluetooth controller.
 ## 1. Prerequisites
@@ -9,7 +9,7 @@ Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided ben
 |---|---|
 | Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (One, OneLite, Pro, Pro2, Luma, LumaPro, LumaCyber, Beast) are rejected for hand tracking. |
 | Host | VITURE Pro Neckband (Android, wireless ADB) for gates 3/4/7/8. Gate 9 needs an Android phone with USB host. |
-| App | Signed v0.3.17 unified APK (versionCode 2022). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1); no export or debug flags are needed. Record version, export SHA and firmware SHA. |
+| App | Signed v0.3.19 unified APK (versionCode 2024). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1); no export or debug flags are needed. Record version, export SHA and firmware SHA. |
 | Bridge | One board on `main`, both controllers paired and awake. |
 | Tooling | `adb` (wireless for the Neckband), terminal, logcat, screenshots. |
 | Checkerboard | Gate 1: flat, rigid, at least 8x6 inner corners, known square size. |
