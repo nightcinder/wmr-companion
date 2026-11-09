@@ -77,6 +77,29 @@ void main() {
     );
   });
 
+  test(
+    'registerEndpoint adds a connectable endpoint, not a scan item',
+    () async {
+      await start();
+      final late = WmrWsEndpoint(
+        host: '127.0.0.1',
+        port: server.port,
+        deviceId: 'late-endpoint',
+      );
+
+      transport.registerEndpoint(late);
+
+      expect(transport.endpointFor('late-endpoint'), same(late));
+      expect(
+        (await transport.scan().toList()).map((result) => result.deviceId),
+        [id],
+      );
+      await transport.connect('late-endpoint');
+      await server.connected;
+      expect(transport.helloFor('late-endpoint')?.version, '0.1.0-test');
+    },
+  );
+
   test('connect performs the subprotocol handshake', () async {
     await start();
     await transport.connect(id);

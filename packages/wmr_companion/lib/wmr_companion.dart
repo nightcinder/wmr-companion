@@ -55,8 +55,11 @@ export 'package:wmr_core/services/controller_service.dart'
 export 'package:wmr_core/services/echo_client.dart'
     show EchoFailure, EchoResult, EchoSample;
 export 'package:wmr_tracking/wmr_tracking.dart';
+export 'package:wmr_ws/wmr_ws.dart'
+    show WmrWsDiscovery, WmrWsEndpoint, WmrWsTransport;
 
 export 'src/companion.dart';
+export 'src/composite_transport.dart';
 export 'src/config.dart';
 export 'src/errors.dart';
 export 'src/models.dart';

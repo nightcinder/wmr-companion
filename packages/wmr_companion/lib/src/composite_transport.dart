@@ -1,0 +1,875 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/protocol/gatt.dart';
+import 'package:wmr_ws/wmr_ws.dart';
+
+/// A [BleTransport] that prefers the Pi's WebSocket (TCP) link and falls back
+/// to BLE GATT, keeping one logical connection across the switch.
+///
+/// The primary transport is a [WmrWsTransport] (the Linux/Raspberry Pi daemon
+/// on `ws://<host>:8765/wmr`). The fallback is any [BleTransport], normally
+/// `UniversalBleTransport` from `wmr_ble`. A bridge is dialled over TCP when
+/// an endpoint is known, either because the caller configured/discovered one
+/// or because the FF16 endpoint document was read over BLE. When TCP cannot
+/// connect, or drops later, the same bridge is dialled over BLE GATT. While
+/// the bridge is on BLE, [upgradeInterval] retries TCP; when it succeeds the
+/// notification subscriptions move to TCP without being closed.
+///
+/// Bridges are identified by the daemon's stable `bridge_id` once a hello or
+/// an FF16 endpoint document has supplied it. Two scan results that resolve
+/// to the same id are published once by [scan]. Before an id has been learned,
+/// a BLE result and a TCP result cannot be matched, so both are published.
+///
+/// ## BLE radio use
+///
+/// Following the per-client CCCD rule, the composite turns its own BLE
+/// notifications off when TCP becomes active. It writes 0x0000 only to the
+/// characteristics it had enabled; it never asks the bridge to silence other
+/// clients.
+///
+/// ## Clock
+///
+/// [clock] is the TCP transport's clock. BLE notifications are re-stamped
+/// onto it as the composite receives them, so a failover does not move the
+/// timeline seen by `ControllerService`.
+class CompositeBleTransport implements BleTransport {
+  CompositeBleTransport({
+    required this.tcp,
+    required this.ble,
+    this.upgradeInterval = const Duration(seconds: 2),
+  }) : clock = tcp.clock;
+
+  /// Primary WebSocket transport.
+  final WmrWsTransport tcp;
+
+  /// Fallback GATT transport.
+  ///
+  /// The parameter is a [BleTransport] rather than a concrete
+  /// `UniversalBleTransport` so this package stays pure Dart; a Flutter host
+  /// passes `UniversalBleTransport` from `wmr_ble`.
+  final BleTransport ble;
+
+  @override
+  final MonotonicClock clock;
+
+  /// How often a bridge on BLE is probed for a working TCP endpoint. A
+  /// non-positive duration disables the automatic upgrade.
+  final Duration upgradeInterval;
+
+  final Map<String, _Route> _routes = {};
+  final Map<String, String> _bridgeIds = {};
+  final Map<String, _ScanHit> _scanHits = {};
+  bool _disposed = false;
+
+  /// The stable bridge id learned for [deviceId], when one is known.
+  ///
+  /// [deviceId] may be a TCP endpoint id (`host:port`) or a BLE device id.
+  String? bridgeIdFor(String deviceId) => _bridgeIdForDevice(deviceId);
+
+  @override
+  Stream<BleScanResult> scan({List<String> withServices = const []}) {
+    _ensureUsable();
+    late final StreamController<BleScanResult> controller;
+    final subscriptions = <StreamSubscription<BleScanResult>>[];
+    final seenIds = <String>{};
+    final seenBridgeIds = <String>{};
+    var sourcesDone = 0;
+
+    void add(BleScanResult result, {required bool fromBle}) {
+      _scanHits[result.deviceId] = _ScanHit(result, fromBle: fromBle);
+      final bridgeId = _bridgeIdForDevice(result.deviceId);
+      if (bridgeId != null && !seenBridgeIds.add(bridgeId)) return;
+      if (!seenIds.add(result.deviceId)) return;
+      if (!controller.isClosed) controller.add(result);
+    }
+
+    void done() {
+      sourcesDone++;
+      if (sourcesDone == 2 && !controller.isClosed) {
+        unawaited(controller.close());
+      }
+    }
+
+    void failed(Object error, StackTrace stackTrace) {
+      if (!controller.isClosed) controller.addError(error, stackTrace);
+    }
+
+    controller = StreamController<BleScanResult>(
+      onListen: () {
+        try {
+          subscriptions.add(
+            tcp
+                .scan(withServices: withServices)
+                .listen(
+                  (result) => add(result, fromBle: false),
+                  onError: failed,
+                  onDone: done,
+                ),
+          );
+        } catch (error, stackTrace) {
+          failed(error, stackTrace);
+          done();
+        }
+        try {
+          subscriptions.add(
+            ble
+                .scan(withServices: withServices)
+                .listen(
+                  (result) => add(result, fromBle: true),
+                  onError: failed,
+                  onDone: done,
+                ),
+          );
+        } catch (error, stackTrace) {
+          failed(error, stackTrace);
+          done();
+        }
+      },
+      onCancel: () async {
+        for (final subscription in subscriptions) {
+          await subscription.cancel();
+        }
+        subscriptions.clear();
+      },
+    );
+    return controller.stream;
+  }
+
+  @override
+  Future<void> stopScan() async {
+    _ensureUsable();
+    await tcp.stopScan();
+    await ble.stopScan();
+  }
+
+  @override
+  Future<void> connect(String deviceId) async {
+    _ensureUsable();
+    final route = _ensureRoute(deviceId);
+    if (route.state == BleConnectionState.connected) return;
+    if (route.switching) return;
+    route.intentional = false;
+    route.switching = true;
+    _setState(route, BleConnectionState.connecting);
+    Object? tcpError;
+    Object? bleError;
+    try {
+      final tcpCandidates = _tcpCandidatesFor(route, deviceId);
+      if (tcpCandidates.isNotEmpty) {
+        try {
+          final id = await _tryTcp(route, tcpCandidates);
+          if (id != null) {
+            await _activateTcp(route, id);
+            return;
+          }
+        } catch (error) {
+          tcpError = error;
+        }
+      }
+
+      final bleId = _bleFallbackFor(
+        route,
+        deviceId,
+        allowDeviceId: tcpCandidates.isEmpty,
+      );
+      if (bleId != null) {
+        try {
+          await _connectBle(route, bleId);
+          await _activateBle(route);
+          return;
+        } catch (error) {
+          bleError = error;
+        }
+      }
+    } finally {
+      route.switching = false;
+    }
+
+    _setState(route, BleConnectionState.disconnected);
+    throw tcpError ?? bleError ?? StateError('No transport for $deviceId');
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async {
+    final route = _routes.remove(deviceId);
+    if (route == null) return;
+    route.intentional = true;
+    try {
+      _stopUpgrade(route);
+      await route.tcpStateSub?.cancel();
+      await route.bleStateSub?.cancel();
+      route.tcpStateSub = null;
+      route.bleStateSub = null;
+      await _disableBleNotifications(route);
+
+      final channels = List<_Channel>.of(route.channels);
+      route.channels.clear();
+      for (final channel in channels) {
+        await channel.close();
+      }
+
+      final tcpId = route.tcpDeviceId;
+      final bleId = route.bleDeviceId;
+      if (tcpId != null) {
+        try {
+          await tcp.disconnect(tcpId);
+        } catch (_) {
+          // A link that already dropped needs no further teardown.
+        }
+      }
+      if (bleId != null) {
+        try {
+          await ble.disconnect(bleId);
+        } catch (_) {
+          // See above.
+        }
+      }
+      route.active = null;
+      _setState(route, BleConnectionState.disconnected);
+    } finally {
+      route.intentional = false;
+      if (!route.states.isClosed) await route.states.close();
+    }
+  }
+
+  @override
+  Stream<BleConnectionState> connectionState(String deviceId) async* {
+    if (_disposed) {
+      yield BleConnectionState.disconnected;
+      return;
+    }
+    final route = _ensureRoute(deviceId);
+    yield route.state;
+    yield* route.states.stream;
+  }
+
+  @override
+  Future<List<BleServiceInfo>> discoverServices(String deviceId) {
+    final active = _requireActive(deviceId);
+    return active.transport.discoverServices(active.deviceId);
+  }
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final route = _routes[deviceId];
+    if (route == null || route.active == null) {
+      throw StateError('Device $deviceId is not connected');
+    }
+    final channel = _Channel(
+      route,
+      serviceUuid.toLowerCase(),
+      characteristicUuid.toLowerCase(),
+    );
+    route.channels.add(channel);
+    return channel.stream;
+  }
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final active = _requireActive(deviceId);
+    return active.transport.unsubscribe(
+      active.deviceId,
+      serviceUuid,
+      characteristicUuid,
+    );
+  }
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final active = _requireActive(deviceId);
+    return active.transport.read(
+      active.deviceId,
+      serviceUuid,
+      characteristicUuid,
+    );
+  }
+
+  @override
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) {
+    final active = _requireActive(deviceId);
+    return active.transport.write(
+      active.deviceId,
+      serviceUuid,
+      characteristicUuid,
+      value,
+      withoutResponse: withoutResponse,
+    );
+  }
+
+  @override
+  Future<BleConnectionInfo> connectionInfo(String deviceId) {
+    final active = _requireActive(deviceId);
+    return active.transport.connectionInfo(active.deviceId);
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    final routes = _routes.values.toList();
+    _routes.clear();
+    for (final route in routes) {
+      route.intentional = true;
+      _stopUpgrade(route);
+      await route.tcpStateSub?.cancel();
+      await route.bleStateSub?.cancel();
+      await _disableBleNotifications(route);
+      final channels = List<_Channel>.of(route.channels);
+      route.channels.clear();
+      for (final channel in channels) {
+        await channel.close();
+      }
+      final tcpId = route.tcpDeviceId;
+      final bleId = route.bleDeviceId;
+      if (tcpId != null) {
+        try {
+          await tcp.disconnect(tcpId);
+        } catch (_) {}
+      }
+      if (bleId != null) {
+        try {
+          await ble.disconnect(bleId);
+        } catch (_) {}
+      }
+      if (!route.states.isClosed) await route.states.close();
+    }
+    await tcp.dispose();
+    await ble.dispose();
+  }
+
+  void _ensureUsable() {
+    if (_disposed) throw StateError('CompositeBleTransport is disposed');
+  }
+
+  _Route _ensureRoute(String deviceId) =>
+      _routes.putIfAbsent(deviceId, () => _Route(deviceId, tcp, ble, clock));
+
+  ({BleTransport transport, String deviceId}) _requireActive(String deviceId) {
+    final route = _routes[deviceId];
+    final lane = route?.active;
+    final activeId = route?.deviceIdFor(lane);
+    final transport = route?.transportFor(lane);
+    if (route == null ||
+        lane == null ||
+        activeId == null ||
+        transport == null) {
+      throw StateError('Device $deviceId is not connected');
+    }
+    return (transport: transport, deviceId: activeId);
+  }
+
+  List<String> _tcpCandidatesFor(_Route route, String deviceId) {
+    final ids = <String>{};
+    final current = route.tcpDeviceId;
+    if (current != null) ids.add(current);
+    ids.addAll(route.tcpCandidates);
+    if (tcp.endpointFor(deviceId) != null) ids.add(deviceId);
+    return ids.toList();
+  }
+
+  Future<String?> _tryTcp(_Route route, List<String> candidates) async {
+    if (candidates.isEmpty) return null;
+    Object? lastError;
+    for (final id in candidates) {
+      try {
+        await tcp.connect(id);
+        route.tcpDeviceId = id;
+        _rememberBridge(route, tcp.helloFor(id)?.bridgeId);
+        return id;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? StateError('No TCP endpoint answered');
+  }
+
+  String? _bleFallbackFor(
+    _Route route,
+    String deviceId, {
+    required bool allowDeviceId,
+  }) {
+    if (route.bleDeviceId != null) return route.bleDeviceId;
+    if (allowDeviceId && !_claimedByOtherRoute(deviceId, route)) {
+      return deviceId;
+    }
+    final hits = _scanHits.values.where((hit) => hit.fromBle).toList()
+      ..sort(
+        (a, b) => (b.result.rssi ?? -1000).compareTo(a.result.rssi ?? -1000),
+      );
+    for (final hit in hits) {
+      if (_claimedByOtherRoute(hit.result.deviceId, route)) continue;
+      return hit.result.deviceId;
+    }
+    return null;
+  }
+
+  bool _claimedByOtherRoute(String deviceId, _Route route) =>
+      _routes.values.any(
+        (other) =>
+            !identical(other, route) &&
+            (other.deviceId == deviceId ||
+                other.bleDeviceId == deviceId ||
+                other.tcpDeviceId == deviceId),
+      );
+
+  Future<void> _connectBle(_Route route, String bleId) async {
+    route.bleDeviceId = bleId;
+    final state = await ble.connectionState(bleId).first;
+    if (state != BleConnectionState.connected) {
+      await ble.connect(bleId);
+    }
+    _watchBle(route);
+    await _learnBleEndpoint(route);
+  }
+
+  Future<void> _activateTcp(_Route route, String tcpId) async {
+    route.tcpDeviceId = tcpId;
+    _rememberBridge(route, tcp.helloFor(tcpId)?.bridgeId);
+    _watchTcp(route);
+    await _switchChannels(route, _Lane.tcp);
+    _stopUpgrade(route);
+    _setState(route, BleConnectionState.connected);
+  }
+
+  Future<void> _activateBle(_Route route) async {
+    _watchBle(route);
+    await _switchChannels(route, _Lane.ble);
+    _startUpgrade(route);
+    _setState(route, BleConnectionState.connected);
+  }
+
+  Future<void> _switchChannels(_Route route, _Lane to) async {
+    final currentId = route.deviceIdFor(route.active);
+    final nextId = route.deviceIdFor(to);
+    if (route.active == to && currentId == nextId) return;
+
+    final live = route.channels.where((channel) => channel.isLive).toList();
+    if (to == _Lane.tcp) {
+      await _disableBleNotifications(route);
+    }
+    for (final channel in live) {
+      await channel.detach();
+    }
+    route.active = to;
+    for (final channel in live) {
+      channel.attach();
+    }
+  }
+
+  Future<void> _disableBleNotifications(_Route route) async {
+    final bleId = route.bleDeviceId;
+    final keys = route.bleRefs.keys.toList();
+    route.bleRefs.clear();
+    if (bleId == null) return;
+    for (final key in keys) {
+      final separator = key.indexOf('|');
+      if (separator < 0) continue;
+      final service = key.substring(0, separator);
+      final characteristic = key.substring(separator + 1);
+      try {
+        await ble.unsubscribe(bleId, service, characteristic);
+      } catch (_) {
+        // The BLE link may already be gone; its CCC went with it.
+      }
+    }
+  }
+
+  void _watchTcp(_Route route) {
+    final id = route.tcpDeviceId;
+    if (id == null) return;
+    if (route.tcpStateSub != null && route.tcpStateId == id) return;
+    unawaited(route.tcpStateSub?.cancel());
+    route.tcpStateId = id;
+    route.tcpStateSub = tcp.connectionState(id).listen((state) {
+      if (_disposed || route.intentional) return;
+      if (state == BleConnectionState.disconnected &&
+          route.active == _Lane.tcp) {
+        unawaited(_fallbackToBle(route));
+      }
+    }, onError: (Object _) {});
+  }
+
+  void _watchBle(_Route route) {
+    final id = route.bleDeviceId;
+    if (id == null) return;
+    if (route.bleStateSub != null && route.bleStateId == id) return;
+    unawaited(route.bleStateSub?.cancel());
+    route.bleStateId = id;
+    route.bleStateSub = ble.connectionState(id).listen((state) {
+      if (_disposed || route.intentional) return;
+      if (state == BleConnectionState.disconnected &&
+          route.active == _Lane.ble) {
+        unawaited(_recoverFromBleDrop(route));
+      }
+    }, onError: (Object _) {});
+  }
+
+  Future<void> _fallbackToBle(_Route route) async {
+    if (_disposed || route.intentional || route.switching) return;
+    route.switching = true;
+    try {
+      final bleId = _bleFallbackFor(
+        route,
+        route.deviceId,
+        allowDeviceId: false,
+      );
+      if (bleId == null) {
+        await _lose(route);
+        return;
+      }
+      await _connectBle(route, bleId);
+      await _activateBle(route);
+    } catch (_) {
+      await _lose(route);
+    } finally {
+      route.switching = false;
+    }
+  }
+
+  Future<void> _recoverFromBleDrop(_Route route) async {
+    if (_disposed || route.intentional || route.switching) return;
+    route.switching = true;
+    try {
+      if (route.tcpCandidates.isNotEmpty) {
+        try {
+          final id = await _tryTcp(route, route.tcpCandidates.toList());
+          if (id != null) {
+            await _activateTcp(route, id);
+            return;
+          }
+        } catch (_) {
+          // Both paths are down; report the loss below.
+        }
+      }
+      await _lose(route);
+    } finally {
+      route.switching = false;
+    }
+  }
+
+  Future<void> _lose(_Route route) async {
+    _stopUpgrade(route);
+    await route.tcpStateSub?.cancel();
+    await route.bleStateSub?.cancel();
+    route.tcpStateSub = null;
+    route.bleStateSub = null;
+    final channels = List<_Channel>.of(route.channels);
+    for (final channel in channels) {
+      await channel.detach();
+    }
+    route.active = null;
+    if (!_disposed) _setState(route, BleConnectionState.disconnected);
+  }
+
+  Future<void> _attemptUpgrade(_Route route) async {
+    if (_disposed || route.intentional || route.upgrading) return;
+    if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
+    route.upgrading = true;
+    try {
+      final id = await _tryTcp(route, route.tcpCandidates.toList());
+      if (id != null) await _activateTcp(route, id);
+    } catch (_) {
+      // Stay on BLE; the next tick retries.
+    } finally {
+      route.upgrading = false;
+    }
+  }
+
+  void _startUpgrade(_Route route) {
+    if (_disposed ||
+        upgradeInterval <= Duration.zero ||
+        route.tcpCandidates.isEmpty) {
+      return;
+    }
+    route.upgradeTimer ??= Timer.periodic(upgradeInterval, (_) {
+      unawaited(_attemptUpgrade(route));
+    });
+  }
+
+  void _stopUpgrade(_Route route) {
+    route.upgradeTimer?.cancel();
+    route.upgradeTimer = null;
+  }
+
+  Future<void> _learnBleEndpoint(_Route route) async {
+    final bleId = route.bleDeviceId;
+    if (bleId == null) return;
+    try {
+      final value = await ble.read(
+        bleId,
+        wmrBridgeServiceUuid,
+        wmrBridgeVersionCharUuid,
+      );
+      final endpoint = _LanEndpoint.parse(value);
+      if (endpoint == null) return;
+      _rememberBridge(route, endpoint.bridgeId);
+
+      String? token;
+      if (endpoint.authRequired) {
+        token = await _readBleToken(bleId);
+        if (token == null) return;
+      }
+      for (final host in endpoint.hosts) {
+        final candidate = WmrWsEndpoint(
+          host: host,
+          port: endpoint.port,
+          path: endpoint.path,
+          name: endpoint.name,
+          bridgeId: endpoint.bridgeId,
+          token: token,
+        );
+        tcp.registerEndpoint(candidate);
+        route.tcpCandidates.add(candidate.resolvedDeviceId);
+      }
+      _startUpgrade(route);
+    } catch (_) {
+      // FF16 is a plain version string on older bridges, not this document.
+      // Without LAN metadata the bridge stays on BLE.
+    }
+  }
+
+  Future<String?> _readBleToken(String bleId) async {
+    try {
+      final value = await ble.read(
+        bleId,
+        wmrBridgeServiceUuid,
+        wmrBridgeConfigCharUuid,
+      );
+      final decoded = jsonDecode(utf8.decode(value));
+      if (decoded is Map && decoded['type'] == 'wmr_ble_session') {
+        final token = decoded['token'];
+        if (token is String && token.isNotEmpty) return token;
+      }
+    } catch (_) {
+      // FF13 may be absent, or still hold a calibration window.
+    }
+    return null;
+  }
+
+  void _rememberBridge(_Route route, String? bridgeId) {
+    if (bridgeId == null || bridgeId.isEmpty) return;
+    route.bridgeId = bridgeId;
+    _bridgeIds[route.deviceId] = bridgeId;
+    final tcpId = route.tcpDeviceId;
+    if (tcpId != null) _bridgeIds[tcpId] = bridgeId;
+    final bleId = route.bleDeviceId;
+    if (bleId != null) _bridgeIds[bleId] = bridgeId;
+  }
+
+  String? _bridgeIdForDevice(String deviceId) =>
+      _bridgeIds[deviceId] ?? _routes[deviceId]?.bridgeId;
+
+  void _setState(_Route route, BleConnectionState state) {
+    if (route.state == state) return;
+    route.state = state;
+    if (!route.states.isClosed) route.states.add(state);
+  }
+}
+
+enum _Lane { tcp, ble }
+
+class _Route {
+  _Route(this.deviceId, this.tcp, this.ble, this.clock);
+
+  final String deviceId;
+  final WmrWsTransport tcp;
+  final BleTransport ble;
+  final MonotonicClock clock;
+  final StreamController<BleConnectionState> states =
+      StreamController.broadcast();
+  final List<_Channel> channels = [];
+  final Map<String, int> bleRefs = {};
+
+  String? bridgeId;
+  String? bleDeviceId;
+  String? tcpDeviceId;
+  final Set<String> tcpCandidates = {};
+  _Lane? active;
+  BleConnectionState state = BleConnectionState.disconnected;
+  bool intentional = false;
+  bool switching = false;
+  bool upgrading = false;
+  StreamSubscription<BleConnectionState>? tcpStateSub;
+  StreamSubscription<BleConnectionState>? bleStateSub;
+  String? tcpStateId;
+  String? bleStateId;
+  Timer? upgradeTimer;
+
+  BleTransport? transportFor(_Lane? lane) => switch (lane) {
+    _Lane.tcp => tcp,
+    _Lane.ble => ble,
+    null => null,
+  };
+
+  String? deviceIdFor(_Lane? lane) => switch (lane) {
+    _Lane.tcp => tcpDeviceId,
+    _Lane.ble => bleDeviceId,
+    null => null,
+  };
+
+  void addBleRef(String serviceUuid, String characteristicUuid) {
+    final key = '$serviceUuid|$characteristicUuid';
+    bleRefs[key] = (bleRefs[key] ?? 0) + 1;
+  }
+
+  void removeBleRef(String serviceUuid, String characteristicUuid) {
+    final key = '$serviceUuid|$characteristicUuid';
+    final remaining = (bleRefs[key] ?? 0) - 1;
+    if (remaining <= 0) {
+      bleRefs.remove(key);
+    } else {
+      bleRefs[key] = remaining;
+    }
+  }
+}
+
+class _Channel {
+  _Channel(this.route, this.serviceUuid, this.characteristicUuid);
+
+  final _Route route;
+  final String serviceUuid;
+  final String characteristicUuid;
+  StreamSubscription<BleNotification>? _subscription;
+
+  late final StreamController<BleNotification> _controller =
+      StreamController<BleNotification>.broadcast(
+        onListen: attach,
+        onCancel: () {
+          route.channels.remove(this);
+          unawaited(detach());
+        },
+      );
+
+  Stream<BleNotification> get stream => _controller.stream;
+
+  bool get isLive => _controller.hasListener && !_controller.isClosed;
+
+  void attach() {
+    if (_subscription != null) return;
+    final lane = route.active;
+    final transport = route.transportFor(lane);
+    final deviceId = route.deviceIdFor(lane);
+    if (lane == null || transport == null || deviceId == null) return;
+    try {
+      _subscription = transport
+          .subscribe(deviceId, serviceUuid, characteristicUuid)
+          .listen(
+            (notification) {
+              if (_controller.isClosed) return;
+              _controller.add(
+                lane == _Lane.ble
+                    ? BleNotification(
+                        value: notification.value,
+                        receivedAtUs: route.clock.nowUs,
+                      )
+                    : notification,
+              );
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              if (!_controller.isClosed) {
+                _controller.addError(error, stackTrace);
+              }
+            },
+          );
+      if (lane == _Lane.ble) {
+        route.addBleRef(serviceUuid, characteristicUuid);
+      }
+    } catch (error, stackTrace) {
+      if (!_controller.isClosed) _controller.addError(error, stackTrace);
+    }
+  }
+
+  Future<void> detach() async {
+    final subscription = _subscription;
+    _subscription = null;
+    if (route.active == _Lane.ble) {
+      route.removeBleRef(serviceUuid, characteristicUuid);
+    }
+    await subscription?.cancel();
+  }
+
+  Future<void> close() async {
+    await detach();
+    if (!_controller.isClosed) await _controller.close();
+  }
+}
+
+class _ScanHit {
+  const _ScanHit(this.result, {required this.fromBle});
+
+  final BleScanResult result;
+  final bool fromBle;
+}
+
+class _LanEndpoint {
+  const _LanEndpoint({
+    required this.bridgeId,
+    required this.hosts,
+    required this.port,
+    required this.path,
+    this.name,
+    this.authRequired = false,
+  });
+
+  final String bridgeId;
+  final List<String> hosts;
+  final int port;
+  final String path;
+  final String? name;
+  final bool authRequired;
+
+  static _LanEndpoint? parse(Uint8List value) {
+    try {
+      final decoded = jsonDecode(utf8.decode(value));
+      if (decoded is! Map) return null;
+      if (decoded['type'] != 'wmr_ble_endpoint') return null;
+      final bridgeId = decoded['bridge_id'];
+      final port = decoded['port'];
+      final hostsValue = decoded['hosts'];
+      if (bridgeId is! String || bridgeId.isEmpty) return null;
+      if (port is! int || port < 1 || port > 65535) return null;
+      final hosts = <String>[];
+      if (hostsValue is List) {
+        for (final host in hostsValue) {
+          if (host is String && host.trim().isNotEmpty) hosts.add(host);
+        }
+      }
+      if (hosts.isEmpty) return null;
+      final pathValue = decoded['path'];
+      final name = decoded['name'];
+      return _LanEndpoint(
+        bridgeId: bridgeId,
+        hosts: List.unmodifiable(hosts),
+        port: port,
+        path: pathValue is String && pathValue.startsWith('/')
+            ? pathValue
+            : wmrWsDefaultPath,
+        name: name is String && name.isNotEmpty ? name : null,
+        authRequired: decoded['authRequired'] == true,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
