@@ -117,7 +117,7 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
             ?.map { display ->
                 DisplayFacts(
                     id = display.displayId,
-                    type = displayTypeName(display.type),
+                    type = displayTypeName(display),
                     name = display.name,
                     width = display.mode?.physicalWidth,
                     height = display.mode?.physicalHeight,
@@ -129,7 +129,9 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
             emptyList()
         } else {
             xrSystemFeatures(
-                packageManager.systemFeatures.map { it.name },
+                packageManager.systemAvailableFeatures
+                    ?.mapNotNull { it.name }
+                    ?: emptyList(),
                 ANDROID_XR_FEATURES,
             )
         }
@@ -141,15 +143,12 @@ class WmrTrackingDispatchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler
         ).toMap()
     }
 
-    private fun displayTypeName(type: Int): String = when (type) {
-        Display.TYPE_BUILT_IN -> "builtIn"
-        Display.TYPE_HDMI -> "hdmi"
-        Display.TYPE_WIFI -> "wifi"
-        Display.TYPE_OVERLAY -> "overlay"
-        Display.TYPE_VIRTUAL -> "virtual"
-        Display.TYPE_EXTERNAL -> "external"
-        else -> "type_$type"
-    }
+    private fun displayTypeName(display: Display): String =
+        if ((display.flags and Display.FLAG_PRESENTATION) != 0) {
+            "external"
+        } else {
+            "builtIn"
+        }
 
     private fun configFrom(arguments: Any?): GlassesUsbConfig {
         val args = arguments as? Map<*, *> ?: return config
