@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.19+24
+
+- `wmr_ws` discovers the Pi bridge on the LAN with a UDP probe and mDNS, and
+  `CompositeBleTransport` keeps one logical connection: TCP first, BLE GATT as
+  fallback, and a retry every 2 seconds to move back to TCP (ONY-1071,
+  ONY-1072). The fallback is opt-in for library hosts; the reference app still
+  connects through the WebSocket transport directly. It is not yet tested on
+  hardware; that test is waiting on ONY-1070.
+- `docs/LIBRARY.md` and `packages/wmr_ws/README.md` document the Pi TCP/BLE
+  fallback contract and library discovery (ONY-1073).
+- The native visionOS app is scaffolded with an ARKit tracking seam, a SwiftUI
+  dashboard and a 6DoF scene, and its architecture, permissions and signing
+  are documented (ONY-1039, ONY-1040, ONY-1041).
+- The GATT latency probe is retired; its tool and release packaging are
+  removed (ONY-1012).
+- CI adds CodeQL and OSV dependency scanning with SARIF to code scanning
+  (ONY-1079), and scans the published APK with MobSF plus a native-library
+  inventory diff against the previous release (ONY-1085).
+- Paired with WMR_Bridge `v0.3.15`, which adds the Pi bridge, the 5 GHz
+  preference and keep-alive.
+
 ## 0.3.18+23
 
 - The Debug screen names the connected bridge's FF16 firmware version and
