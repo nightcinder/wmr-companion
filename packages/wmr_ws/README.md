@@ -175,5 +175,9 @@ A host app that uses discovery or BLE fallback needs these Android permissions:
 - `android.permission.INTERNET`
 - `android.permission.BLUETOOTH_SCAN`
 - `android.permission.BLUETOOTH_CONNECT`
+- On Android 11 (API 30) and older: `android.permission.ACCESS_FINE_LOCATION`,
+  `android.permission.BLUETOOTH` and `android.permission.BLUETOOTH_ADMIN`,
+  all with `maxSdkVersion=30`.
 
-iOS needs `NSBluetoothAlwaysUsageDescription`.
+See `docs/LIBRARY.md` §15 for the full manifest example. iOS needs
+`NSBluetoothAlwaysUsageDescription`.

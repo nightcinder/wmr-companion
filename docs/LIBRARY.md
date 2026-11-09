@@ -638,7 +638,7 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 final tcp = WmrWsTransport(endpoints: const [], enableDiscovery: true);
-final ble = UniversalBleTransport();
+final ble = UniversalBleTransport(adapter: UniversalBleAdapter());
 final transport = CompositeBleTransport(tcp: tcp, ble: ble);
 
 final wmr = WmrCompanion(ble: transport);
@@ -654,8 +654,8 @@ Android host apps must declare these in `AndroidManifest.xml`:
 - `android.permission.BLUETOOTH_SCAN` with `android:usesPermissionFlags="neverForLocation"`
 - `android.permission.BLUETOOTH_CONNECT`
 
-Legacy Android 12 and older also need `ACCESS_FINE_LOCATION` with
-`maxSdkVersion=30`. iOS host apps need `NSBluetoothAlwaysUsageDescription`
+Android 11 (API 30) and older also need `ACCESS_FINE_LOCATION`,
+`BLUETOOTH` and `BLUETOOTH_ADMIN` with `maxSdkVersion=30`. iOS host apps need `NSBluetoothAlwaysUsageDescription`
 and, for background use, the `bluetooth-central` background mode. The
 `wmr_ble` package merges the Android permissions, but the host app must
 explain why it needs them.
