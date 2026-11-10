@@ -17,6 +17,26 @@ const _all = WmrBridgeFeatures(
 
 Uint8List _bytes(String text) => Uint8List.fromList(utf8.encode(text));
 
+/// The document the Pi host bridge serves from FF16. It is deliberately longer
+/// than [wmrFirmwareVersionMaxBytes].
+Uint8List _endpointDocument({
+  String type = 'wmr_ble_endpoint',
+  bool includeVersion = true,
+  Object? version = '0.2.4',
+}) => _bytes(
+  jsonEncode({
+    'type': type,
+    'protocol': 1,
+    'bridge_id': 'pi-1',
+    'name': 'WMR Bridge',
+    if (includeVersion) 'version': version,
+    'hosts': ['192.168.1.42'],
+    'port': 8765,
+    'path': '/wmr',
+    'authRequired': false,
+  }),
+);
+
 void main() {
   group('WmrBridgeFeatures', () {
     test('maps the FF10 characteristics case-insensitively', () {
@@ -97,6 +117,59 @@ void main() {
       );
       expect(protocol.firmwareVersion, max);
       expect(protocol.firmwareVersionMalformed, isFalse);
+    });
+
+    test('extracts the version from the Pi BLE JSON endpoint document', () {
+      final document = _endpointDocument();
+      expect(document.length, greaterThan(wmrFirmwareVersionMaxBytes));
+      final protocol = WmrProtocolVersion.parseFirmwareVersion(
+        document,
+        features: _all,
+      );
+      expect(protocol.firmwareVersion, '0.2.4');
+      expect(protocol.hasFirmwareVersion, isTrue);
+      expect(protocol.firmwareVersionMalformed, isFalse);
+      expect(protocol.features, same(_all));
+    });
+
+    test('tolerates a trailing NUL after the endpoint document', () {
+      final protocol = WmrProtocolVersion.parseFirmwareVersion(
+        Uint8List.fromList([..._endpointDocument(), 0]),
+        features: _all,
+      );
+      expect(protocol.firmwareVersion, '0.2.4');
+      expect(protocol.firmwareVersionMalformed, isFalse);
+    });
+
+    test('marks a non-endpoint JSON object malformed', () {
+      for (final document in [
+        _endpointDocument(type: 'something_else'),
+        _endpointDocument(includeVersion: false),
+        _endpointDocument(version: 24),
+        _bytes('{"type":"wmr_ble_endpoint",'),
+      ]) {
+        final protocol = WmrProtocolVersion.parseFirmwareVersion(
+          document,
+          features: _all,
+        );
+        expect(protocol.firmwareVersion, isNull);
+        expect(protocol.firmwareVersionMalformed, isTrue);
+      }
+    });
+
+    test('marks an endpoint version that breaks the plain-string rules', () {
+      for (final version in [
+        '',
+        'v1.2.3-abcdef0123456789-abcdefgh',
+        'v1.2.3\u0001',
+      ]) {
+        final protocol = WmrProtocolVersion.parseFirmwareVersion(
+          _endpointDocument(version: version),
+          features: _all,
+        );
+        expect(protocol.firmwareVersion, isNull);
+        expect(protocol.firmwareVersionMalformed, isTrue);
+      }
     });
 
     test('a missing FF16 is a normal status, not malformed', () {

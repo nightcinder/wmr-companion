@@ -11,10 +11,17 @@ import 'dart:typed_data';
 
 import 'gatt.dart';
 
-/// `esp_app_desc_t.version` is 32 bytes including its terminator, so the value
-/// FF16 serves is at most 31 bytes. The firmware refuses a longer
+/// `esp_app_desc_t.version` is 32 bytes including its terminator, so a plain
+/// version string from FF16 is at most 31 bytes. The firmware refuses a longer
 /// `PROJECT_VER` instead of letting ESP-IDF truncate it.
+///
+/// The Raspberry Pi BLE host bridge serves a JSON endpoint document from FF16
+/// instead of a plain string. That document is longer than this cap; only its
+/// `"version"` value is held to it.
 const int wmrFirmwareVersionMaxBytes = 31;
+
+/// The `"type"` of the endpoint document the Pi host bridge serves from FF16.
+const String wmrBleEndpointDocumentType = 'wmr_ble_endpoint';
 
 /// The FF characteristics a bridge offers. FF11 and FF12 are on every known
 /// firmware; the others arrived later and are optional.
@@ -122,13 +129,15 @@ class WmrProtocolVersion {
     : firmwareVersion = null,
       firmwareVersionMalformed = false;
 
-  /// The FF16 value, trimmed of a trailing NUL and surrounding whitespace.
-  /// Null when the bridge has no FF16 or the value was malformed.
+  /// The FF16 version, trimmed of a trailing NUL and surrounding whitespace.
+  /// For a JSON endpoint document this is its `"version"` value. Null when the
+  /// bridge has no FF16 or the value was malformed.
   final String? firmwareVersion;
 
-  /// True when FF16 was present but its value was empty, longer than
-  /// [wmrFirmwareVersionMaxBytes], not valid UTF-8 or contained control
-  /// characters. Informational: the link is unaffected.
+  /// True when FF16 was present but unusable: empty, a plain value longer than
+  /// [wmrFirmwareVersionMaxBytes], not valid UTF-8, containing control
+  /// characters, or a JSON endpoint document without a usable `"version"`.
+  /// Informational: the link is unaffected.
   final bool firmwareVersionMalformed;
 
   /// The feature matrix derived from the GATT table.
@@ -140,9 +149,17 @@ class WmrProtocolVersion {
   /// Decodes an FF16 read.
   ///
   /// [value] is null when the bridge has no FF16 or the read failed; that is
-  /// not malformed. The firmware writes no terminator, but one trailing NUL is
-  /// tolerated because a platform stack may add one. Unknown bytes are not
-  /// fatal: the version becomes null and [firmwareVersionMalformed] is set.
+  /// not malformed. Two payload shapes are accepted:
+  ///
+  /// * a plain UTF-8 version string of at most [wmrFirmwareVersionMaxBytes]
+  ///   bytes, as the ESP32 firmware serves;
+  /// * a JSON endpoint document whose `"type"` is
+  ///   [wmrBleEndpointDocumentType], as the Pi host bridge serves; its
+  ///   `"version"` value is extracted before the plain-string cap applies.
+  ///
+  /// The firmware writes no terminator, but one trailing NUL is tolerated
+  /// because a platform stack may add one. Unknown bytes are not fatal: the
+  /// version becomes null and [firmwareVersionMalformed] is set.
   static WmrProtocolVersion parseFirmwareVersion(
     Uint8List? value, {
     required WmrBridgeFeatures features,
@@ -154,7 +171,16 @@ class WmrProtocolVersion {
     if (bytes.isNotEmpty && bytes.last == 0) {
       bytes = Uint8List.sublistView(bytes, 0, bytes.length - 1);
     }
-    if (bytes.isEmpty || bytes.length > wmrFirmwareVersionMaxBytes) {
+    if (bytes.isEmpty) {
+      return WmrProtocolVersion(
+        features: features,
+        firmwareVersionMalformed: true,
+      );
+    }
+    if (_firstNonWhitespaceByte(bytes) == 0x7b) {
+      return _parseEndpointDocument(bytes, features: features);
+    }
+    if (bytes.length > wmrFirmwareVersionMaxBytes) {
       return WmrProtocolVersion(
         features: features,
         firmwareVersionMalformed: true,
@@ -169,13 +195,54 @@ class WmrProtocolVersion {
         firmwareVersionMalformed: true,
       );
     }
-    if (text.isEmpty || _hasControlCharacter(text)) {
+    return _fromVersionText(text, features: features);
+  }
+
+  /// Decodes the Pi host bridge's FF16 endpoint document and extracts its
+  /// `"version"`. Anything else served from FF16 is malformed.
+  static WmrProtocolVersion _parseEndpointDocument(
+    Uint8List bytes, {
+    required WmrBridgeFeatures features,
+  }) {
+    final malformed = WmrProtocolVersion(
+      features: features,
+      firmwareVersionMalformed: true,
+    );
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(bytes, allowMalformed: false));
+    } on FormatException {
+      return malformed;
+    }
+    if (decoded is! Map) return malformed;
+    if (decoded['type'] != wmrBleEndpointDocumentType) return malformed;
+    final version = decoded['version'];
+    if (version is! String) return malformed;
+    return _fromVersionText(version.trim(), features: features);
+  }
+
+  static WmrProtocolVersion _fromVersionText(
+    String text, {
+    required WmrBridgeFeatures features,
+  }) {
+    if (text.isEmpty ||
+        utf8.encode(text).length > wmrFirmwareVersionMaxBytes ||
+        _hasControlCharacter(text)) {
       return WmrProtocolVersion(
         features: features,
         firmwareVersionMalformed: true,
       );
     }
     return WmrProtocolVersion(features: features, firmwareVersion: text);
+  }
+
+  static int? _firstNonWhitespaceByte(Uint8List bytes) {
+    for (final byte in bytes) {
+      if (byte != 0x20 && byte != 0x09 && byte != 0x0a && byte != 0x0d) {
+        return byte;
+      }
+    }
+    return null;
   }
 
   static bool _hasControlCharacter(String text) =>
