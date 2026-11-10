@@ -2,6 +2,8 @@
 
 ## 0.3.20+25
 
+- Unity and hand tracking start only when the Bench or Debug screen opens; the
+  Connect screen no longer runs the tracking probe on launch (ONY-1209).
 - The guided bench shows live speed feedback during each pose capture: the
   active hand turns green inside the section 8 band and red outside it, with
   the measured speed and target band on screen, so a cell can be corrected

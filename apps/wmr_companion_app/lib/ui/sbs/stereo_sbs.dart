@@ -128,10 +128,12 @@ StereoHeadOffset stereoSbsCounterOffset({
 
 /// Live head pose from the selected tracking source.
 ///
-/// The wrapper watches this so a displayless Neckband has head motion before
-/// the first pane is laid out; watching [debugTrackingSourceProvider] also
-/// starts its auto-detection probe. Frames without a head pose are dropped and
-/// keep the previous value.
+/// A wrapper with `headTracking: true` watches this for the 6DoF
+/// counter-offset; watching [debugTrackingSourceProvider] also starts its
+/// auto-detection probe. Wrappers on screens that have not opened a tracking
+/// source (Connect) must leave this alone so the app does not start Unity or a
+/// vendor player before the Bench or Debug screen opens. Frames without a head
+/// pose are dropped and keep the previous value.
 final stereoHeadPoseProvider = StreamProvider<Pose?>((ref) {
   final source = ref
       .watch(debugTrackingSourceProvider)
@@ -221,15 +223,31 @@ class StereoSbs extends InheritedWidget {
 /// (popup menu, licence page, dialogs, snackbars) also span the full viewport
 /// and are not mirrored.
 class StereoSbsWrapper extends ConsumerWidget {
-  const StereoSbsWrapper({super.key, required this.child});
+  const StereoSbsWrapper({
+    super.key,
+    required this.child,
+    this.headTracking = true,
+  });
 
   final Widget child;
+
+  /// Whether this screen already started a hand-tracking source.
+  ///
+  /// When false the wrapper never reads the head pose providers, so a screen
+  /// that only mirrors its UI cannot start the auto-detection probe, Unity or
+  /// a vendor player. The Connect screen sets this false; the Bench screen
+  /// leaves it on and gets the 6DoF counter-offset as soon as its source runs.
+  final bool headTracking;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final override = ref.watch(sbsOverrideProvider);
-    final headPose = ref.watch(stereoHeadPoseProvider).value;
-    final headOrigin = ref.watch(stereoHeadOriginProvider);
+    final headPose = headTracking
+        ? ref.watch(stereoHeadPoseProvider).value
+        : null;
+    final headOrigin = headTracking
+        ? ref.watch(stereoHeadOriginProvider)
+        : null;
     return LayoutBuilder(
       builder: (context, constraints) {
         if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
