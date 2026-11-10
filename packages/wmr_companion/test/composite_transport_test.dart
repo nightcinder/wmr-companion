@@ -35,6 +35,7 @@ Uint8List _endpointDocument({
   String bridgeId = _bridgeId,
   List<String> hosts = const ['127.0.0.1'],
   int port = 8765,
+  bool authRequired = false,
 }) => Uint8List.fromList(
   utf8.encode(
     jsonEncode({
@@ -46,10 +47,15 @@ Uint8List _endpointDocument({
       'hosts': hosts,
       'port': port,
       'path': '/wmr',
-      'authRequired': false,
+      'authRequired': authRequired,
     }),
   ),
 );
+
+Uint8List _tokenDocument([String token = 'paired-secret']) =>
+    Uint8List.fromList(
+      utf8.encode(jsonEncode({'type': 'wmr_ble_session', 'token': token})),
+    );
 
 Uint8List _versionString([String value = '0.2.4-pi']) =>
     Uint8List.fromList(utf8.encode(value));
@@ -65,6 +71,8 @@ class _FakeTcp extends WmrWsTransport {
   final Map<String, StreamController<BleNotification>> streams = {};
   final List<String> connectCalls = [];
   final List<String> unsubscribeCalls = [];
+  final Set<String> discoveredDeviceIds = {};
+  final Set<String> refusedDeviceIds = {};
   bool failConnect = false;
   bool _disposed = false;
 
@@ -76,9 +84,15 @@ class _FakeTcp extends WmrWsTransport {
   Future<void> stopScan() async {}
 
   @override
+  bool isDiscoveredDevice(String deviceId) =>
+      discoveredDeviceIds.contains(deviceId);
+
+  @override
   Future<void> connect(String deviceId) async {
     connectCalls.add(deviceId);
-    if (failConnect) throw StateError('tcp down');
+    if (failConnect || refusedDeviceIds.contains(deviceId)) {
+      throw StateError('tcp down');
+    }
     final endpoint = endpoints[deviceId];
     if (endpoint == null) throw StateError('unknown endpoint $deviceId');
     hellos[deviceId] ??= _hello(endpoint.bridgeId ?? _bridgeId);
@@ -658,4 +672,133 @@ void main() {
       BleConnectionState.disconnected,
     );
   });
+
+  test(
+    'a seeded pairing deduplicates BLE and LAN hits and dials Wi-Fi first',
+    () async {
+      const lanId = '10.0.0.7:8765';
+      tcp.scanResults
+        ..clear()
+        ..add(
+          BleScanResult(
+            deviceId: lanId,
+            name: 'WMR Bridge (10.0.0.7)',
+            rssi: null,
+            serviceUuids: const [wmrBridgeServiceUuid],
+          ),
+        );
+      tcp.discoveredDeviceIds.add(lanId);
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+      transport.seedPairedBridge(
+        bridgeId: _bridgeId,
+        bleDeviceId: _bleDeviceId,
+        hosts: const ['10.0.0.7'],
+        token: 'paired-secret',
+      );
+
+      final scans = await transport.scan().toList();
+      expect(
+        scans.map((result) => result.deviceId),
+        hasLength(1),
+        reason: 'the paired bridge was published twice',
+      );
+      expect(transport.bridgeIdFor(_bleDeviceId), _bridgeId);
+      expect(transport.bridgeIdFor(lanId), _bridgeId);
+
+      await transport.connect(_bleDeviceId);
+
+      expect(tcp.connectCalls, contains(lanId));
+      expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.tcp);
+      expect(tcp.endpoints[lanId]?.token, 'paired-secret');
+    },
+  );
+
+  test(
+    'suppresses an unauthenticated discovery tile and merges its host',
+    () async {
+      const lanId = '10.0.0.5:8765';
+      const ff16Host = '192.168.1.9';
+      tcp.scanResults
+        ..clear()
+        ..add(
+          BleScanResult(
+            deviceId: lanId,
+            name: 'WMR Bridge (10.0.0.5)',
+            rssi: null,
+            serviceUuids: const [wmrBridgeServiceUuid],
+          ),
+        );
+      tcp.discoveredDeviceIds.add(lanId);
+      tcp.endpoints[lanId] = WmrWsEndpoint(
+        host: '10.0.0.5',
+        port: 8765,
+        bridgeId: _bridgeId,
+      );
+      // The FF16 host is refused so the merged discovery host has to be tried.
+      tcp.refusedDeviceIds.add('$ff16Host:8765');
+      ble.dispose();
+      ble = FakeTransport(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+      );
+      ble.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _endpointDocument(hosts: const [ff16Host], authRequired: true);
+        }
+        if (characteristicUuid.toLowerCase() == wmrBridgeConfigCharUuid) {
+          return _tokenDocument();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+
+      final pairings = <BridgePairing>[];
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        // Long enough that only the immediate attempt can explain a dial.
+        upgradeInterval: const Duration(hours: 1),
+        onBridgePaired: pairings.add,
+      );
+      addTearDown(transport.dispose);
+
+      final scans = await transport.scan().toList();
+      expect(scans.map((result) => result.deviceId), [
+        _bleDeviceId,
+      ], reason: 'the unauthenticated LAN tile was published');
+
+      final lanes = <CompositeTransportLane>[];
+      final laneSub = transport.activeLane(_bleDeviceId).listen(lanes.add);
+      addTearDown(laneSub.cancel);
+
+      await transport.connect(_bleDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+        reason: 'FF16/FF13 did not upgrade immediately',
+      );
+
+      expect(tcp.connectCalls, containsAll(['$ff16Host:8765', lanId]));
+      expect(tcp.endpoints[lanId]?.token, 'paired-secret');
+      expect(lanes.first, CompositeTransportLane.ble);
+      expect(lanes.last, CompositeTransportLane.wifi);
+
+      final pairing = pairings.single;
+      expect(pairing.bridgeId, _bridgeId);
+      expect(pairing.bleDeviceId, _bleDeviceId);
+      expect(pairing.hosts, containsAll([ff16Host, '10.0.0.5']));
+      expect(pairing.token, 'paired-secret');
+      expect(pairing.port, 8765);
+      expect(pairing.path, '/wmr');
+    },
+  );
 }

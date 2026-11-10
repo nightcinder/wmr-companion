@@ -9,6 +9,40 @@ import 'package:wmr_ws/wmr_ws.dart';
 /// Which leg of a [CompositeBleTransport] currently carries a bridge.
 enum CompositeLeg { tcp, ble }
 
+/// The lane a bridge is using, as published by
+/// [CompositeBleTransport.activeLane].
+enum CompositeTransportLane { ble, wifi }
+
+/// A bridge the composite has paired with: the identity and LAN details a host
+/// persists so the next connection can go straight to Wi-Fi.
+class BridgePairing {
+  const BridgePairing({
+    required this.bridgeId,
+    required this.bleDeviceId,
+    required this.hosts,
+    required this.port,
+    required this.path,
+    this.name,
+    this.token,
+    this.secure = false,
+  });
+
+  /// The daemon's stable `bridge_id`.
+  final String bridgeId;
+
+  /// The BLE device that supplied the FF16 document, when one was used.
+  final String? bleDeviceId;
+
+  /// LAN hosts the bridge reported or that discovery supplied.
+  final List<String> hosts;
+
+  final int port;
+  final String path;
+  final String? name;
+  final String? token;
+  final bool secure;
+}
+
 /// A [BleTransport] that prefers the Pi's WebSocket (TCP) link and falls back
 /// to BLE GATT, keeping one logical connection across the switch.
 ///
@@ -18,13 +52,18 @@ enum CompositeLeg { tcp, ble }
 /// an endpoint is known, either because the caller configured/discovered one
 /// or because the FF16 endpoint document was read over BLE. When TCP cannot
 /// connect, or drops later, the same bridge is dialled over BLE GATT. While
-/// the bridge is on BLE, [upgradeInterval] retries TCP; when it succeeds the
+/// the bridge is on BLE, [upgradeInterval] retries TCP; an FF16/FF13 read that
+/// supplies a LAN endpoint tries immediately, and when TCP succeeds the
 /// notification subscriptions move to TCP without being closed.
 ///
 /// Bridges are identified by the daemon's stable `bridge_id` once a hello or
 /// an FF16 endpoint document has supplied it. Two scan results that resolve
 /// to the same id are published once by [scan]. Before an id has been learned,
 /// a BLE result and a TCP result cannot be matched, so both are published.
+/// An unauthenticated discovery tile is withheld: it cannot connect without a
+/// token, so its host is indexed by `bridge_id` for the FF16 read instead. A
+/// bridge seeded with [seedPairedBridge] carries its stored token and is
+/// deduplicated against the BLE hit.
 ///
 /// ## BLE radio use
 ///
@@ -44,6 +83,7 @@ class CompositeBleTransport implements BleTransport {
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
     this.bleScanWait = const Duration(seconds: 5),
+    this.onBridgePaired,
   }) : clock = tcp.clock;
 
   /// Primary WebSocket transport.
@@ -70,9 +110,23 @@ class CompositeBleTransport implements BleTransport {
   /// leave the BLE leg with no candidate, so the failover never happens.
   final Duration bleScanWait;
 
+  /// Called when a bridge's pairing details are known: after an FF16 endpoint
+  /// document and its FF13 token are read over BLE, or after a manual Wi-Fi
+  /// handshake reports a `bridge_id`.
+  ///
+  /// A host persists [BridgePairing] so a later start can seed
+  /// [seedPairedBridge] and connect to Wi-Fi without asking for a token.
+  final void Function(BridgePairing pairing)? onBridgePaired;
+
   final Map<String, _Route> _routes = {};
   final Map<String, String> _bridgeIds = {};
   final Map<String, _ScanHit> _scanHits = {};
+  final Map<String, WmrWsEndpoint> _lanByBridgeId = {};
+  final Map<String, String> _pairedTokens = {};
+  final Map<String, Set<String>> _pairedTcpCandidates = {};
+  final Map<String, bool> _pairedSecure = {};
+  final Set<String> _pairedBridgeIds = {};
+  final Set<int> _pairedSignatures = {};
   bool _disposed = false;
   bool _scanning = false;
   Completer<void>? _scanWake;
@@ -95,6 +149,77 @@ class CompositeBleTransport implements BleTransport {
         null => null,
       };
 
+  /// The lane [deviceId] is on now and every lane change after that.
+  ///
+  /// The first event is the current lane, when the bridge is connected. The
+  /// stream stays open across a leg switch; it does not close on a transient
+  /// reconnect.
+  Stream<CompositeTransportLane> activeLane(String deviceId) async* {
+    _ensureUsable();
+    final route = _ensureRoute(deviceId);
+    final current = _laneOf(route.active);
+    if (current != null) yield current;
+    yield* route.lanes.stream;
+  }
+
+  /// Seeds a bridge the host paired before this transport existed.
+  ///
+  /// [bridgeId] and [token] are registered on [tcp] so a matching
+  /// [WmrWsDiscovery] hit authenticates even on a new DHCP address. Each
+  /// stored host becomes a connectable TCP candidate, and [bleDeviceId] is
+  /// mapped to [bridgeId] so a BLE scan result and a LAN result share one
+  /// bridge entry instead of becoming two tiles.
+  void seedPairedBridge({
+    required String bridgeId,
+    String? bleDeviceId,
+    String? name,
+    List<String> hosts = const [],
+    int port = wmrWsDefaultPort,
+    String path = wmrWsDefaultPath,
+    String? token,
+    bool secure = false,
+  }) {
+    _ensureUsable();
+    final id = bridgeId.trim();
+    if (id.isEmpty) {
+      throw ArgumentError.value(bridgeId, 'bridgeId', 'must not be empty');
+    }
+    _pairedBridgeIds.add(id);
+    _pairedSecure[id] = secure;
+    if (token != null && token.isNotEmpty) _pairedTokens[id] = token;
+    tcp.registerBridgeToken(id, token);
+
+    final bleId = bleDeviceId?.trim();
+    if (bleId != null && bleId.isNotEmpty) {
+      _bridgeIds[bleId] = id;
+      for (final route in _routes.values) {
+        if (route.deviceId == bleId || route.bleDeviceId == bleId) {
+          route.bridgeId ??= id;
+        }
+      }
+    }
+
+    final candidates = _pairedTcpCandidates.putIfAbsent(id, () => <String>{});
+    for (final host in hosts) {
+      final trimmed = host.trim();
+      if (trimmed.isEmpty) continue;
+      final endpoint = WmrWsEndpoint(
+        host: trimmed,
+        port: port,
+        path: path,
+        name: name,
+        token: token,
+        secure: secure,
+        bridgeId: id,
+      );
+      final tcpId = endpoint.resolvedDeviceId;
+      tcp.registerEndpoint(endpoint);
+      _bridgeIds[tcpId] = id;
+      _lanByBridgeId.putIfAbsent(id, () => endpoint);
+      candidates.add(tcpId);
+    }
+  }
+
   @override
   Stream<BleScanResult> scan({List<String> withServices = const []}) {
     _ensureUsable();
@@ -107,6 +232,24 @@ class CompositeBleTransport implements BleTransport {
     void add(BleScanResult result, {required bool fromBle}) {
       _scanHits[result.deviceId] = _ScanHit(result, fromBle: fromBle);
       if (fromBle) _wakeScanWaiters();
+      if (!fromBle) {
+        final endpoint = tcp.endpointFor(result.deviceId);
+        final bridgeId = endpoint?.bridgeId;
+        if (endpoint != null && bridgeId != null && bridgeId.isNotEmpty) {
+          if (tcp.isDiscoveredDevice(result.deviceId)) {
+            _bridgeIds[result.deviceId] = bridgeId;
+            // Keep the live address even when the tile is suppressed, so an
+            // FF16 read can merge this host with the bridge's own list.
+            _lanByBridgeId[bridgeId] = endpoint;
+            final unauthenticated = endpoint.token == null;
+            if (unauthenticated && !_pairedBridgeIds.contains(bridgeId)) {
+              // A discovery reply never carries the token, so this tile
+              // cannot connect. The BLE entry is the first-contact tile.
+              return;
+            }
+          }
+        }
+      }
       final bridgeId = _bridgeIdForDevice(result.deviceId);
       if (bridgeId != null && !seenBridgeIds.add(bridgeId)) return;
       if (!seenIds.add(result.deviceId)) return;
@@ -282,6 +425,7 @@ class CompositeBleTransport implements BleTransport {
     } finally {
       route.intentional = false;
       if (!route.states.isClosed) await route.states.close();
+      if (!route.lanes.isClosed) await route.lanes.close();
     }
   }
 
@@ -403,6 +547,7 @@ class CompositeBleTransport implements BleTransport {
         } catch (_) {}
       }
       if (!route.states.isClosed) await route.states.close();
+      if (!route.lanes.isClosed) await route.lanes.close();
     }
     await tcp.dispose();
     await ble.dispose();
@@ -412,8 +557,14 @@ class CompositeBleTransport implements BleTransport {
     if (_disposed) throw StateError('CompositeBleTransport is disposed');
   }
 
-  _Route _ensureRoute(String deviceId) =>
-      _routes.putIfAbsent(deviceId, () => _Route(deviceId, tcp, ble, clock));
+  _Route _ensureRoute(String deviceId) {
+    final route = _routes.putIfAbsent(
+      deviceId,
+      () => _Route(deviceId, tcp, ble, clock),
+    );
+    route.bridgeId ??= _bridgeIds[deviceId];
+    return route;
+  }
 
   ({BleTransport transport, String deviceId}) _requireActive(String deviceId) {
     final route = _routes[deviceId];
@@ -434,6 +585,10 @@ class CompositeBleTransport implements BleTransport {
     final current = route.tcpDeviceId;
     if (current != null) ids.add(current);
     ids.addAll(route.tcpCandidates);
+    final bridgeId = route.bridgeId;
+    if (bridgeId != null) {
+      ids.addAll(_pairedTcpCandidates[bridgeId] ?? const <String>{});
+    }
     if (tcp.endpointFor(deviceId) != null) ids.add(deviceId);
     return ids.toList();
   }
@@ -549,6 +704,23 @@ class CompositeBleTransport implements BleTransport {
     await _switchChannels(route, _Lane.tcp);
     _stopUpgrade(route);
     _setState(route, BleConnectionState.connected);
+    final bridgeId = route.bridgeId;
+    // A direct Wi-Fi handshake is a pairing too. Skip it when this activation
+    // came from a BLE session: `_learnBleEndpoint` already reported the
+    // richer FF16 record.
+    if (bridgeId != null && route.bleDeviceId == null) {
+      final endpoint = tcp.endpointFor(tcpId);
+      _notifyPaired(
+        route,
+        bridgeId: bridgeId,
+        hosts: endpoint == null ? const [] : [endpoint.host],
+        port: endpoint?.port ?? wmrWsDefaultPort,
+        path: endpoint?.path ?? wmrWsDefaultPath,
+        name: endpoint?.name,
+        token: endpoint?.token,
+        secure: endpoint?.secure ?? false,
+      );
+    }
   }
 
   Future<void> _activateBle(_Route route) async {
@@ -556,6 +728,14 @@ class CompositeBleTransport implements BleTransport {
     await _switchChannels(route, _Lane.ble);
     _startUpgrade(route);
     _setState(route, BleConnectionState.connected);
+    if (route.upgradeImmediately) {
+      route.upgradeImmediately = false;
+      // FF16/FF13 supplied a live LAN candidate: dial it now, not one timer
+      // tick later. A zero interval still means "no automatic upgrade".
+      if (upgradeInterval > Duration.zero) {
+        unawaited(_attemptUpgrade(route));
+      }
+    }
   }
 
   Future<void> _switchChannels(_Route route, _Lane to) async {
@@ -571,6 +751,8 @@ class CompositeBleTransport implements BleTransport {
       await channel.detach();
     }
     route.active = to;
+    final lane = _laneOf(to);
+    if (lane != null && !route.lanes.isClosed) route.lanes.add(lane);
     for (final channel in live) {
       channel.attach();
     }
@@ -734,12 +916,20 @@ class CompositeBleTransport implements BleTransport {
     if (bleId == null) return;
     _rememberBridge(route, endpoint.bridgeId);
 
-    String? token;
+    var token = _pairedTokens[endpoint.bridgeId];
     if (endpoint.authRequired) {
-      token = await _readBleToken(bleId);
+      token = await _readBleToken(bleId) ?? token;
       if (token == null) return;
     }
-    for (final host in endpoint.hosts) {
+
+    // Merge hosts the bridge reported with a LAN reply that discovery indexed
+    // for the same bridge id: DHCP may have moved the bridge since it wrote
+    // its FF16 document.
+    final hosts = <String>{...endpoint.hosts};
+    final discovered = _lanByBridgeId[endpoint.bridgeId];
+    if (discovered != null) hosts.add(discovered.host);
+
+    for (final host in hosts) {
       final candidate = WmrWsEndpoint(
         host: host,
         port: endpoint.port,
@@ -747,11 +937,66 @@ class CompositeBleTransport implements BleTransport {
         name: endpoint.name,
         bridgeId: endpoint.bridgeId,
         token: token,
+        secure: _pairedSecure[endpoint.bridgeId] ?? false,
       );
       tcp.registerEndpoint(candidate);
       route.tcpCandidates.add(candidate.resolvedDeviceId);
     }
+    if (token != null) tcp.registerBridgeToken(endpoint.bridgeId, token);
+    route.upgradeImmediately = true;
     _startUpgrade(route);
+    _notifyPaired(
+      route,
+      bridgeId: endpoint.bridgeId,
+      hosts: hosts.toList(),
+      port: endpoint.port,
+      path: endpoint.path,
+      name: endpoint.name,
+      token: token,
+      secure: _pairedSecure[endpoint.bridgeId] ?? false,
+    );
+  }
+
+  void _notifyPaired(
+    _Route route, {
+    required String bridgeId,
+    required List<String> hosts,
+    required int port,
+    required String path,
+    String? name,
+    String? token,
+    bool secure = false,
+  }) {
+    final callback = onBridgePaired;
+    if (callback == null) return;
+    final signature = Object.hash(
+      bridgeId,
+      route.bleDeviceId,
+      Object.hashAll(hosts),
+      port,
+      path,
+      name,
+      token,
+      secure,
+    );
+    if (!_pairedSignatures.add(signature)) return;
+    try {
+      callback(
+        BridgePairing(
+          bridgeId: bridgeId,
+          bleDeviceId: route.bleDeviceId,
+          hosts: List.unmodifiable(hosts),
+          port: port,
+          path: path,
+          name: name,
+          token: token,
+          secure: secure,
+        ),
+      );
+    } catch (_) {
+      // Host persistence is not the link's concern; a failed save must not
+      // turn a working BLE or Wi-Fi connection into a connect error.
+    }
   }
 
   Future<String?> _readBleToken(String bleId) async {
@@ -786,6 +1031,12 @@ class CompositeBleTransport implements BleTransport {
 
   String? _bridgeIdForDevice(String deviceId) =>
       _bridgeIds[deviceId] ?? _routes[deviceId]?.bridgeId;
+
+  static CompositeTransportLane? _laneOf(_Lane? lane) => switch (lane) {
+    _Lane.tcp => CompositeTransportLane.wifi,
+    _Lane.ble => CompositeTransportLane.ble,
+    null => null,
+  };
 
   /// Wakes [connect] waiters: a BLE hit arrived or the scan stopped.
   void _wakeScanWaiters() {
@@ -823,6 +1074,8 @@ class _Route {
   final MonotonicClock clock;
   final StreamController<BleConnectionState> states =
       StreamController.broadcast();
+  final StreamController<CompositeTransportLane> lanes =
+      StreamController.broadcast();
   final List<_Channel> channels = [];
   final Map<String, int> bleRefs = {};
 
@@ -835,6 +1088,7 @@ class _Route {
   bool intentional = false;
   bool switching = false;
   bool upgrading = false;
+  bool upgradeImmediately = false;
   StreamSubscription<BleConnectionState>? tcpStateSub;
   StreamSubscription<BleConnectionState>? bleStateSub;
   String? tcpStateId;

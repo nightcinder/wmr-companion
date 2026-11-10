@@ -311,6 +311,31 @@ void main() {
     expect(transport.endpointFor(mdnsId)?.bridgeId, 'pi-mdns');
   });
 
+  test(
+    'scan attaches a stored token to a discovery hit by bridge_id',
+    () async {
+      final udp = await _UdpResponder.start(
+        bridgeId: 'pi-udp',
+        metadataPort: 9321,
+      );
+      addTearDown(udp.close);
+      final transport = WmrWsTransport(
+        endpoints: const [],
+        discovery: _loopbackDiscovery(timeout: timeout, udpPort: udp.port),
+      );
+      addTearDown(transport.dispose);
+      transport.registerBridgeToken('pi-udp', 'paired-secret');
+
+      final results = await transport.scan().toList();
+
+      expect(results, hasLength(1));
+      final id = '127.0.0.1:9321';
+      expect(results.single.deviceId, id);
+      expect(transport.endpointFor(id)?.token, 'paired-secret');
+      expect(transport.isDiscoveredDevice(id), isTrue);
+    },
+  );
+
   test('a restarted scan re-yields discovered endpoints', () async {
     final udp = await _UdpResponder.start(
       bridgeId: 'pi-udp',

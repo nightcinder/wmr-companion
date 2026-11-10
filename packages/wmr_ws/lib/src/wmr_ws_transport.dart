@@ -134,6 +134,11 @@ class WmrWsTransport implements BleTransport {
   /// of the static scan list; the caller already discovered the bridge.
   final Map<String, WmrWsEndpoint> _registered = {};
 
+  /// Tokens supplied by a host that has already paired with a bridge, keyed by
+  /// the daemon's stable `bridge_id`. Discovery replies never carry the token,
+  /// so [scan] attaches the matching entry to each [WmrWsEndpoint] it yields.
+  final Map<String, String> _bridgeTokens = {};
+
   final Map<String, _WmrWsSession> _sessions = {};
   final Map<String, BleConnectionState> _states = {};
   final Map<String, StreamController<BleConnectionState>> _stateControllers =
@@ -148,7 +153,7 @@ class WmrWsTransport implements BleTransport {
       return;
     }
     for (final endpoint in _endpoints) {
-      yield _scanResult(endpoint);
+      yield _scanResult(_byDeviceId[endpoint.resolvedDeviceId] ?? endpoint);
     }
     final discovery = _discovery;
     if (discovery == null) return;
@@ -159,7 +164,8 @@ class WmrWsTransport implements BleTransport {
       if (!_registered.containsKey(id)) _byDeviceId.remove(id);
     }
     _discovered.clear();
-    for (final endpoint in discovered) {
+    for (final raw in discovered) {
+      final endpoint = _withBridgeToken(raw);
       final id = endpoint.resolvedDeviceId;
       if (_byDeviceId.containsKey(id)) continue;
       _discovered[id] = endpoint;
@@ -412,6 +418,56 @@ class WmrWsTransport implements BleTransport {
     final id = endpoint.resolvedDeviceId;
     _registered[id] = endpoint;
     _byDeviceId[id] = endpoint;
+  }
+
+  /// Registers [token] for [bridgeId] and attaches it to every endpoint that
+  /// reports that id.
+  ///
+  /// A host that has already paired with a bridge stores the token keyed by
+  /// `bridge_id` and calls this before [scan]. Discovery replies never carry
+  /// the token, so the matching [WmrWsEndpoint] gets it here and [connect] can
+  /// authenticate after checking the WebSocket `hello` reports the same id.
+  /// Passing null or an empty token removes the entry.
+  void registerBridgeToken(String bridgeId, String? token) {
+    final id = bridgeId.trim();
+    if (id.isEmpty) return;
+    if (token == null || token.isEmpty) {
+      _bridgeTokens.remove(id);
+    } else {
+      _bridgeTokens[id] = token;
+    }
+    _attachBridgeTokens();
+  }
+
+  /// Whether [deviceId] came from the most recent [scan] discovery pass rather
+  /// than from configuration or [registerEndpoint].
+  bool isDiscoveredDevice(String deviceId) => _discovered.containsKey(deviceId);
+
+  void _attachBridgeTokens() {
+    for (final map in [_byDeviceId, _registered, _discovered]) {
+      for (final entry in map.entries.toList()) {
+        final attached = _withBridgeToken(entry.value);
+        if (!identical(attached, entry.value)) map[entry.key] = attached;
+      }
+    }
+  }
+
+  WmrWsEndpoint _withBridgeToken(WmrWsEndpoint endpoint) {
+    if (endpoint.token != null) return endpoint;
+    final bridgeId = endpoint.bridgeId;
+    if (bridgeId == null || bridgeId.isEmpty) return endpoint;
+    final token = _bridgeTokens[bridgeId];
+    if (token == null) return endpoint;
+    return WmrWsEndpoint(
+      host: endpoint.host,
+      port: endpoint.port,
+      path: endpoint.path,
+      deviceId: endpoint.deviceId,
+      name: endpoint.name,
+      token: token,
+      secure: endpoint.secure,
+      bridgeId: bridgeId,
+    );
   }
 
   @override
