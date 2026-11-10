@@ -107,7 +107,7 @@ jobs:
 
       # One resolution for the whole workspace; every member is resolved here.
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_tracking_dispatch packages/wmr_tracking_android_xr packages/wmr_tracking_viture packages/wmr_tracking_xreal packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test
+      - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_tracking_dispatch packages/wmr_tracking_android_xr packages/wmr_tracking_viture packages/wmr_tracking_xreal packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test tool
       - working-directory: apps/wmr_companion_app
         run: flutter analyze
       - working-directory: apps/wmr_companion_app
@@ -440,7 +440,8 @@ jobs:
             :wmr_tracking_dispatch:testDebugUnitTest \
             :wmr_tracking_viture:testDebugUnitTest \
             :wmr_tracking_xreal:testDebugUnitTest \
-            :wmr_tracking_android_xr:testDebugUnitTest
+            :wmr_tracking_android_xr:testDebugUnitTest \
+            :wmr_companion_hid_android:testDebugUnitTest
 
       - name: Build unified without Unity
         working-directory: apps/wmr_companion_app
