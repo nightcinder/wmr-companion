@@ -229,7 +229,7 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 
 Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
 
-**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data (the latency-2 campaign). ONY-23 is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions; the second is In between on the stall clause, and both sessions prescribe staying on Flutter). The standalone probe's retirement is tracked in ONY-1012; the archived sheet was removed.
+**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data (`d <= 5 ms` and `abs(a - p) <= 0.25 * p` to stay on Flutter, `d >= 10 ms` or `p < 0.5 * a` to move native). ONY-23 is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions; the second is In between on the stall clause, and both sessions prescribe staying on Flutter). The standalone probe's retirement is tracked in ONY-1012; the archived sheet was removed (preserved in git history at `4c6e6ac`).
 
 ## Flutter library / iOS v1 run (phase 5)
 
@@ -251,10 +251,11 @@ support; this release does not have that evidence.
    runs above on each platform. Record the exported JSON/echo files, firmware
    hash, app commit, phone model, iOS version and whether MTU/RSSI are
    visible.
-4. **Decision.** Apply the rule recorded in the closed latency-2 campaign:
-   if `universal_ble` meets the latency/background requirement, phase 6 (the
-   native iOS transport) never runs; if not, the numbers decide it. Record
-   the outcome here and in `docs/STATUS.md`.
+4. **Decision.** Apply the rule established during the latency-2 campaign (`d = app p50 - probe p50`, `a = app stalls >50 ms`, `p = probe stalls >50 ms`):
+   - Move the receive hot path native if `d >= 10 ms` or either hand has `p < 0.5 * a`.
+   - Stay Flutter if `d <= 5 ms` and both hands have `abs(a - p) <= 0.25 * p`.
+   - In between: stay Flutter and file `universal_ble` gaps upstream.
+   If `universal_ble` meets the latency and background requirement, phase 6 (the native iOS transport) never runs; if not, the numbers decide it. Record the outcome here and in `docs/STATUS.md`. (Archived copy of the rule and Android session logs: git commit `4c6e6ac` `docs/runs/sheets/latency-2.md`).
 
 No iOS device run has happened yet; until then iOS is design- and
 CI-config-validated, not a hardware claim.

@@ -13,7 +13,7 @@ Gates: 1, 2, 6 (optional), 7, 8. See [GATES.md](../../tracking/GATES.md).
 | Tooling | `adb`, a terminal, logcat capture. |
 | Controllers | Both charged, connected and awake for the sitting. |
 
-Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "Android XR tracking: available" when running on an Android XR device.
+Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "Android XR tracking attached" when running on an Android XR device.
 
 ## 2. Setup, once per sitting
 1. Put the bridge in place, controllers on taped marks ~0.5 m away. Photo the setup.

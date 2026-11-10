@@ -19,7 +19,7 @@ VITURE hand tracking runs only on a **VITURE Pro Neckband** with **Luma Ultra**.
 Android XR hand tracking runs on the headset. It requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`. A "Precise movement and area data" prompt (`SCENE_UNDERSTANDING_FINE`) must not appear; if it does, record a regression. The VITURE slice requests `CAMERA` only.
 
 ### URXR One day-one checks
-URXR One connects to the host phone through USB-C. Day-one checks do not need paired controllers or a bridge. The app uses the device environment probe to capture USB identities, display metrics, and OpenXR features into the diagnostic test bundle.
+URXR One connects to the host phone through USB-C. Day-one checks do not need paired controllers or a bridge. These checks require an app build cut after PR #260 / ONY-1137 (commit `75655c8` on `main`, or the next release) because v0.3.19 does not contain the device environment probe. The app captures USB identities, display metrics, and OpenXR features into `device_environment.json` inside the diagnostic test bundle.
 
 ## 1. Get the APK
 https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk
@@ -27,6 +27,8 @@ https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-compa
 SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/SHA256SUMS
 
 Confirm the v0.3.19 release exists and the installed APK reports `versionName` 0.3.19 before testing. If it reports 0.3.18, the tag was cut from a bumped tree: record it and stop.
+
+For URXR One day-one checks, install an APK built from `main` after commit `75655c8` (ONY-1137, for example `flutter build apk --debug` in `apps/wmr_companion_app`) or a subsequent release. v0.3.19 predates the probe and does not generate `device_environment.json`.
 
 One APK carries VITURE and XREAL and runs on a Galaxy XR. Uninstall an older WMR Companion first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
@@ -69,14 +71,14 @@ From **Connect**, tap **Run guided bench**. It ends with **Write test bundle**, 
 - **6A: 3DoF only / Combined.** Pick 3DoF only for controllers, or Combined for bridge + glasses. Follow the wizard: connect, both hands, firmware/config, still, slow move, 60 s FF11, latency, serial.
 - **6B: 6DoF only (no bridge).** Pick 6DoF only. The bridge steps are skipped and the run is shorter; that is expected. There are no controllers to pair. If your glasses do not report hand tracking, **Capture 6DoF pose** is unavailable: record it as skipped.
 
-**URXR One day-one discovery (setup B).** Connect URXR One to the phone over USB-C. Open the app and tap **Export test bundle** on the Connect screen, or complete the 6DoF guided bench. The app creates `wmr-ext-<yyyyMMdd>.zip`. Make sure that the zip file contains `device_environment.json`. Open `manifest.md` in the zip file and confirm the device environment summary line.
+**URXR One day-one discovery (setup B).** Connect URXR One to the phone over USB-C. Without an active hand-tracking runtime, the 6DoF-only guided bench is unavailable. Tap **Export test bundle** directly on the Connect screen. The app creates `wmr-ext-<yyyyMMdd>.zip`. Make sure that the zip file contains `device_environment.json`. Open `manifest.md` in the zip file and confirm the device environment summary line.
 
 Check these items in `device_environment.json`:
 1. USB devices: make sure that the URXR One vendor ID, product ID, and interface class list appear under `usb.devices`.
 2. Displays: make sure that the external panel resolution, refresh rate, and external flag appear under `displays.items`.
 3. OpenXR features: make sure that system features (`android.hardware.xr` or vendor extensions) appear under `xr_features`.
 
-If URXR One does not report hand tracking yet, the 6DoF pose step is skipped. The exported environment bundle completes the day-one check.
+The exported environment bundle completes the day-one check.
 
 **Stereo check (VITURE, setup B).** The Unity player must render stereo 3D (SpaceWalker). The debug overlay shows `playerHosted`, `stereoMode` and `stage`. A healthy run reaches `firstFrame` with `stereoMode` `multiPass`/`singlePass`/`singlePassInstanced` and fills both eyes. If the stage stops at `playerHosted`/`loaderStarted`, `stereoMode` is `unknown`, or one eye shows half an image, record the values and capture logs. A 2D/mono player fails closed with `unavailable`. If the right eye is black, see 6D.
 
@@ -113,7 +115,7 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.5
-- App: <versionName from ADB> unified (signed release) (expected 0.3.19)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.19, or post-ONY-1137 build for URXR One)
 - Host: Neckband / Android XR headset / URXR One / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
