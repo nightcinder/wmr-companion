@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 
 import '../../services/test_bundle_export.dart';
 import '../debug/debug_providers.dart';
@@ -205,7 +206,18 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
-                const BenchTrackingHud(),
+                BenchTrackingHud(
+                  liveGateCell:
+                      poseSpec != null && result.status == BenchStatus.running
+                      ? poseSpec.segment.speedGateCell
+                      : null,
+                  liveHand:
+                      poseSpec != null && result.status == BenchStatus.running
+                      ? (poseSpec.hand == 0
+                            ? TrackedHand.left
+                            : TrackedHand.right)
+                      : null,
+                ),
                 const SizedBox(height: 8),
                 LinearProgressIndicator(value: finished / total),
                 const SizedBox(height: 12),
@@ -234,6 +246,20 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                       ? null
                       : const Key('bench-capture-prompt'),
                 ),
+                if (poseSpec != null &&
+                    poseSpec.segment.speedGateCell != null &&
+                    result.status == BenchStatus.running) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Live target ${poseSpec.segment.speedGateCell!.bandLabel}: '
+                    'the ${RealBenchSession.handName(poseSpec.hand).toLowerCase()} '
+                    'hand turns green inside the band and red outside it.',
+                    key: const Key('bench-live-gate-target'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ],
                 if (poseSpec != null &&
                     result.status == BenchStatus.running) ...[
                   const SizedBox(height: 8),

@@ -5,6 +5,9 @@ keeps its own changelog; this file records the release as a whole.
 
 ## Unreleased
 
+- The guided bench checks a pose capture's speed live: the active hand turns
+  green inside the section 8 band and red outside it, with the measured speed
+  and the band shown during the run (ONY-1176).
 - The reference app scans the LAN for Pi bridges with `WmrWsDiscovery` and
   can opt into `CompositeBleTransport`: TCP first, BLE GATT as fallback, with
   the active leg shown on the Connect screen (ONY-1143).

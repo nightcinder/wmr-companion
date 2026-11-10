@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The guided bench shows live speed feedback during each pose capture: the
+  active hand turns green inside the section 8 band and red outside it, with
+  the measured speed and target band on screen, so a cell can be corrected
+  while recording instead of only after it is saved (ONY-1176).
 - The Connect screen discovers Pi bridges on the LAN with `WmrWsDiscovery`
   and offers an opt-in `CompositeBleTransport` link (TCP first, BLE GATT
   fallback) with an active-leg indicator (ONY-1143).

@@ -90,6 +90,25 @@ HandPose _hand(TrackedHand hand, double x) => HandPose(
   },
 );
 
+class _LiveFrames extends Notifier<AsyncValue<DebugPoses>> {
+  @override
+  AsyncValue<DebugPoses> build() => AsyncValue.data(const DebugPoses());
+
+  void set(DebugPoses poses) => state = AsyncValue.data(poses);
+}
+
+final _liveFramesProvider =
+    NotifierProvider<_LiveFrames, AsyncValue<DebugPoses>>(_LiveFrames.new);
+
+DebugPoses _livePoses(int timeNs, double x) => DebugPoses(
+  head: _pose(0),
+  tracking: TrackingFrame(
+    timeNs: timeNs,
+    hostTimeNs: timeNs,
+    rightHand: _hand(TrackedHand.right, x),
+  ),
+);
+
 void main() {
   test('head motion separates a static 0DoF pose from a moving 6DoF one', () {
     final tracker = BenchHeadMotionTracker(windowSamples: 10);
@@ -157,6 +176,74 @@ void main() {
     expect(find.text('3 joints'), findsNWidgets(2));
     expect(find.text('0DoF head pose: static'), findsOneWidget);
     expect(find.byKey(const Key('bench-head-pose-delta')), findsOneWidget);
+  });
+
+  testWidgets('live speed feedback paints the active hand green then red', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        benchLivePosesProvider.overrideWith(
+          (ref) => ref.watch(_liveFramesProvider),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.read(_liveFramesProvider.notifier).set(_livePoses(0, 0));
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: BenchTrackingHud(
+              liveGateCell: SpeedGateCell.slowPan,
+              liveHand: TrackedHand.right,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 10 cm/s is the slow-pan nominal; the cell's warm-up is 1 s.
+    for (var index = 0; index <= 16; index++) {
+      final time = index * 100000000;
+      container
+          .read(_liveFramesProvider.notifier)
+          .set(_livePoses(time, 0.10 * index * 0.1));
+      await tester.pump();
+    }
+
+    expect(find.byKey(const Key('bench-live-speed-right')), findsOneWidget);
+    expect(find.textContaining('in range'), findsOneWidget);
+    final inBand =
+        tester
+                .widget<CustomPaint>(
+                  find.byKey(const Key('bench-hand-preview-right')),
+                )
+                .painter!
+            as HandSkeletonPainter;
+    expect(inBand.color, benchLiveInBandColor);
+
+    // 30 cm/s leaves the 7.5-12.5 cm/s band.
+    var x = 0.16;
+    for (var index = 17; index <= 26; index++) {
+      final time = index * 100000000;
+      x += 0.03;
+      container.read(_liveFramesProvider.notifier).set(_livePoses(time, x));
+      await tester.pump();
+    }
+
+    expect(find.textContaining('too fast'), findsOneWidget);
+    final outOfBand =
+        tester
+                .widget<CustomPaint>(
+                  find.byKey(const Key('bench-hand-preview-right')),
+                )
+                .painter!
+            as HandSkeletonPainter;
+    expect(outOfBand.color, benchLiveOutOfBandColor);
   });
 
   testWidgets('a Neckband with no bridge opens in 6DoF only', (tester) async {

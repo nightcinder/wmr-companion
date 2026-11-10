@@ -519,6 +519,8 @@ void main() {
       BenchStatus.running,
     );
     expect(find.text('Skip segment'), findsOneWidget);
+    expect(find.byKey(const Key('bench-live-gate-target')), findsOneWidget);
+    expect(find.textContaining('Live target < 2 cm/s'), findsOneWidget);
 
     await tap(tester, 'bench-skip');
     await tester.pump();
