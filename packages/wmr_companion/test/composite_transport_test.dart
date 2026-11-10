@@ -218,6 +218,26 @@ class _FakeTcp extends WmrWsTransport {
       '$deviceId|${characteristicUuid.toLowerCase()}';
 }
 
+/// A BLE fake whose scan emits nothing until [finishScan], so the composite's
+/// connect path deterministically reaches its wait for a scan hit.
+class _GatedScanBle extends FakeTransport {
+  _GatedScanBle({required super.devices, required this.results});
+
+  final List<BleScanResult> results;
+  final StreamController<BleScanResult> _scan =
+      StreamController<BleScanResult>();
+
+  void finishScan() {
+    if (_scan.isClosed) return;
+    results.forEach(_scan.add);
+    unawaited(_scan.close());
+  }
+
+  @override
+  Stream<BleScanResult> scan({List<String> withServices = const []}) =>
+      _scan.stream;
+}
+
 void main() {
   late _FakeTcp tcp;
   late FakeTransport ble;
@@ -278,6 +298,7 @@ void main() {
     );
 
     await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
     expect(tcp.connectCalls, [_tcpDeviceId]);
     expect(
       await ble.connectionState(_bleDeviceId).first,
@@ -329,6 +350,7 @@ void main() {
         await ble.connectionState(_bleDeviceId).first,
         BleConnectionState.connected,
       );
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
       expect(transport.bridgeIdFor(_tcpDeviceId), _bridgeId);
 
       final received = <BleNotification>[];
@@ -361,6 +383,7 @@ void main() {
 
       expect(tcp.emit(_lanDeviceId, wmrBridgeBatchedCharUuid, [8]), isTrue);
       await _settle();
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
       expect(received.last.value, [8]);
       expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [9]), isFalse);
       expect(states, isNot(contains(BleConnectionState.disconnected)));
@@ -369,6 +392,131 @@ void main() {
       // entry for it.
       final deduped = await transport.scan().toList();
       expect(deduped, hasLength(1));
+    },
+  );
+
+  test(
+    'waits for a BLE scan hit that lands after the TCP dial fails',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      final gated = _GatedScanBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'WMR Bridge',
+            rssi: -40,
+            serviceUuids: const [wmrBridgeServiceUuid],
+          ),
+        ],
+      );
+      gated.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = gated;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+        bleScanWait: const Duration(seconds: 2),
+      );
+      addTearDown(transport.dispose);
+      var scanDone = false;
+      final sub = transport.scan().listen(
+        (_) {},
+        onDone: () => scanDone = true,
+      );
+      addTearDown(sub.cancel);
+      await _settle();
+
+      final connecting = transport.connect(_tcpDeviceId);
+      await _settle();
+
+      // The TCP refusal has been seen and connect is parked on the scan wait,
+      // with no BLE hit yet.
+      expect(tcp.connectCalls, [_tcpDeviceId]);
+      expect(transport.activeLegFor(_tcpDeviceId), isNull);
+      expect(scanDone, isFalse);
+
+      gated.finishScan();
+      await connecting;
+
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+      expect(
+        await ble.connectionState(_bleDeviceId).first,
+        BleConnectionState.connected,
+      );
+    },
+  );
+
+  test(
+    'reports the TCP error when the scan finds no BLE bridge in time',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      final gated = _GatedScanBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'WMR Bridge',
+            rssi: -40,
+            serviceUuids: const [wmrBridgeServiceUuid],
+          ),
+        ],
+      );
+      gated.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = gated;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+        bleScanWait: const Duration(milliseconds: 30),
+      );
+      addTearDown(transport.dispose);
+      final sub = transport.scan().listen((_) {});
+      addTearDown(sub.cancel);
+      await _settle();
+
+      await expectLater(
+        transport.connect(_tcpDeviceId),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            'tcp down',
+          ),
+        ),
+      );
+
+      expect(transport.activeLegFor(_tcpDeviceId), isNull);
+      expect(
+        await ble.connectionState(_bleDeviceId).first,
+        BleConnectionState.disconnected,
+      );
     },
   );
 

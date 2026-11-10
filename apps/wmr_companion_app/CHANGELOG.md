@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The Connect screen discovers Pi bridges on the LAN with `WmrWsDiscovery`
+  and offers an opt-in `CompositeBleTransport` link (TCP first, BLE GATT
+  fallback) with an active-leg indicator (ONY-1143).
+
 ## 0.3.19+24
 
 - `wmr_ws` discovers the Pi bridge on the LAN with a UDP probe and mDNS, and
