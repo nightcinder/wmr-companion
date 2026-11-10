@@ -1,5 +1,5 @@
 # Run sheet: pose validation - Android XR (Aura-class headset)
-Status: proposed, not run. The adapter is implemented and host-tested; no device run has happened. Result tables are empty and must not be pre-filled.
+Status: active. The 0.3.15 and 0.3.16 builds ran on a Google Aura headset for pose captures; both missed the 10-50 cm/s speed gate. Result tables below record gate criteria.
 
 Gates: 1, 2, 6 (optional), 7, 8. See [GATES.md](../../tracking/GATES.md).
 
@@ -8,12 +8,12 @@ Gates: 1, 2, 6 (optional), 7, 8. See [GATES.md](../../tracking/GATES.md).
 |---|---|
 | Headset | Android XR device with an outward passthrough camera: Samsung Galaxy XR, Aura or similar, or a dev kit. Record model and Android version. |
 | Bridge | One board on `main`, flashed, powered, both controllers paired and awake. Record firmware SHA and boot banner. |
-| App | Debug APK from `main` after ONY-212, built with `--dart-define=WMR_ANDROID_XR_TRACKING=true`. Record the commit. |
+| App | Signed v0.3.19 unified APK (versionCode 2024). It carries Android XR, VITURE, and XREAL tracking; no manual build flags are needed. Record the commit. |
 | Permissions | `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING`, `HEAD_TRACKING` declared. `SCENE_UNDERSTANDING_FINE` ("Precise movement and area data") must not be requested; its appearance is a regression. |
 | Tooling | `adb`, a terminal, logcat capture. |
 | Controllers | Both charged, connected and awake for the sitting. |
 
-Build: `cd apps/wmr_companion_app && flutter build apk --debug --dart-define=WMR_ANDROID_XR_TRACKING=true`, then `adb install -r build/app/outputs/flutter-apk/app-debug.apk`. The debug overlay shows "Android XR tracking: available" when the flag is live.
+Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "Attached androidXr tracking" when running on an Android XR device.
 
 ## 2. Setup, once per sitting
 1. Put the bridge in place, controllers on taped marks ~0.5 m away. Photo the setup.
@@ -107,12 +107,34 @@ Pass: offset std < 5 ms and < 1% of frames older than 100 ms. Fail if the offset
 
 Pass: the test is run and the failure of `headRelative` as positional tracking is recorded.
 
-## 8. Send
+## 8. Guided speed checks (filter-spec rev 4 section 8)
+Run the 6-run pose capture from the guided bench on the headset. The bench guides each segment:
+
+1. LEFT still (0 cm/s): brace your forearm on a table. Keep your hand relaxed for 15 s. Scores static jitter J <= 0.5 mm.
+2. RIGHT held, drifting (10-50 cm/s): hold your hand as if aiming. Move smoothly at 10-50 cm/s for 15 s. Do not move slower than 10 cm/s. Scores drift jitter J_D <= 0.75 mm.
+3. LEFT slow pan (10 cm/s): move 30 cm sideways in 3 s (10 cm/s) back and forth for 18 s. Scores lag L <= 160 ms.
+4. RIGHT medium pan (50 cm/s): move 50 cm sideways in 1 s (50 cm/s) back and forth for 15 s. Scores lag L <= 20 ms.
+5. LEFT fast flick (150 cm/s): flick 45 cm in 0.3 s (150 cm/s), pause, and return for 20 s. Scores lag L <= 20 ms.
+6. RIGHT occlusion: hold aim, then cover the hand for 1-2 s. Duration is 15 s. Diagnostic check only.
+
+Make sure that segment D stays within the 10-50 cm/s speed band. The tuner drops samples below 10 cm/s.
+
+| Segment | Speed | Bar | Result |
+|---|---|---|---|
+| LEFT still | 0 cm/s | J <= 0.5 mm | |
+| RIGHT held, drifting | 10-50 cm/s | J_D <= 0.75 mm | |
+| LEFT slow pan | 10 cm/s | L <= 160 ms | |
+| RIGHT medium pan | 50 cm/s | L <= 20 ms | |
+| LEFT fast flick | 150 cm/s | L <= 20 ms | |
+| RIGHT occlusion | n/a | diagnostic | |
+
+## 9. Send
 Capture per gate: logcat `pose-androidxr-<gate>-<timestamp>.log`; exported JSON/CSV; bridge serial `pose-androidxr-serial-<timestamp>.txt`; setup and permission-dialog photos. Zip as `pose-androidxr-<YYYYMMDD>.zip`, record its SHA-256, and attach it with the filled tables. If a file is missing, say which; do not reconstruct numbers.
 
-## 9. Pass/fail for 1.0
+## 10. Pass/fail for 1.0
 - Gate 1 recorded.
 - Gate 2: permission outcome recorded; if `SPATIAL` is unsupported, the path is not 6DoF-capable.
 - Gate 7 pass.
 - Gate 8: failure of `headRelative` recorded.
+- Guided speed checks pass (J <= 0.5 mm, J_D <= 0.75 mm, medium and fast lag <= 20 ms).
 - Android XR needs joints arriving while gripping. If gripping kills tracking, the path is "head-relative fallback only (grip kills tracking)".
