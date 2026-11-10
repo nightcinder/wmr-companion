@@ -3,7 +3,7 @@ Three setups, 20-40 minutes. Android 13+ host (phone, Neckband or headset). The 
 
 ## 0. Pick your setup
 - **A: Bridge + WMR controllers.** You have the bridge and one or two WMR controllers. Full run.
-- **B: 6DoF only (glasses, no bridge).** Glasses with hand tracking, no bridge. Short path.
+- **B: 6DoF only (glasses, no bridge).** Glasses with hand tracking or URXR One day-one environment discovery, no bridge. Short path.
 - **C: Bridge + PSVR2 Sense controllers.** Same as A with PSVR2. Experimental; read 6C first.
 
 Record the setup in the intake block.
@@ -17,6 +17,9 @@ Record the setup in the intake block.
 VITURE hand tracking runs only on a **VITURE Pro Neckband** with **Luma Ultra**. The app runs on the Neckband, not a paired phone. 3DoF models (One, OneLite, Pro, Pro2, Luma, LumaPro, LumaCyber, Beast) do not deliver hand tracking: record setup B as "not supported", not a failure.
 
 Android XR hand tracking runs on the headset. It requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING`. A "Precise movement and area data" prompt (`SCENE_UNDERSTANDING_FINE`) must not appear; if it does, record a regression. The VITURE slice requests `CAMERA` only.
+
+### URXR One day-one checks
+URXR One connects to the host phone through USB-C. Day-one checks do not need paired controllers or a bridge. The app uses the device environment probe to capture USB identities, display metrics, and OpenXR features into the diagnostic test bundle.
 
 ## 1. Get the APK
 https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk
@@ -66,6 +69,15 @@ From **Connect**, tap **Run guided bench**. It ends with **Write test bundle**, 
 - **6A: 3DoF only / Combined.** Pick 3DoF only for controllers, or Combined for bridge + glasses. Follow the wizard: connect, both hands, firmware/config, still, slow move, 60 s FF11, latency, serial.
 - **6B: 6DoF only (no bridge).** Pick 6DoF only. The bridge steps are skipped and the run is shorter; that is expected. There are no controllers to pair. If your glasses do not report hand tracking, **Capture 6DoF pose** is unavailable: record it as skipped.
 
+**URXR One day-one discovery (setup B).** Connect URXR One to the phone over USB-C. Open the app and tap **Export test bundle** on the Connect screen, or complete the 6DoF guided bench. The app creates `wmr-ext-<yyyyMMdd>.zip`. Make sure that the zip file contains `device_environment.json`. Open `manifest.md` in the zip file and confirm the device environment summary line.
+
+Check these items in `device_environment.json`:
+1. USB devices: make sure that the URXR One vendor ID, product ID, and interface class list appear under `usb.devices`.
+2. Displays: make sure that the external panel resolution, refresh rate, and external flag appear under `displays.items`.
+3. OpenXR features: make sure that system features (`android.hardware.xr` or vendor extensions) appear under `xr_features`.
+
+If URXR One does not report hand tracking yet, the 6DoF pose step is skipped. The exported environment bundle completes the day-one check.
+
 **Stereo check (VITURE, setup B).** The Unity player must render stereo 3D (SpaceWalker). The debug overlay shows `playerHosted`, `stereoMode` and `stage`. A healthy run reaches `firstFrame` with `stereoMode` `multiPass`/`singlePass`/`singlePassInstanced` and fills both eyes. If the stage stops at `playerHosted`/`loaderStarted`, `stereoMode` is `unknown`, or one eye shows half an image, record the values and capture logs. A 2D/mono player fails closed with `unavailable`. If the right eye is black, see 6D.
 
 **Capture 6DoF pose.** Appears only while the glasses report hand tracking. It records six short runs: still, held drifting, slow pan, medium pan, fast flick and one occlusion check. Each lasts 15-20 s; the step takes about 1.5 min and alternates hands. Brace your arm for still. For drifting, hold as if aiming and let the hand wander. Pan 30 cm in 3 s for slow, 50 cm in 1 s for medium, flick 45 cm in 0.3 s for fast. Hide the hand for a second or two for occlusion. Skipped runs are recorded as skipped, and the files are in the bundle.
@@ -102,7 +114,7 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - Date/timezone:
 - Firmware: 0.3.5
 - App: <versionName from ADB> unified (signed release) (expected 0.3.19)
-- Host: Neckband / Android XR headset / phone (make/model/OS)
+- Host: Neckband / Android XR headset / URXR One / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none
 - Result: PASS / PARTIAL / FAIL / BLOCKED
@@ -110,7 +122,8 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - LED: red / yellow / blue / green
 - MTU shown: ____
 - Neckband SBS: black right eye / full screen / n/a
-- Hand tracking source: auto-detected (VITURE / XREAL / Android XR) / Simulated
+- Hand tracking source: auto-detected (VITURE / XREAL / Android XR) / Simulated / none (URXR One)
+- Device environment JSON: captured / missing
 - 0DoF status line: ____
 - 6DoF only enabled: yes / no
 - ADB wm size: ____

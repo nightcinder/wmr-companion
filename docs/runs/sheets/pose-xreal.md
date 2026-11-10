@@ -10,13 +10,11 @@ Gates: 3, 5, 7, 8. Gate 1 is informational (no app-visible tracking camera; pass
 |---|---|
 | Glasses | XREAL Air 2 Ultra (the only model with hand tracking). One/OnePro (6DoF head, no hands) and Air/Air2/Air2Pro/Light (3DoF) are rejected and must not be used for gate 5. |
 | Host | Beam Pro or Samsung S24/S25 or later. XREAL warns against Android 16 on dev devices. Record model and Android version. |
-| App build | Release `v0.3.7` unified APK (SHA-256 `d66f5147f85f76d8b4a7249b4cc7d29e969f06205599f04a5fb99825249d865c`, all tracking flags on, both SDKs in one `unityLibrary`), or a local `apps/wmr_companion_app/tool/build_flavor.sh unified --debug` from the same export. Record the commit. |
+| App build | Signed v0.3.19 unified APK (versionCode 2024). It carries Android XR, VITURE, and XREAL tracking; no manual export is required. Record the commit. |
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb`, terminal, logcat capture. |
 
-Unity project settings, set before export (the bridge does not change them at runtime): XREAL XR Plug-in enabled; **Initial Input Source = Hands**; Unity XR Hands + XRI installed; `XREAL_DEVICE_CATEGORY_REALITY` in Support Devices; `WMR_XREAL_XR_SDK` and `WMR_UNITY_XR_HANDS` defined.
-
-The debug overlay shows "XREAL tracking: available" when the AAR is linked and the input source is Hands.
+Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "XREAL tracking: available" when running with Air 2 Ultra glasses.
 
 ## 2. Setup, once per sitting
 1. Connect the host phone to the Air 2 Ultra; confirm 6DoF head tracking in the XREAL home.
@@ -108,13 +106,35 @@ Same procedure as [pose-androidxr.md](pose-androidxr.md) section 7, with the XRE
 
 Pass: the test is run and the failure of `headRelative` as positional tracking is recorded.
 
-## 8. Send
+## 8. Guided speed checks (filter-spec rev 4 section 8)
+Run the 6-run pose capture from the guided bench with the Air 2 Ultra connected. The bench guides each segment:
+
+1. LEFT still (0 cm/s): brace your forearm on a table. Keep your hand relaxed for 15 s. Scores static jitter J <= 0.5 mm.
+2. RIGHT held, drifting (10-50 cm/s): hold your hand as if aiming. Move smoothly at 10-50 cm/s for 15 s. Do not move slower than 10 cm/s. Scores drift jitter J_D <= 0.75 mm.
+3. LEFT slow pan (10 cm/s): move 30 cm sideways in 3 s (10 cm/s) back and forth for 18 s. Scores lag L <= 160 ms.
+4. RIGHT medium pan (50 cm/s): move 50 cm sideways in 1 s (50 cm/s) back and forth for 15 s. Scores lag L <= 20 ms.
+5. LEFT fast flick (150 cm/s): flick 45 cm in 0.3 s (150 cm/s), pause, and return for 20 s. Scores lag L <= 20 ms.
+6. RIGHT occlusion: hold aim, then cover the hand for 1-2 s. Duration is 15 s. Diagnostic check only.
+
+Make sure that segment D stays within the 10-50 cm/s speed band. The tuner drops samples below 10 cm/s.
+
+| Segment | Speed | Bar | Result |
+|---|---|---|---|
+| LEFT still | 0 cm/s | J <= 0.5 mm | |
+| RIGHT held, drifting | 10-50 cm/s | J_D <= 0.75 mm | |
+| LEFT slow pan | 10 cm/s | L <= 160 ms | |
+| RIGHT medium pan | 50 cm/s | L <= 20 ms | |
+| LEFT fast flick | 150 cm/s | L <= 20 ms | |
+| RIGHT occlusion | n/a | diagnostic | |
+
+## 9. Send
 Capture per gate: logcat `pose-xreal-<gate>-<timestamp>.log`; exported JSON/CSV; bridge serial `pose-xreal-serial-<timestamp>.txt`; setup and input-source photos. Zip as `pose-xreal-<YYYYMMDD>.zip`, record its SHA-256, and attach it with the filled tables. If a file is missing, say which; do not reconstruct numbers.
 
-## 9. Pass/fail for 1.0
+## 10. Pass/fail for 1.0
 - Gate 3 pass, or blocked on the SDK/project-settings gate and recorded.
 - Gate 5: joints arrive for an empty hand; the gripping result is recorded.
 - Gate 7 pass.
 - Gate 8: failure of `headRelative` recorded.
+- Guided speed checks pass (J <= 0.5 mm, J_D <= 0.75 mm, medium and fast lag <= 20 ms).
 
 XREAL counts as "6DoF supported" only if gates 3 and 5 pass with joints arriving while gripping. Otherwise it is "head-relative fallback only" (if head pose works) or "not supported". Air 2 Ultra is the only XREAL model that can pass gate 5; all others are recorded as `unsupported`.
