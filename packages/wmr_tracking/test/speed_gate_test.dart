@@ -89,11 +89,11 @@ void main() {
     expect(result.medianSpeedMps, closeTo(0.02, 0.0001));
   });
 
-  test('a dynamic Aura cell inside 10-50 cm/s passes', () {
+  test('a drifting Aura cell inside 10-50 cm/s passes', () {
     final result = evaluator.evaluateRecording(
       _auraTrajectory(0.25),
       hand: TrackedHand.right,
-      cell: SpeedGateCell.dynamic,
+      cell: SpeedGateCell.drifting,
     );
 
     expect(result.status, SpeedGateStatus.pass);
@@ -108,7 +108,7 @@ void main() {
       final result = evaluator.evaluateRecording(
         _auraTrajectory(speed),
         hand: TrackedHand.right,
-        cell: SpeedGateCell.dynamic,
+        cell: SpeedGateCell.drifting,
       );
       expect(
         result.status,
@@ -118,11 +118,11 @@ void main() {
     }
   });
 
-  test('a dynamic Aura cell that barely moves warns below the band', () {
+  test('a drifting Aura cell that barely moves warns below the band', () {
     final result = evaluator.evaluateRecording(
       _auraTrajectory(0.04),
       hand: TrackedHand.right,
-      cell: SpeedGateCell.dynamic,
+      cell: SpeedGateCell.drifting,
     );
 
     expect(result.status, SpeedGateStatus.warning);
@@ -131,11 +131,11 @@ void main() {
     expect(result.reason, contains('below 10-50 cm/s'));
   });
 
-  test('a dynamic Aura cell faster than 50 cm/s warns above the band', () {
+  test('a drifting Aura cell faster than 50 cm/s warns above the band', () {
     final result = evaluator.evaluateRecording(
       _auraTrajectory(0.80),
       hand: TrackedHand.right,
-      cell: SpeedGateCell.dynamic,
+      cell: SpeedGateCell.drifting,
     );
 
     expect(result.status, SpeedGateStatus.warning);
@@ -144,11 +144,87 @@ void main() {
     expect(result.reason, contains('above 10-50 cm/s'));
   });
 
+  test('each section 8 moving class passes at its nominal speed', () {
+    const nominal = {
+      SpeedGateCell.drifting: 0.25,
+      SpeedGateCell.slowPan: 0.10,
+      SpeedGateCell.mediumPan: 0.50,
+      SpeedGateCell.fastFlick: 1.50,
+    };
+    for (final entry in nominal.entries) {
+      final result = evaluator.evaluateRecording(
+        _auraTrajectory(entry.value),
+        hand: TrackedHand.right,
+        cell: entry.key,
+      );
+      expect(result.status, SpeedGateStatus.pass, reason: entry.key.name);
+    }
+  });
+
+  test('a fast flick at 150 cm/s passes its own band', () {
+    final result = evaluator.evaluateRecording(
+      _auraTrajectory(1.50),
+      hand: TrackedHand.right,
+      cell: SpeedGateCell.fastFlick,
+    );
+
+    expect(result.status, SpeedGateStatus.pass, reason: result.reason);
+    expect(result.medianSpeedMps, closeTo(1.50, 0.01));
+    expect(result.toJson()['band_min_mps'], 1.125);
+    expect(result.toJson()['band_max_mps'], 1.875);
+    expect(result.reason, contains('112.5-187.5 cm/s'));
+  });
+
+  test('a fast flick performed at 50 cm/s warns below its band', () {
+    final result = evaluator.evaluateRecording(
+      _auraTrajectory(0.50),
+      hand: TrackedHand.right,
+      cell: SpeedGateCell.fastFlick,
+    );
+
+    expect(result.status, SpeedGateStatus.warning);
+    expect(result.reason, contains('below 112.5-187.5 cm/s'));
+  });
+
+  test('a slow pan performed at 50 cm/s warns above its band', () {
+    final result = evaluator.evaluateRecording(
+      _auraTrajectory(0.50),
+      hand: TrackedHand.right,
+      cell: SpeedGateCell.slowPan,
+    );
+
+    expect(result.status, SpeedGateStatus.warning);
+    expect(result.reason, contains('above 7.5-12.5 cm/s'));
+  });
+
+  test("still cells drop the tuner's first 2 s of settling motion", () {
+    const rateHz = 90;
+    final samples = <SpeedGateSample>[];
+    for (var index = 0; index <= 3 * rateHz; index++) {
+      final seconds = index / rateHz;
+      samples.add(
+        SpeedGateSample(
+          timeNs: 1000000000 + index * (1000000000 ~/ rateHz),
+          position: Vector3(seconds < 2 ? 0.5 * seconds : 1, 0, 0),
+        ),
+      );
+    }
+
+    final result = evaluator.evaluate(samples, cell: SpeedGateCell.still);
+    expect(result.status, SpeedGateStatus.pass, reason: result.reason);
+    expect(result.medianSpeedMps, closeTo(0, 0.01));
+
+    // A 1 s warm-up would score the settling seconds and warn.
+    const oneSecond = SpeedGateEvaluator(warmup: Duration(seconds: 1));
+    final shorter = oneSecond.evaluate(samples, cell: SpeedGateCell.still);
+    expect(shorter.status, SpeedGateStatus.warning);
+  });
+
   test('a trace with too few samples after warm-up is a warning', () {
     final result = evaluator.evaluate([
       SpeedGateSample(timeNs: 1000000000, position: Vector3.zero()),
       SpeedGateSample(timeNs: 1010000000, position: Vector3(0.001, 0, 0)),
-    ], cell: SpeedGateCell.dynamic);
+    ], cell: SpeedGateCell.drifting);
 
     expect(result.status, SpeedGateStatus.warning);
     expect(result.medianSpeedMps, isNull);
@@ -199,7 +275,7 @@ void main() {
       final result = evaluator.evaluateRecording(
         PoseRecording(samples: frames),
         hand: TrackedHand.right,
-        cell: SpeedGateCell.dynamic,
+        cell: SpeedGateCell.drifting,
       );
 
       // 0.02 m per 11.1 ms is 1.8 m/s, far above the 50 cm/s ceiling.

@@ -103,6 +103,7 @@ class _FakeSession implements BenchSession {
       );
     }
     final passed = segment == PoseSegment.still;
+    final gateCell = segment.speedGateCell;
     return BenchStepOutcome.done(
       '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} run $run saved',
       data: {
@@ -112,14 +113,15 @@ class _FakeSession implements BenchSession {
         'run': run,
         'file': '/tmp/${segment.id}.json',
         'samples': 30,
-        'speed_gate': {
-          'cell': segment.speedGateCell.name,
-          'status': passed ? 'pass' : 'warning',
-          'median_speed_mps': passed ? 0.008 : 0.04,
-          'reason': passed
-              ? '0.8 cm/s is in < 2 cm/s'
-              : '4.0 cm/s is below 10-50 cm/s',
-        },
+        if (gateCell != null)
+          'speed_gate': {
+            'cell': gateCell.name,
+            'status': passed ? 'pass' : 'warning',
+            'median_speed_mps': passed ? 0.008 : 0.04,
+            'reason': passed
+                ? '0.8 cm/s is in < 2 cm/s'
+                : '4.0 cm/s is below 10-50 cm/s',
+          },
       },
     );
   }

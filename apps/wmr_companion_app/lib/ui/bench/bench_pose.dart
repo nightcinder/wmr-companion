@@ -78,10 +78,16 @@ enum PoseSegment {
 
   bool get isDiagnostic => this == occlusion;
 
-  /// The section 8 speed gate for this cell: a still hold is capped at
-  /// 2 cm/s, every moving class must stay in the 10-50 cm/s band.
-  SpeedGateCell get speedGateCell =>
-      this == PoseSegment.still ? SpeedGateCell.still : SpeedGateCell.dynamic;
+  /// The section 8 speed gate for this cell, or null for the occlusion
+  /// diagnostic, which has no acceptance bar.
+  SpeedGateCell? get speedGateCell => switch (this) {
+    PoseSegment.still => SpeedGateCell.still,
+    PoseSegment.drifting => SpeedGateCell.drifting,
+    PoseSegment.slowPan => SpeedGateCell.slowPan,
+    PoseSegment.mediumPan => SpeedGateCell.mediumPan,
+    PoseSegment.fastFlick => SpeedGateCell.fastFlick,
+    PoseSegment.occlusion => null,
+  };
 }
 
 /// The five motion classes the tuner scores. Occlusion is diagnostic only.
@@ -484,11 +490,14 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
       if (segment.isDiagnostic) 'diagnostics': diagnostics,
     };
     final recording = builder.build(provenance: provenance);
-    final speedGate = const SpeedGateEvaluator().evaluateRecording(
-      recording,
-      hand: hand == 0 ? TrackedHand.left : TrackedHand.right,
-      cell: segment.speedGateCell,
-    );
+    final gateCell = segment.speedGateCell;
+    final speedGate = gateCell == null
+        ? null
+        : const SpeedGateEvaluator().evaluateRecording(
+            recording,
+            hand: hand == 0 ? TrackedHand.left : TrackedHand.right,
+            cell: gateCell,
+          );
     final file = await store.save(
       recording,
       DateTime.now(),

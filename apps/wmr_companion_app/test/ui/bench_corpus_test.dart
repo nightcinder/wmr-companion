@@ -313,11 +313,16 @@ void main() {
         .firstWhere((step) => step['id'] == 'pose_capture');
     final segments = (pose['data']! as Map)['segments']! as List;
     for (final segment in segments.cast<Map>()) {
-      expect(
-        segment['speed_gate'],
-        isA<Map>(),
-        reason: '${segment['segment']} run ${segment['run']}',
-      );
+      // Occlusion is diagnostic only: section 8 gives it no acceptance bar.
+      if (segment['segment'] == 'occlusion') {
+        expect(segment['speed_gate'], isNull);
+      } else {
+        expect(
+          segment['speed_gate'],
+          isA<Map>(),
+          reason: '${segment['segment']} run ${segment['run']}',
+        );
+      }
     }
   });
 }

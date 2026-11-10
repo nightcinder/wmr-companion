@@ -5,18 +5,34 @@ import 'tracking_types.dart';
 
 /// The speed regime a guided pose-capture cell is expected to follow.
 ///
-/// `filter-spec` rev 4 section 8 asks a still cell to stay under 2 cm/s and
-/// the moving classes to stay in the 10-50 cm/s dynamic band.
+/// `filter-spec` rev 4 section 8 gives the still cell a 0 cm/s nominal and
+/// each moving class a nominal speed; the tuner scores only samples within
+/// +/-25% of that nominal. The occlusion diagnostic has no acceptance bar and
+/// is not gated.
 enum SpeedGateCell {
-  /// Segment S: the hand rests, so a representative speed must be under
-  /// 2 cm/s.
-  still(minSpeedMps: 0, maxSpeedMps: 0.02),
+  /// Segment S: the hand rests, so the median speed must be under 2 cm/s.
+  ///
+  /// The pose-filter tuner drops the first 2 s of a still capture, so the gate
+  /// uses the same settle window.
+  still(minSpeedMps: 0, maxSpeedMps: 0.02, warmup: Duration(seconds: 2)),
 
-  /// Segments D, slow pan, medium pan, fast flick and occlusion: the hand
-  /// moves, so its representative speed must be inside 10-50 cm/s.
-  dynamic(minSpeedMps: 0.10, maxSpeedMps: 0.50);
+  /// Segment D: held, drifting at the 10-50 cm/s band section 8 names.
+  drifting(minSpeedMps: 0.10, maxSpeedMps: 0.50),
 
-  const SpeedGateCell({required this.minSpeedMps, required this.maxSpeedMps});
+  /// Slow pan: section 8's 10 cm/s nominal, +/-25%.
+  slowPan(minSpeedMps: 0.075, maxSpeedMps: 0.125),
+
+  /// Medium pan: section 8's 50 cm/s nominal, +/-25%.
+  mediumPan(minSpeedMps: 0.375, maxSpeedMps: 0.625),
+
+  /// Fast flick: section 8's 150 cm/s nominal, +/-25%.
+  fastFlick(minSpeedMps: 1.125, maxSpeedMps: 1.875);
+
+  const SpeedGateCell({
+    required this.minSpeedMps,
+    required this.maxSpeedMps,
+    this.warmup = const Duration(seconds: 1),
+  });
 
   /// Inclusive lower bound. Still cells accept zero.
   final double minSpeedMps;
@@ -24,15 +40,27 @@ enum SpeedGateCell {
   /// Inclusive upper bound.
   final double maxSpeedMps;
 
+  /// Leading time excluded before scoring.
+  ///
+  /// One second matches the tuner's general `_warmup`; the still cell uses the
+  /// tuner's 2 s settle rather than scoring seconds 1-2.
+  final Duration warmup;
+
   bool contains(double speedMps) =>
       speedMps >= minSpeedMps - _bandEpsilon &&
       speedMps <= maxSpeedMps + _bandEpsilon;
 
   /// Human-readable band for the bundle manifest.
   String get bandLabel => this == still
-      ? '< ${(maxSpeedMps * 100).toStringAsFixed(0)} cm/s'
-      : '${(minSpeedMps * 100).toStringAsFixed(0)}-'
-            '${(maxSpeedMps * 100).toStringAsFixed(0)} cm/s';
+      ? '< ${_cm(maxSpeedMps)} cm/s'
+      : '${_cm(minSpeedMps)}-${_cm(maxSpeedMps)} cm/s';
+
+  static String _cm(double mps) {
+    final cm = mps * 100;
+    return cm == cm.roundToDouble()
+        ? cm.toStringAsFixed(0)
+        : cm.toStringAsFixed(1);
+  }
 }
 
 /// Pass or warning for one pose-capture cell.
@@ -113,13 +141,13 @@ class SpeedGateResult {
 /// tester was asked to perform.
 class SpeedGateEvaluator {
   const SpeedGateEvaluator({
-    this.warmup = const Duration(seconds: 1),
+    this.warmup,
     this.window = const Duration(milliseconds: 500),
     this.minSamples = 3,
   });
 
-  /// Leading time excluded before scoring, matching the tuner's warm-up.
-  final Duration warmup;
+  /// Leading time override; null uses the cell's own [SpeedGateCell.warmup].
+  final Duration? warmup;
 
   /// Centred window used for each instantaneous speed.
   final Duration window;
@@ -148,8 +176,9 @@ class SpeedGateEvaluator {
       );
     }
 
+    final effectiveWarmup = warmup ?? cell.warmup;
     final originNs = sorted.first.timeNs;
-    final startNs = originNs + warmup.inMicroseconds * 1000;
+    final startNs = originNs + effectiveWarmup.inMicroseconds * 1000;
     final halfWindowNs = window.inMicroseconds * 1000 ~/ 2;
     final speeds = <double>[];
     var left = 0;
@@ -184,8 +213,8 @@ class SpeedGateEvaluator {
         medianSpeedMps: null,
         reason:
             '${speeds.length} samples after the '
-            '${warmup.inMilliseconds} ms warm-up; need $minSamples; expected '
-            '${cell.bandLabel}',
+            '${effectiveWarmup.inMilliseconds} ms warm-up; need $minSamples; '
+            'expected ${cell.bandLabel}',
       );
     }
 

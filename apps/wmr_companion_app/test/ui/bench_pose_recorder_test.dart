@@ -291,16 +291,16 @@ void main() {
     const stepNs = 1000000000 ~/ rateHz;
     for (var index = 0; index <= 3 * rateHz; index++) {
       final time = 1000000000 + index * stepNs;
-      feed(time, x: 0.25 * index / rateHz);
+      feed(time, x: 0.5 * index / rateHz);
     }
     final result = await future;
 
     final gate = result.speedGate;
     expect(gate, isNotNull);
-    expect(gate!.cell, SpeedGateCell.dynamic);
+    expect(gate!.cell, SpeedGateCell.mediumPan);
     expect(gate.status, SpeedGateStatus.pass);
-    expect(gate.medianSpeedMps, closeTo(0.25, 0.005));
-    expect(gate.reason, contains('25.0 cm/s'));
+    expect(gate.medianSpeedMps, closeTo(0.5, 0.005));
+    expect(gate.reason, contains('50.0 cm/s'));
   });
 
   test('a still cell moving at 5 cm/s records a speed-gate warning', () async {
@@ -312,7 +312,8 @@ void main() {
     );
     const rateHz = 90;
     const stepNs = 1000000000 ~/ rateHz;
-    for (var index = 0; index <= 2 * rateHz; index++) {
+    // Four seconds so the still cell's 2 s settle still leaves scored samples.
+    for (var index = 0; index <= 4 * rateHz; index++) {
       final time = 1000000000 + index * stepNs;
       feed(time, x: 0.05 * index / rateHz);
     }
