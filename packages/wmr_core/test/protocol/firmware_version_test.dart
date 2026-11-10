@@ -232,15 +232,18 @@ void main() {
   });
 
   group('WmrSemanticVersion', () {
-    test('parses release tags, plain versions and git-describe builds', () {
+    test('parses release tags and ignores git-describe build metadata', () {
       final release = WmrSemanticVersion.tryParse('v0.3.20')!;
       expect((release.major, release.minor, release.patch), (0, 3, 20));
       expect(release.isPreRelease, isFalse);
       expect(WmrSemanticVersion.tryParse(' 0.2.4 ')!.toString(), '0.2.4');
+      final describe = WmrSemanticVersion.tryParse('v0.4.0-3-g41771f8')!;
       expect(
-        WmrSemanticVersion.tryParse('v0.4.0-3-g41771f8')!.toString(),
-        '0.4.0-3-g41771f8',
+        describe,
+        WmrSemanticVersion.tryParse('0.4.0'),
+        reason: 'git describe counts commits after the tag, not a pre-release',
       );
+      expect(describe.isPreRelease, isFalse);
       expect(
         WmrSemanticVersion.tryParse('0.4.0+sha.41771f8')!.toString(),
         '0.4.0',
@@ -253,11 +256,20 @@ void main() {
       }
     });
 
+    test('rejects components that overflow an int instead of throwing', () {
+      for (final value in [
+        '9999999999999999999.0.0',
+        '0.9999999999999999999.0',
+        '0.0.9999999999999999999',
+      ]) {
+        expect(WmrSemanticVersion.tryParse(value), isNull, reason: value);
+      }
+    });
+
     test('orders releases and pre-releases by SemVer', () {
       final ordered = [
         '0.3.9',
         '0.3.10',
-        '0.4.0-3-g41771f8',
         '0.4.0-beta.2',
         '0.4.0-beta.11',
         '0.4.0-rc.1',

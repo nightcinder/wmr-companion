@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -201,6 +202,67 @@ void main() {
       BleConnectionState.connected,
     );
   });
+
+  test('publishes the protocol the service read after connect', () async {
+    const id = 'pi.local:8765';
+    final transport = FakeTransport(
+      devices: const [
+        FakeDevice(
+          id: id,
+          services: [
+            BleServiceInfo(
+              uuid: wmrBridgeServiceUuid,
+              characteristicUuids: [wmrBridgeVersionCharUuid],
+            ),
+          ],
+        ),
+      ],
+    );
+    transport.onRead = (_, characteristic) {
+      if (characteristic.toLowerCase() != wmrBridgeVersionCharUuid) {
+        throw StateError('unexpected read $characteristic');
+      }
+      return Uint8List.fromList(utf8.encode('0.3.19'));
+    };
+    final container = makeContainer(wifiFactory: (_) => transport);
+    final read = Completer<String?>();
+    container.listen(realDeviceProvider, (_, next) {
+      if (!read.isCompleted && next.protocol != null) {
+        read.complete(next.protocol!.firmwareVersion);
+      }
+    });
+
+    await container
+        .read(realDeviceProvider.notifier)
+        .connectWifi(host: 'pi.local', port: 8765);
+
+    expect(await read.future.timeout(const Duration(seconds: 2)), '0.3.19');
+    expect(container.read(realDeviceProvider).protocolUnavailable, isFalse);
+  });
+
+  test(
+    'publishes protocolUnavailable when discovery finds no bridge',
+    () async {
+      const id = 'pi.local:8765';
+      final transport = FakeTransport(devices: const [FakeDevice(id: id)]);
+      final container = makeContainer(wifiFactory: (_) => transport);
+      final unavailable = Completer<void>();
+      container.listen(realDeviceProvider, (_, next) {
+        if (!unavailable.isCompleted && next.protocolUnavailable) {
+          unavailable.complete();
+        }
+      });
+
+      await container
+          .read(realDeviceProvider.notifier)
+          .connectWifi(host: 'pi.local', port: 8765);
+
+      await unavailable.future.timeout(const Duration(seconds: 2));
+      final state = container.read(realDeviceProvider);
+      expect(state.protocol, isNull);
+      expect(state.protocolUnavailable, isTrue);
+    },
+  );
 
   group('BridgeReleaseChecker', () {
     test(

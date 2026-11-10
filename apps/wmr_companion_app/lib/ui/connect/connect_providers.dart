@@ -163,6 +163,7 @@ class RealDeviceState {
     this.decodedStats,
     this.mode,
     this.protocol,
+    this.protocolUnavailable = false,
     this.disconnectEpoch = 0,
     this.activeTransport = BridgeTransportKind.ble,
     this.wifiDeviceId,
@@ -205,6 +206,10 @@ class RealDeviceState {
   /// while the one-time read after connect is in flight, after a disconnect,
   /// and when discovery failed.
   final WmrProtocolVersion? protocol;
+
+  /// True when protocol discovery failed, so [protocol] will stay null
+  /// instead of a read landing later.
+  final bool protocolUnavailable;
 
   /// The primary connected bridge's FF16 version, when it reported one.
   String? get firmwareVersion => protocol?.firmwareVersion;
@@ -548,6 +553,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       decodedStats: _service?.decodedStats ?? state.decodedStats,
       mode: _service?.modeState ?? state.mode,
       protocol: primaryId == null ? null : _service?.protocolFor(primaryId),
+      protocolUnavailable:
+          primaryId != null &&
+          (_service?.protocolUnavailableFor(primaryId) ?? false),
       disconnectEpoch: _disconnectEpoch,
       activeTransport: nextTransport,
       wifiDeviceId: _wifiDeviceId,

@@ -181,6 +181,57 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+  testWidgets('labels a protocol that will never arrive as unavailable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    Future<void> pump({required bool unavailable}) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(
+              () => _BridgeWithoutProtocol(unavailable: unavailable),
+            ),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+    }
+
+    await pump(unavailable: false);
+    expect(find.text('Bridge version: reading…'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    await pump(unavailable: true);
+    expect(
+      find.text('Bridge version: unavailable (discovery failed)'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+}
+
+/// A connected bridge whose protocol read has not landed, or never will.
+class _BridgeWithoutProtocol extends RealDeviceController {
+  _BridgeWithoutProtocol({required this.unavailable});
+
+  final bool unavailable;
+
+  @override
+  RealDeviceState build() => RealDeviceState(
+    status: const BleLinkStatus(BleLinkPhase.ready, deviceId: 'bridge-1'),
+    deviceId: 'bridge-1',
+    connectedDeviceIds: const {'bridge-1'},
+    protocolUnavailable: unavailable,
+  );
 }
 
 /// A connected bridge that has already reported its FF16 version.

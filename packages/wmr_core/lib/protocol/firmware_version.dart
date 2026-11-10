@@ -28,8 +28,10 @@ const String wmrBleEndpointDocumentType = 'wmr_ble_endpoint';
 ///
 /// The bridge reports plain versions (`0.3.19`), git-describe strings
 /// (`v0.4.0-3-g41771f8`) and GitHub serves release tags (`v0.3.20`); all three
-/// parse. A git-describe suffix becomes a pre-release, so `0.4.0-3-g41771f8`
-/// sorts below the `0.4.0` release, as SemVer requires.
+/// parse. A git-describe `-N-gSHA` suffix counts commits after the tag, not a
+/// pre-release, so it is treated as build metadata and compares equal to the
+/// tag it was cut from. A real pre-release (`0.4.0-rc.1`) still sorts below the
+/// release, as SemVer requires.
 class WmrSemanticVersion implements Comparable<WmrSemanticVersion> {
   const WmrSemanticVersion(
     this.major,
@@ -49,9 +51,13 @@ class WmrSemanticVersion implements Comparable<WmrSemanticVersion> {
     r'^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$',
   );
 
+  /// `git describe` output: N commits after the tag, then the abbreviated SHA.
+  static final RegExp _gitDescribeSuffix = RegExp(r'^\d+-g[0-9a-f]+$');
+
   /// Parses [text] after trimming it and allowing one leading `v`/`V`.
-  /// Returns null for anything that is not a version, so callers can fall
-  /// back to showing the raw string.
+  /// Returns null for anything that is not a version, including numeric
+  /// components that do not fit an [int], so callers can fall back to showing
+  /// the raw string.
   static WmrSemanticVersion? tryParse(String text) {
     var value = text.trim();
     if (value.startsWith('v') || value.startsWith('V')) {
@@ -59,15 +65,16 @@ class WmrSemanticVersion implements Comparable<WmrSemanticVersion> {
     }
     final match = _pattern.firstMatch(value);
     if (match == null) return null;
+    final major = int.tryParse(match.group(1)!);
+    final minor = int.tryParse(match.group(2)!);
+    final patch = int.tryParse(match.group(3)!);
+    if (major == null || minor == null || patch == null) return null;
     final pre = match.group(4);
-    final identifiers = pre == null ? const <String>[] : pre.split('.');
+    final identifiers = pre == null || _gitDescribeSuffix.hasMatch(pre)
+        ? const <String>[]
+        : pre.split('.');
     if (identifiers.any((identifier) => identifier.isEmpty)) return null;
-    return WmrSemanticVersion(
-      int.parse(match.group(1)!),
-      int.parse(match.group(2)!),
-      int.parse(match.group(3)!),
-      preRelease: identifiers,
-    );
+    return WmrSemanticVersion(major, minor, patch, preRelease: identifiers);
   }
 
   bool get isPreRelease => preRelease.isNotEmpty;

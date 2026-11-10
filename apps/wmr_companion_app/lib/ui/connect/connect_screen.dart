@@ -304,7 +304,7 @@ class RealPanel extends ConsumerWidget {
         if (status.message != null) Text(status.message!),
         if (s.connected)
           Text(
-            _bridgeVersionLabel(s.protocol),
+            _bridgeVersionLabel(s.protocol, s.protocolUnavailable),
             key: const Key('bridge-version'),
             style: mono,
           ),
@@ -518,9 +518,17 @@ class RealPanel extends ConsumerWidget {
   };
 
   /// The FF16 version of the connected bridge, with an explicit state while
-  /// the one-time read is in flight and when the bridge reports none.
-  static String _bridgeVersionLabel(WmrProtocolVersion? protocol) {
-    if (protocol == null) return 'Bridge version: reading…';
+  /// the one-time read is in flight and when discovery failed or the bridge
+  /// reports none.
+  static String _bridgeVersionLabel(
+    WmrProtocolVersion? protocol,
+    bool unavailable,
+  ) {
+    if (protocol == null) {
+      return unavailable
+          ? 'Bridge version: unavailable (discovery failed)'
+          : 'Bridge version: reading…';
+    }
     if (protocol.firmwareVersionMalformed) {
       return 'Bridge version: malformed (FF16 present)';
     }
