@@ -32,7 +32,7 @@ For URXR One day-one checks, install an APK built from `main` after commit `7565
 
 One APK carries VITURE and XREAL and runs on a Galaxy XR. Uninstall an older WMR Companion first (CI APKs are signed differently): `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
-Do not run an older build. v0.3.19 carries the 6-run pose capture (v0.3.15), Android XR detection before USB IDs (v0.3.16), the Semgrep/gitleaks/Dependabot scans (ONY-890), and the LAN discovery and TCP-to-BLE fallback (ONY-1071 and ONY-1072).
+Do not run an older build. v0.3.19 carries the 6-run pose capture (v0.3.15), Android XR detection before USB IDs (v0.3.16), and the Semgrep/gitleaks/Dependabot scans (ONY-890). The Connect-screen LAN scan and opt-in CompositeBleTransport link (ONY-1143), the device_environment snapshot (ONY-1137), and the pose-capture speed-gate validator (ONY-1138) need a build cut after those commits and are not in the v0.3.19 APK.
 
 ## 2. Install
 1. Download the APK and SHA256SUMS. Verify: `sha256sum -c SHA256SUMS` on a computer (or Termux), or compare the APK's SHA-256.
