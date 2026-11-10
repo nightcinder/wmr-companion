@@ -72,4 +72,10 @@ kotlin {
 dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.0")
     testImplementation("org.mockito:mockito-core:5.0.0")
+    // The plugin talks to Android's Bluetooth stack directly, so the tests run
+    // it under Robolectric. Robolectric's runner is JUnit 4; the vintage engine
+    // runs it on the JUnit Platform configured above.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.10.1")
 }

@@ -3,9 +3,9 @@
 Flutter companion library and reference app for ESP32 (BTstack) WMR controllers. Current state, hardware results and roadmap: `docs/STATUS.md`. Plan and architecture: `docs/PLAN.md`. Library architecture: `docs/LIBRARY.md`. Milestone plan: `/PAP/issues/ONY-50#document-plan`. Read before starting work.
 
 ## Architecture rules
-- The repo is structured as federated packages (`packages/wmr_core`, `packages/wmr_companion` facade, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`, `packages/WMRCompanionKit`, `example/`). The app under `apps/wmr_companion_app` (`wmr_companion_app`) is the reference consumer driving its real connection through the facade or ControllerService.
+- The repo is structured as federated packages (`packages/wmr_core`, `packages/wmr_companion` facade, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`, `packages/wmr_tracking`, `packages/wmr_tracking_dispatch`, `packages/wmr_tracking_android_xr`, `packages/wmr_tracking_viture`, `packages/wmr_tracking_xreal`, `packages/WMRCompanionKit`, `apps/wmr_visionos_app`, `example/`). The app under `apps/wmr_companion_app` (`wmr_companion_app`) is the reference consumer driving its real connection through the facade or ControllerService.
 - Layers: UI -> Riverpod state -> `WmrCompanion` facade (`packages/wmr_companion`) -> `ControllerService` (`packages/wmr_core`) -> (protocol parsers in `packages/wmr_core` + `BleTransport`).
-- `BleTransport` is an abstract interface living in `packages/wmr_core`. Implementations: `UniversalBleTransport` in `packages/wmr_ble` (default on Android/iOS for BLE), `WmrWsTransport` in `packages/wmr_ws` (WebSocket transport for Linux/Pi Wi-Fi daemon; host-tested/loopback-only), `FakeTransport` in `packages/wmr_companion/testing.dart` (tests/UI dev), and native CoreBluetooth via `packages/WMRCompanionKit` (iOS). `BleTransport` is GATT-shaped, but its name is settled for 0.1.0: the owner decided on ONY-146 to keep it (it wraps third-party libraries). Keep it swappable.
+- `BleTransport` is an abstract interface living in `packages/wmr_core`. Implementations: `UniversalBleTransport` in `packages/wmr_ble` (default on Android/iOS for BLE), `WmrWsTransport` in `packages/wmr_ws` (WebSocket transport for Linux/Pi Wi-Fi daemon; host-tested/loopback-only), `WmrWsDiscovery` for LAN discovery of Pi bridges, `CompositeBleTransport` in `packages/wmr_companion` (opt-in TCP-first with BLE GATT fallback), `FakeTransport` in `packages/wmr_companion/testing.dart` (tests/UI dev), and native CoreBluetooth via `packages/WMRCompanionKit` (iOS). `BleTransport` is GATT-shaped, but its name is settled for 0.1.0: the owner decided on ONY-146 to keep it (it wraps third-party libraries). Keep it swappable.
 - Protocol parser is pure Dart in `packages/wmr_core` (no Flutter, Riverpod, or plugin imports; verified by CI grep) and unit tested with golden byte arrays.
 - Timestamp notifications with a monotonic `Stopwatch` at the transport boundary (`wmr_ble`).
 - Never compare ESP32 timestamps with the phone clock; use inter-arrival deltas and sequence numbers. For FF12/FF14, the time step comes from `device_ticks` (100 ns), not from arrival time.
@@ -31,7 +31,13 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
   - `packages/wmr_fusion`: `dart test` (also `dart pub get`, `dart analyze`)
   - `packages/wmr_companion_ui`: `flutter test` (also `flutter pub get`, `flutter analyze`)
   - `packages/wmr_companion_hid_android`: `flutter test` (also `flutter pub get`, `flutter analyze`)
+  - `packages/wmr_tracking`: `dart test` (also `dart pub get`, `dart analyze`)
+  - `packages/wmr_tracking_dispatch`: `flutter test` (also `flutter pub get`, `flutter analyze`)
+  - `packages/wmr_tracking_android_xr`: `flutter test` (also `flutter pub get`, `flutter analyze`)
+  - `packages/wmr_tracking_viture`: `flutter test` (also `flutter pub get`, `flutter analyze`)
+  - `packages/wmr_tracking_xreal`: `flutter test` (also `flutter pub get`, `flutter analyze`)
   - `packages/WMRCompanionKit`: `swift test`
+  - `apps/wmr_visionos_app`: `swift build && swift test`
 - Example app:
   - `cd example && flutter pub get && flutter test && flutter build apk --debug`
 - iOS config validation (macOS / CI):
