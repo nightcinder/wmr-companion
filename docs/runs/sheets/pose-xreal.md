@@ -14,7 +14,7 @@ Gates: 3, 5, 7, 8. Gate 1 is informational (no app-visible tracking camera; pass
 | Bridge | One board on `main`, both controllers paired and awake. Record firmware SHA and boot banner. |
 | Tooling | `adb`, terminal, logcat capture. |
 
-Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "XREAL tracking attached" when running with Air 2 Ultra glasses.
+Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "Attached xreal tracking" when running with Air 2 Ultra glasses.
 
 ## 2. Setup, once per sitting
 1. Connect the host phone to the Air 2 Ultra; confirm 6DoF head tracking in the XREAL home.
