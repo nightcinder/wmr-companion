@@ -152,7 +152,7 @@ void main() {
     expect(
       manifest,
       contains(
-        '| — | LEFT | drifting | 1 | skipped | — | — | '
+        '| — | LEFT | drifting | 1 | skipped | — | — | — | — | '
         'skipped by tester |',
       ),
     );
@@ -365,6 +365,18 @@ void main() {
                   'segment': 'still',
                   'status': 'done',
                   'samples': 30,
+                  'speed_gate': {
+                    'cell': 'still',
+                    'status': 'pass',
+                    'samples': 30,
+                    'gated_samples': 28,
+                    'in_band_samples': 28,
+                    'in_band_fraction': 1.0,
+                    'median_speed_mps': 0.008,
+                    'band_min_mps': 0.0,
+                    'band_max_mps': 0.02,
+                    'reason': '0.8 cm/s is in < 2 cm/s',
+                  },
                 },
                 {
                   'file': '/tmp/pose_capture_fake_right_fastFlick.json',
@@ -373,6 +385,20 @@ void main() {
                   'segment': 'fastFlick',
                   'status': 'done',
                   'samples': 30,
+                  'speed_gate': {
+                    'cell': 'fastFlick',
+                    'status': 'warning',
+                    'samples': 30,
+                    'gated_samples': 28,
+                    'in_band_samples': 0,
+                    'in_band_fraction': 0.0,
+                    'median_speed_mps': 0.8,
+                    'peak_speed_mps': 1.0,
+                    'speed_metric': 'peak',
+                    'band_min_mps': 1.125,
+                    'band_max_mps': 1.875,
+                    'reason': '100.0 cm/s is below 112.5-187.5 cm/s',
+                  },
                 },
               ],
             },
@@ -414,7 +440,10 @@ void main() {
     expect(manifest, contains('## 6DoF pose captures'));
     expect(manifest, contains('pose_capture_fake_left_still.json'));
     expect(manifest, contains('| LEFT | still | 1 | done | 30 |'));
+    expect(manifest, contains('| Speed gate | Speed cm/s |'));
+    expect(manifest, contains('| pass | 0.8 |'));
     expect(manifest, contains('pose_capture_fake_right_fastFlick.json'));
+    expect(manifest, contains('| warning | 100.0 |'));
   });
 
   test(

@@ -102,9 +102,27 @@ class _FakeSession implements BenchSession {
         },
       );
     }
-    return _outcome(
-      BenchStep.poseCapture,
+    final passed = segment == PoseSegment.still;
+    final gateCell = segment.speedGateCell;
+    return BenchStepOutcome.done(
       '${hand == 0 ? 'LEFT' : 'RIGHT'} ${segment.id} run $run saved',
+      data: {
+        'runtime': 'viture',
+        'hand': hand == 0 ? 'LEFT' : 'RIGHT',
+        'segment': segment.id,
+        'run': run,
+        'file': '/tmp/${segment.id}.json',
+        'samples': 30,
+        if (gateCell != null)
+          'speed_gate': {
+            'cell': gateCell.name,
+            'status': passed ? 'pass' : 'warning',
+            'median_speed_mps': passed ? 0.008 : 0.04,
+            'reason': passed
+                ? '0.8 cm/s is in < 2 cm/s'
+                : '4.0 cm/s is below 10-50 cm/s',
+          },
+      },
     );
   }
 
@@ -424,6 +442,27 @@ void main() {
       published.steps.firstWhere((step) => step.id == 'pose_capture').status,
       'skipped',
     );
+  });
+
+  testWidgets('the guided bench shows the last cell speed-gate verdict', (
+    tester,
+  ) async {
+    final container = await open(
+      tester,
+      _FakeSession(),
+      mode: BenchMode.combined,
+      withCarina: false,
+    );
+    await walkTo(tester, container, BenchStep.poseCapture);
+
+    await tap(tester, 'bench-start'); // still: pass
+    expect(find.byKey(const Key('bench-pose-speed-gate')), findsOneWidget);
+    expect(find.textContaining('Speed gate: pass'), findsOneWidget);
+    expect(find.textContaining('0.8 cm/s is in < 2 cm/s'), findsOneWidget);
+
+    await tap(tester, 'bench-start'); // drifting: warning
+    expect(find.textContaining('Speed gate: warning'), findsOneWidget);
+    expect(find.textContaining('4.0 cm/s is below 10-50 cm/s'), findsOneWidget);
   });
 
   testWidgets('skipping pose segments records them and continues', (

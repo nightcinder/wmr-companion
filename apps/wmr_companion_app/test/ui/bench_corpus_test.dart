@@ -300,5 +300,29 @@ void main() {
       'LEFT:fast_flick': 1,
       'RIGHT:occlusion': 1,
     });
+
+    final diagnostics = jsonDecode(
+      utf8.decode(
+        archive.files.firstWhere((f) => f.name == 'diagnostics.json').content
+            as List<int>,
+      ),
+    ) as Map<String, Object?>;
+    final bench = diagnostics['bench']! as Map<String, Object?>;
+    final pose = (bench['steps']! as List)
+        .cast<Map<String, Object?>>()
+        .firstWhere((step) => step['id'] == 'pose_capture');
+    final segments = (pose['data']! as Map)['segments']! as List;
+    for (final segment in segments.cast<Map>()) {
+      // Occlusion is diagnostic only: section 8 gives it no acceptance bar.
+      if (segment['segment'] == 'occlusion') {
+        expect(segment['speed_gate'], isNull);
+      } else {
+        expect(
+          segment['speed_gate'],
+          isA<Map>(),
+          reason: '${segment['segment']} run ${segment['run']}',
+        );
+      }
+    }
   });
 }
