@@ -92,9 +92,13 @@ The exported environment bundle completes the day-one check.
 2. In 3D mode use the Neckband controls (it has no D-pad): short Volume Up/Down move the focus ring, hold Volume Down selects, hold Volume Up goes back. With headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. Do not use ADB to inject touches.
 3. Switch back to 3D before Capture 6DoF pose, which needs stereo.
 
+**Mirroring the screen (6D).** Do not use Android Studio Device Mirroring, and do not use plain `scrcpy`: the Neckband exposes an empty virtual Display 5 (`SYSTEM_NOTIFICATION_VD`) that the tools attach to, while the real UI is on Display 3, which excludes touch. PC clicks therefore land on nothing and touch injection is dropped. View only with `scrcpy --display-id=3`. Drive the app with the physical Volume Up/Down keys, headgaze (Settings + Power), the phone Neckband Remote app, or a paired Bluetooth controller.
+
 Capture: `adb shell dumpsys package com.onyxlens.wmr_companion | grep -E "versionName|versionCode"`, `adb shell wm size`, `adb shell dumpsys display | grep -iE "DisplayDeviceInfo|size=|density=|mode="`, and `adb logcat -v threadtime > wmr-neckband-sbs-<YYYYMMDD-HHMMSS>.log`. Connect wireless ADB first: `adb connect <neckband-ip>:5555`.
 
 **6E: Neckband 0DoF / 6DoF triage.** On v0.3.10 and earlier the app could open and drop to 0DoF with **6DoF only** greyed out. v0.3.11 fixed two causes: the Unity player was paused/unfocused on first host, and 6DoF needs VITURE stereo 3D (SpaceWalker). **The Pro Neckband has no D-pad.** Use short Volume Up/Down to move focus, hold Volume Down to select, hold Volume Up to go back; with headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. If the app still shows 0DoF on v0.3.19, record the status line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
+
+**Mirroring during triage (6E).** Android Studio Device Mirroring attaches to the empty virtual Display 5 (`SYSTEM_NOTIFICATION_VD`) and drops touch injection; the UI is on Display 3, which excludes touch. For a visible screen use `scrcpy --display-id=3` for viewing only, and send input with the physical Volume Up/Down keys, headgaze (Settings + Power), the phone Neckband Remote app, or a paired Bluetooth controller.
 
 ## 7. Logs and files
 Capture for every run and include in the zip:
