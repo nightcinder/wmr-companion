@@ -16,6 +16,7 @@ import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_companion_app/ui/latency/latency_providers.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/capture_files.dart';
@@ -204,6 +205,61 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+
+  test(
+    'a composite export only reports ble_fallback while Wi-Fi is active',
+    () async {
+      final latencyDir = Directory('${dir.path}/latency')..createSync();
+      final captureDir = Directory('${dir.path}/captures')..createSync();
+      final transport = UniversalBleTransport(
+        adapter: FakeBleAdapter(),
+        scanTimeout: const Duration(minutes: 5),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          compositeWifiTransportFactoryProvider.overrideWithValue(
+            (_) => WifiLink(
+              FakeTransport(
+                devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+              ),
+              activeLeg: () => WifiLinkLeg.tcp,
+            ),
+          ),
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          latencyStoreProvider.overrideWith((ref) => LatencyStore(latencyDir)),
+          captureStoreProvider.overrideWith((ref) => CaptureStore(captureDir)),
+          bundleDeviceInfoProvider.overrideWithValue(
+            () async => const BundleDeviceInfo(
+              appVersion: '0.2.2+4',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+            ),
+          ),
+          deviceEnvironmentProbeProvider.overrideWithValue(
+            const _FakeEnvironmentProbe(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(realDeviceProvider.notifier)
+          .connectWifi(host: 'pi.local', port: 8765, bleFallback: true);
+
+      final wifi = await container.read(testBundleInputProvider)();
+      expect(wifi.wifiFallback, isTrue);
+      expect(wifi.activeLeg, 'TCP');
+
+      await container
+          .read(realDeviceProvider.notifier)
+          .selectTransport(BridgeTransportKind.ble);
+
+      final ble = await container.read(testBundleInputProvider)();
+      expect(ble.wifiFallback, isFalse);
+      expect(ble.activeLeg, isNull);
+    },
+  );
 
   testWidgets('a published pose run puts every capture in the zip', (
     tester,

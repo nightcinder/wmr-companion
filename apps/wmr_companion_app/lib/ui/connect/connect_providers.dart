@@ -535,7 +535,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       disconnectEpoch: _disconnectEpoch,
       activeTransport: nextTransport,
       wifiDeviceId: _wifiDeviceId,
-      wifiFallback: wifiFallback ?? state.wifiFallback,
+      wifiFallback:
+          nextTransport == BridgeTransportKind.wifi &&
+          (wifiFallback ?? state.wifiFallback),
       wifiLeg: nextTransport == BridgeTransportKind.wifi
           ? _wifiLink?.activeLeg?.call()
           : null,
