@@ -258,8 +258,8 @@ class WmrProtocolVersion {
   bool get hasFirmwareVersion => firmwareVersion != null;
 
   /// [firmwareVersion] parsed for ordering, or null when FF16 is absent,
-  /// malformed, or not a version string. A git-describe build still parses,
-  /// its suffix becoming a pre-release.
+  /// malformed, or not a version string. A git-describe build still parses;
+  /// its `-N-gSHA` suffix is ignored for ordering.
   WmrSemanticVersion? get semanticVersion {
     final value = firmwareVersion;
     return value == null ? null : WmrSemanticVersion.tryParse(value);
