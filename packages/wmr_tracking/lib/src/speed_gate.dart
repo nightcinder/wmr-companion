@@ -3,6 +3,19 @@ import 'package:vector_math/vector_math_64.dart';
 import 'pose_recording.dart';
 import 'tracking_types.dart';
 
+/// How a cell's verdict is measured.
+enum SpeedGateMetric {
+  /// Continuous motion: the median gated speed must be in band.
+  median,
+
+  /// Intermittent motion: the fastest short-window speed must be in band.
+  ///
+  /// A fast flick is 45 cm in 0.3 s followed by a pause and the return, so
+  /// most samples sit at rest. A median over the whole cell would report the
+  /// pauses rather than the flick.
+  peak,
+}
+
 /// The speed regime a guided pose-capture cell is expected to follow.
 ///
 /// `filter-spec` rev 4 section 8 gives the still cell a 0 cm/s nominal and
@@ -26,12 +39,24 @@ enum SpeedGateCell {
   mediumPan(minSpeedMps: 0.375, maxSpeedMps: 0.625),
 
   /// Fast flick: section 8's 150 cm/s nominal, +/-25%.
-  fastFlick(minSpeedMps: 1.125, maxSpeedMps: 1.875);
+  ///
+  /// The instructed flick is 45 cm in 0.3 s, so the measurement window is no
+  /// longer than the flick; a 0.5 s window spans the whole leg plus the pause
+  /// and can never measure 150 cm/s. The verdict uses the peak short-window
+  /// speed because the flick is intermittent, not sustained.
+  fastFlick(
+    minSpeedMps: 1.125,
+    maxSpeedMps: 1.875,
+    window: Duration(milliseconds: 300),
+    metric: SpeedGateMetric.peak,
+  );
 
   const SpeedGateCell({
     required this.minSpeedMps,
     required this.maxSpeedMps,
     this.warmup = const Duration(seconds: 1),
+    this.window = const Duration(milliseconds: 500),
+    this.metric = SpeedGateMetric.median,
   });
 
   /// Inclusive lower bound. Still cells accept zero.
@@ -45,6 +70,15 @@ enum SpeedGateCell {
   /// One second matches the tuner's general `_warmup`; the still cell uses the
   /// tuner's 2 s settle rather than scoring seconds 1-2.
   final Duration warmup;
+
+  /// Centred window used for each instantaneous speed.
+  ///
+  /// The 0.5 s default matches the tuner's `_speedsCmS`; the fast flick uses
+  /// its own 0.3 s so the window fits inside one flick.
+  final Duration window;
+
+  /// Statistic the verdict uses.
+  final SpeedGateMetric metric;
 
   bool contains(double speedMps) =>
       speedMps >= minSpeedMps - _bandEpsilon &&
@@ -87,6 +121,7 @@ class SpeedGateResult {
     required this.gatedSamples,
     required this.inBandSamples,
     required this.medianSpeedMps,
+    required this.peakSpeedMps,
     required this.reason,
   });
 
@@ -105,6 +140,17 @@ class SpeedGateResult {
   /// Median speed of the gated samples, or null when there were too few.
   final double? medianSpeedMps;
 
+  /// Fastest gated sample, or null when there were too few.
+  ///
+  /// This is the fastest speed measured over [SpeedGateCell.window] (0.3 s for
+  /// the fast flick), not a single-frame difference.
+  final double? peakSpeedMps;
+
+  /// The speed the verdict used: [medianSpeedMps] or [peakSpeedMps] per
+  /// [SpeedGateCell.metric].
+  double? get measuredSpeedMps =>
+      cell.metric == SpeedGateMetric.peak ? peakSpeedMps : medianSpeedMps;
+
   /// One sentence naming the measured speed and the expected band.
   final String reason;
 
@@ -121,6 +167,8 @@ class SpeedGateResult {
     'in_band_samples': inBandSamples,
     'in_band_fraction': _round(inBandFraction),
     'median_speed_mps': _round(medianSpeedMps),
+    'peak_speed_mps': _round(peakSpeedMps),
+    'speed_metric': cell.metric.name,
     'band_min_mps': cell.minSpeedMps,
     'band_max_mps': cell.maxSpeedMps,
     'reason': reason,
@@ -136,21 +184,21 @@ class SpeedGateResult {
 ///
 /// Speed is measured over a centred window, the same way the pose-filter
 /// tuner gates samples, so a validated cell is scorable by that tuner. The
-/// verdict uses the median gated speed rather than a single peak: tracking
-/// jitter produces isolated spikes, while the cell's motion is what the
-/// tester was asked to perform.
+/// default window is 0.5 s, matching the tuner; the fast flick uses a 0.3 s
+/// window because the instructed flick is only 0.3 s long.
+///
+/// Continuous cells use the median gated speed rather than a single peak:
+/// tracking jitter produces isolated spikes, while the cell's motion is what
+/// the tester was asked to perform. The fast flick is intermittent, so its
+/// verdict uses the peak short-window speed instead.
 class SpeedGateEvaluator {
-  const SpeedGateEvaluator({
-    this.warmup,
-    this.window = const Duration(milliseconds: 500),
-    this.minSamples = 3,
-  });
+  const SpeedGateEvaluator({this.warmup, this.window, this.minSamples = 3});
 
   /// Leading time override; null uses the cell's own [SpeedGateCell.warmup].
   final Duration? warmup;
 
-  /// Centred window used for each instantaneous speed.
-  final Duration window;
+  /// Window override; null uses the cell's own [SpeedGateCell.window].
+  final Duration? window;
 
   /// Fewer gated samples than this cannot support a verdict.
   final int minSamples;
@@ -172,14 +220,16 @@ class SpeedGateEvaluator {
         gatedSamples: 0,
         inBandSamples: 0,
         medianSpeedMps: null,
+        peakSpeedMps: null,
         reason: 'no positions to score; expected ${cell.bandLabel}',
       );
     }
 
     final effectiveWarmup = warmup ?? cell.warmup;
+    final effectiveWindow = window ?? cell.window;
     final originNs = sorted.first.timeNs;
     final startNs = originNs + effectiveWarmup.inMicroseconds * 1000;
-    final halfWindowNs = window.inMicroseconds * 1000 ~/ 2;
+    final halfWindowNs = effectiveWindow.inMicroseconds * 1000 ~/ 2;
     final speeds = <double>[];
     var left = 0;
     var right = 0;
@@ -211,6 +261,7 @@ class SpeedGateEvaluator {
         gatedSamples: speeds.length,
         inBandSamples: 0,
         medianSpeedMps: null,
+        peakSpeedMps: null,
         reason:
             '${speeds.length} samples after the '
             '${effectiveWarmup.inMilliseconds} ms warm-up; need $minSamples; '
@@ -223,14 +274,17 @@ class SpeedGateEvaluator {
     final median = speeds.length.isOdd
         ? speeds[middle]
         : (speeds[middle - 1] + speeds[middle]) / 2;
+    final peak = speeds.last;
     final inBand = speeds.where(cell.contains).length;
-    final passed = cell.contains(median);
-    final measured = (median * 100).toStringAsFixed(1);
+    final measured = cell.metric == SpeedGateMetric.peak ? peak : median;
+    final passed = cell.contains(measured);
+    final measuredCm = (measured * 100).toStringAsFixed(1);
+    final label = cell.metric == SpeedGateMetric.peak ? 'peak ' : '';
     final reason = passed
-        ? '$measured cm/s is in ${cell.bandLabel}'
-        : median < cell.minSpeedMps
-        ? '$measured cm/s is below ${cell.bandLabel}'
-        : '$measured cm/s is above ${cell.bandLabel}';
+        ? '$label$measuredCm cm/s is in ${cell.bandLabel}'
+        : measured < cell.minSpeedMps
+        ? '$label$measuredCm cm/s is below ${cell.bandLabel}'
+        : '$label$measuredCm cm/s is above ${cell.bandLabel}';
     return SpeedGateResult(
       cell: cell,
       status: passed ? SpeedGateStatus.pass : SpeedGateStatus.warning,
@@ -238,6 +292,7 @@ class SpeedGateEvaluator {
       gatedSamples: speeds.length,
       inBandSamples: inBand,
       medianSpeedMps: median,
+      peakSpeedMps: peak,
       reason: reason,
     );
   }

@@ -47,6 +47,70 @@ PoseRecording _auraTrajectory(
   );
 }
 
+/// A synthetic XREAL Aura fast-flick cell: [distanceM] out over [legSeconds],
+/// a [pauseSeconds] hold, the return over the same time, repeated.
+///
+/// This is the instructed motion (`Flick your hand 45 cm in 0.3 s, pause, then
+/// bring it back`) rather than a constant-speed trace.
+PoseRecording _flickTrajectory({
+  required double legSeconds,
+  double distanceM = 0.45,
+  double pauseSeconds = 0.4,
+  int cycles = 10,
+  int rateHz = 90,
+  TrackedHand hand = TrackedHand.right,
+}) {
+  const leadInSeconds = 1.0;
+  final period = 2 * (legSeconds + pauseSeconds);
+  final totalSeconds = leadInSeconds + cycles * period;
+  final count = (totalSeconds * rateHz).round();
+  final frames = <TrackingFrame>[];
+  for (var index = 0; index <= count; index++) {
+    final time = 1000000000 + index * (1000000000 ~/ rateHz);
+    final phase = (index / rateHz - leadInSeconds) % period;
+    final double x;
+    if (phase < legSeconds) {
+      x = distanceM * phase / legSeconds;
+    } else if (phase < legSeconds + pauseSeconds) {
+      x = distanceM;
+    } else if (phase < 2 * legSeconds + pauseSeconds) {
+      x = distanceM * (1 - (phase - legSeconds - pauseSeconds) / legSeconds);
+    } else {
+      x = 0;
+    }
+    final pose = TrackedPose(
+      pose: Pose(
+        translation: Vector3(x, 0, 0),
+        rotation: Quaternion.identity(),
+      ),
+    );
+    frames.add(
+      TrackingFrame(
+        timeNs: time,
+        hostTimeNs: time,
+        leftHand: hand == TrackedHand.left
+            ? HandPose(hand: hand, palm: pose)
+            : null,
+        rightHand: hand == TrackedHand.right
+            ? HandPose(hand: hand, palm: pose)
+            : null,
+      ),
+    );
+  }
+  return PoseRecording(
+    samples: [
+      for (final frame in frames)
+        PoseRecordingSample(hostTimeNs: frame.hostTimeNs!, tracking: frame),
+    ],
+    provenance: const {
+      'kind': 'synthetic',
+      'runtime': 'xreal',
+      'device': 'Aura',
+      'generator': 'test/speed_gate_test.dart',
+    },
+  );
+}
+
 void main() {
   const evaluator = SpeedGateEvaluator();
 
@@ -173,6 +237,33 @@ void main() {
     expect(result.toJson()['band_min_mps'], 1.125);
     expect(result.toJson()['band_max_mps'], 1.875);
     expect(result.reason, contains('112.5-187.5 cm/s'));
+  });
+
+  test('a 45 cm flick in 0.3 s passes the fast-flick band', () {
+    final result = evaluator.evaluateRecording(
+      _flickTrajectory(legSeconds: 0.3),
+      hand: TrackedHand.right,
+      cell: SpeedGateCell.fastFlick,
+    );
+
+    expect(result.status, SpeedGateStatus.pass, reason: result.reason);
+    expect(result.peakSpeedMps, closeTo(1.50, 0.02));
+    // Most of the cell is the pause, so the median alone would warn.
+    expect(result.medianSpeedMps, lessThan(1.125));
+    expect(result.reason, contains('peak'));
+    expect(result.toJson()['speed_metric'], 'peak');
+  });
+
+  test('the same 45 cm flick in 0.9 s warns below the fast-flick band', () {
+    final result = evaluator.evaluateRecording(
+      _flickTrajectory(legSeconds: 0.9),
+      hand: TrackedHand.right,
+      cell: SpeedGateCell.fastFlick,
+    );
+
+    expect(result.status, SpeedGateStatus.warning);
+    expect(result.peakSpeedMps, closeTo(0.50, 0.01));
+    expect(result.reason, contains('below 112.5-187.5 cm/s'));
   });
 
   test('a fast flick performed at 50 cm/s warns below its band', () {

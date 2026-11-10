@@ -638,7 +638,10 @@ String _manifest(TestBundleInput input) {
       final rate = segment['anchor_rate_hz'];
       final gate = segment['speed_gate'];
       final gateData = gate is Map ? gate : null;
-      final median = gateData?['median_speed_mps'];
+      final speedKey = gateData != null && gateData['speed_metric'] == 'peak'
+          ? 'peak_speed_mps'
+          : 'median_speed_mps';
+      final speed = gateData?[speedKey];
       buffer.writeln(
         '| ${file == null ? '—' : _baseName(file)} '
         '| ${segment['hand'] ?? '—'} '
@@ -648,7 +651,7 @@ String _manifest(TestBundleInput input) {
         '| ${segment['samples'] ?? '—'} '
         '| ${rate is num ? rate.toStringAsFixed(1) : '—'} '
         '| ${gateData?['status'] ?? '—'} '
-        '| ${median is num ? (median * 100).toStringAsFixed(1) : '—'} '
+        '| ${speed is num ? (speed * 100).toStringAsFixed(1) : '—'} '
         '| ${segment['reason'] ?? '—'} |',
       );
     }
