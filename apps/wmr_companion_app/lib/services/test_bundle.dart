@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:wmr_core/domain/stick_centre.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 /// One connected bridge, as the diagnostics and the manifest describe it.
@@ -208,6 +209,9 @@ class TestBundleInput {
     this.benchRuntime,
     this.deviceEnvironment,
     this.firmwareSha,
+    this.wifiFallback = false,
+    this.activeLeg,
+    this.stickSettings = const StickSettings(),
   });
 
   /// Local time; the file name uses its date and the manifest its timestamp.
@@ -256,6 +260,16 @@ class TestBundleInput {
 
   /// The attached bridge's firmware identity, null without a bridge.
   final String? firmwareSha;
+
+  /// Whether the Wi-Fi link was the opt-in TCP-first link with a BLE GATT
+  /// fallback.
+  final bool wifiFallback;
+
+  /// `TCP` or `BLE` while a [wifiFallback] link is up, null otherwise.
+  final String? activeLeg;
+
+  /// Dead zone, rest-centre learning and the per-hand centres on screen.
+  final StickSettings stickSettings;
 }
 
 /// What one export produced, for the screen and for tests.
@@ -292,7 +306,8 @@ Future<TestBundle> writeTestBundle(
 
   final present = <String>[
     '`manifest.md` — date, phone, Android version, firmware, MTU',
-    '`diagnostics.json` — app, FF16 firmware, MTU, stream and link stats',
+    '`diagnostics.json` — app, FF16 firmware, MTU, stream and link stats, '
+        'composite leg and stick settings',
   ];
   final missing = <String>[];
   final files = <String, List<int>>{};
@@ -462,6 +477,16 @@ Future<TestBundle> writeTestBundle(
     'tracking_runtime': input.benchRuntime,
     'app_commit': input.appCommit,
     'firmware_sha': input.firmwareSha,
+    'ble_fallback': input.wifiFallback,
+    'active_leg': input.activeLeg,
+    'stick': {
+      'dead_zone': input.stickSettings.config.deadZone,
+      'learn_centre': input.stickSettings.config.learn,
+      'centres': [
+        for (final centre in input.stickSettings.centres)
+          centre == null ? null : [centre[0], centre[1]],
+      ],
+    },
     if (input.poseCaptures.isNotEmpty)
       'pose_captures': [
         for (final capture in input.poseCaptures) capture.toJson(),

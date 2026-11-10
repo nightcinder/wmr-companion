@@ -68,6 +68,7 @@ class DebugScreen extends ConsumerWidget {
         fakeBridgeDeviceId: BridgeTransportKind.ble,
       ...ref.watch(bridgeTransportKindsProvider),
     };
+    final wifiLeg = ref.watch(activeWifiLegProvider);
 
     final vm.Quaternion raw = decoded
         ? view?.orientation ?? vm.Quaternion.identity()
@@ -197,7 +198,12 @@ class DebugScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           Text('Stream', style: theme.textTheme.titleMedium),
-          BridgeLinkTable(bridges, style: mono, transportKinds: transportKinds),
+          BridgeLinkTable(
+            bridges,
+            style: mono,
+            transportKinds: transportKinds,
+            wifiLeg: wifiLeg,
+          ),
           const SizedBox(height: 8),
           BridgeFirmwareView(bridges, style: mono),
           if (decoded)
@@ -210,6 +216,7 @@ class DebugScreen extends ConsumerWidget {
                 style: mono,
                 link: link,
                 transportKinds: transportKinds,
+                wifiLeg: wifiLeg,
               )
           else
             _rawStats(ref, mono),
@@ -411,6 +418,7 @@ class BridgeLinkTable extends StatelessWidget {
     super.key,
     this.style,
     this.transportKinds = const {},
+    this.wifiLeg,
   });
 
   final List<BridgeLinkSnapshot> bridges;
@@ -419,6 +427,10 @@ class BridgeLinkTable extends StatelessWidget {
   /// Link kind by bridge id, from `bridgeTransportKindsProvider`. Empty in
   /// tests that do not care; a known kind prefixes the row with its label.
   final Map<String, BridgeTransportKind> transportKinds;
+
+  /// Active leg of an opt-in TCP/BLE composite link; null for a plain Wi-Fi
+  /// link. A legacy label is kept when kind or leg is unknown.
+  final WifiLinkLeg? wifiLeg;
 
   static String _pct(double v) => '${(v * 100).toStringAsFixed(1)}%';
 
@@ -450,9 +462,10 @@ class BridgeLinkTable extends StatelessWidget {
     );
   }
 
-  String _kindLabel(String bridgeId) => transportKinds[bridgeId] == null
-      ? ''
-      : '${transportKinds[bridgeId]!.label}  ';
+  String _kindLabel(String bridgeId) {
+    final kind = transportKinds[bridgeId];
+    return kind == null ? '' : '${kind.labelWithLeg(wifiLeg)}  ';
+  }
 }
 
 /// The FF16 firmware string and the FF11-FF17 feature matrix of each bridge.
@@ -523,6 +536,7 @@ class DecodedStatsView extends StatelessWidget {
     this.style,
     this.link,
     this.transportKinds = const {},
+    this.wifiLeg,
   });
 
   final DecodedStats stats;
@@ -534,6 +548,9 @@ class DecodedStatsView extends StatelessWidget {
 
   /// Link kind by bridge id, for the per-bridge rows.
   final Map<String, BridgeTransportKind> transportKinds;
+
+  /// Active leg of an opt-in TCP/BLE composite link, when one is in use.
+  final WifiLinkLeg? wifiLeg;
 
   static String _ms(double s) => (s * 1000).toStringAsFixed(2);
   static String _sgn(double v) => '${v >= 0 ? '+' : ''}${v.toStringAsFixed(4)}';
@@ -590,7 +607,8 @@ class DecodedStatsView extends StatelessWidget {
   String _bridgeRow(String bridgeId, DecodedStats bridge) {
     final kind = transportKinds[bridgeId];
     final parts = <String>[
-      '${kind == null ? '' : '${kind.label}  '}bridge $bridgeId',
+      '${kind == null ? '' : '${kind.labelWithLeg(wifiLeg)}  '}'
+          'bridge $bridgeId',
     ];
     for (var h = 0; h < bridge.hands.length; h++) {
       final s = bridge.hands[h];

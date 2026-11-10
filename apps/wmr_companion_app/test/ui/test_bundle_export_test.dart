@@ -129,6 +129,15 @@ void main() {
     await tester.pump();
     expect(find.text('State: connected, streaming'), findsOneWidget);
 
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(ConnectScreen)),
+      listen: false,
+    );
+    container.read(stickSettingsProvider.notifier)
+      ..setDeadZone(0.2)
+      ..setLearn(false)
+      ..setCentre(1, -0.02, 0.001);
+
     final zip = File('${dir.path}/out/wmr-ext-20261029.zip');
     late List<int> bytes;
     await tester.runAsync(() async {
@@ -181,6 +190,16 @@ void main() {
     expect((exportedBridge['firmware'] as Map)['version'], '0.3.0');
     expect(exportedBridge['mtu'], 185);
     expect((exportedBridge['link'] as Map)['rssi_dbm'], isNotNull);
+    expect(diagnostics['ble_fallback'], isFalse);
+    expect(diagnostics['active_leg'], isNull);
+    expect(diagnostics['stick'], {
+      'dead_zone': 0.2,
+      'learn_centre': false,
+      'centres': [
+        null,
+        [-0.02, 0.001],
+      ],
+    });
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();

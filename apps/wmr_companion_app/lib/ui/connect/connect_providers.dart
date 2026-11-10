@@ -31,6 +31,13 @@ extension BridgeTransportKindLabel on BridgeTransportKind {
     BridgeTransportKind.ble => 'BLE',
     BridgeTransportKind.wifi => 'Wi-Fi',
   };
+
+  /// The row label, with the active leg of a TCP/BLE composite Wi-Fi link.
+  String labelWithLeg(WifiLinkLeg? wifiLeg) => switch (this) {
+    BridgeTransportKind.ble => label,
+    BridgeTransportKind.wifi =>
+      wifiLeg == null ? label : 'Wi-Fi (${wifiLeg.label})',
+  };
 }
 
 /// The transport behind each bridge id, published by [RealDeviceController]
@@ -74,6 +81,17 @@ extension WifiLinkLegLabel on WifiLinkLeg {
     WifiLinkLeg.ble => 'BLE',
   };
 }
+
+/// The leg carrying an opt-in TCP/BLE composite Wi-Fi link, null for a plain
+/// Wi-Fi link or while the composite is still choosing one.
+///
+/// Debug and latency rows read it so they can say `Wi-Fi (TCP)` instead of a
+/// bare `Wi-Fi` while a fallback link is active.
+final activeWifiLegProvider = Provider<WifiLinkLeg?>(
+  (ref) => ref.watch(
+    realDeviceProvider.select((s) => s.wifiFallback ? s.wifiLeg : null),
+  ),
+);
 
 /// A Wi-Fi link and, for the opt-in composite, the leg currently in use.
 class WifiLink {
