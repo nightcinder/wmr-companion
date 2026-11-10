@@ -393,9 +393,11 @@ void main() {
                     'in_band_samples': 0,
                     'in_band_fraction': 0.0,
                     'median_speed_mps': 0.8,
+                    'peak_speed_mps': 1.0,
+                    'speed_metric': 'peak',
                     'band_min_mps': 1.125,
                     'band_max_mps': 1.875,
-                    'reason': '80.0 cm/s is below 112.5-187.5 cm/s',
+                    'reason': '100.0 cm/s is below 112.5-187.5 cm/s',
                   },
                 },
               ],
@@ -441,7 +443,7 @@ void main() {
     expect(manifest, contains('| Speed gate | Speed cm/s |'));
     expect(manifest, contains('| pass | 0.8 |'));
     expect(manifest, contains('pose_capture_fake_right_fastFlick.json'));
-    expect(manifest, contains('| warning | 80.0 |'));
+    expect(manifest, contains('| warning | 100.0 |'));
   });
 
   test(
