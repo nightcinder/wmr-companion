@@ -201,6 +201,53 @@ void main() {
       BleConnectionState.connected,
     );
   });
+
+  group('BridgeReleaseChecker', () {
+    test(
+      'parses the latest release tag and caches it for the session',
+      () async {
+        var fetches = 0;
+        var now = DateTime(2026, 11, 10, 12);
+        final checker = BridgeReleaseChecker(
+          fetch: (_) async {
+            fetches++;
+            return '{"tag_name":"v0.3.20"}';
+          },
+          clock: () => now,
+        );
+
+        expect((await checker.latest())!.toString(), '0.3.20');
+        expect((await checker.latest())!.toString(), '0.3.20');
+        expect(fetches, 1, reason: 'the second read is served from the cache');
+
+        now = now.add(const Duration(hours: 2));
+        expect((await checker.latest())!.toString(), '0.3.20');
+        expect(fetches, 2, reason: 'the cache expires after an hour');
+      },
+    );
+
+    test(
+      'degrades silently when offline or the response is unusable',
+      () async {
+        final offline = BridgeReleaseChecker(
+          fetch: (_) async => throw StateError('offline'),
+        );
+        expect(await offline.latest(), isNull);
+
+        final malformed = BridgeReleaseChecker(
+          fetch: (_) async => '{"tag_name":24}',
+        );
+        expect(await malformed.latest(), isNull);
+        expect(BridgeReleaseChecker.parseLatestRelease('not json'), isNull);
+        expect(BridgeReleaseChecker.parseLatestRelease('[]'), isNull);
+        expect(
+          BridgeReleaseChecker.parseLatestRelease('{"tag_name":"v0.3.21"}')
+              ?.toString(),
+          '0.3.21',
+        );
+      },
+    );
+  });
 }
 
 /// A Wi-Fi leg that is reachable but refuses every dial, so the composite has

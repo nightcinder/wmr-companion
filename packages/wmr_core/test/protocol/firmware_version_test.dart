@@ -230,4 +230,62 @@ void main() {
       expect(protocol.firmwareVersionMalformed, isTrue);
     });
   });
+
+  group('WmrSemanticVersion', () {
+    test('parses release tags, plain versions and git-describe builds', () {
+      final release = WmrSemanticVersion.tryParse('v0.3.20')!;
+      expect((release.major, release.minor, release.patch), (0, 3, 20));
+      expect(release.isPreRelease, isFalse);
+      expect(WmrSemanticVersion.tryParse(' 0.2.4 ')!.toString(), '0.2.4');
+      expect(
+        WmrSemanticVersion.tryParse('v0.4.0-3-g41771f8')!.toString(),
+        '0.4.0-3-g41771f8',
+      );
+      expect(
+        WmrSemanticVersion.tryParse('0.4.0+sha.41771f8')!.toString(),
+        '0.4.0',
+      );
+    });
+
+    test('rejects strings that are not versions', () {
+      for (final value in ['', 'v', '1.2', '1.2.x', '1.2.3.4', 'v1.2.3-']) {
+        expect(WmrSemanticVersion.tryParse(value), isNull, reason: value);
+      }
+    });
+
+    test('orders releases and pre-releases by SemVer', () {
+      final ordered = [
+        '0.3.9',
+        '0.3.10',
+        '0.4.0-3-g41771f8',
+        '0.4.0-beta.2',
+        '0.4.0-beta.11',
+        '0.4.0-rc.1',
+        '0.4.0',
+      ].map((value) => WmrSemanticVersion.tryParse(value)!).toList();
+      for (var i = 1; i < ordered.length; i++) {
+        expect(
+          ordered[i - 1] < ordered[i],
+          isTrue,
+          reason: '${ordered[i - 1]} < ${ordered[i]}',
+        );
+        expect(ordered[i - 1] == ordered[i], isFalse);
+      }
+    });
+
+    test('a protocol version exposes its parsed semantic version', () {
+      final protocol = WmrProtocolVersion.parseFirmwareVersion(
+        _endpointDocument(version: '0.3.19'),
+        features: _all,
+      );
+      expect(protocol.semanticVersion!.toString(), '0.3.19');
+      expect(
+        WmrProtocolVersion.parseFirmwareVersion(
+          null,
+          features: _all,
+        ).semanticVersion,
+        isNull,
+      );
+    });
+  });
 }

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +10,7 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_companion/wmr_companion.dart'
     show CompositeBleTransport, CompositeLeg;
 import 'package:wmr_core/ble/ble_transport.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
@@ -159,6 +162,7 @@ class RealDeviceState {
     this.stats,
     this.decodedStats,
     this.mode,
+    this.protocol,
     this.disconnectEpoch = 0,
     this.activeTransport = BridgeTransportKind.ble,
     this.wifiDeviceId,
@@ -196,6 +200,14 @@ class RealDeviceState {
 
   /// Requested stream and its fault, from the service. Null before connect.
   final ModeState? mode;
+
+  /// FF16 version and feature matrix of the primary connected bridge. Null
+  /// while the one-time read after connect is in flight, after a disconnect,
+  /// and when discovery failed.
+  final WmrProtocolVersion? protocol;
+
+  /// The primary connected bridge's FF16 version, when it reported one.
+  String? get firmwareVersion => protocol?.firmwareVersion;
 
   /// Latest sighting per device, strongest signal first.
   final List<BleScanResult> results;
@@ -516,6 +528,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
             ? (_deviceStatuses[_connectedDeviceIds.first] ?? _lastStatus)
             : _lastStatus);
     final nextTransport = activeTransport ?? state.activeTransport;
+    final primaryId = _connectedDeviceIds.isNotEmpty
+        ? _connectedDeviceIds.first
+        : null;
     state = RealDeviceState(
       status: activeStatus,
       results: results ?? state.results,
@@ -532,6 +547,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       stats: _service?.stats ?? state.stats,
       decodedStats: _service?.decodedStats ?? state.decodedStats,
       mode: _service?.modeState ?? state.mode,
+      protocol: primaryId == null ? null : _service?.protocolFor(primaryId),
       disconnectEpoch: _disconnectEpoch,
       activeTransport: nextTransport,
       wifiDeviceId: _wifiDeviceId,
@@ -894,3 +910,83 @@ final appVersionProvider = FutureProvider<String>((ref) async {
     return 'unknown';
   }
 });
+
+/// The GitHub Releases endpoint for the latest Pi bridge release.
+const String bridgeLatestReleaseUrl =
+    'https://api.github.com/repos/nightcinder/WMR_Bridge/releases/latest';
+
+/// Reads the latest WMR_Bridge release tag and caches it for the session.
+///
+/// The Connect screen needs a yes/no answer ("is there a newer release?"), so
+/// a failed request, an offline device, or a malformed response all degrade
+/// to null instead of surfacing an error. [fetch] and [clock] are injectable
+/// for tests; [cacheFor] keeps repeat screen builds from re-querying GitHub.
+class BridgeReleaseChecker {
+  BridgeReleaseChecker({
+    Future<String?> Function(Uri uri)? fetch,
+    DateTime Function()? clock,
+    this.cacheFor = const Duration(hours: 1),
+  }) : _fetch = fetch ?? _fetchLatestReleaseDocument,
+       _clock = clock ?? DateTime.now;
+
+  final Future<String?> Function(Uri uri) _fetch;
+  final DateTime Function() _clock;
+  final Duration cacheFor;
+
+  ({DateTime at, WmrSemanticVersion version})? _cached;
+
+  /// The latest release tag, or null when it could not be read.
+  Future<WmrSemanticVersion?> latest() async {
+    final cached = _cached;
+    if (cached != null && _clock().difference(cached.at) < cacheFor) {
+      return cached.version;
+    }
+    try {
+      final body = await _fetch(Uri.parse(bridgeLatestReleaseUrl));
+      if (body == null) return null;
+      final version = parseLatestRelease(body);
+      if (version != null) _cached = (at: _clock(), version: version);
+      return version;
+    } catch (_) {
+      // Offline, DNS failure or a timeout: no banner rather than an error.
+      return null;
+    }
+  }
+
+  /// Parses the `tag_name` of a GitHub `releases/latest` response.
+  static WmrSemanticVersion? parseLatestRelease(String body) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map) return null;
+    final tag = decoded['tag_name'];
+    return tag is String ? WmrSemanticVersion.tryParse(tag) : null;
+  }
+
+  static Future<String?> _fetchLatestReleaseDocument(Uri uri) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      final request = await client.getUrl(uri);
+      // GitHub rejects API requests that do not identify a client.
+      request.headers.set(HttpHeaders.userAgentHeader, 'wmr-companion');
+      final response = await request.close();
+      if (response.statusCode != HttpStatus.ok) return null;
+      return await utf8.decoder.bind(response).join();
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
+/// The release checker for this session. Tests override it with a fake.
+final bridgeReleaseCheckerProvider = Provider<BridgeReleaseChecker>(
+  (ref) => BridgeReleaseChecker(),
+);
+
+/// The latest WMR_Bridge release, null while unknown or offline.
+final latestBridgeReleaseProvider = FutureProvider<WmrSemanticVersion?>(
+  (ref) => ref.watch(bridgeReleaseCheckerProvider).latest(),
+);
