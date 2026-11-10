@@ -17,7 +17,7 @@
 - CI adds Kotlin unit tests for the HID plugin (ONY-1171) and makes the
   gitleaks, Semgrep and OSV scans blocking (ONY-1136); the release dex check
   runs as its own workflow.
-- Paired with WMR_Bridge `v0.3.15`.
+- Paired with WMR_Bridge `v0.3.17`.
 
 ## 0.3.19+24
 

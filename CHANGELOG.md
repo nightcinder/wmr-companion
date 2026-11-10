@@ -5,7 +5,7 @@ keeps its own changelog; this file records the release as a whole.
 
 ## 0.3.20+25
 
-WMR Companion release, paired with WMR_Bridge `v0.3.15`.
+WMR Companion release, paired with WMR_Bridge `v0.3.17`.
 
 - The guided bench checks a pose capture's speed live: the active hand turns
   green inside the section 8 band and red outside it, with the measured speed
