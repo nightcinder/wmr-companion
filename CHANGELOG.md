@@ -3,14 +3,24 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
-## Unreleased
+## 0.3.20+25
+
+WMR Companion release, paired with WMR_Bridge `v0.3.17`.
 
 - The guided bench checks a pose capture's speed live: the active hand turns
   green inside the section 8 band and red outside it, with the measured speed
-  and the band shown during the run (ONY-1176).
+  and the band shown during the run (ONY-1176). A separate validator scores a
+  saved cell against the section 8 speed gate (ONY-1138).
 - The reference app scans the LAN for Pi bridges with `WmrWsDiscovery` and
   can opt into `CompositeBleTransport`: TCP first, BLE GATT as fallback, with
-  the active leg shown on the Connect screen (ONY-1143).
+  the active leg shown on the Connect screen (ONY-1143). The active leg and
+  composite stick settings are recorded in diagnostic bundles and shown in the
+  Debug and Latency screens (ONY-1170).
+- Diagnostic bundles include a USB, display and XR device environment snapshot
+  (ONY-1137).
+- CI adds Kotlin unit tests for the HID plugin (ONY-1171), splits the release
+  dex check into its own workflow, and makes the gitleaks, Semgrep and OSV
+  scans blocking (ONY-1136).
 
 ## 0.3.19+24
 

@@ -1,14 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.3.20+25
 
 - The guided bench shows live speed feedback during each pose capture: the
   active hand turns green inside the section 8 band and red outside it, with
   the measured speed and target band on screen, so a cell can be corrected
-  while recording instead of only after it is saved (ONY-1176).
+  while recording instead of only after it is saved (ONY-1176). A saved cell
+  can be scored with the section 8 speed-gate validator (ONY-1138).
 - The Connect screen discovers Pi bridges on the LAN with `WmrWsDiscovery`
   and offers an opt-in `CompositeBleTransport` link (TCP first, BLE GATT
-  fallback) with an active-leg indicator (ONY-1143).
+  fallback) with an active-leg indicator (ONY-1143). Diagnostic bundles and
+  the Debug and Latency screens record the composite active leg and stick
+  settings (ONY-1170).
+- Diagnostic bundles include a USB, display and XR device environment snapshot
+  (ONY-1137).
+- CI adds Kotlin unit tests for the HID plugin (ONY-1171) and makes the
+  gitleaks, Semgrep and OSV scans blocking (ONY-1136); the release dex check
+  runs as its own workflow.
+- Paired with WMR_Bridge `v0.3.17`.
 
 ## 0.3.19+24
 
