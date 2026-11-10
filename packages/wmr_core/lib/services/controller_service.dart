@@ -582,6 +582,11 @@ class ControllerService {
   /// [WmrProtocolVersion.withoutFirmwareVersion].
   WmrProtocolVersion? protocolFor(String bridgeId) => _protocols[bridgeId];
 
+  /// Whether protocol discovery for [bridgeId] failed, so [protocolFor] stays
+  /// null instead of a read landing later.
+  bool protocolUnavailableFor(String bridgeId) =>
+      _protocolUnavailable.contains(bridgeId);
+
   /// Emits the per-bridge protocol map whenever a read or a removal changes
   /// it.
   Stream<Map<String, WmrProtocolVersion>> get protocolChanges =>

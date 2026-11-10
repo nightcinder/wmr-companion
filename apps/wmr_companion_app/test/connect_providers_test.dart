@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -199,6 +200,114 @@ void main() {
     expect(
       await ble.connectionState(bleDeviceId).first,
       BleConnectionState.connected,
+    );
+  });
+
+  test('publishes the protocol the service read after connect', () async {
+    const id = 'pi.local:8765';
+    final transport = FakeTransport(
+      devices: const [
+        FakeDevice(
+          id: id,
+          services: [
+            BleServiceInfo(
+              uuid: wmrBridgeServiceUuid,
+              characteristicUuids: [wmrBridgeVersionCharUuid],
+            ),
+          ],
+        ),
+      ],
+    );
+    transport.onRead = (_, characteristic) {
+      if (characteristic.toLowerCase() != wmrBridgeVersionCharUuid) {
+        throw StateError('unexpected read $characteristic');
+      }
+      return Uint8List.fromList(utf8.encode('0.3.19'));
+    };
+    final container = makeContainer(wifiFactory: (_) => transport);
+    final read = Completer<String?>();
+    container.listen(realDeviceProvider, (_, next) {
+      if (!read.isCompleted && next.protocol != null) {
+        read.complete(next.protocol!.firmwareVersion);
+      }
+    });
+
+    await container
+        .read(realDeviceProvider.notifier)
+        .connectWifi(host: 'pi.local', port: 8765);
+
+    expect(await read.future.timeout(const Duration(seconds: 2)), '0.3.19');
+    expect(container.read(realDeviceProvider).protocolUnavailable, isFalse);
+  });
+
+  test(
+    'publishes protocolUnavailable when discovery finds no bridge',
+    () async {
+      const id = 'pi.local:8765';
+      final transport = FakeTransport(devices: const [FakeDevice(id: id)]);
+      final container = makeContainer(wifiFactory: (_) => transport);
+      final unavailable = Completer<void>();
+      container.listen(realDeviceProvider, (_, next) {
+        if (!unavailable.isCompleted && next.protocolUnavailable) {
+          unavailable.complete();
+        }
+      });
+
+      await container
+          .read(realDeviceProvider.notifier)
+          .connectWifi(host: 'pi.local', port: 8765);
+
+      await unavailable.future.timeout(const Duration(seconds: 2));
+      final state = container.read(realDeviceProvider);
+      expect(state.protocol, isNull);
+      expect(state.protocolUnavailable, isTrue);
+    },
+  );
+
+  group('BridgeReleaseChecker', () {
+    test(
+      'parses the latest release tag and caches it for the session',
+      () async {
+        var fetches = 0;
+        var now = DateTime(2026, 11, 10, 12);
+        final checker = BridgeReleaseChecker(
+          fetch: (_) async {
+            fetches++;
+            return '{"tag_name":"v0.3.20"}';
+          },
+          clock: () => now,
+        );
+
+        expect((await checker.latest())!.toString(), '0.3.20');
+        expect((await checker.latest())!.toString(), '0.3.20');
+        expect(fetches, 1, reason: 'the second read is served from the cache');
+
+        now = now.add(const Duration(hours: 2));
+        expect((await checker.latest())!.toString(), '0.3.20');
+        expect(fetches, 2, reason: 'the cache expires after an hour');
+      },
+    );
+
+    test(
+      'degrades silently when offline or the response is unusable',
+      () async {
+        final offline = BridgeReleaseChecker(
+          fetch: (_) async => throw StateError('offline'),
+        );
+        expect(await offline.latest(), isNull);
+
+        final malformed = BridgeReleaseChecker(
+          fetch: (_) async => '{"tag_name":24}',
+        );
+        expect(await malformed.latest(), isNull);
+        expect(BridgeReleaseChecker.parseLatestRelease('not json'), isNull);
+        expect(BridgeReleaseChecker.parseLatestRelease('[]'), isNull);
+        expect(
+          BridgeReleaseChecker.parseLatestRelease('{"tag_name":"v0.3.21"}')
+              ?.toString(),
+          '0.3.21',
+        );
+      },
     );
   });
 }

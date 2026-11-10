@@ -7,6 +7,7 @@ import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 import 'ui/raw_mode_notifier.dart';
@@ -122,6 +123,128 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     },
+  );
+
+  testWidgets('shows the connected bridge version and a newer-release banner', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(_ConnectedBridge.new),
+          latestBridgeReleaseProvider.overrideWith(
+            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Bridge version: 0.3.19'), findsOneWidget);
+    expect(find.byKey(const Key('bridge-update-banner')), findsOneWidget);
+    expect(find.textContaining('0.3.20'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('hides the update banner when the bridge is current', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(_ConnectedBridge.new),
+          latestBridgeReleaseProvider.overrideWith(
+            (ref) async => const WmrSemanticVersion(0, 3, 19),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Bridge version: 0.3.19'), findsOneWidget);
+    expect(find.byKey(const Key('bridge-update-banner')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+  testWidgets('labels a protocol that will never arrive as unavailable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    Future<void> pump({required bool unavailable}) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(
+              () => _BridgeWithoutProtocol(unavailable: unavailable),
+            ),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+    }
+
+    await pump(unavailable: false);
+    expect(find.text('Bridge version: reading…'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    await pump(unavailable: true);
+    expect(
+      find.text('Bridge version: unavailable (discovery failed)'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+}
+
+/// A connected bridge whose protocol read has not landed, or never will.
+class _BridgeWithoutProtocol extends RealDeviceController {
+  _BridgeWithoutProtocol({required this.unavailable});
+
+  final bool unavailable;
+
+  @override
+  RealDeviceState build() => RealDeviceState(
+    status: const BleLinkStatus(BleLinkPhase.ready, deviceId: 'bridge-1'),
+    deviceId: 'bridge-1',
+    connectedDeviceIds: const {'bridge-1'},
+    protocolUnavailable: unavailable,
+  );
+}
+
+/// A connected bridge that has already reported its FF16 version.
+class _ConnectedBridge extends RealDeviceController {
+  @override
+  RealDeviceState build() => const RealDeviceState(
+    status: BleLinkStatus(BleLinkPhase.ready, deviceId: 'bridge-1'),
+    deviceId: 'bridge-1',
+    connectedDeviceIds: {'bridge-1'},
+    protocol: WmrProtocolVersion(
+      features: WmrBridgeFeatures.none,
+      firmwareVersion: '0.3.19',
+    ),
   );
 }
 

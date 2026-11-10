@@ -23,6 +23,117 @@ const int wmrFirmwareVersionMaxBytes = 31;
 /// The `"type"` of the endpoint document the Pi host bridge serves from FF16.
 const String wmrBleEndpointDocumentType = 'wmr_ble_endpoint';
 
+/// One bridge or release version: `major.minor.patch` with an optional SemVer
+/// pre-release suffix. Build metadata is ignored when comparing.
+///
+/// The bridge reports plain versions (`0.3.19`), git-describe strings
+/// (`v0.4.0-3-g41771f8`) and GitHub serves release tags (`v0.3.20`); all three
+/// parse. A git-describe `-N-gSHA` suffix counts commits after the tag, not a
+/// pre-release, so it is treated as build metadata and compares equal to the
+/// tag it was cut from. A real pre-release (`0.4.0-rc.1`) still sorts below the
+/// release, as SemVer requires.
+class WmrSemanticVersion implements Comparable<WmrSemanticVersion> {
+  const WmrSemanticVersion(
+    this.major,
+    this.minor,
+    this.patch, {
+    this.preRelease = const [],
+  });
+
+  final int major;
+  final int minor;
+  final int patch;
+
+  /// Dot-separated pre-release identifiers, empty for a release version.
+  final List<String> preRelease;
+
+  static final RegExp _pattern = RegExp(
+    r'^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$',
+  );
+
+  /// `git describe` output: N commits after the tag, then the abbreviated SHA.
+  static final RegExp _gitDescribeSuffix = RegExp(r'^\d+-g[0-9a-f]+$');
+
+  /// Parses [text] after trimming it and allowing one leading `v`/`V`.
+  /// Returns null for anything that is not a version, including numeric
+  /// components that do not fit an [int], so callers can fall back to showing
+  /// the raw string.
+  static WmrSemanticVersion? tryParse(String text) {
+    var value = text.trim();
+    if (value.startsWith('v') || value.startsWith('V')) {
+      value = value.substring(1);
+    }
+    final match = _pattern.firstMatch(value);
+    if (match == null) return null;
+    final major = int.tryParse(match.group(1)!);
+    final minor = int.tryParse(match.group(2)!);
+    final patch = int.tryParse(match.group(3)!);
+    if (major == null || minor == null || patch == null) return null;
+    final pre = match.group(4);
+    final identifiers = pre == null || _gitDescribeSuffix.hasMatch(pre)
+        ? const <String>[]
+        : pre.split('.');
+    if (identifiers.any((identifier) => identifier.isEmpty)) return null;
+    return WmrSemanticVersion(major, minor, patch, preRelease: identifiers);
+  }
+
+  bool get isPreRelease => preRelease.isNotEmpty;
+
+  @override
+  int compareTo(WmrSemanticVersion other) {
+    for (final (a, b) in [
+      (major, other.major),
+      (minor, other.minor),
+      (patch, other.patch),
+    ]) {
+      if (a != b) return a < b ? -1 : 1;
+    }
+    if (preRelease.isEmpty || other.preRelease.isEmpty) {
+      if (preRelease.isEmpty && other.preRelease.isEmpty) return 0;
+      return preRelease.isEmpty ? 1 : -1;
+    }
+    final shared = preRelease.length < other.preRelease.length
+        ? preRelease.length
+        : other.preRelease.length;
+    for (var i = 0; i < shared; i++) {
+      final a = preRelease[i];
+      final b = other.preRelease[i];
+      final aNumber = int.tryParse(a);
+      final bNumber = int.tryParse(b);
+      if (aNumber != null && bNumber != null) {
+        if (aNumber != bNumber) return aNumber < bNumber ? -1 : 1;
+      } else if (aNumber != null) {
+        // Numeric identifiers sort below alphanumeric ones.
+        return -1;
+      } else if (bNumber != null) {
+        return 1;
+      } else {
+        final order = a.compareTo(b);
+        if (order != 0) return order < 0 ? -1 : 1;
+      }
+    }
+    if (preRelease.length == other.preRelease.length) return 0;
+    return preRelease.length < other.preRelease.length ? -1 : 1;
+  }
+
+  bool operator >(WmrSemanticVersion other) => compareTo(other) > 0;
+
+  bool operator <(WmrSemanticVersion other) => compareTo(other) < 0;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WmrSemanticVersion && compareTo(other) == 0;
+
+  @override
+  int get hashCode =>
+      Object.hash(major, minor, patch, Object.hashAll(preRelease));
+
+  @override
+  String toString() =>
+      '$major.$minor.$patch'
+      '${preRelease.isEmpty ? '' : '-${preRelease.join('.')}'}';
+}
+
 /// The FF characteristics a bridge offers. FF11 and FF12 are on every known
 /// firmware; the others arrived later and are optional.
 enum WmrBridgeFeature {
@@ -145,6 +256,14 @@ class WmrProtocolVersion {
 
   /// Whether a usable version string was reported.
   bool get hasFirmwareVersion => firmwareVersion != null;
+
+  /// [firmwareVersion] parsed for ordering, or null when FF16 is absent,
+  /// malformed, or not a version string. A git-describe build still parses;
+  /// its `-N-gSHA` suffix is ignored for ordering.
+  WmrSemanticVersion? get semanticVersion {
+    final value = firmwareVersion;
+    return value == null ? null : WmrSemanticVersion.tryParse(value);
+  }
 
   /// Decodes an FF16 read.
   ///

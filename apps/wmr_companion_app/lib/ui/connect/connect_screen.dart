@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 import '../../services/test_bundle_export.dart';
@@ -301,6 +302,13 @@ class RealPanel extends ConsumerWidget {
           ),
         ),
         if (status.message != null) Text(status.message!),
+        if (s.connected)
+          Text(
+            _bridgeVersionLabel(s.protocol, s.protocolUnavailable),
+            key: const Key('bridge-version'),
+            style: mono,
+          ),
+        if (s.connected) _BridgeUpdateBanner(connected: s.protocol),
         if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null) ...[
           Text('Endpoint: ${s.wifiDeviceId}', style: mono),
           if (s.wifiFallback)
@@ -508,6 +516,61 @@ class RealPanel extends ConsumerWidget {
     BleLinkPhase.serviceNotFound => 'bridge service not found',
     BleLinkPhase.connectionLost => 'connection lost',
   };
+
+  /// The FF16 version of the connected bridge, with an explicit state while
+  /// the one-time read is in flight and when discovery failed or the bridge
+  /// reports none.
+  static String _bridgeVersionLabel(
+    WmrProtocolVersion? protocol,
+    bool unavailable,
+  ) {
+    if (protocol == null) {
+      return unavailable
+          ? 'Bridge version: unavailable (discovery failed)'
+          : 'Bridge version: reading…';
+    }
+    if (protocol.firmwareVersionMalformed) {
+      return 'Bridge version: malformed (FF16 present)';
+    }
+    final version = protocol.firmwareVersion;
+    return version == null
+        ? 'Bridge version: not reported'
+        : 'Bridge version: $version';
+  }
+}
+
+/// Shown when the latest WMR_Bridge GitHub release is newer than the version
+/// the connected bridge reported. A missing or unparsable version on either
+/// side stays silent; this is a hint, not a connectivity state.
+class _BridgeUpdateBanner extends ConsumerWidget {
+  const _BridgeUpdateBanner({required this.connected});
+
+  final WmrProtocolVersion? connected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final latest = ref.watch(latestBridgeReleaseProvider).value;
+    final connectedVersion = connected?.semanticVersion;
+    if (latest == null ||
+        connectedVersion == null ||
+        latest.compareTo(connectedVersion) <= 0) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    return Card(
+      key: const Key('bridge-update-banner'),
+      color: theme.colorScheme.tertiaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Text(
+          'Bridge update available: $connectedVersion → $latest',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onTertiaryContainer,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Entry for a Pi Wi-Fi bridge: host, port, the optional shared token, and a
