@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import '../../services/test_bundle_export.dart';
 import '../bench/bench_screen.dart';
@@ -41,6 +42,8 @@ class ConnectUiState extends ChangeNotifier {
   final FocusNode portFocus = FocusNode(debugLabel: 'wifi-port');
   final FocusNode tokenFocus = FocusNode(debugLabel: 'wifi-token');
   final FocusNode secureFocus = FocusNode(debugLabel: 'wifi-secure');
+  final FocusNode discoverFocus = FocusNode(debugLabel: 'wifi-discover');
+  final FocusNode fallbackFocus = FocusNode(debugLabel: 'wifi-ble-fallback');
 
   final TextEditingController host = TextEditingController();
   final TextEditingController port = TextEditingController(text: '8765');
@@ -49,6 +52,7 @@ class ConnectUiState extends ChangeNotifier {
   final ScrollController scroll = StereoSbsScrollController();
 
   bool secure = false;
+  bool bleFallback = false;
   String? wifiError;
   bool exportBusy = false;
   String? exportMessage;
@@ -56,6 +60,11 @@ class ConnectUiState extends ChangeNotifier {
 
   void setSecure(bool value) {
     secure = value;
+    notifyListeners();
+  }
+
+  void setBleFallback(bool value) {
+    bleFallback = value;
     notifyListeners();
   }
 
@@ -101,6 +110,8 @@ class ConnectUiState extends ChangeNotifier {
       portFocus,
       tokenFocus,
       secureFocus,
+      discoverFocus,
+      fallbackFocus,
     ]) {
       node.dispose();
     }
@@ -299,8 +310,15 @@ class RealPanel extends ConsumerWidget {
           ),
         ),
         if (status.message != null) Text(status.message!),
-        if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null)
+        if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null) ...[
           Text('Endpoint: ${s.wifiDeviceId}', style: mono),
+          if (s.wifiFallback)
+            Text(
+              'Active leg: ${s.connected ? (s.wifiLeg?.label ?? '-') : '-'}',
+              key: const Key('wifi-active-leg'),
+              style: mono,
+            ),
+        ],
         if (s.connectedDeviceIds.length <= 1) ...[
           Text('MTU (negotiated): ${status.mtu ?? '-'}', style: mono),
           Text(
@@ -480,11 +498,7 @@ class RealPanel extends ConsumerWidget {
         .push(MaterialPageRoute<void>(builder: (_) => const CaptureScreen()));
   }
 
-  /// Entry for a Pi Wi-Fi bridge: host, port and the optional shared token.
-  /// No discovery; the user types what the daemon printed at startup.
-  ///
-  /// This is a separate widget so the fields keep their contents while the
-  /// controller rebuilds every 250 ms on stream statistics.
+  /// Human label for a link phase.
   static String _describe(BleLinkPhase p) => switch (p) {
     BleLinkPhase.idle => 'idle',
     BleLinkPhase.scanning => 'scanning',
@@ -505,8 +519,9 @@ class RealPanel extends ConsumerWidget {
   };
 }
 
-/// Entry for a Pi Wi-Fi bridge: host, port and the optional shared token.
-/// No discovery; the user types what the daemon printed at startup.
+/// Entry for a Pi Wi-Fi bridge: host, port, the optional shared token, and a
+/// LAN scan for bridges that announce themselves. The opt-in fallback wraps
+/// the WebSocket link in a composite whose BLE leg takes over if TCP fails.
 ///
 /// The fields and their errors live in [ConnectUiState] so both eye halves
 /// show the same values while the controller rebuilds on stream statistics.
@@ -539,6 +554,29 @@ class _WifiConnectPanel extends ConsumerWidget {
         port: port,
         token: ui.token.text,
         secure: ui.secure,
+        bleFallback: ui.bleFallback,
+      );
+    } on ArgumentError catch (error) {
+      ui.setWifiError('${error.message}');
+    } catch (error) {
+      ui.setWifiError('$error');
+    }
+  }
+
+  Future<void> _connectDiscovered(WmrWsEndpoint endpoint) async {
+    ui.setWifiError(null);
+    ui.host.text = endpoint.host;
+    ui.port.text = '${endpoint.port}';
+    try {
+      await controller.connectWifi(
+        host: endpoint.host,
+        port: endpoint.port,
+        path: endpoint.path,
+        bridgeId: endpoint.bridgeId,
+        name: endpoint.name,
+        token: ui.token.text,
+        secure: ui.secure,
+        bleFallback: ui.bleFallback,
       );
     } on ArgumentError catch (error) {
       ui.setWifiError('${error.message}');
@@ -550,6 +588,7 @@ class _WifiConnectPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final state = ref.watch(realDeviceProvider);
     return ListenableBuilder(
       listenable: ui,
       builder: (context, _) => Column(
@@ -562,6 +601,38 @@ class _WifiConnectPanel extends ConsumerWidget {
             'token when it runs with one. The token is not stored.',
             style: theme.textTheme.bodySmall,
           ),
+          const SizedBox(height: 8),
+          FilledButton.tonal(
+            key: const Key('wifi-discover'),
+            focusNode: ui.discoverFocus,
+            onPressed: busy || state.discoveringLan
+                ? null
+                : controller.discoverLan,
+            child: Text(state.discoveringLan ? 'Scanning LAN...' : 'Scan LAN'),
+          ),
+          if (state.lanEndpoints.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text('LAN bridges', style: theme.textTheme.titleSmall),
+            for (final endpoint in state.lanEndpoints)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(endpoint.displayName),
+                subtitle: Text(
+                  '${endpoint.resolvedDeviceId}'
+                  '${endpoint.bridgeId == null ? '' : ' · ${endpoint.bridgeId}'}',
+                ),
+                trailing: TextButton(
+                  key: Key('wifi-lan-connect-${endpoint.resolvedDeviceId}'),
+                  onPressed: busy ? null : () => _connectDiscovered(endpoint),
+                  child: const Text('Connect'),
+                ),
+              ),
+          ],
+          if (state.lanError != null)
+            Text(
+              'LAN scan failed: ${state.lanError}',
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
           const SizedBox(height: 8),
           TextField(
             key: const Key('wifi-host'),
@@ -613,6 +684,20 @@ class _WifiConnectPanel extends ConsumerWidget {
               'ws://. Use a trusted LAN, or a TLS proxy with TLS on.',
               style: theme.textTheme.bodySmall,
             ),
+          CheckboxListTile(
+            key: const Key('wifi-ble-fallback'),
+            focusNode: ui.fallbackFocus,
+            contentPadding: EdgeInsets.zero,
+            value: ui.bleFallback,
+            onChanged: busy
+                ? null
+                : (value) => ui.setBleFallback(value ?? false),
+            title: const Text('BLE fallback'),
+            subtitle: const Text(
+              'Try TCP first; if the Pi link fails, keep the same session '
+              'over BLE GATT and retry TCP in the background.',
+            ),
+          ),
           if (ui.wifiError != null) ...[
             const SizedBox(height: 8),
             Text(
