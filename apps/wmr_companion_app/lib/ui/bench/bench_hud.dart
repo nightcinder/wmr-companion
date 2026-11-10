@@ -14,15 +14,68 @@ import 'bench_tracking.dart';
 /// tester sees no hands after tapping Run and cannot tell a 0DoF run from a
 /// 6DoF one.
 class BenchTrackingHud extends ConsumerStatefulWidget {
-  const BenchTrackingHud({super.key});
+  const BenchTrackingHud({super.key, this.liveGateCell, this.liveHand});
+
+  /// Speed band to check live while a guided capture is recording, or null
+  /// outside a scored segment (and for the occlusion diagnostic).
+  final SpeedGateCell? liveGateCell;
+
+  /// Hand the live speed check follows; null outside a capture.
+  final TrackedHand? liveHand;
 
   @override
   ConsumerState<BenchTrackingHud> createState() => _BenchTrackingHudState();
 }
 
+/// Green used while the active hand's live speed is inside the band.
+const Color benchLiveInBandColor = Color(0xFF2E7D32);
+
+/// Red used while the active hand's live speed is outside the band.
+const Color benchLiveOutOfBandColor = Color(0xFFC62828);
+
 class _BenchTrackingHudState extends ConsumerState<BenchTrackingHud> {
   final BenchHeadMotionTracker _head = BenchHeadMotionTracker();
   DebugPoses? _last;
+  SpeedGateLiveTracker? _live;
+  SpeedGateLiveFeedback? _liveFeedback;
+  SpeedGateCell? _liveCell;
+  TrackedHand? _liveHand;
+
+  /// Feeds the active capture's live gate tracker once per new source frame.
+  ///
+  /// The tracker is recreated when the segment or hand changes so the settle
+  /// window starts with the run rather than carrying the previous cell's
+  /// history.
+  SpeedGateLiveFeedback? _feedLive(DebugPoses current, bool changed) {
+    final cell = widget.liveGateCell;
+    final hand = widget.liveHand;
+    if (cell == null || hand == null) {
+      _live = null;
+      _liveFeedback = null;
+      _liveCell = null;
+      _liveHand = null;
+      return null;
+    }
+    if (_live == null || _liveCell != cell || _liveHand != hand) {
+      _live = SpeedGateLiveTracker(cell: cell);
+      _liveCell = cell;
+      _liveHand = hand;
+      _liveFeedback = null;
+    }
+    final tracking = current.tracking;
+    if (changed && tracking != null) {
+      _liveFeedback = _live!.addFrame(tracking, hand: hand);
+    }
+    return _liveFeedback;
+  }
+
+  Color? _liveColor(SpeedGateLiveFeedback? feedback) =>
+      switch (feedback?.status) {
+        SpeedGateLiveStatus.inBand => benchLiveInBandColor,
+        SpeedGateLiveStatus.tooSlow ||
+        SpeedGateLiveStatus.tooFast => benchLiveOutOfBandColor,
+        _ => null,
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -30,14 +83,20 @@ class _BenchTrackingHudState extends ConsumerState<BenchTrackingHud> {
     final poses = ref.watch(benchLivePosesProvider).value;
     final current = poses ?? const DebugPoses();
     // Each new source sample feeds the head travel window exactly once.
-    if (!identical(current, _last)) {
+    final changed = !identical(current, _last);
+    if (changed) {
       _last = current;
       _head.add(current.head);
     }
+    final liveFeedback = _feedLive(current, changed);
     final hands = benchHandSnapshots(current.tracking);
     final motion = _head.motion;
     final left = hands[0];
     final right = hands[1];
+    final leftLive = widget.liveHand == TrackedHand.left ? liveFeedback : null;
+    final rightLive = widget.liveHand == TrackedHand.right
+        ? liveFeedback
+        : null;
 
     return Card(
       key: const Key('bench-tracking-hud'),
@@ -53,6 +112,8 @@ class _BenchTrackingHudState extends ConsumerState<BenchTrackingHud> {
                 child: _HandPreview(
                   snapshot: left,
                   color: theme.colorScheme.primary,
+                  liveLabel: leftLive?.speedLabel,
+                  liveColor: _liveColor(leftLive),
                 ),
               ),
               const SizedBox(width: 8),
@@ -60,6 +121,8 @@ class _BenchTrackingHudState extends ConsumerState<BenchTrackingHud> {
                 child: _HandPreview(
                   snapshot: right,
                   color: theme.colorScheme.tertiary,
+                  liveLabel: rightLive?.speedLabel,
+                  liveColor: _liveColor(rightLive),
                 ),
               ),
               const SizedBox(width: 8),
@@ -76,15 +139,28 @@ class _BenchTrackingHudState extends ConsumerState<BenchTrackingHud> {
 }
 
 class _HandPreview extends StatelessWidget {
-  const _HandPreview({required this.snapshot, required this.color});
+  const _HandPreview({
+    required this.snapshot,
+    required this.color,
+    this.liveLabel,
+    this.liveColor,
+  });
 
   final BenchHandSnapshot snapshot;
   final Color color;
+
+  /// Live speed reading shown in place of the joint count during a capture.
+  final String? liveLabel;
+
+  /// Green/red when the live reading is in or out of band; null while settling.
+  final Color? liveColor;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hand = snapshot.hand.name;
+    final drawnColor = liveColor ?? color;
+    final label = liveLabel;
     return Column(
       children: [
         Row(
@@ -92,15 +168,24 @@ class _HandPreview extends StatelessWidget {
             Text(
               snapshot.label,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: color,
+                color: drawnColor,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const Spacer(),
-            Text(
-              '${snapshot.joints.length} joints',
-              key: Key('bench-hand-joints-$hand'),
-              style: theme.textTheme.labelSmall,
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                label ?? '${snapshot.joints.length} joints',
+                key: label == null
+                    ? Key('bench-hand-joints-$hand')
+                    : Key('bench-live-speed-$hand'),
+                textAlign: TextAlign.end,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: liveColor,
+                  fontWeight: liveColor == null ? null : FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),
@@ -110,7 +195,7 @@ class _HandPreview extends StatelessWidget {
                   key: Key('bench-hand-preview-$hand'),
                   painter: HandSkeletonPainter(
                     joints: snapshot.joints,
-                    color: color,
+                    color: drawnColor,
                   ),
                   child: const SizedBox.expand(),
                 )

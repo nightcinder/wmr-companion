@@ -354,3 +354,217 @@ class SpeedGateEvaluator {
   static bool _finite(Vector3 position) =>
       position.x.isFinite && position.y.isFinite && position.z.isFinite;
 }
+
+/// The tester-facing state of a live speed check.
+enum SpeedGateLiveStatus {
+  /// No position sample has arrived yet.
+  waiting,
+
+  /// The cell's settle/warm-up window is still running, so nothing is scored.
+  settling,
+
+  /// The recent measured speed is inside the cell's band.
+  inBand,
+
+  /// The recent measured speed is below the cell's band.
+  tooSlow,
+
+  /// The recent measured speed is above the cell's band.
+  tooFast,
+}
+
+/// One live speed reading for the guided-bench HUD.
+class SpeedGateLiveFeedback {
+  const SpeedGateLiveFeedback({
+    required this.cell,
+    required this.status,
+    required this.speedMps,
+    required this.samples,
+  });
+
+  final SpeedGateCell cell;
+  final SpeedGateLiveStatus status;
+
+  /// Recent measured speed, or null before the warm-up has a reading.
+  final double? speedMps;
+
+  /// Position samples currently inside the live speed window.
+  final int samples;
+
+  bool get inBand => status == SpeedGateLiveStatus.inBand;
+
+  /// Short instruction for the tester.
+  String get statusLabel => switch (status) {
+    SpeedGateLiveStatus.waiting => 'waiting for hand',
+    SpeedGateLiveStatus.settling => 'settling',
+    SpeedGateLiveStatus.inBand => 'in range',
+    SpeedGateLiveStatus.tooSlow => 'too slow',
+    SpeedGateLiveStatus.tooFast => 'too fast',
+  };
+
+  /// Measured speed plus [statusLabel], for the hand label in the HUD.
+  String get speedLabel {
+    final speed = speedMps;
+    if (speed == null) return statusLabel;
+    return '${(speed * 100).toStringAsFixed(1)} cm/s · $statusLabel';
+  }
+}
+
+/// Live per-frame speed feedback for one guided capture cell.
+///
+/// The final verdict is computed over the whole recording by
+/// [SpeedGateEvaluator]. This tracker uses the same band, warm-up and window on
+/// the samples seen so far, so the hand colour points at the signal that will
+/// be scored. Live frames have no future samples, so the speed window trails
+/// instead of centring; the recent speeds are then reduced with the cell's own
+/// metric (median for continuous motion, peak for the flick). That keeps a
+/// single jitter spike from painting the hand red during a still hold while
+/// still showing the flick's peak.
+class SpeedGateLiveTracker {
+  SpeedGateLiveTracker({
+    required this.cell,
+    this.minSamples = 3,
+    this.smoothingWindow = const Duration(seconds: 1),
+  }) : _feedback = SpeedGateLiveFeedback(
+         cell: cell,
+         status: SpeedGateLiveStatus.waiting,
+         speedMps: null,
+         samples: 0,
+       );
+
+  final SpeedGateCell cell;
+
+  /// Recent readings needed before a verdict is shown.
+  final int minSamples;
+
+  /// How much recent history the median/peak is taken over.
+  final Duration smoothingWindow;
+
+  final List<SpeedGateSample> _window = [];
+  final List<(int, double)> _speeds = [];
+  int? _originNs;
+  SpeedGateLiveFeedback _feedback;
+
+  /// Latest reading; [SpeedGateLiveStatus.waiting] before any sample.
+  SpeedGateLiveFeedback get feedback => _feedback;
+
+  /// Clears the tracker for a new capture segment.
+  void reset() {
+    _window.clear();
+    _speeds.clear();
+    _originNs = null;
+    _feedback = SpeedGateLiveFeedback(
+      cell: cell,
+      status: SpeedGateLiveStatus.waiting,
+      speedMps: null,
+      samples: 0,
+    );
+  }
+
+  /// Feeds the same hand position [SpeedGateEvaluator.samplesFromRecording]
+  /// scores: a tracked controller pose first, then the hand controller anchor.
+  SpeedGateLiveFeedback addFrame(
+    TrackingFrame frame, {
+    required TrackedHand hand,
+  }) {
+    final controller = frame.controller(hand);
+    final anchor = frame.hand(hand)?.controllerAnchor;
+    final Vector3? position;
+    if (controller != null && controller.isTracked) {
+      position = controller.pose.translation;
+    } else if (anchor != null && anchor.isTracked) {
+      position = anchor.pose.translation;
+    } else {
+      position = null;
+    }
+    if (position == null || !SpeedGateEvaluator._finite(position)) {
+      return _feedback;
+    }
+    return addSample(timeNs: frame.fusionTimeNs, position: position);
+  }
+
+  /// Adds one position sample and returns the updated feedback.
+  SpeedGateLiveFeedback addSample({
+    required int timeNs,
+    required Vector3 position,
+  }) {
+    if (!SpeedGateEvaluator._finite(position)) return _feedback;
+    if (_window.isNotEmpty && timeNs <= _window.last.timeNs) return _feedback;
+    _originNs ??= timeNs;
+    _window.add(
+      SpeedGateSample(timeNs: timeNs, position: Vector3.copy(position)),
+    );
+
+    // Keep the newest sample at or before the window edge as the far end, so
+    // the measured span is the cell's window even at a high frame rate.
+    final windowCutoffNs = timeNs - cell.window.inMicroseconds * 1000;
+    while (_window.length > 1 && _window[1].timeNs <= windowCutoffNs) {
+      _window.removeAt(0);
+    }
+
+    final elapsedNs = timeNs - _originNs!;
+    if (elapsedNs < cell.warmup.inMicroseconds * 1000) {
+      _feedback = SpeedGateLiveFeedback(
+        cell: cell,
+        status: SpeedGateLiveStatus.settling,
+        speedMps: null,
+        samples: _window.length,
+      );
+      return _feedback;
+    }
+
+    final first = _window.first;
+    final spanNs = timeNs - first.timeNs;
+    final minimumSpanNs = cell.window.inMicroseconds * 1000 ~/ 2;
+    if (spanNs < minimumSpanNs) {
+      _feedback = SpeedGateLiveFeedback(
+        cell: cell,
+        status: SpeedGateLiveStatus.settling,
+        speedMps: null,
+        samples: _window.length,
+      );
+      return _feedback;
+    }
+
+    final speedMps = (position - first.position).length / (spanNs / 1000000000);
+    if (!speedMps.isFinite) return _feedback;
+    _speeds.add((timeNs, speedMps));
+    final speedCutoffNs = timeNs - smoothingWindow.inMicroseconds * 1000;
+    while (_speeds.isNotEmpty && _speeds.first.$1 < speedCutoffNs) {
+      _speeds.removeAt(0);
+    }
+    if (_speeds.length < minSamples) {
+      _feedback = SpeedGateLiveFeedback(
+        cell: cell,
+        status: SpeedGateLiveStatus.settling,
+        speedMps: null,
+        samples: _window.length,
+      );
+      return _feedback;
+    }
+
+    final recent = [for (final reading in _speeds) reading.$2]..sort();
+    final measured = cell.metric == SpeedGateMetric.peak
+        ? recent.last
+        : _median(recent);
+    final status = cell.contains(measured)
+        ? SpeedGateLiveStatus.inBand
+        : measured < cell.minSpeedMps
+        ? SpeedGateLiveStatus.tooSlow
+        : SpeedGateLiveStatus.tooFast;
+    _feedback = SpeedGateLiveFeedback(
+      cell: cell,
+      status: status,
+      speedMps: measured,
+      samples: _window.length,
+    );
+    return _feedback;
+  }
+
+  static double _median(List<double> sorted) {
+    final middle = sorted.length ~/ 2;
+    return sorted.length.isOdd
+        ? sorted[middle]
+        : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+}

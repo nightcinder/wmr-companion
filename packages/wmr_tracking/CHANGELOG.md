@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `SpeedGateLiveTracker` reports a cell's speed band from live tracking
+  frames, using the same band, warm-up and window as the final
+  `SpeedGateEvaluator` verdict, so the guided bench can colour the active hand
+  green or red while a capture records (ONY-1176).
+
 ## 0.3.0
 
 - Version aligned with the v0.3.0 release.

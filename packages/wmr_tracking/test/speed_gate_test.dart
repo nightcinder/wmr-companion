@@ -374,4 +374,116 @@ void main() {
       expect(result.status, SpeedGateStatus.warning);
     },
   );
+
+  group('SpeedGateLiveTracker', () {
+    test('waits, then settles through the cell warm-up', () {
+      final tracker = SpeedGateLiveTracker(cell: SpeedGateCell.still);
+      expect(tracker.feedback.status, SpeedGateLiveStatus.waiting);
+      expect(tracker.feedback.speedLabel, 'waiting for hand');
+
+      tracker.addSample(timeNs: 0, position: Vector3.zero());
+      expect(tracker.feedback.status, SpeedGateLiveStatus.settling);
+
+      tracker.addSample(timeNs: 1500000000, position: Vector3(0.0075, 0, 0));
+      expect(tracker.feedback.status, SpeedGateLiveStatus.settling);
+      expect(tracker.feedback.speedMps, isNull);
+    });
+
+    test('a still hand reads in band and a moving one reads too fast', () {
+      final still = SpeedGateLiveTracker(cell: SpeedGateCell.still);
+      _feedLive(still, 0.005);
+      expect(still.feedback.status, SpeedGateLiveStatus.inBand);
+      expect(still.feedback.speedMps, closeTo(0.005, 0.001));
+      expect(still.feedback.speedLabel, contains('in range'));
+
+      final moving = SpeedGateLiveTracker(cell: SpeedGateCell.still);
+      _feedLive(moving, 0.05);
+      expect(moving.feedback.status, SpeedGateLiveStatus.tooFast);
+      expect(moving.feedback.speedLabel, contains('too fast'));
+    });
+
+    test('each moving class reads in band at its nominal speed', () {
+      const nominal = {
+        SpeedGateCell.drifting: 0.25,
+        SpeedGateCell.slowPan: 0.10,
+        SpeedGateCell.mediumPan: 0.50,
+        SpeedGateCell.fastFlick: 1.50,
+      };
+      for (final entry in nominal.entries) {
+        final tracker = SpeedGateLiveTracker(cell: entry.key);
+        _feedLive(tracker, entry.value);
+        expect(
+          tracker.feedback.status,
+          SpeedGateLiveStatus.inBand,
+          reason: '${entry.key.name}: ${tracker.feedback.speedLabel}',
+        );
+      }
+    });
+
+    test('slow and fast readings name the side of the band', () {
+      final slow = SpeedGateLiveTracker(cell: SpeedGateCell.slowPan);
+      _feedLive(slow, 0.02);
+      expect(slow.feedback.status, SpeedGateLiveStatus.tooSlow);
+
+      final fast = SpeedGateLiveTracker(cell: SpeedGateCell.drifting);
+      _feedLive(fast, 0.80);
+      expect(fast.feedback.status, SpeedGateLiveStatus.tooFast);
+
+      final flick = SpeedGateLiveTracker(cell: SpeedGateCell.fastFlick);
+      _feedLive(flick, 0.50);
+      expect(flick.feedback.status, SpeedGateLiveStatus.tooSlow);
+    });
+
+    test('reads the same hand anchor the final gate scores', () {
+      const rateHz = 90;
+      final tracker = SpeedGateLiveTracker(cell: SpeedGateCell.slowPan);
+      for (var index = 0; index <= 4 * rateHz; index++) {
+        final time = index * (1000000000 ~/ rateHz);
+        tracker.addFrame(
+          TrackingFrame(
+            timeNs: time,
+            hostTimeNs: time,
+            rightHand: HandPose(
+              hand: TrackedHand.right,
+              palm: TrackedPose(
+                pose: Pose(
+                  translation: Vector3(0.10 * index / rateHz, 0, 0),
+                  rotation: Quaternion.identity(),
+                ),
+              ),
+            ),
+          ),
+          hand: TrackedHand.right,
+        );
+      }
+      expect(tracker.feedback.status, SpeedGateLiveStatus.inBand);
+      expect(tracker.feedback.speedMps, closeTo(0.10, 0.005));
+    });
+
+    test('reset returns the tracker to waiting', () {
+      final tracker = SpeedGateLiveTracker(cell: SpeedGateCell.drifting);
+      _feedLive(tracker, 0.25);
+      expect(tracker.feedback.status, SpeedGateLiveStatus.inBand);
+
+      tracker.reset();
+      expect(tracker.feedback.status, SpeedGateLiveStatus.waiting);
+      expect(tracker.feedback.samples, 0);
+    });
+  });
+}
+
+/// Feeds a constant-speed trace at 90 Hz for [seconds].
+void _feedLive(
+  SpeedGateLiveTracker tracker,
+  double speedMps, {
+  double seconds = 3.5,
+  int rateHz = 90,
+}) {
+  final count = (seconds * rateHz).round();
+  for (var index = 0; index <= count; index++) {
+    tracker.addSample(
+      timeNs: index * (1000000000 ~/ rateHz),
+      position: Vector3(speedMps * index / rateHz, 0, 0),
+    );
+  }
 }
