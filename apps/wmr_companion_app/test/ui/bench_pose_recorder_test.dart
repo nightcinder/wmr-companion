@@ -106,9 +106,9 @@ void main() {
 
   /// Feeds one frame and queues the host arrival time the recorder reads when
   /// the fake source delivers it.
-  void feed(int sourceNs, {int? hostNs, bool left = true, bool moved = false}) {
+  void feed(int sourceNs, {int? hostNs, bool left = true, double x = 0}) {
     hostArrivals.add(hostNs ?? sourceNs);
-    source.addFrame(_frame(sourceNs, left: left, x: moved ? 0.01 : 0));
+    source.addFrame(_frame(sourceNs, left: left, x: x));
   }
 
   test('samples once per anchor frame and writes provenance', () async {
@@ -120,8 +120,8 @@ void main() {
       run: 2,
     );
     feed(1000000);
-    feed(2000000, moved: true);
-    feed(3000000, moved: true);
+    feed(2000000, x: 0.01);
+    feed(3000000, x: 0.02);
     final result = await future;
 
     final file = File(result.path);
@@ -165,7 +165,7 @@ void main() {
       duration: const Duration(milliseconds: 50),
     );
     feed(1000000);
-    feed(2000000, moved: true);
+    feed(2000000, x: 0.01);
     final result = await future;
 
     final recording = PoseRecording.decode(
@@ -278,6 +278,50 @@ void main() {
     expect(diagnostics['occlusion_gaps'], 1);
     expect(diagnostics['occluded_samples'], 2);
     expect(result.diagnostics['occlusion_gaps'], 1);
+  });
+
+  test('records the section 8 speed gate for a moving cell', () async {
+    final subject = recorder();
+    final future = subject.record(
+      hand: 1,
+      segment: PoseSegment.mediumPan,
+      duration: const Duration(milliseconds: 50),
+    );
+    const rateHz = 90;
+    const stepNs = 1000000000 ~/ rateHz;
+    for (var index = 0; index <= 3 * rateHz; index++) {
+      final time = 1000000000 + index * stepNs;
+      feed(time, x: 0.25 * index / rateHz);
+    }
+    final result = await future;
+
+    final gate = result.speedGate;
+    expect(gate, isNotNull);
+    expect(gate!.cell, SpeedGateCell.dynamic);
+    expect(gate.status, SpeedGateStatus.pass);
+    expect(gate.medianSpeedMps, closeTo(0.25, 0.005));
+    expect(gate.reason, contains('25.0 cm/s'));
+  });
+
+  test('a still cell moving at 5 cm/s records a speed-gate warning', () async {
+    final subject = recorder();
+    final future = subject.record(
+      hand: 0,
+      segment: PoseSegment.still,
+      duration: const Duration(milliseconds: 50),
+    );
+    const rateHz = 90;
+    const stepNs = 1000000000 ~/ rateHz;
+    for (var index = 0; index <= 2 * rateHz; index++) {
+      final time = 1000000000 + index * stepNs;
+      feed(time, x: 0.05 * index / rateHz);
+    }
+    final result = await future;
+
+    expect(result.speedGate, isNotNull);
+    expect(result.speedGate!.cell, SpeedGateCell.still);
+    expect(result.speedGate!.status, SpeedGateStatus.warning);
+    expect(result.speedGate!.medianSpeedMps, closeTo(0.05, 0.002));
   });
 
   test('a cancelled segment saves nothing', () async {

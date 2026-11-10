@@ -681,9 +681,13 @@ class RealBenchSession implements BenchSession {
         run: run,
         cancel: cancel,
       );
+      final gate = result.speedGate;
+      final gateNote = gate == null
+          ? ''
+          : '; speed gate ${gate.status.name} (${gate.reason})';
       return BenchStepOutcome.done(
         '$handLabel ${segment.title} run $run: ${result.samples} samples; '
-        'saved ${result.path}',
+        'saved ${result.path}$gateNote',
         data: {
           'runtime': result.runtime,
           'hand': handLabel,
@@ -695,6 +699,7 @@ class RealBenchSession implements BenchSession {
           'anchor_rate_hz': result.anchorRateHz,
           'provenance': result.provenance,
           if (result.diagnostics.isNotEmpty) 'diagnostics': result.diagnostics,
+          if (gate != null) 'speed_gate': gate.toJson(),
           'app_commit': appCommit,
           'firmware_sha': firmwareSha,
         },

@@ -77,6 +77,11 @@ enum PoseSegment {
   final String prompt;
 
   bool get isDiagnostic => this == occlusion;
+
+  /// The section 8 speed gate for this cell: a still hold is capped at
+  /// 2 cm/s, every moving class must stay in the 10-50 cm/s band.
+  SpeedGateCell get speedGateCell =>
+      this == PoseSegment.still ? SpeedGateCell.still : SpeedGateCell.dynamic;
 }
 
 /// The five motion classes the tuner scores. Occlusion is diagnostic only.
@@ -267,6 +272,7 @@ class PoseCaptureResult {
     required this.anchorRateHz,
     required this.provenance,
     this.diagnostics = const {},
+    this.speedGate,
   });
 
   final String runtime;
@@ -283,6 +289,10 @@ class PoseCaptureResult {
 
   /// Occlusion-only counters: gaps in the hand anchor and the worst one.
   final Map<String, Object?> diagnostics;
+
+  /// The section 8 linear-speed gate for this cell, or null when a recorder
+  /// does not evaluate one.
+  final SpeedGateResult? speedGate;
 }
 
 /// Thrown when the tester skips a segment while it is recording.
@@ -474,6 +484,11 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
       if (segment.isDiagnostic) 'diagnostics': diagnostics,
     };
     final recording = builder.build(provenance: provenance);
+    final speedGate = const SpeedGateEvaluator().evaluateRecording(
+      recording,
+      hand: hand == 0 ? TrackedHand.left : TrackedHand.right,
+      cell: segment.speedGateCell,
+    );
     final file = await store.save(
       recording,
       DateTime.now(),
@@ -493,6 +508,7 @@ class RealBenchPoseRecorder implements BenchPoseRecorder {
       anchorRateHz: rate,
       provenance: provenance,
       diagnostics: diagnostics,
+      speedGate: speedGate,
     );
   }
 

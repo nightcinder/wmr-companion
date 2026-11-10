@@ -248,6 +248,8 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
                 ],
                 const SizedBox(height: 16),
                 _status(result, mono, theme),
+                if (step == BenchStep.poseCapture)
+                  ..._poseSpeedGate(result, theme),
                 const SizedBox(height: 16),
                 ..._actions(
                   state,
@@ -452,6 +454,42 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         for (final item in state.missing)
           Text('• $item', style: theme.textTheme.bodySmall),
       ],
+    ];
+  }
+
+  /// The last completed cell's section 8 speed gate, so a tester sees the
+  /// pass/warning before starting the next run.
+  List<Widget> _poseSpeedGate(BenchStepResult result, ThemeData theme) {
+    final segments = result.data['segments'];
+    if (segments is! List || segments.isEmpty) return const [];
+    final last = segments.last;
+    if (last is! Map) return const [];
+    final gate = last['speed_gate'];
+    if (gate is! Map) return const [];
+    final warning = gate['status'] == 'warning';
+    final reason = gate['reason'];
+    final color = warning ? theme.colorScheme.error : theme.colorScheme.primary;
+    return [
+      const SizedBox(height: 8),
+      Row(
+        key: const Key('bench-pose-speed-gate'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            warning ? Icons.warning_amber : Icons.speed,
+            color: color,
+            size: 18,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Speed gate: ${warning ? 'warning' : 'pass'}'
+              '${reason == null ? '' : ' — $reason'}',
+              style: theme.textTheme.bodySmall?.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
     ];
   }
 

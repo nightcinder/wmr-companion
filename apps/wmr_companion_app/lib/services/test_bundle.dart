@@ -630,12 +630,15 @@ String _manifest(TestBundleInput input) {
       ..writeln()
       ..writeln(
         '| File | Hand | Segment | Run | Status | Samples '
-        '| Anchor Hz | Reason |',
+        '| Anchor Hz | Speed gate | Speed cm/s | Reason |',
       )
-      ..writeln('|---|---|---|---|---:|---:|---:|---|');
+      ..writeln('|---|---|---|---|---:|---:|---:|---|---:|---|');
     for (final segment in poseSegments) {
       final file = segment['file'] as String?;
       final rate = segment['anchor_rate_hz'];
+      final gate = segment['speed_gate'];
+      final gateData = gate is Map ? gate : null;
+      final median = gateData?['median_speed_mps'];
       buffer.writeln(
         '| ${file == null ? '—' : _baseName(file)} '
         '| ${segment['hand'] ?? '—'} '
@@ -644,6 +647,8 @@ String _manifest(TestBundleInput input) {
         '| ${segment['status'] ?? '—'} '
         '| ${segment['samples'] ?? '—'} '
         '| ${rate is num ? rate.toStringAsFixed(1) : '—'} '
+        '| ${gateData?['status'] ?? '—'} '
+        '| ${median is num ? (median * 100).toStringAsFixed(1) : '—'} '
         '| ${segment['reason'] ?? '—'} |',
       );
     }

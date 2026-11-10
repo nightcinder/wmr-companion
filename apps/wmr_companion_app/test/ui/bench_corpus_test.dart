@@ -300,5 +300,24 @@ void main() {
       'LEFT:fast_flick': 1,
       'RIGHT:occlusion': 1,
     });
+
+    final diagnostics = jsonDecode(
+      utf8.decode(
+        archive.files.firstWhere((f) => f.name == 'diagnostics.json').content
+            as List<int>,
+      ),
+    ) as Map<String, Object?>;
+    final bench = diagnostics['bench']! as Map<String, Object?>;
+    final pose = (bench['steps']! as List)
+        .cast<Map<String, Object?>>()
+        .firstWhere((step) => step['id'] == 'pose_capture');
+    final segments = (pose['data']! as Map)['segments']! as List;
+    for (final segment in segments.cast<Map>()) {
+      expect(
+        segment['speed_gate'],
+        isA<Map>(),
+        reason: '${segment['segment']} run ${segment['run']}',
+      );
+    }
   });
 }
