@@ -12,6 +12,7 @@ import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import '../ui/capture/capture_providers.dart';
 import '../ui/connect/connect_providers.dart';
+import '../ui/debug/stream_settings.dart';
 import '../ui/latency/latency_providers.dart';
 import 'firmware_identity.dart';
 import 'test_bundle.dart';
@@ -107,6 +108,7 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
     final service = ref.read(realDeviceProvider.notifier).service;
     final info = await ref.read(bundleDeviceInfoProvider)();
     final kinds = ref.read(bridgeTransportKindsProvider);
+    final stickSettings = ref.read(stickSettingsProvider);
 
     final bridges = <BundleBridge>[];
     try {
@@ -194,6 +196,9 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       benchRuntime: poseRuntimeFromRun(run),
       deviceEnvironment: environment,
       firmwareSha: firmwareSha,
+      wifiFallback: device.wifiFallback,
+      activeLeg: device.wifiLeg?.label,
+      stickSettings: stickSettings,
     );
   };
 });

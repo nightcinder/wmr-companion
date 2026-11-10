@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
+import 'package:wmr_core/domain/stick_centre.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 void main() {
@@ -240,6 +241,44 @@ void main() {
       expect((bridgeJson['stream'] as Map)['rate_hz'], [99.4, 98.8]);
     },
   );
+
+  test('diagnostics records the composite leg and stick settings', () async {
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 11, 9, 12),
+        appVersion: '0.3.20+25',
+        phone: 'Test Phone',
+        androidVersion: 'Android 14 (API 34)',
+        streamMode: 'raw',
+        wifiFallback: true,
+        activeLeg: 'TCP',
+        stickSettings: const StickSettings(
+          config: StickConfig(deadZone: 0.2, learn: false),
+          centres: [
+            [0.03, 0.148],
+            null,
+          ],
+        ),
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final diagnostics =
+        jsonDecode(text(archive, 'diagnostics.json')) as Map<String, Object?>;
+    expect(diagnostics['ble_fallback'], isTrue);
+    expect(diagnostics['active_leg'], 'TCP');
+    expect(diagnostics['stick'], {
+      'dead_zone': 0.2,
+      'learn_centre': false,
+      'centres': [
+        [0.03, 0.148],
+        null,
+      ],
+    });
+  });
 
   test('names every missing artifact in the README and the result', () async {
     final bundle = await writeTestBundle(
