@@ -170,7 +170,7 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Guided bench run'),
-            actions: const [SbsToggleButton()],
+            actions: const [SbsRecenterButton(), SbsToggleButton()],
           ),
           body: FocusTraversalGroup(
             key: const Key('bench-focus-order'),

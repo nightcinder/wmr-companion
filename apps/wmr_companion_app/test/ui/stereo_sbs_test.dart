@@ -57,6 +57,18 @@ void main() {
     await tester.pump();
   }
 
+  Future<void> openBench(
+    WidgetTester tester,
+    Size size, {
+    Pose? pose,
+    Stream<Pose?>? poses,
+    Pose? origin,
+  }) async {
+    await openApp(tester, size, pose: pose, poses: poses, origin: origin);
+    await tester.tap(find.byKey(const Key('open-guided-bench')).first);
+    await tester.pumpAndSettle();
+  }
+
   Future<void> close(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
@@ -324,7 +336,7 @@ void main() {
     });
 
     testWidgets('a non-zero pose shifts both eye panes', (tester) async {
-      await openApp(
+      await openBench(
         tester,
         viewport,
         pose: headPose(yawRight: 0.1, pitchUp: 0.05),
@@ -348,7 +360,7 @@ void main() {
     });
 
     testWidgets('a zero pose keeps both eye panes centered', (tester) async {
-      await openApp(tester, viewport, pose: Pose.identity);
+      await openBench(tester, viewport, pose: Pose.identity);
 
       for (final key in ['sbs-eye-left', 'sbs-eye-right']) {
         final translation = tester
@@ -364,7 +376,7 @@ void main() {
     testWidgets('the first live pose becomes the origin for later motion', (
       tester,
     ) async {
-      await openApp(
+      await openBench(
         tester,
         viewport,
         poses: Stream.fromIterable([
@@ -385,7 +397,7 @@ void main() {
     });
 
     testWidgets('the recenter action centers both panes', (tester) async {
-      await openApp(
+      await openBench(
         tester,
         viewport,
         pose: headPose(yawRight: 0.1),

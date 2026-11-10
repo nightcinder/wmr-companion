@@ -127,17 +127,6 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
   final _ui = ConnectUiState();
 
   @override
-  void initState() {
-    super.initState();
-    // A Neckband is Android. Warming the tracking probe before the first eye
-    // pane is laid out gives the SBS wrapper a live head pose on launch
-    // instead of waiting for the bench or debug screen to select a source.
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      ref.read(debugTrackingSourceProvider);
-    }
-  }
-
-  @override
   void dispose() {
     _ui.dispose();
     super.dispose();
@@ -145,7 +134,10 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // No head tracking here: the Bench and Debug screens start a source when
+    // they open, and the Connect screen only needs the stereo layout.
     return StereoSbsWrapper(
+      headTracking: false,
       child: Scaffold(
         appBar: AppBar(
           title: const _AppTitle(),
@@ -157,7 +149,6 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
                 icon: const Icon(Icons.touch_app_outlined),
                 onPressed: () => _showNeckbandControls(context),
               ),
-            const SbsRecenterButton(),
             const SbsToggleButton(),
             PopupMenuButton<String>(
               tooltip: 'About',

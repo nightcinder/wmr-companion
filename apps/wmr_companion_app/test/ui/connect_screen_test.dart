@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,7 +10,9 @@ import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
+import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
+import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import 'package:wmr_ble/testing.dart';
 
@@ -32,6 +33,31 @@ void main() {
           realTransportProvider.overrideWithValue(transport),
           appVersionProvider.overrideWith((ref) => '0.3.0+5'),
           if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+  }
+
+  /// Pumps Connect with the auto-detection selector replaced, so a test can
+  /// count detector calls without a vendor plugin.
+  Future<void> openWithProbe(
+    WidgetTester tester,
+    TrackingSourceSelector selector,
+  ) async {
+    adapter = FakeBleAdapter();
+    final transport = UniversalBleTransport(
+      adapter: adapter,
+      scanTimeout: const Duration(minutes: 5),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          appVersionProvider.overrideWith((ref) => '0.3.0+5'),
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          debugTrackingSelectorProvider.overrideWithValue(selector),
         ],
         child: const MaterialApp(home: ConnectScreen()),
       ),
@@ -266,4 +292,73 @@ void main() {
     );
     await close(tester);
   });
+
+  testWidgets('Connect never starts the tracking probe on Android', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final detector = _CountingDetector();
+      final selector = TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => null,
+      );
+
+      // SBS on (32:9) and off (phone), so the wrapper rebuilds both ways.
+      for (final size in [const Size(3840, 1080), const Size(432, 960)]) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await openWithProbe(tester, selector);
+        await tester.pump();
+        await tester.pump();
+        expect(
+          detector.calls,
+          0,
+          reason: 'Connect at $size must not start tracking',
+        );
+        await close(tester);
+      }
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('opening the Bench starts the tracking probe', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final detector = _CountingDetector();
+      final selector = TrackingSourceSelector(
+        detector: detector,
+        flags: const TrackingSourceFlags(viture: true),
+        vitureSource: () async => null,
+      );
+
+      await openWithProbe(tester, selector);
+      expect(detector.calls, 0);
+
+      await tester.tap(find.byKey(const Key('open-guided-bench')));
+      await tester.pump();
+      await tester.pump();
+      for (var i = 0; i < 10 && detector.calls == 0; i++) {
+        await tester.pump();
+      }
+
+      expect(detector.calls, greaterThan(0));
+      await close(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+}
+
+class _CountingDetector implements GlassesDetector {
+  int calls = 0;
+
+  @override
+  Future<GlassesDetection> detect() async {
+    calls++;
+    return GlassesDetection.none;
+  }
 }
