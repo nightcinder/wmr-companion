@@ -68,4 +68,10 @@ dependencies {
     implementation("androidx.core:core:1.16.0")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.0")
+    // The player's attach path manipulates real Android views, so its tests run
+    // under Robolectric. Robolectric's runner is JUnit 4; the vintage engine
+    // runs it on the JUnit Platform configured above.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.10.1")
 }

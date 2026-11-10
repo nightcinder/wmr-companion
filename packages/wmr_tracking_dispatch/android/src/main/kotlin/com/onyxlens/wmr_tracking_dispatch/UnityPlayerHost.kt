@@ -2,6 +2,7 @@ package com.onyxlens.wmr_tracking_dispatch
 
 import android.app.Activity
 import android.content.res.Configuration
+import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -323,13 +324,14 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
      * FlutterActivity added earlier, so the Flutter UI stays visible instead
      * of being covered by an opaque black player surface.
      */
-    private fun attach(
+    internal fun attach(
         activity: Activity,
         view: View,
         placement: PlayerViewPlacement,
     ) {
         val content = activity.findViewById<ViewGroup>(android.R.id.content)
         if (content == null) {
+            resetSurfaceZOrder(view)
             activity.addContentView(view, fullScreenParams())
             releaseInputFocus(view)
             return
@@ -337,9 +339,31 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
         val index = when (placement) {
             PlayerViewPlacement.BEHIND_EXISTING_CONTENT -> 0
         }
+        resetSurfaceZOrder(view)
         content.addView(view, index, fullScreenParams())
         releaseInputFocus(view)
         content.requestFocus()
+    }
+
+    /**
+     * Puts every `SurfaceView` in [view] back in the application's surface
+     * layer before the player is attached.
+     *
+     * Unity sets its surface on top, or as a media overlay, while it boots.
+     * Either layer draws above the `FlutterTextureView` and hides the Flutter
+     * UI, so a `BEHIND_EXISTING_CONTENT` player must reset both before
+     * `addView` (ONY-1203).
+     */
+    private fun resetSurfaceZOrder(view: View) {
+        if (view is SurfaceView) {
+            view.setZOrderOnTop(false)
+            view.setZOrderMediaOverlay(false)
+        }
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                resetSurfaceZOrder(view.getChildAt(index))
+            }
+        }
     }
 
     /**
@@ -350,14 +374,20 @@ internal class ReflectiveUnityPlayerViewHost : UnityPlayerViewHost {
      * Flutter view. A VITURE Pro Neckband has no D-pad, so its only controls
      * are the volume rocker and headgaze; if the player took focus the app
      * would have no controls at all (ONY-802). The surface stays attached and
-     * still receives window focus; only view focus is blocked.
+     * still receives window focus; only view focus is blocked for the player
+     * and every descendant. A root-only block is not enough: a view that
+     * already holds focus keeps it until it is cleared (ONY-1203).
      */
     private fun releaseInputFocus(view: View) {
         view.clearFocus()
         view.isFocusable = false
         view.isFocusableInTouchMode = false
-        (view as? ViewGroup)?.descendantFocusability =
-            ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        if (view is ViewGroup) {
+            view.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            for (index in 0 until view.childCount) {
+                releaseInputFocus(view.getChildAt(index))
+            }
+        }
     }
 
     /**

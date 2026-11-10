@@ -1,11 +1,39 @@
 package com.onyxlens.wmr_tracking_dispatch
 
-import kotlin.test.Test
+import android.app.Activity
+import android.content.Context
+import android.view.SurfaceView
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class UnityPlayerHostTest {
+    /** Records the Z-order reset calls the attach path makes. */
+    private class RecordingSurfaceView(context: Context) : SurfaceView(context) {
+        val zOrderCalls = mutableListOf<String>()
+
+        override fun setZOrderOnTop(onTop: Boolean) {
+            zOrderCalls += "onTop:$onTop"
+            super.setZOrderOnTop(onTop)
+        }
+
+        override fun setZOrderMediaOverlay(mediaOverlay: Boolean) {
+            zOrderCalls += "mediaOverlay:$mediaOverlay"
+            super.setZOrderMediaOverlay(mediaOverlay)
+        }
+    }
+
     private class FakeViewHost(
         override val isLinked: Boolean = true,
         private val createResult: Boolean = true,
@@ -269,5 +297,54 @@ class UnityPlayerHostTest {
         assertFalse(result.hosted)
         assertEquals(UnityPlayerHost.STAGE_UNAVAILABLE, result.stage)
         assertTrue(result.detail != null)
+    }
+
+    @Test
+    fun behindExistingContentResetsNestedSurfaceViewZOrderBeforeAttaching() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val content = activity.findViewById<ViewGroup>(android.R.id.content)
+        val root = FrameLayout(activity)
+        val nested = FrameLayout(activity)
+        val surface = RecordingSurfaceView(activity)
+        nested.addView(surface)
+        root.addView(nested)
+
+        ReflectiveUnityPlayerViewHost().attach(
+            activity,
+            root,
+            PlayerViewPlacement.BEHIND_EXISTING_CONTENT,
+        )
+
+        assertEquals(listOf("onTop:false", "mediaOverlay:false"), surface.zOrderCalls)
+        assertSame(content, root.parent)
+        assertEquals(0, content.indexOfChild(root))
+    }
+
+    @Test
+    fun behindExistingContentBlocksFocusForThePlayerAndEveryDescendant() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val root = FrameLayout(activity)
+        val nested = FrameLayout(activity)
+        val leaf = View(activity).apply {
+            isFocusable = true
+            isFocusableInTouchMode = true
+        }
+        val surface = RecordingSurfaceView(activity)
+        nested.addView(leaf)
+        nested.addView(surface)
+        root.addView(nested)
+
+        ReflectiveUnityPlayerViewHost().attach(
+            activity,
+            root,
+            PlayerViewPlacement.BEHIND_EXISTING_CONTENT,
+        )
+
+        assertEquals(ViewGroup.FOCUS_BLOCK_DESCENDANTS, root.descendantFocusability)
+        assertEquals(ViewGroup.FOCUS_BLOCK_DESCENDANTS, nested.descendantFocusability)
+        assertFalse(root.isFocusable)
+        assertFalse(leaf.isFocusable)
+        assertFalse(leaf.isFocusableInTouchMode)
+        assertFalse(surface.isFocusable)
     }
 }
