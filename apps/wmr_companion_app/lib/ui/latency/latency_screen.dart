@@ -33,6 +33,7 @@ class LatencyScreen extends ConsumerWidget {
         fakeBridgeDeviceId: BridgeTransportKind.ble,
       ...ref.watch(bridgeTransportKindsProvider),
     };
+    final wifiLeg = ref.watch(activeWifiLegProvider);
 
     return PopScope(
       canPop: !running,
@@ -176,6 +177,7 @@ class LatencyScreen extends ConsumerWidget {
                 s.report!,
                 style: mono,
                 transportKinds: transportKinds,
+                wifiLeg: wifiLeg,
               ),
             ],
             if (s.saved != null) ...[
@@ -215,6 +217,7 @@ class LatencyReportView extends StatelessWidget {
     super.key,
     this.style,
     this.transportKinds = const {},
+    this.wifiLeg,
   });
 
   final LatencyReport report;
@@ -222,6 +225,9 @@ class LatencyReportView extends StatelessWidget {
 
   /// Link kind by bridge id, from `bridgeTransportKindsProvider`.
   final Map<String, BridgeTransportKind> transportKinds;
+
+  /// Active leg of an opt-in TCP/BLE composite link, when one is in use.
+  final WifiLinkLeg? wifiLeg;
 
   static String _ms(int us) => (us / 1000).toStringAsFixed(1);
   static String _pct(double v) => '${(v * 100).toStringAsFixed(1)} %';
@@ -271,7 +277,7 @@ class LatencyReportView extends StatelessWidget {
               'loss ${_pct(loss!)}   ';
     final kind = transportKinds[bridgeId];
     return Text(
-      '${kind == null ? '' : '${kind.label}  '}'
+      '${kind == null ? '' : '${kind.labelWithLeg(wifiLeg)}  '}'
       'bridge $bridgeId   MTU ${link.mtu ?? '-'}   '
       'RSSI ${link.rssiStart ?? '-'}'
       '${link.rssiEnd == null ? '' : ' -> ${link.rssiEnd}'} dBm   '
@@ -325,7 +331,7 @@ class LatencyReportView extends StatelessWidget {
               style: theme.textTheme.titleSmall,
             ),
             Text(
-              '  ${h.bridgeId == null || transportKinds[h.bridgeId] == null ? '' : '${transportKinds[h.bridgeId]!.label} '}'
+              '  ${h.bridgeId == null || transportKinds[h.bridgeId] == null ? '' : '${transportKinds[h.bridgeId]!.labelWithLeg(wifiLeg)} '}'
               'bridge ${h.bridgeId ?? '-'}',
               style: style,
             ),

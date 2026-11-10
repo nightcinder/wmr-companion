@@ -129,4 +129,95 @@ void main() {
     expect(find.text('  BLE bridge bridge-left'), findsOneWidget);
     expect(find.text('  Wi-Fi bridge bridge-right'), findsOneWidget);
   });
+
+  testWidgets('composite Wi-Fi rows show the active leg on both screens', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: BridgeLinkTable(
+            [
+              BridgeLinkSnapshot(
+                bridgeId: 'bridge-right',
+                mode: StreamMode.raw,
+                mtu: 4096,
+              ),
+            ],
+            transportKinds: kinds,
+            wifiLeg: WifiLinkLeg.tcp,
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.textContaining('Wi-Fi (TCP)  bridge-right  raw  MTU 4096'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: DecodedStatsView(
+              DecodedStats(
+                hands: [DecodedHandStats(), DecodedHandStats()],
+                byBridge: {
+                  'bridge-right': DecodedStats(
+                    hands: [DecodedHandStats(), DecodedHandStats(records: 120)],
+                  ),
+                },
+              ),
+              selectedHand: 0,
+              transportKinds: kinds,
+              wifiLeg: WifiLinkLeg.ble,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.textContaining('Wi-Fi (BLE)  bridge bridge-right'),
+      findsOneWidget,
+    );
+
+    final recorder = LatencyRecorder(
+      started: DateTime(2026, 10, 24),
+      originUs: 0,
+      stream: 'decoded',
+    );
+    for (var i = 1; i <= 3; i++) {
+      recorder.addRecord(
+        wmrHandRight,
+        i,
+        i * 5000,
+        deviceTicks: i * 50000,
+        espRxUs: i * 5000,
+        bridgeId: 'bridge-right',
+      );
+    }
+    final report = recorder.report(
+      nowUs: 20000,
+      links: const {'bridge-right': LatencyLink(mtu: 4096)},
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: LatencyReportView(
+              report,
+              transportKinds: kinds,
+              wifiLeg: WifiLinkLeg.tcp,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.textContaining('Wi-Fi (TCP)  bridge bridge-right   MTU 4096'),
+      findsOneWidget,
+    );
+    expect(find.text('  Wi-Fi (TCP) bridge bridge-right'), findsOneWidget);
+  });
 }
