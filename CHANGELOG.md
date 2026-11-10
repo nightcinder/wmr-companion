@@ -3,6 +3,20 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## 0.3.21+26
+
+WMR Companion release, paired with WMR_Bridge `v0.3.19`.
+
+- The Unity SurfaceView no longer blacks out the player on the Pro Neckband.
+  The window drops `windowIsTranslucent`, the embedded `SurfaceView`s stay on
+  the application layer, and they no longer take focus, so Flutter keeps the
+  key events (ONY-1203).
+- Unity and hand tracking start only when the Bench or Debug screen opens. The
+  Connect screen no longer runs the tracking probe on launch, and the recenter
+  control moved to the Bench screen (ONY-1209).
+- The external-test-user sheet warns against Device Mirroring and pins the
+  `scrcpy --display-id=3` capture command (ONY-1204).
+
 ## 0.3.20+25
 
 WMR Companion release, paired with WMR_Bridge `v0.3.17`.

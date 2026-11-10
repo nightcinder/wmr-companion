@@ -1,9 +1,20 @@
 # Changelog
 
+## 0.3.21+26
+
+- The Unity player no longer blacks out on the Pro Neckband: the window drops
+  `windowIsTranslucent`, the embedded `SurfaceView`s stay on the application
+  layer, and they no longer take focus, so Flutter keeps the key events
+  (ONY-1203).
+- Unity and hand tracking start only when the Bench or Debug screen opens; the
+  Connect screen no longer runs the tracking probe on launch, and the recenter
+  control moved to the Bench screen (ONY-1209).
+- The external-test-user sheet warns against Device Mirroring and pins the
+  `scrcpy --display-id=3` capture command (ONY-1204).
+- Paired with WMR_Bridge `v0.3.19`.
+
 ## 0.3.20+25
 
-- Unity and hand tracking start only when the Bench or Debug screen opens; the
-  Connect screen no longer runs the tracking probe on launch (ONY-1209).
 - The guided bench shows live speed feedback during each pose capture: the
   active hand turns green inside the section 8 band and red outside it, with
   the measured speed and target band on screen, so a cell can be corrected
