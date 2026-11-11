@@ -669,9 +669,13 @@ void main() {
   test(
     'a scan that ends on its own does not suppress the resume redial',
     () async {
+      // A retry would call stopScan() and clear the browse suppression by
+      // itself, hiding a regression in the scan's own completion. A backoff
+      // longer than the scan timeout keeps every automatic retry out of the
+      // window before the resume, so only the scan's onDone can clear it.
       const policy = ReconnectPolicy(
-        baseDelay: Duration(milliseconds: 5),
-        maxDelay: Duration(milliseconds: 10),
+        baseDelay: Duration(seconds: 5),
+        maxDelay: Duration(seconds: 5),
         maxAttempts: 3,
       );
       final scanAdapter = FakeBleAdapter();
@@ -700,8 +704,10 @@ void main() {
 
       scanAdapter.connectError = Exception('radio unavailable');
       scanAdapter.dropLink();
-      await wait(500);
-      final exhausted = scanAdapter.calls.where((c) => c == 'connect').length;
+      await wait(50);
+      final connectsBeforeResume = scanAdapter.calls
+          .where((c) => c == 'connect')
+          .length;
       expect(container.read(realDeviceProvider).connected, isFalse);
 
       scanAdapter.connectError = null;
@@ -713,7 +719,7 @@ void main() {
       expect(container.read(realDeviceProvider).connected, isTrue);
       expect(
         scanAdapter.calls.where((c) => c == 'connect').length,
-        greaterThan(exhausted),
+        greaterThan(connectsBeforeResume),
       );
     },
   );
