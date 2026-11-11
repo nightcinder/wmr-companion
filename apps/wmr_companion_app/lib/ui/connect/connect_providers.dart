@@ -25,6 +25,35 @@ final realTransportProvider = Provider<UniversalBleTransport>((ref) {
   return transport;
 });
 
+/// Builds the BLE-first composite used by the Bluetooth tab.
+///
+/// No TCP endpoint is known before the bridge answers FF16 with its endpoint
+/// document, so [CompositeBleTransport.connect] dials BLE and learns the LAN
+/// hosts there. The same session then upgrades to TCP/Wi-Fi, with BLE left as
+/// the fallback.
+final bleHandoffTransportFactoryProvider =
+    Provider<BleTransport Function(BleTransport ble)>(
+      (ref) =>
+          (ble) => CompositeBleTransport(
+            tcp: WmrWsTransport(endpoints: const []),
+            ble: ble,
+            // The shared BLE transport outlives the composite and is disposed
+            // by [realTransportProvider].
+            disposeBle: false,
+          ),
+    );
+
+/// The BLE-first composite behind the Bluetooth tab, built on the shared BLE
+/// transport. Created on first use, so the fake-bridge path never touches the
+/// Bluetooth plugin.
+final bleHandoffTransportProvider = Provider<BleTransport>((ref) {
+  final transport = ref.watch(bleHandoffTransportFactoryProvider)(
+    ref.watch(realTransportProvider),
+  );
+  ref.onDispose(transport.dispose);
+  return transport;
+});
+
 /// Which link a bridge is connected over. The device id stays the existing
 /// `bridgeId`; this only labels it in the UI.
 enum BridgeTransportKind { ble, wifi }
@@ -107,7 +136,7 @@ class WifiLink {
   final WifiLinkLeg? Function()? activeLeg;
 }
 
-/// Builds the opt-in TCP-first link with a BLE GATT fallback.
+/// Builds the TCP-first link with a BLE GATT fallback.
 ///
 /// Production gives the composite its own BLE transport: the composite owns
 /// and disposes it, so it cannot tear down the Bluetooth screen's transport.
@@ -148,7 +177,9 @@ final realLinkTransportProvider = Provider<BleTransport>((ref) {
     return ref.read(realDeviceProvider.notifier).wifiTransport ??
         ref.read(realTransportProvider);
   }
-  return ref.read(realTransportProvider);
+  // The Bluetooth tab dials through the handoff composite, so that is the
+  // transport whose clock stamped the frames the debug panels display.
+  return ref.read(realDeviceProvider.notifier).transport;
 });
 
 class RealDeviceState {
@@ -345,13 +376,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   BleTransport? _wifiTransport;
   StreamSubscription<BleConnectionState>? _wifiStateSub;
   StreamSubscription<BleScanResult>? _fallbackScanSub;
+  StreamSubscription<BleConnectionState>? _bleCompositeStateSub;
+  String? _bleCompositeStateId;
   String? _wifiDeviceId;
   BleLinkStatus _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
 
   @override
   RealDeviceState build() {
     final transport = ref.watch(realTransportProvider);
-    _statusSub = transport.statusChanges.listen(_handleLinkStatus);
+    _statusSub = transport.statusChanges.listen(_handleBleLinkStatus);
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
       onStateChange: (s) => unawaited(
@@ -389,6 +422,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _statusSub?.cancel();
       _wifiStateSub?.cancel();
       _fallbackScanSub?.cancel();
+      _bleCompositeStateSub?.cancel();
       _statsTimer?.cancel();
       for (final t in _reconnectTimers.values) {
         t.cancel();
@@ -402,13 +436,19 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     return RealDeviceState(status: transport.status);
   }
 
-  /// The active link: the BLE transport, or the Wi-Fi transport once one is
-  /// configured. [BleTransport] stays the seam for both.
+  /// The active link: the BLE handoff composite, or the Wi-Fi transport once
+  /// one is configured. [BleTransport] stays the seam for both.
+  ///
+  /// The Bluetooth tab goes through [CompositeBleTransport] too, so its
+  /// FF16/FF13 reads start the automatic upgrade to TCP/Wi-Fi.
   BleTransport get _transport =>
       state.activeTransport == BridgeTransportKind.wifi &&
           _wifiTransport != null
       ? _wifiTransport!
-      : ref.read(realTransportProvider);
+      : _bleHandoffTransport;
+
+  BleTransport get _bleHandoffTransport =>
+      ref.read(bleHandoffTransportProvider);
 
   /// The transport behind the current link, for consumers that need to read
   /// the same device (the debug config panel).
@@ -423,6 +463,23 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// One place for a link status, whether it came from the BLE stack or was
   /// synthesized from a Wi-Fi connection state.
+  ///
+  /// The Bluetooth tab's transport is the handoff composite, which keeps the
+  /// GATT link open as a fallback after it upgrades the session to TCP. A raw
+  /// BLE event for that device therefore only describes the fallback leg, not
+  /// the session: a radio drop while TCP carries it must not tear the session
+  /// down.
+  void _handleBleLinkStatus(BleLinkStatus s) {
+    final id = s.deviceId;
+    final active = transport;
+    if (id != null &&
+        active is CompositeBleTransport &&
+        active.activeLegFor(id) == CompositeLeg.tcp) {
+      return;
+    }
+    _handleLinkStatus(s);
+  }
+
   void _handleLinkStatus(BleLinkStatus s) {
     if (state.activeTransport == BridgeTransportKind.wifi &&
         s.deviceId != null &&
@@ -470,6 +527,60 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _update(status: effectiveStatus);
   }
 
+  /// Forwards the BLE handoff composite's own connection state for
+  /// [deviceId].
+  ///
+  /// The raw BLE status stream only describes the fallback leg. While TCP
+  /// carries the session a radio drop is correctly ignored, and if TCP then
+  /// drops too no further raw BLE event arrives; the composite reports that
+  /// loss on its own stream, which is the only BLE-mode source that sees both
+  /// legs.
+  void _watchBleComposite(String deviceId) {
+    if (state.activeTransport == BridgeTransportKind.wifi) return;
+    if (_bleCompositeStateId == deviceId && _bleCompositeStateSub != null) {
+      return;
+    }
+    unawaited(_bleCompositeStateSub?.cancel());
+    _bleCompositeStateId = deviceId;
+    _bleCompositeStateSub = _bleHandoffTransport
+        .connectionState(deviceId)
+        .listen(
+          (s) => _onBleCompositeState(deviceId, s),
+          onError: (Object _) {},
+        );
+  }
+
+  void _cancelBleCompositeState([String? deviceId]) {
+    if (deviceId != null && _bleCompositeStateId != deviceId) return;
+    final sub = _bleCompositeStateSub;
+    _bleCompositeStateSub = null;
+    _bleCompositeStateId = null;
+    unawaited(sub?.cancel());
+  }
+
+  void _onBleCompositeState(String id, BleConnectionState s) {
+    if (_bleCompositeStateId != id) return;
+    if (state.activeTransport == BridgeTransportKind.wifi) return;
+    switch (s) {
+      case BleConnectionState.connected:
+      case BleConnectionState.connecting:
+        // The raw BLE stream owns the connect phases and the ready status.
+        return;
+      case BleConnectionState.disconnecting:
+        _handleLinkStatus(
+          BleLinkStatus(BleLinkPhase.disconnecting, deviceId: id),
+        );
+      case BleConnectionState.disconnected:
+        final wasReady = _connectedDeviceIds.contains(id);
+        _handleLinkStatus(
+          BleLinkStatus(
+            wasReady ? BleLinkPhase.connectionLost : BleLinkPhase.disconnected,
+            deviceId: id,
+          ),
+        );
+    }
+  }
+
   void _onWifiConnectionState(String id, BleConnectionState s) {
     if (_wifiDeviceId != id) return;
     switch (s) {
@@ -496,6 +607,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   void _scheduleReconnect(String id) {
     if (_intentionalDisconnect) return;
+    // Both the raw BLE loss and the composite's loss can report the same
+    // drop; one pending retry is enough.
+    if (_reconnectTimers[id] != null) return;
     _reconnectTimers[id]?.cancel();
     final policy = ref.read(reconnectPolicyProvider);
     final attempt = _reconnectAttempts[id] ?? 0;
@@ -673,6 +787,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       if (state.activeTransport == BridgeTransportKind.wifi &&
           _wifiTransport != null) {
         await _promoteWifiReady(deviceId);
+      } else {
+        _watchBleComposite(deviceId);
       }
     } finally {
       _connectingDeviceIds.remove(deviceId);
@@ -794,8 +910,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// verify the WebSocket `hello` before sending a token. [candidateHosts]
   /// carries the other interface addresses discovery reported for the same
   /// bridge, so the transport can fall back when [host] is unreachable.
-  /// [bleFallback] opts into the TCP-first [CompositeBleTransport] instead of
-  /// a plain WebSocket.
+  /// [bleFallback] defaults to the TCP-first [CompositeBleTransport] instead
+  /// of a plain WebSocket, so the same session can stay up over BLE and the
+  /// FF16 endpoint document can complete the upgrade.
   Future<void> connectWifi({
     required String host,
     required int port,
@@ -805,7 +922,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     String? bridgeId,
     String? name,
     Iterable<String> candidateHosts = const <String>[],
-    bool bleFallback = false,
+    bool bleFallback = true,
   }) async {
     final trimmedToken = token?.trim();
     final endpoint = WmrWsEndpoint(
@@ -863,6 +980,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _reconnecting.remove(deviceId);
       _disconnectEpoch++;
 
+      _cancelBleCompositeState(deviceId);
       _connectingDeviceIds.remove(deviceId);
       _connectedDeviceIds.remove(deviceId);
       _deviceStatuses.remove(deviceId);
@@ -880,6 +998,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     }
 
     await _stopFallbackScan();
+    _cancelBleCompositeState();
     _globalDisconnectGeneration++;
     for (final t in _reconnectTimers.values) {
       t.cancel();
