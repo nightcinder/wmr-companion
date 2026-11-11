@@ -591,6 +591,82 @@ void main() {
   });
 
   test(
+    'resume redials both bridges after both backoff campaigns exhaust',
+    () async {
+      const policy = ReconnectPolicy(
+        baseDelay: Duration(milliseconds: 5),
+        maxDelay: Duration(milliseconds: 10),
+        maxAttempts: 3,
+      );
+      final container = makeContainer(policy: policy);
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connect(fakeBridgeLeftDeviceId);
+      await controller.connect(fakeBridgeRightDeviceId);
+      expect(
+        container.read(realDeviceProvider).connectedDeviceIds,
+        containsAll([fakeBridgeLeftDeviceId, fakeBridgeRightDeviceId]),
+      );
+      final connectsBefore = adapter.calls.where((c) => c == 'connect').length;
+
+      // Both links drop while the app is in the background and both retry
+      // campaigns exhaust. Every automatic attempt must leave its id in the
+      // dropped set, otherwise resume only knows about the last one.
+      adapter.connectError = Exception('radio unavailable');
+      adapter.dropLink(deviceId: fakeBridgeLeftDeviceId);
+      adapter.dropLink(deviceId: fakeBridgeRightDeviceId);
+      await wait(600);
+      expect(container.read(realDeviceProvider).connected, isFalse);
+      final exhausted = adapter.calls.where((c) => c == 'connect').length;
+      expect(exhausted, connectsBefore + policy.maxAttempts * 2);
+
+      adapter.connectError = null;
+      backgroundApp();
+      await pump();
+      resumeApp();
+      await wait(300);
+
+      expect(
+        container.read(realDeviceProvider).connectedDeviceIds,
+        containsAll([fakeBridgeLeftDeviceId, fakeBridgeRightDeviceId]),
+      );
+    },
+  );
+
+  test('a finished manual scan does not suppress the resume redial', () async {
+    const policy = ReconnectPolicy(
+      baseDelay: Duration(milliseconds: 5),
+      maxDelay: Duration(milliseconds: 10),
+      maxAttempts: 3,
+    );
+    final container = makeContainer(policy: policy);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    // Browsing while connected, then leaving the scan: the browse is over.
+    await controller.startScan();
+    await controller.stopScan();
+
+    adapter.connectError = Exception('radio unavailable');
+    adapter.dropLink();
+    await wait(500);
+    final exhausted = adapter.calls.where((c) => c == 'connect').length;
+    expect(container.read(realDeviceProvider).connected, isFalse);
+
+    adapter.connectError = null;
+    backgroundApp();
+    await pump();
+    resumeApp();
+    await wait(300);
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(
+      adapter.calls.where((c) => c == 'connect').length,
+      greaterThan(exhausted),
+    );
+  });
+
+  test(
     'resuming with no dropped link retries remembered-bridge discovery',
     () async {
       final wifi = _DroppableWifiTransport(
