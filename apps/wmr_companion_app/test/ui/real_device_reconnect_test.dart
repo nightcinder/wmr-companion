@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/hid/hid_output.dart';
+import 'package:wmr_companion_app/services/bridge_token_store.dart';
 import 'package:wmr_companion_app/services/known_bridge_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
@@ -19,6 +20,7 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
 
 import '../hid/fake_hid.dart';
+import '../services/memory_secure_token_backend.dart';
 import 'memory_known_bridge_store.dart';
 
 class _DroppableWifiTransport extends FakeTransport {
@@ -724,37 +726,81 @@ void main() {
     },
   );
 
+  test('resuming with no dropped link retries LAN discovery', () async {
+    final wifi = _DroppableWifiTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+    );
+    addTearDown(wifi.dispose);
+    var discoveryFails = true;
+    final container = ProviderContainer(
+      overrides: [
+        realTransportProvider.overrideWithValue(transport),
+        wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+        compositeWifiTransportFactoryProvider.overrideWithValue(
+          (_) => WifiLink(wifi),
+        ),
+        lanDiscoveryProvider.overrideWithValue(() async {
+          if (discoveryFails) throw Exception('network down');
+          return [
+            WmrWsEndpoint(host: 'pi.local', port: 8765, bridgeId: 'pi-bridge'),
+          ];
+        }),
+        streamModeProvider.overrideWith(() => TestModeNotifier(StreamMode.raw)),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.launchAutoConnect();
+    expect(container.read(realDeviceProvider).connected, isFalse);
+
+    // Discovery recovers while the app is in the background; the resume must
+    // run it again rather than waiting for a tap.
+    discoveryFails = false;
+    backgroundApp();
+    await pump();
+    resumeApp();
+    await wait(300);
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(wifi.connectCalls, 1);
+  });
+
   test(
-    'resuming with no dropped link retries remembered-bridge discovery',
+    'launch auto-connect reuses the saved token while Bluetooth is off',
     () async {
       final wifi = _DroppableWifiTransport(
         devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
       );
       addTearDown(wifi.dispose);
-      final store = MemoryKnownBridgeStore(
-        const KnownBridge(
-          bridgeId: 'pi-bridge',
-          hosts: ['pi.local'],
-          port: 8765,
-          bleFallback: false,
-        ),
+      final tokenStore = BridgeTokenStore(MemorySecureTokenBackend());
+      await tokenStore.save(
+        bridgeId: 'pi-bridge',
+        hosts: ['pi.local'],
+        token: 'secret',
       );
-      var discoveryFails = true;
+      WmrWsEndpoint? dialled;
       final container = ProviderContainer(
         overrides: [
           realTransportProvider.overrideWithValue(transport),
-          wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
-          knownBridgeStoreProvider.overrideWithValue(store),
-          lanDiscoveryProvider.overrideWithValue(() async {
-            if (discoveryFails) throw Exception('network down');
-            return [
-              WmrWsEndpoint(
-                host: 'pi.local',
-                port: 8765,
-                bridgeId: 'pi-bridge',
-              ),
-            ];
+          wifiTransportFactoryProvider.overrideWithValue((endpoint) {
+            dialled = endpoint;
+            return wifi;
           }),
+          knownBridgeStoreProvider.overrideWithValue(
+            MemoryKnownBridgeStore(
+              const KnownBridge(
+                bridgeId: 'pi-bridge',
+                hosts: ['pi.local'],
+                port: 8765,
+                bleFallback: false,
+              ),
+            ),
+          ),
+          bridgeTokenStoreProvider.overrideWithValue(tokenStore),
+          lanDiscoveryProvider.overrideWithValue(
+            () async => throw Exception('network down'),
+          ),
           streamModeProvider.overrideWith(
             () => TestModeNotifier(StreamMode.raw),
           ),
@@ -762,20 +808,11 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      final controller = container.read(realDeviceProvider.notifier);
-      await controller.launchAutoConnect();
-      expect(container.read(realDeviceProvider).connected, isFalse);
+      await container.read(realDeviceProvider.notifier).launchAutoConnect();
 
-      // Discovery recovers while the app is in the background; the resume must
-      // look the remembered bridge up again rather than waiting for a tap.
-      discoveryFails = false;
-      backgroundApp();
-      await pump();
-      resumeApp();
-      await wait(300);
-
+      expect(dialled?.host, 'pi.local');
+      expect(dialled?.token, 'secret');
       expect(container.read(realDeviceProvider).connected, isTrue);
-      expect(wifi.connectCalls, 1);
     },
   );
 }

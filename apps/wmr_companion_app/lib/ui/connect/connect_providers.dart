@@ -42,12 +42,13 @@ final bleHandoffTransportFactoryProvider =
             // The shared BLE transport outlives the composite and is disposed
             // by [realTransportProvider].
             disposeBle: false,
-            onTokenLearned: (bridgeId, hosts, token) {
+            onTokenLearned: (bridgeId, hosts, port, token) {
               unawaited(
                 ref
                     .read(bridgeTokenStoreProvider)
                     .save(bridgeId: bridgeId, hosts: hosts, token: token),
               );
+              unawaited(_rememberLearnedBridge(ref, bridgeId, hosts, port));
             },
           ),
     );
@@ -156,12 +157,13 @@ final compositeWifiTransportFactoryProvider =
         final composite = CompositeBleTransport(
           tcp: WmrWsTransport(endpoints: [endpoint]),
           ble: UniversalBleTransport(adapter: UniversalBleAdapter()),
-          onTokenLearned: (bridgeId, hosts, token) {
+          onTokenLearned: (bridgeId, hosts, port, token) {
             unawaited(
               ref
                   .read(bridgeTokenStoreProvider)
                   .save(bridgeId: bridgeId, hosts: hosts, token: token),
             );
+            unawaited(_rememberLearnedBridge(ref, bridgeId, hosts, port));
           },
         );
         return WifiLink(
@@ -175,6 +177,27 @@ final compositeWifiTransportFactoryProvider =
         );
       };
     });
+
+/// Saves the endpoint a BLE FF13/FF16 exchange discovered, so the next launch
+/// reconnects to that bridge by default instead of waiting for a scan.
+///
+/// The token is stored separately in secure storage; this only remembers the
+/// address. Losing the memory costs one discovery pass, not the connection.
+Future<void> _rememberLearnedBridge(
+  Ref ref,
+  String bridgeId,
+  List<String> hosts,
+  int port,
+) async {
+  if (bridgeId.trim().isEmpty || hosts.isEmpty) return;
+  try {
+    await ref
+        .read(knownBridgeStoreProvider)
+        .save(KnownBridge(bridgeId: bridgeId, hosts: hosts, port: port));
+  } catch (_) {
+    // Nothing saved, or no storage on this platform.
+  }
+}
 
 /// The latest WMR_Bridge release can be installed from the Pi itself when its
 /// daemon advertises `upgradeCapable`. Older daemons need this one-liner.
@@ -1209,7 +1232,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       // No storage, no remembered bridge: the sole discovered one still works.
     }
     if (!ref.mounted || _autoConnectSuppressed) return;
-    await _discoverLan(remembered: remembered);
+    final attempted = await _discoverLan(remembered: remembered);
+    // A blocked or failing scan must not keep a saved bridge off the wire: the
+    // remembered address is the fallback, with `hello` still verifying its id.
+    if (!attempted &&
+        remembered != null &&
+        ref.mounted &&
+        !_autoConnectSuppressed) {
+      await _autoConnect(const [], remembered);
+    }
   }
 
   /// Gives a dropped link a fresh attempt when the app returns to the
@@ -1268,23 +1299,37 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       // No storage, no remembered bridge: the sole discovered one still works.
     }
     if (!ref.mounted || _autoConnectSuppressed) return;
-    await _discoverLan(remembered: remembered);
+    final attempted = await _discoverLan(remembered: remembered);
+    if (!attempted &&
+        remembered != null &&
+        ref.mounted &&
+        !_autoConnectSuppressed) {
+      await _autoConnect(const [], remembered);
+    }
   }
 
-  Future<void> _discoverLan({KnownBridge? remembered}) async {
-    if (state.discoveringLan) return;
+  /// Runs one discovery pass and dials the remembered or sole bridge.
+  ///
+  /// Returns true when discovery handed the dial to [_autoConnect], so a
+  /// caller does not repeat the same attempt. A failed pass still lets the
+  /// caller fall back to the remembered address.
+  Future<bool> _discoverLan({KnownBridge? remembered}) async {
+    if (state.discoveringLan) return false;
     _update(discoveringLan: true, clearLanError: true);
     try {
       final found = _deduplicateLanEndpoints(
         await ref.read(lanDiscoveryProvider)(),
       );
-      if (!ref.mounted) return;
+      if (!ref.mounted) return false;
       _update(lanEndpoints: found);
       if (remembered != null || found.length == 1) {
         await _autoConnect(found, remembered);
+        return true;
       }
+      return false;
     } catch (error) {
       if (ref.mounted) _update(lanError: '$error');
+      return false;
     } finally {
       if (ref.mounted) _update(discoveringLan: false);
     }

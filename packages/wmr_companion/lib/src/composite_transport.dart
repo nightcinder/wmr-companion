@@ -78,13 +78,20 @@ class CompositeBleTransport implements BleTransport {
   final bool disposeBle;
 
   /// Called when the FF13 encrypted read supplies the bridge token, with the
-  /// stable `bridge_id` and the LAN hosts the FF16 document reported.
+  /// stable `bridge_id`, the LAN hosts and the port the FF16 document
+  /// reported.
   ///
   /// The composite keeps the token only for the current dial. A host that
   /// wants it after an app restart, so Wi-Fi can authenticate while Bluetooth
-  /// is off, saves it here. The callback must not log the token; an exception
-  /// it throws is swallowed so the dial still proceeds.
-  final void Function(String bridgeId, List<String> hosts, String token)?
+  /// is off, saves it here together with the endpoint (hosts and port). The
+  /// callback must not log the token; an exception it throws is swallowed so
+  /// the dial still proceeds.
+  final void Function(
+    String bridgeId,
+    List<String> hosts,
+    int port,
+    String token,
+  )?
   onTokenLearned;
 
   final Map<String, _Route> _routes = {};
@@ -804,7 +811,7 @@ class CompositeBleTransport implements BleTransport {
       final learned = onTokenLearned;
       if (learned != null && endpoint.bridgeId.trim().isNotEmpty) {
         try {
-          learned(endpoint.bridgeId, endpoint.hosts, token);
+          learned(endpoint.bridgeId, endpoint.hosts, endpoint.port, token);
         } catch (_) {
           // Saving the token is best-effort; the dial still proceeds.
         }
