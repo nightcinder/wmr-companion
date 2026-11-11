@@ -44,6 +44,7 @@ class CompositeBleTransport implements BleTransport {
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
     this.bleScanWait = const Duration(seconds: 5),
+    this.disposeBle = true,
   }) : clock = tcp.clock;
 
   /// Primary WebSocket transport.
@@ -69,6 +70,11 @@ class CompositeBleTransport implements BleTransport {
   /// Without this, a TCP refusal that returns faster than the radio scan can
   /// leave the BLE leg with no candidate, so the failover never happens.
   final Duration bleScanWait;
+
+  /// Whether [dispose] also disposes [ble]. A host that shares one BLE
+  /// transport between several composites (the Bluetooth tab and an opt-in
+  /// Wi-Fi fallback) sets this to false and owns the transport itself.
+  final bool disposeBle;
 
   final Map<String, _Route> _routes = {};
   final Map<String, String> _bridgeIds = {};
@@ -183,8 +189,16 @@ class CompositeBleTransport implements BleTransport {
   Future<void> connect(String deviceId) async {
     _ensureUsable();
     final route = _ensureRoute(deviceId);
+    if (route.switching) {
+      // A failover or loss is already changing this route. Wait for it so an
+      // explicit reconnect is not swallowed while the old subscriptions are
+      // being detached.
+      final done = route.switchingDone;
+      if (done != null) await done.future;
+      if (route.state == BleConnectionState.connected || route.switching)
+        return;
+    }
     if (route.state == BleConnectionState.connected) return;
-    if (route.switching) return;
     route.intentional = false;
     route.switching = true;
     _setState(route, BleConnectionState.connecting);
@@ -249,10 +263,17 @@ class CompositeBleTransport implements BleTransport {
     route.intentional = true;
     try {
       _stopUpgrade(route);
-      await route.tcpStateSub?.cancel();
-      await route.bleStateSub?.cancel();
+      // Do not await these cancels: a transport's connection-state stream can
+      // defer cancellation until a later delivery turn, which would make an
+      // explicit Disconnect look stuck.
+      final tcpSub = route.tcpStateSub;
+      final bleSub = route.bleStateSub;
       route.tcpStateSub = null;
       route.bleStateSub = null;
+      route.tcpStateId = null;
+      route.bleStateId = null;
+      unawaited(tcpSub?.cancel());
+      unawaited(bleSub?.cancel());
       await _disableBleNotifications(route);
 
       final channels = List<_Channel>.of(route.channels);
@@ -382,8 +403,14 @@ class CompositeBleTransport implements BleTransport {
     for (final route in routes) {
       route.intentional = true;
       _stopUpgrade(route);
-      await route.tcpStateSub?.cancel();
-      await route.bleStateSub?.cancel();
+      final tcpSub = route.tcpStateSub;
+      final bleSub = route.bleStateSub;
+      route.tcpStateSub = null;
+      route.bleStateSub = null;
+      route.tcpStateId = null;
+      route.bleStateId = null;
+      unawaited(tcpSub?.cancel());
+      unawaited(bleSub?.cancel());
       await _disableBleNotifications(route);
       final channels = List<_Channel>.of(route.channels);
       route.channels.clear();
@@ -405,7 +432,7 @@ class CompositeBleTransport implements BleTransport {
       if (!route.states.isClosed) await route.states.close();
     }
     await tcp.dispose();
-    await ble.dispose();
+    if (disposeBle) await ble.dispose();
   }
 
   void _ensureUsable() {
@@ -529,9 +556,10 @@ class CompositeBleTransport implements BleTransport {
   }
 
   Future<void> _rejectBle(_Route route) async {
-    await route.bleStateSub?.cancel();
+    final bleSub = route.bleStateSub;
     route.bleStateSub = null;
     route.bleStateId = null;
+    unawaited(bleSub?.cancel());
     final bleId = route.bleDeviceId;
     route.bleDeviceId = null;
     if (bleId == null) return;
@@ -556,6 +584,13 @@ class CompositeBleTransport implements BleTransport {
     await _switchChannels(route, _Lane.ble);
     _startUpgrade(route);
     _setState(route, BleConnectionState.connected);
+    // An FF16 endpoint document names the LAN hosts during the BLE dial, so
+    // try them at once instead of waiting for the first periodic tick. A
+    // failed attempt leaves the timer to keep retrying.
+    if (route.upgradeNow) {
+      route.upgradeNow = false;
+      unawaited(_attemptUpgrade(route));
+    }
   }
 
   Future<void> _switchChannels(_Route route, _Lane to) async {
@@ -627,6 +662,7 @@ class CompositeBleTransport implements BleTransport {
   Future<void> _fallbackToBle(_Route route) async {
     if (_disposed || route.intentional || route.switching) return;
     route.switching = true;
+    final switchingDone = route.switchingDone = Completer<void>();
     try {
       final bleCandidates = _bleCandidatesFor(
         route,
@@ -647,12 +683,17 @@ class CompositeBleTransport implements BleTransport {
       await _lose(route);
     } finally {
       route.switching = false;
+      if (identical(route.switchingDone, switchingDone)) {
+        route.switchingDone = null;
+      }
+      if (!switchingDone.isCompleted) switchingDone.complete();
     }
   }
 
   Future<void> _recoverFromBleDrop(_Route route) async {
     if (_disposed || route.intentional || route.switching) return;
     route.switching = true;
+    final switchingDone = route.switchingDone = Completer<void>();
     try {
       if (route.tcpCandidates.isNotEmpty) {
         try {
@@ -668,15 +709,26 @@ class CompositeBleTransport implements BleTransport {
       await _lose(route);
     } finally {
       route.switching = false;
+      if (identical(route.switchingDone, switchingDone)) {
+        route.switchingDone = null;
+      }
+      if (!switchingDone.isCompleted) switchingDone.complete();
     }
   }
 
   Future<void> _lose(_Route route) async {
     _stopUpgrade(route);
-    await route.tcpStateSub?.cancel();
-    await route.bleStateSub?.cancel();
+    // A drop is reported from the BLE subscription's own listener; awaiting
+    // that generator's cancel() there can park the loss until the next event.
+    // The streams are done after a loss, so detach without waiting.
+    final tcpSub = route.tcpStateSub;
+    final bleSub = route.bleStateSub;
     route.tcpStateSub = null;
     route.bleStateSub = null;
+    route.tcpStateId = null;
+    route.bleStateId = null;
+    unawaited(tcpSub?.cancel());
+    unawaited(bleSub?.cancel());
     final channels = List<_Channel>.of(route.channels);
     for (final channel in channels) {
       await channel.detach();
@@ -751,6 +803,9 @@ class CompositeBleTransport implements BleTransport {
       tcp.registerEndpoint(candidate);
       route.tcpCandidates.add(candidate.resolvedDeviceId);
     }
+    // The link is about to become active on BLE; retry TCP as soon as it does
+    // rather than waiting for the first periodic tick.
+    route.upgradeNow = true;
     _startUpgrade(route);
   }
 
@@ -835,6 +890,15 @@ class _Route {
   bool intentional = false;
   bool switching = false;
   bool upgrading = false;
+
+  /// Completed when an in-flight failover or loss finishes, so a concurrent
+  /// [CompositeBleTransport.connect] can wait instead of returning as if the
+  /// route were already dialled.
+  Completer<void>? switchingDone;
+
+  /// Set when an FF16 endpoint document supplied LAN hosts during this BLE
+  /// dial; [_activateBle] then probes TCP without waiting for a timer tick.
+  bool upgradeNow = false;
   StreamSubscription<BleConnectionState>? tcpStateSub;
   StreamSubscription<BleConnectionState>? bleStateSub;
   String? tcpStateId;

@@ -53,7 +53,7 @@ class ConnectUiState extends ChangeNotifier {
   final ScrollController scroll = StereoSbsScrollController();
 
   bool secure = false;
-  bool bleFallback = false;
+  bool bleFallback = true;
   String? wifiError;
   bool exportBusy = false;
   String? exportMessage;
@@ -574,8 +574,9 @@ class _BridgeUpdateBanner extends ConsumerWidget {
 }
 
 /// Entry for a Pi Wi-Fi bridge: host, port, the optional shared token, and a
-/// LAN scan for bridges that announce themselves. The opt-in fallback wraps
-/// the WebSocket link in a composite whose BLE leg takes over if TCP fails.
+/// LAN scan for bridges that announce themselves. The fallback, on by default,
+/// wraps the WebSocket link in a composite whose BLE leg takes over if TCP
+/// fails.
 ///
 /// The fields and their errors live in [ConnectUiState] so both eye halves
 /// show the same values while the controller rebuilds on stream statistics.

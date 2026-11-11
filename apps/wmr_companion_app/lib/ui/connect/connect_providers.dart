@@ -25,6 +25,35 @@ final realTransportProvider = Provider<UniversalBleTransport>((ref) {
   return transport;
 });
 
+/// Builds the BLE-first composite used by the Bluetooth tab.
+///
+/// No TCP endpoint is known before the bridge answers FF16 with its endpoint
+/// document, so [CompositeBleTransport.connect] dials BLE and learns the LAN
+/// hosts there. The same session then upgrades to TCP/Wi-Fi, with BLE left as
+/// the fallback.
+final bleHandoffTransportFactoryProvider =
+    Provider<BleTransport Function(BleTransport ble)>(
+      (ref) =>
+          (ble) => CompositeBleTransport(
+            tcp: WmrWsTransport(endpoints: const []),
+            ble: ble,
+            // The shared BLE transport outlives the composite and is disposed
+            // by [realTransportProvider].
+            disposeBle: false,
+          ),
+    );
+
+/// The BLE-first composite behind the Bluetooth tab, built on the shared BLE
+/// transport. Created on first use, so the fake-bridge path never touches the
+/// Bluetooth plugin.
+final bleHandoffTransportProvider = Provider<BleTransport>((ref) {
+  final transport = ref.watch(bleHandoffTransportFactoryProvider)(
+    ref.watch(realTransportProvider),
+  );
+  ref.onDispose(transport.dispose);
+  return transport;
+});
+
 /// Which link a bridge is connected over. The device id stays the existing
 /// `bridgeId`; this only labels it in the UI.
 enum BridgeTransportKind { ble, wifi }
@@ -107,7 +136,7 @@ class WifiLink {
   final WifiLinkLeg? Function()? activeLeg;
 }
 
-/// Builds the opt-in TCP-first link with a BLE GATT fallback.
+/// Builds the TCP-first link with a BLE GATT fallback.
 ///
 /// Production gives the composite its own BLE transport: the composite owns
 /// and disposes it, so it cannot tear down the Bluetooth screen's transport.
@@ -402,13 +431,19 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     return RealDeviceState(status: transport.status);
   }
 
-  /// The active link: the BLE transport, or the Wi-Fi transport once one is
-  /// configured. [BleTransport] stays the seam for both.
+  /// The active link: the BLE handoff composite, or the Wi-Fi transport once
+  /// one is configured. [BleTransport] stays the seam for both.
+  ///
+  /// The Bluetooth tab goes through [CompositeBleTransport] too, so its
+  /// FF16/FF13 reads start the automatic upgrade to TCP/Wi-Fi.
   BleTransport get _transport =>
       state.activeTransport == BridgeTransportKind.wifi &&
           _wifiTransport != null
       ? _wifiTransport!
-      : ref.read(realTransportProvider);
+      : _bleHandoffTransport;
+
+  BleTransport get _bleHandoffTransport =>
+      ref.read(bleHandoffTransportProvider);
 
   /// The transport behind the current link, for consumers that need to read
   /// the same device (the debug config panel).
@@ -794,8 +829,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// verify the WebSocket `hello` before sending a token. [candidateHosts]
   /// carries the other interface addresses discovery reported for the same
   /// bridge, so the transport can fall back when [host] is unreachable.
-  /// [bleFallback] opts into the TCP-first [CompositeBleTransport] instead of
-  /// a plain WebSocket.
+  /// [bleFallback] defaults to the TCP-first [CompositeBleTransport] instead
+  /// of a plain WebSocket, so the same session can stay up over BLE and the
+  /// FF16 endpoint document can complete the upgrade.
   Future<void> connectWifi({
     required String host,
     required int port,
@@ -805,7 +841,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     String? bridgeId,
     String? name,
     Iterable<String> candidateHosts = const <String>[],
-    bool bleFallback = false,
+    bool bleFallback = true,
   }) async {
     final trimmedToken = token?.trim();
     final endpoint = WmrWsEndpoint(

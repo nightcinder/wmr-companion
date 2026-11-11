@@ -35,6 +35,10 @@ void main() {
             onEndpoint?.call(endpoint);
             return wifi;
           }),
+          compositeWifiTransportFactoryProvider.overrideWithValue((endpoint) {
+            onEndpoint?.call(endpoint);
+            return WifiLink(wifi, activeLeg: () => WifiLinkLeg.tcp);
+          }),
           if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -190,6 +194,9 @@ void main() {
             ),
           ),
           wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+          compositeWifiTransportFactoryProvider.overrideWithValue(
+            (_) => WifiLink(wifi, activeLeg: () => WifiLinkLeg.tcp),
+          ),
           streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),

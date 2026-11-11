@@ -21,6 +21,7 @@ void main() {
   ProviderContainer makeContainer({
     BleTransport Function(WmrWsEndpoint)? wifiFactory,
     WifiLink Function(WmrWsEndpoint)? compositeFactory,
+    BleTransport Function(BleTransport)? bleHandoffFactory,
     Future<List<WmrWsEndpoint>> Function()? discovery,
   }) {
     final ble = UniversalBleTransport(
@@ -36,6 +37,10 @@ void main() {
         compositeWifiTransportFactoryProvider.overrideWithValue(
           compositeFactory ?? (_) => WifiLink(FakeTransport()),
         ),
+        if (bleHandoffFactory != null)
+          bleHandoffTransportFactoryProvider.overrideWithValue(
+            bleHandoffFactory,
+          ),
         lanDiscoveryProvider.overrideWithValue(
           discovery ?? () async => const [],
         ),
@@ -61,7 +66,7 @@ void main() {
 
     await container
         .read(realDeviceProvider.notifier)
-        .connectWifi(host: 'pi.local', port: 8765);
+        .connectWifi(host: 'pi.local', port: 8765, bleFallback: false);
 
     final state = container.read(realDeviceProvider);
     expect(state.connected, isTrue);
@@ -70,6 +75,48 @@ void main() {
     expect(state.wifiLeg, isNull);
     expect(compositeBuilds, 0);
   });
+
+  test('a Wi-Fi connect defaults to the BLE fallback composite', () async {
+    var compositeBuilds = 0;
+    final container = makeContainer(
+      wifiFactory: (_) => throw StateError('direct Wi-Fi factory must not run'),
+      compositeFactory: (_) {
+        compositeBuilds++;
+        return WifiLink(
+          wifiWithDevice('pi.local:8765'),
+          activeLeg: () => WifiLinkLeg.tcp,
+        );
+      },
+    );
+
+    await container
+        .read(realDeviceProvider.notifier)
+        .connectWifi(host: 'pi.local', port: 8765);
+
+    final state = container.read(realDeviceProvider);
+    expect(state.connected, isTrue);
+    expect(state.wifiFallback, isTrue);
+    expect(compositeBuilds, 1);
+  });
+
+  test(
+    'the Bluetooth tab connects through the BLE handoff transport',
+    () async {
+      const bleId = 'ble-pi-1';
+      var handoffBuilds = 0;
+      final container = makeContainer(
+        bleHandoffFactory: (ble) {
+          handoffBuilds++;
+          return ble;
+        },
+      );
+
+      await container.read(realDeviceProvider.notifier).connect(bleId);
+
+      expect(handoffBuilds, 1);
+      expect(container.read(realDeviceProvider).connected, isTrue);
+    },
+  );
 
   test('LAN discovery publishes the endpoints it finds', () async {
     final endpoint = WmrWsEndpoint(
@@ -234,7 +281,7 @@ void main() {
 
     await container
         .read(realDeviceProvider.notifier)
-        .connectWifi(host: 'pi.local', port: 8765);
+        .connectWifi(host: 'pi.local', port: 8765, bleFallback: false);
 
     expect(await read.future.timeout(const Duration(seconds: 2)), '0.3.19');
     expect(container.read(realDeviceProvider).protocolUnavailable, isFalse);
@@ -255,7 +302,7 @@ void main() {
 
       await container
           .read(realDeviceProvider.notifier)
-          .connectWifi(host: 'pi.local', port: 8765);
+          .connectWifi(host: 'pi.local', port: 8765, bleFallback: false);
 
       await unavailable.future.timeout(const Duration(seconds: 2));
       final state = container.read(realDeviceProvider);

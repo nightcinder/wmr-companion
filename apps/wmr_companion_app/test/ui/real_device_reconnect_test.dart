@@ -374,7 +374,11 @@ void main() {
     addTearDown(container.dispose);
 
     final controller = container.read(realDeviceProvider.notifier);
-    await controller.connectWifi(host: 'pi.local', port: 8765);
+    await controller.connectWifi(
+      host: 'pi.local',
+      port: 8765,
+      bleFallback: false,
+    );
     expect(container.read(realDeviceProvider).connected, isTrue);
 
     final connectsBefore = wifi.connectCalls;

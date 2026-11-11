@@ -35,6 +35,7 @@ Uint8List _endpointDocument({
   String bridgeId = _bridgeId,
   List<String> hosts = const ['127.0.0.1'],
   int port = 8765,
+  bool authRequired = false,
 }) => Uint8List.fromList(
   utf8.encode(
     jsonEncode({
@@ -46,9 +47,13 @@ Uint8List _endpointDocument({
       'hosts': hosts,
       'port': port,
       'path': '/wmr',
-      'authRequired': false,
+      'authRequired': authRequired,
     }),
   ),
+);
+
+Uint8List _sessionToken([String token = 'secret']) => Uint8List.fromList(
+  utf8.encode(jsonEncode({'type': 'wmr_ble_session', 'token': token})),
 );
 
 Uint8List _versionString([String value = '0.2.4-pi']) =>
@@ -392,6 +397,67 @@ void main() {
       // entry for it.
       final deduped = await transport.scan().toList();
       expect(deduped, hasLength(1));
+    },
+  );
+
+  test('a BLE-only connect learns FF16 and upgrades to TCP', () async {
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    // The Bluetooth tab knows only the BLE device id; the LAN host is in the
+    // FF16 document, not in the transport's endpoints.
+    expect(tcp.endpointFor(_bleDeviceId), isNull);
+    await transport.connect(_bleDeviceId);
+
+    expect(transport.bridgeIdFor(_bleDeviceId), _bridgeId);
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the FF16 LAN host was not dialled',
+    );
+    expect(tcp.connectCalls, contains(_lanDeviceId));
+    expect(
+      await transport.connectionState(_bleDeviceId).first,
+      BleConnectionState.connected,
+    );
+  });
+
+  test(
+    'reads the FF13 token before dialling an authRequired FF16 host',
+    () async {
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument(authRequired: true));
+      ble.onRead = (deviceId, characteristicUuid) {
+        final normalized = characteristicUuid.toLowerCase();
+        if (normalized == wmrBridgeVersionCharUuid) {
+          return _endpointDocument(authRequired: true);
+        }
+        if (normalized == wmrBridgeConfigCharUuid) {
+          return _sessionToken();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.connect(_bleDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+        reason: 'the authenticated FF16 LAN host was not dialled',
+      );
+
+      expect(tcp.endpoints[_lanDeviceId]?.token, 'secret');
     },
   );
 

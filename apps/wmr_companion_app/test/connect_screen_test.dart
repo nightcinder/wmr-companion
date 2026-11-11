@@ -14,7 +14,7 @@ import 'ui/raw_mode_notifier.dart';
 
 void main() {
   testWidgets(
-    'discovers a LAN bridge and connects over the opt-in BLE fallback',
+    'discovers a LAN bridge and connects over the default BLE fallback',
     (tester) async {
       tester.view.physicalSize = const Size(900, 1600);
       tester.view.devicePixelRatio = 1;
@@ -73,8 +73,7 @@ void main() {
 
       final fallback = find.byKey(const Key('wifi-ble-fallback'));
       await tester.ensureVisible(fallback);
-      await tester.tap(fallback);
-      await tester.pump();
+      expect(tester.widget<CheckboxListTile>(fallback).value, isTrue);
 
       final connect = find.byKey(
         const Key('wifi-lan-connect-192.168.1.42:8765'),
