@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_companion_app/services/bridge_token_store.dart';
 import 'package:wmr_companion_app/services/known_bridge_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
@@ -14,6 +15,7 @@ import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import '../services/memory_secure_token_backend.dart';
 import 'memory_known_bridge_store.dart';
 import 'raw_mode_notifier.dart';
 
@@ -54,6 +56,9 @@ void main() {
           ),
           knownBridgeStoreProvider.overrideWithValue(
             store ?? MemoryKnownBridgeStore(),
+          ),
+          bridgeTokenStoreProvider.overrideWithValue(
+            BridgeTokenStore(MemorySecureTokenBackend()),
           ),
           wifiTransportFactoryProvider.overrideWithValue((endpoint) {
             onEndpoint?.call(endpoint, false);
