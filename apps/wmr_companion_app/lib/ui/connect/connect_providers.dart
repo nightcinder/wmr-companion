@@ -14,6 +14,7 @@ import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import '../../services/bridge_token_store.dart';
 import '../../services/known_bridge_store.dart';
 import '../debug/stream_settings.dart';
 
@@ -41,6 +42,13 @@ final bleHandoffTransportFactoryProvider =
             // The shared BLE transport outlives the composite and is disposed
             // by [realTransportProvider].
             disposeBle: false,
+            onTokenLearned: (bridgeId, hosts, token) {
+              unawaited(
+                ref
+                    .read(bridgeTokenStoreProvider)
+                    .save(bridgeId: bridgeId, hosts: hosts, token: token),
+              );
+            },
           ),
     );
 
@@ -148,6 +156,13 @@ final compositeWifiTransportFactoryProvider =
         final composite = CompositeBleTransport(
           tcp: WmrWsTransport(endpoints: [endpoint]),
           ble: UniversalBleTransport(adapter: UniversalBleAdapter()),
+          onTokenLearned: (bridgeId, hosts, token) {
+            unawaited(
+              ref
+                  .read(bridgeTokenStoreProvider)
+                  .save(bridgeId: bridgeId, hosts: hosts, token: token),
+            );
+          },
         );
         return WifiLink(
           composite,
@@ -167,6 +182,23 @@ const String bridgeManualUpgradeCommand =
     'curl -fsSL '
     'https://github.com/nightcinder/WMR_Bridge/releases/latest/download/install.sh'
     ' | sudo bash';
+
+/// Human-readable reason for a failed Wi-Fi dial.
+///
+/// A token failure names the file on the Pi and the Bluetooth path that can
+/// learn it. The token itself is never included in the message.
+String wifiFailureMessage(Object error) => switch (error) {
+  WmrWsAuthException(failure: WmrWsAuthFailure.noToken) =>
+    'This bridge requires a token. Type the one from '
+        '/etc/wmr-bridge/token on the Pi, or connect once over Bluetooth '
+        'so the app can read and save it.',
+  WmrWsAuthException(failure: WmrWsAuthFailure.rejected) =>
+    'The bridge rejected the token. Compare it with '
+        '/etc/wmr-bridge/token on the Pi.',
+  WmrWsAuthException(failure: WmrWsAuthFailure.timeout) =>
+    'The bridge did not answer authentication. Check the token and retry.',
+  _ => '$error',
+};
 
 /// What the Connect screen shows for an in-app bridge upgrade.
 enum BridgeUpgradePhase { idle, sending, restarting, busy, failed }
@@ -954,7 +986,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       BleLinkStatus(
         BleLinkPhase.connectFailed,
         deviceId: deviceId,
-        message: '$error',
+        message: wifiFailureMessage(error),
       ),
     );
   }
@@ -1331,8 +1363,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   /// Connects to a Pi Wi-Fi bridge by host:port, with the optional shared
-  /// token. The token is only handed to the transport; it is never logged or
-  /// kept in app state.
+  /// token. The token is never logged or kept in app state.
+  ///
+  /// When [token] is empty, the token saved for [bridgeId] or [host] in the
+  /// platform secure storage is used. That is how a bridge the app learned
+  /// over BLE FF13 still authenticates after a restart with Bluetooth off.
+  /// Pass [rememberToken] to save a hand-typed token for next time; it is
+  /// written only after the connect succeeds, so a mistyped token is not kept.
   ///
   /// [bridgeId] and [name] come from LAN discovery and let the transport
   /// verify the WebSocket `hello` before sending a token. [candidateHosts]
@@ -1351,8 +1388,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     String? name,
     Iterable<String> candidateHosts = const <String>[],
     bool bleFallback = true,
+    bool rememberToken = false,
   }) async {
     final trimmedToken = token?.trim();
+    final tokenStore = ref.read(bridgeTokenStoreProvider);
+    final savedToken = trimmedToken == null || trimmedToken.isEmpty
+        ? await tokenStore.load(bridgeId: bridgeId, host: host.trim())
+        : null;
+    final effectiveToken = trimmedToken != null && trimmedToken.isNotEmpty
+        ? trimmedToken
+        : savedToken;
     final endpoint = WmrWsEndpoint(
       host: host.trim(),
       candidateHosts: candidateHosts,
@@ -1361,7 +1406,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       secure: secure,
       bridgeId: bridgeId,
       name: name,
-      token: trimmedToken == null || trimmedToken.isEmpty ? null : trimmedToken,
+      token: effectiveToken == null || effectiveToken.isEmpty
+          ? null
+          : effectiveToken,
     );
     final id = endpoint.resolvedDeviceId;
 
@@ -1387,6 +1434,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     if (bleFallback) _startFallbackScan(transport);
     await connect(id);
     if (state.connectedDeviceIds.contains(id)) {
+      if (rememberToken && trimmedToken != null && trimmedToken.isNotEmpty) {
+        await tokenStore.save(
+          bridgeId: bridgeId,
+          hosts: endpoint.hosts,
+          token: trimmedToken,
+        );
+      }
       await _rememberBridge(
         bridgeId: bridgeId,
         hosts: endpoint.hosts,

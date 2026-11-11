@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_companion_app/services/bridge_token_store.dart';
 import 'package:wmr_companion_app/services/known_bridge_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
@@ -12,6 +13,7 @@ import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import '../services/memory_secure_token_backend.dart';
 import 'memory_known_bridge_store.dart';
 import 'raw_mode_notifier.dart';
 
@@ -22,6 +24,7 @@ void main() {
     bool rawDefault = true,
     Future<List<WmrWsEndpoint>> Function()? discovery,
     KnownBridgeStore? store,
+    BridgeTokenStore? tokenStore,
     void Function(WmrWsEndpoint endpoint)? onEndpoint,
   }) async {
     tester.view.physicalSize = const Size(900, 1600);
@@ -41,6 +44,9 @@ void main() {
           ),
           knownBridgeStoreProvider.overrideWithValue(
             store ?? MemoryKnownBridgeStore(),
+          ),
+          bridgeTokenStoreProvider.overrideWithValue(
+            tokenStore ?? BridgeTokenStore(MemorySecureTokenBackend()),
           ),
           wifiTransportFactoryProvider.overrideWithValue((endpoint) {
             onEndpoint?.call(endpoint);
@@ -297,5 +303,94 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
+  });
+
+  testWidgets('remembers a typed token and reuses it with an empty field', (
+    tester,
+  ) async {
+    final backend = MemorySecureTokenBackend();
+    final wifi = FakeTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+    );
+    WmrWsEndpoint? seen;
+    await open(
+      tester,
+      wifi,
+      tokenStore: BridgeTokenStore(backend),
+      onEndpoint: (endpoint) => seen = endpoint,
+    );
+
+    await tester.enterText(find.byKey(const Key('wifi-host')), 'pi.local');
+    await tester.enterText(
+      find.byKey(const Key('wifi-token')),
+      'shared-secret',
+    );
+    await tester.ensureVisible(find.byKey(const Key('wifi-remember-token')));
+    await tester.tap(find.byKey(const Key('wifi-remember-token')));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
+    await tester.tap(find.text('Connect over Wi-Fi'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    expect(backend.values.values, contains('shared-secret'));
+
+    // Bluetooth is off on the next attempt, so the field is empty and the
+    // saved token has to authenticate the same host.
+    seen = null;
+    await tester.enterText(find.byKey(const Key('wifi-token')), '');
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
+    await tester.tap(find.text('Connect over Wi-Fi'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    expect(seen?.token, 'shared-secret');
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('does not save a typed token without the opt-in', (tester) async {
+    final backend = MemorySecureTokenBackend();
+    final wifi = FakeTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+    );
+    await open(tester, wifi, tokenStore: BridgeTokenStore(backend));
+
+    await tester.enterText(find.byKey(const Key('wifi-host')), 'pi.local');
+    await tester.enterText(
+      find.byKey(const Key('wifi-token')),
+      'shared-secret',
+    );
+    await tester.ensureVisible(find.text('Connect over Wi-Fi'));
+    await tester.pump();
+    await tester.tap(find.text('Connect over Wi-Fi'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    expect(backend.values, isEmpty);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  test('a missing token names the file on the Pi', () {
+    expect(
+      wifiFailureMessage(
+        const WmrWsAuthException(
+          WmrWsAuthFailure.noToken,
+          'the daemon requires a token but the endpoint has none',
+        ),
+      ),
+      contains('/etc/wmr-bridge/token'),
+    );
   });
 }

@@ -44,6 +44,9 @@ class ConnectUiState extends ChangeNotifier {
   final FocusNode hostFocus = FocusNode(debugLabel: 'wifi-host');
   final FocusNode portFocus = FocusNode(debugLabel: 'wifi-port');
   final FocusNode tokenFocus = FocusNode(debugLabel: 'wifi-token');
+  final FocusNode rememberTokenFocus = FocusNode(
+    debugLabel: 'wifi-remember-token',
+  );
   final FocusNode secureFocus = FocusNode(debugLabel: 'wifi-secure');
   final FocusNode discoverFocus = FocusNode(debugLabel: 'wifi-discover');
   final FocusNode fallbackFocus = FocusNode(debugLabel: 'wifi-ble-fallback');
@@ -56,6 +59,7 @@ class ConnectUiState extends ChangeNotifier {
 
   bool secure = false;
   bool bleFallback = true;
+  bool rememberToken = false;
   String? wifiError;
   bool exportBusy = false;
   String? exportMessage;
@@ -68,6 +72,11 @@ class ConnectUiState extends ChangeNotifier {
 
   void setBleFallback(bool value) {
     bleFallback = value;
+    notifyListeners();
+  }
+
+  void setRememberToken(bool value) {
+    rememberToken = value;
     notifyListeners();
   }
 
@@ -693,6 +702,7 @@ class _WifiConnectPanel extends ConsumerWidget {
         token: ui.token.text,
         secure: ui.secure,
         bleFallback: ui.bleFallback,
+        rememberToken: ui.rememberToken,
       );
     } on ArgumentError catch (error) {
       ui.setWifiError('${error.message}');
@@ -716,6 +726,7 @@ class _WifiConnectPanel extends ConsumerWidget {
         token: ui.token.text,
         secure: ui.secure,
         bleFallback: ui.bleFallback,
+        rememberToken: ui.rememberToken,
       );
     } on ArgumentError catch (error) {
       ui.setWifiError('${error.message}');
@@ -737,7 +748,9 @@ class _WifiConnectPanel extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             'Host and control port of the wmr_bridge daemon, plus the shared '
-            'token when it runs with one. The token is not stored.',
+            'token when it runs with one. A token learned over Bluetooth is '
+            'kept in the platform secure storage and reused here; with Bluetooth off, '
+            'paste the token from /etc/wmr-bridge/token on the Pi.',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
@@ -807,7 +820,25 @@ class _WifiConnectPanel extends ConsumerWidget {
             obscureText: true,
             autocorrect: false,
             enableSuggestions: false,
-            decoration: const InputDecoration(labelText: 'Token (optional)'),
+            decoration: const InputDecoration(
+              labelText: 'Token (optional)',
+              helperText: 'On the Pi: sudo cat /etc/wmr-bridge/token',
+            ),
+          ),
+          CheckboxListTile(
+            key: const Key('wifi-remember-token'),
+            focusNode: ui.rememberTokenFocus,
+            contentPadding: EdgeInsets.zero,
+            value: ui.rememberToken,
+            onChanged: busy
+                ? null
+                : (value) => ui.setRememberToken(value ?? false),
+            title: const Text('Remember this token'),
+            subtitle: const Text(
+              'Save the typed token in platform secure storage so Wi-Fi can '
+              'reconnect with Bluetooth off. A token learned over Bluetooth '
+              'is saved automatically.',
+            ),
           ),
           CheckboxListTile(
             key: const Key('wifi-secure'),
