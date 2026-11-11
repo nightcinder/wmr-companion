@@ -171,6 +171,48 @@ void main() {
     expect(composite.activeLegFor(bleDeviceId), CompositeLeg.tcp);
   });
 
+  test('losing both legs ends the BLE-mode session', () async {
+    const bridgeId = 'pi-1';
+    const bleDeviceId = 'ble-pi-1';
+    const lanDeviceId = '192.168.1.42:8765';
+    final adapter = _EndpointAdapter(bridgeId: bridgeId);
+    final tcp = _ScriptedTcp(
+      FakeTransport(devices: const [FakeDevice(id: lanDeviceId, mtu: 4096)]),
+    );
+    addTearDown(tcp.dispose);
+    late CompositeBleTransport composite;
+    final container = makeContainer(
+      adapter: adapter,
+      bleHandoffFactory: (ble) => composite = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      ),
+    );
+
+    await container.read(realDeviceProvider.notifier).connect(bleDeviceId);
+    await _waitFor(
+      () => composite.activeLegFor(bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the FF16 LAN host was not dialled',
+    );
+
+    // The radio goes first, while TCP carries the session: that loss is
+    // ignored. The composite cannot redial the gone radio when TCP drops too,
+    // so it reports the loss on its own stream; the controller must follow it
+    // instead of keeping a dead session marked connected.
+    adapter.connectFailureCount = 1;
+    adapter.dropLink(deviceId: bleDeviceId);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    await tcp.inner.disconnect(lanDeviceId);
+    await _waitFor(
+      () => !container.read(realDeviceProvider).connected,
+      reason: 'both legs were gone but the UI still showed a live session',
+    );
+    expect(composite.activeLegFor(bleDeviceId), isNull);
+  });
+
   test('LAN discovery publishes the endpoints it finds', () async {
     final endpoint = WmrWsEndpoint(
       host: '192.168.1.42',

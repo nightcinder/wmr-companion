@@ -376,6 +376,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   BleTransport? _wifiTransport;
   StreamSubscription<BleConnectionState>? _wifiStateSub;
   StreamSubscription<BleScanResult>? _fallbackScanSub;
+  StreamSubscription<BleConnectionState>? _bleCompositeStateSub;
+  String? _bleCompositeStateId;
   String? _wifiDeviceId;
   BleLinkStatus _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
 
@@ -420,6 +422,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _statusSub?.cancel();
       _wifiStateSub?.cancel();
       _fallbackScanSub?.cancel();
+      _bleCompositeStateSub?.cancel();
       _statsTimer?.cancel();
       for (final t in _reconnectTimers.values) {
         t.cancel();
@@ -524,6 +527,60 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _update(status: effectiveStatus);
   }
 
+  /// Forwards the BLE handoff composite's own connection state for
+  /// [deviceId].
+  ///
+  /// The raw BLE status stream only describes the fallback leg. While TCP
+  /// carries the session a radio drop is correctly ignored, and if TCP then
+  /// drops too no further raw BLE event arrives; the composite reports that
+  /// loss on its own stream, which is the only BLE-mode source that sees both
+  /// legs.
+  void _watchBleComposite(String deviceId) {
+    if (state.activeTransport == BridgeTransportKind.wifi) return;
+    if (_bleCompositeStateId == deviceId && _bleCompositeStateSub != null) {
+      return;
+    }
+    unawaited(_bleCompositeStateSub?.cancel());
+    _bleCompositeStateId = deviceId;
+    _bleCompositeStateSub = _bleHandoffTransport
+        .connectionState(deviceId)
+        .listen(
+          (s) => _onBleCompositeState(deviceId, s),
+          onError: (Object _) {},
+        );
+  }
+
+  void _cancelBleCompositeState([String? deviceId]) {
+    if (deviceId != null && _bleCompositeStateId != deviceId) return;
+    final sub = _bleCompositeStateSub;
+    _bleCompositeStateSub = null;
+    _bleCompositeStateId = null;
+    unawaited(sub?.cancel());
+  }
+
+  void _onBleCompositeState(String id, BleConnectionState s) {
+    if (_bleCompositeStateId != id) return;
+    if (state.activeTransport == BridgeTransportKind.wifi) return;
+    switch (s) {
+      case BleConnectionState.connected:
+      case BleConnectionState.connecting:
+        // The raw BLE stream owns the connect phases and the ready status.
+        return;
+      case BleConnectionState.disconnecting:
+        _handleLinkStatus(
+          BleLinkStatus(BleLinkPhase.disconnecting, deviceId: id),
+        );
+      case BleConnectionState.disconnected:
+        final wasReady = _connectedDeviceIds.contains(id);
+        _handleLinkStatus(
+          BleLinkStatus(
+            wasReady ? BleLinkPhase.connectionLost : BleLinkPhase.disconnected,
+            deviceId: id,
+          ),
+        );
+    }
+  }
+
   void _onWifiConnectionState(String id, BleConnectionState s) {
     if (_wifiDeviceId != id) return;
     switch (s) {
@@ -550,6 +607,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   void _scheduleReconnect(String id) {
     if (_intentionalDisconnect) return;
+    // Both the raw BLE loss and the composite's loss can report the same
+    // drop; one pending retry is enough.
+    if (_reconnectTimers[id] != null) return;
     _reconnectTimers[id]?.cancel();
     final policy = ref.read(reconnectPolicyProvider);
     final attempt = _reconnectAttempts[id] ?? 0;
@@ -727,6 +787,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       if (state.activeTransport == BridgeTransportKind.wifi &&
           _wifiTransport != null) {
         await _promoteWifiReady(deviceId);
+      } else {
+        _watchBleComposite(deviceId);
       }
     } finally {
       _connectingDeviceIds.remove(deviceId);
@@ -918,6 +980,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _reconnecting.remove(deviceId);
       _disconnectEpoch++;
 
+      _cancelBleCompositeState(deviceId);
       _connectingDeviceIds.remove(deviceId);
       _connectedDeviceIds.remove(deviceId);
       _deviceStatuses.remove(deviceId);
@@ -935,6 +998,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     }
 
     await _stopFallbackScan();
+    _cancelBleCompositeState();
     _globalDisconnectGeneration++;
     for (final t in _reconnectTimers.values) {
       t.cancel();
