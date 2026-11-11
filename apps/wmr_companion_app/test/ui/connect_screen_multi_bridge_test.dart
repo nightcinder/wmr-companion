@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +26,7 @@ void main() {
     Future<List<WmrWsEndpoint>> Function()? discovery,
     KnownBridgeStore? store,
     FakeTransport? wifi,
+    bool launchAutoConnect = true,
     void Function(WmrWsEndpoint endpoint, bool composite)? onEndpoint,
   }) async {
     tester.view.physicalSize = const Size(900, 1600);
@@ -43,6 +46,8 @@ void main() {
       ProviderScope(
         overrides: [
           realTransportProvider.overrideWithValue(transport),
+          if (!launchAutoConnect)
+            launchAutoConnectEnabledProvider.overrideWithValue(false),
           streamModeProvider.overrideWith(RawModeNotifier.new),
           lanDiscoveryProvider.overrideWithValue(
             discovery ?? () async => const <WmrWsEndpoint>[],
@@ -219,6 +224,146 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('wifi-lan-row-bridge-1')), findsOneWidget);
     expect(find.byKey(const Key('wifi-lan-row-bridge-2')), findsOneWidget);
+
+    await close(tester);
+  });
+
+  testWidgets('disconnect forgets the remembered bridge', (tester) async {
+    final store = MemoryKnownBridgeStore(
+      const KnownBridge(
+        bridgeId: 'bridge-4',
+        hosts: ['192.168.1.80'],
+        port: 8765,
+      ),
+    );
+    final wifi = FakeTransport(
+      devices: const [FakeDevice(id: '192.168.1.80:8765', mtu: 4096)],
+    );
+    await open(
+      tester,
+      discovery: () async => [
+        WmrWsEndpoint(host: '192.168.1.80', port: 8765, bridgeId: 'bridge-4'),
+      ],
+      store: store,
+      wifi: wifi,
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pump();
+
+    expect(find.text('State: connected, streaming'), findsOneWidget);
+    expect(store.saves, 1);
+
+    await tester.tap(find.text('Disconnect'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pump();
+
+    expect(store.clears, 1);
+    expect(store.saved, isNull);
+    expect(find.text('State: disconnected'), findsOneWidget);
+
+    await close(tester);
+  });
+
+  testWidgets('switching transport keeps the remembered bridge', (
+    tester,
+  ) async {
+    final store = MemoryKnownBridgeStore(
+      const KnownBridge(
+        bridgeId: 'bridge-5',
+        hosts: ['192.168.1.81'],
+        port: 8765,
+      ),
+    );
+    await open(tester, store: store, launchAutoConnect: false);
+
+    await tester.tap(find.text('Wi-Fi'));
+    await tester.pump();
+
+    expect(store.clears, 0);
+    expect(store.saved?.bridgeId, 'bridge-5');
+
+    await close(tester);
+  });
+
+  testWidgets('a manual LAN scan suppresses the launch auto-connect', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final store = MemoryKnownBridgeStore(
+      const KnownBridge(
+        bridgeId: 'bridge-6',
+        hosts: ['192.168.1.82'],
+        port: 8765,
+      ),
+    )..loadGate = gate;
+    var dials = 0;
+    await open(
+      tester,
+      discovery: () async => [
+        WmrWsEndpoint(host: '192.168.1.82', port: 8765, bridgeId: 'bridge-6'),
+      ],
+      store: store,
+      onEndpoint: (_, _) => dials++,
+    );
+
+    // The launch auto-connect is still waiting on storage, so this manual
+    // scan lands first and must claim the dial.
+    await ProviderScope.containerOf(tester.element(find.byType(ConnectScreen)))
+        .read(realDeviceProvider.notifier)
+        .discoverLan();
+    await tester.pump();
+
+    gate.complete();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pump();
+
+    expect(dials, 0);
+    expect(store.saves, 0);
+    expect(find.text('State: idle'), findsOneWidget);
+
+    await close(tester);
+  });
+
+  testWidgets('a transport switch suppresses the launch auto-connect', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final store = MemoryKnownBridgeStore(
+      const KnownBridge(
+        bridgeId: 'bridge-7',
+        hosts: ['192.168.1.83'],
+        port: 8765,
+      ),
+    )..loadGate = gate;
+    var dials = 0;
+    await open(
+      tester,
+      discovery: () async => [
+        WmrWsEndpoint(host: '192.168.1.83', port: 8765, bridgeId: 'bridge-7'),
+      ],
+      store: store,
+      onEndpoint: (_, _) => dials++,
+    );
+
+    await ProviderScope.containerOf(tester.element(find.byType(ConnectScreen)))
+        .read(realDeviceProvider.notifier)
+        .selectTransport(BridgeTransportKind.wifi);
+    await tester.pump();
+
+    gate.complete();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pump();
+
+    expect(dials, 0);
+    expect(store.saves, 0);
 
     await close(tester);
   });

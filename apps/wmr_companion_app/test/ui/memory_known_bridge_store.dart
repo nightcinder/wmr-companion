@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:wmr_companion_app/services/known_bridge_store.dart';
 
 class MemoryKnownBridgeStore implements KnownBridgeStore {
@@ -7,8 +9,15 @@ class MemoryKnownBridgeStore implements KnownBridgeStore {
   int saves = 0;
   int clears = 0;
 
+  /// When set, [load] waits for it, so a test can hold the launch
+  /// auto-connect between reading the memory and dialling.
+  Completer<void>? loadGate;
+
   @override
-  Future<KnownBridge?> load() async => saved;
+  Future<KnownBridge?> load() async {
+    await loadGate?.future;
+    return saved;
+  }
 
   @override
   Future<void> save(KnownBridge bridge) async {
