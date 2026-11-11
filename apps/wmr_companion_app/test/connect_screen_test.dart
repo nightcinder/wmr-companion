@@ -155,6 +155,79 @@ void main() {
     expect(find.text('Bridge version: 0.3.19'), findsOneWidget);
     expect(find.byKey(const Key('bridge-update-banner')), findsOneWidget);
     expect(find.textContaining('0.3.20'), findsOneWidget);
+    expect(find.byKey(const Key('bridge-upgrade-command')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('tapping Upgrade Pi Bridge asks the controller to upgrade', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _UpgradeableBridge();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(() => bridge),
+          latestBridgeReleaseProvider.overrideWith(
+            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final upgrade = find.byKey(const Key('bridge-upgrade'));
+    expect(upgrade, findsOneWidget);
+    await tester.ensureVisible(upgrade);
+    await tester.tap(upgrade);
+    await tester.pump();
+
+    expect(bridge.requested, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('shows upgrade progress while the bridge restarts', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _UpgradeableBridge(
+      upgrade: const BridgeUpgradeState(
+        BridgeUpgradePhase.restarting,
+        message: 'Upgrade started. Waiting for the bridge to restart…',
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(() => bridge),
+          latestBridgeReleaseProvider.overrideWith(
+            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('bridge-upgrade-status')), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    final button = tester.widget<FilledButton>(
+      find.byKey(const Key('bridge-upgrade')),
+    );
+    expect(button.onPressed, isNull);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
@@ -252,6 +325,37 @@ class _ConnectedBridge extends RealDeviceController {
       firmwareVersion: '0.3.19',
     ),
   );
+}
+
+/// A connected Wi-Fi bridge whose daemon advertises the root upgrade unit.
+class _UpgradeableBridge extends RealDeviceController {
+  _UpgradeableBridge({this.upgrade = const BridgeUpgradeState.idle()});
+
+  final BridgeUpgradeState upgrade;
+  bool requested = false;
+
+  @override
+  RealDeviceState build() => RealDeviceState(
+    status: const BleLinkStatus(
+      BleLinkPhase.ready,
+      deviceId: '192.168.1.42:8765',
+    ),
+    deviceId: '192.168.1.42:8765',
+    connectedDeviceIds: const {'192.168.1.42:8765'},
+    activeTransport: BridgeTransportKind.wifi,
+    wifiDeviceId: '192.168.1.42:8765',
+    protocol: const WmrProtocolVersion(
+      features: WmrBridgeFeatures.none,
+      firmwareVersion: '0.3.19',
+    ),
+    bridgeUpgradeCapable: true,
+    bridgeUpgrade: upgrade,
+  );
+
+  @override
+  Future<void> requestBridgeUpgrade() async {
+    requested = true;
+  }
 }
 
 /// A Wi-Fi fallback link that is no longer connected, as it is after the user

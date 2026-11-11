@@ -161,6 +161,33 @@ final compositeWifiTransportFactoryProvider =
       };
     });
 
+/// The latest WMR_Bridge release can be installed from the Pi itself when its
+/// daemon advertises `upgradeCapable`. Older daemons need this one-liner.
+const String bridgeManualUpgradeCommand =
+    'curl -fsSL '
+    'https://github.com/nightcinder/WMR_Bridge/releases/latest/download/install.sh'
+    ' | sudo bash';
+
+/// What the Connect screen shows for an in-app bridge upgrade.
+enum BridgeUpgradePhase { idle, sending, restarting, busy, failed }
+
+class BridgeUpgradeState {
+  const BridgeUpgradeState(this.phase, {this.message});
+
+  const BridgeUpgradeState.idle()
+    : phase = BridgeUpgradePhase.idle,
+      message = null;
+
+  final BridgeUpgradePhase phase;
+
+  /// Human-readable result of the last upgrade request, or null while idle.
+  final String? message;
+
+  bool get isActive =>
+      phase == BridgeUpgradePhase.sending ||
+      phase == BridgeUpgradePhase.restarting;
+}
+
 /// One LAN discovery pass. Production runs [WmrWsDiscovery]; tests replace it
 /// with a fixed list so no socket is opened.
 final lanDiscoveryProvider = Provider<Future<List<WmrWsEndpoint>> Function()>(
@@ -208,6 +235,8 @@ class RealDeviceState {
     this.lanEndpoints = const [],
     this.discoveringLan = false,
     this.lanError,
+    this.bridgeUpgrade = const BridgeUpgradeState.idle(),
+    this.bridgeUpgradeCapable = false,
   }) : _primaryDeviceId = deviceId;
 
   final BleLinkStatus status;
@@ -234,6 +263,13 @@ class RealDeviceState {
 
   /// Why the last LAN discovery pass failed, if it did.
   final String? lanError;
+
+  /// Progress and result of the last in-app bridge upgrade request.
+  final BridgeUpgradeState bridgeUpgrade;
+
+  /// Whether the connected Wi-Fi daemon advertised `upgradeCapable` and the
+  /// TCP leg is carrying the session. False in BLE mode and on older daemons.
+  final bool bridgeUpgradeCapable;
 
   /// Requested stream and its fault, from the service. Null before connect.
   final ModeState? mode;
@@ -393,6 +429,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   String? _wifiDeviceId;
   BleLinkStatus _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
 
+  /// True between an accepted upgrade request and the daemon reconnecting.
+  bool _upgradeAwaitingReconnect = false;
+  DateTime? _upgradeReconnectDeadline;
+  Timer? _upgradeWatchdog;
+
   @override
   RealDeviceState build() {
     final transport = ref.watch(realTransportProvider);
@@ -439,6 +480,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _fallbackScanSub?.cancel();
       _bleCompositeStateSub?.cancel();
       _statsTimer?.cancel();
+      _upgradeWatchdog?.cancel();
       for (final t in _reconnectTimers.values) {
         t.cancel();
       }
@@ -471,6 +513,27 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// The Wi-Fi transport, once [connectWifi] has made one. Null in BLE mode.
   BleTransport? get wifiTransport => _wifiTransport;
+
+  /// The WebSocket transport behind the current Wi-Fi link, unwrapping the
+  /// opt-in TCP/BLE composite. Null in BLE mode or before a Wi-Fi connect.
+  WmrWsTransport? get _wsTransport {
+    final transport = _wifiTransport;
+    if (transport is WmrWsTransport) return transport;
+    if (transport is CompositeBleTransport) return transport.tcp;
+    return null;
+  }
+
+  /// Whether the daemon behind the active Wi-Fi link advertised the root
+  /// upgrade unit, and TCP (not the BLE fallback) is carrying it.
+  bool _upgradeCapableFor(BridgeTransportKind transport) {
+    if (transport != BridgeTransportKind.wifi) return false;
+    final id = _wifiDeviceId;
+    final ws = _wsTransport;
+    if (id == null || ws == null) return false;
+    final leg = _wifiLink?.activeLeg;
+    if (leg != null && leg() != WifiLinkLeg.tcp) return false;
+    return ws.helloFor(id)?.upgradeCapable ?? false;
+  }
 
   /// The service behind the current connection, for consumers that share its
   /// frame stream (the capture screen). Null before the first connect.
@@ -511,6 +574,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _reconnectAttempts.remove(id);
         _reconnecting.remove(id);
         _droppedDeviceIds.remove(id);
+        if (_upgradeAwaitingReconnect && id == _wifiDeviceId) {
+          _finishUpgrade(const BridgeUpgradeState.idle());
+        }
       } else if (s.phase == BleLinkPhase.disconnected ||
           s.phase == BleLinkPhase.disconnecting ||
           s.phase == BleLinkPhase.connectionLost ||
@@ -636,7 +702,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _reconnectTimers[id]?.cancel();
     final policy = ref.read(reconnectPolicyProvider);
     final attempt = _reconnectAttempts[id] ?? 0;
-    if (attempt >= policy.maxAttempts) {
+    if (_upgradeAwaitingReconnect) {
+      final deadline = _upgradeReconnectDeadline;
+      if (deadline != null && !DateTime.now().isBefore(deadline)) {
+        _finishUpgrade(
+          const BridgeUpgradeState(
+            BridgeUpgradePhase.failed,
+            message: 'The bridge did not come back after the upgrade.',
+          ),
+        );
+        return;
+      }
+    } else if (attempt >= policy.maxAttempts) {
       _reconnectAttempts.remove(id);
       _reconnecting.remove(id);
       return;
@@ -663,6 +740,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     bool? discoveringLan,
     String? lanError,
     bool clearLanError = false,
+    BridgeUpgradeState? bridgeUpgrade,
   }) {
     final activeStatus =
         status ??
@@ -705,6 +783,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       lanEndpoints: lanEndpoints ?? state.lanEndpoints,
       discoveringLan: discoveringLan ?? state.discoveringLan,
       lanError: clearLanError ? null : (lanError ?? state.lanError),
+      bridgeUpgrade: bridgeUpgrade ?? state.bridgeUpgrade,
+      bridgeUpgradeCapable: _upgradeCapableFor(nextTransport),
     );
   }
 
@@ -964,6 +1044,116 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       // browse, not for the rest of the run.
       _manualBrowseSuppressed = false;
     }
+  }
+
+  /// Asks the connected Wi-Fi daemon to install its latest release.
+  ///
+  /// An accepted request restarts the daemon, so the link is expected to
+  /// drop; the ordinary reconnect campaign then dials it back. While the
+  /// upgrade is pending its retry budget is extended past the usual six
+  /// attempts, because a package install takes longer than a transient drop.
+  Future<void> requestBridgeUpgrade() async {
+    if (state.bridgeUpgrade.isActive) return;
+    final id = _wifiDeviceId;
+    final ws = _wsTransport;
+    if (ws == null || id == null || !state.bridgeUpgradeCapable) {
+      _update(
+        bridgeUpgrade: const BridgeUpgradeState(
+          BridgeUpgradePhase.failed,
+          message:
+              'This bridge cannot upgrade from the app. '
+              'On the Pi, run: $bridgeManualUpgradeCommand',
+        ),
+      );
+      return;
+    }
+    _update(
+      bridgeUpgrade: const BridgeUpgradeState(BridgeUpgradePhase.sending),
+    );
+    try {
+      final status = await ws.requestUpgrade(id);
+      switch (status.state) {
+        case WmrWsUpgradeState.started:
+          _upgradeAwaitingReconnect = true;
+          _upgradeReconnectDeadline = DateTime.now().add(
+            const Duration(minutes: 5),
+          );
+          _upgradeWatchdog?.cancel();
+          _upgradeWatchdog = Timer(const Duration(minutes: 5), () {
+            if (!_upgradeAwaitingReconnect) return;
+            _finishUpgrade(
+              const BridgeUpgradeState(
+                BridgeUpgradePhase.failed,
+                message: 'The bridge did not come back after the upgrade.',
+              ),
+            );
+          });
+          _reconnectTimers.remove(id)?.cancel();
+          _reconnectAttempts.remove(id);
+          _reconnecting.remove(id);
+          _update(
+            bridgeUpgrade: const BridgeUpgradeState(
+              BridgeUpgradePhase.restarting,
+              message: 'Upgrade started. Waiting for the bridge to restart…',
+            ),
+          );
+        case WmrWsUpgradeState.busy:
+          _update(
+            bridgeUpgrade: const BridgeUpgradeState(
+              BridgeUpgradePhase.busy,
+              message: 'Another upgrade is already running on the bridge.',
+            ),
+          );
+        case WmrWsUpgradeState.error:
+          _update(
+            bridgeUpgrade: BridgeUpgradeState(
+              BridgeUpgradePhase.failed,
+              message: _upgradeErrorMessage(status.code),
+            ),
+          );
+        case WmrWsUpgradeState.unknown:
+          _update(
+            bridgeUpgrade: const BridgeUpgradeState(
+              BridgeUpgradePhase.failed,
+              message: 'The bridge sent an unexpected upgrade reply.',
+            ),
+          );
+      }
+    } on WmrWsControlException catch (error) {
+      _update(
+        bridgeUpgrade: BridgeUpgradeState(
+          BridgeUpgradePhase.failed,
+          message: _upgradeErrorMessage(error.code),
+        ),
+      );
+    } catch (error) {
+      _update(
+        bridgeUpgrade: BridgeUpgradeState(
+          BridgeUpgradePhase.failed,
+          message: 'Upgrade request failed: $error',
+        ),
+      );
+    }
+  }
+
+  static String _upgradeErrorMessage(String? code) => switch (code) {
+    'auth_failed' =>
+      'The bridge has no token configured; '
+          'in-app upgrades need one. Add a token on the Pi and reconnect.',
+    'unavailable' =>
+      'This bridge cannot upgrade itself. '
+          'On the Pi, run: $bridgeManualUpgradeCommand',
+    _ =>
+      'The bridge refused the upgrade'
+          '${code == null ? '' : ' ($code)'}.',
+  };
+
+  void _finishUpgrade(BridgeUpgradeState next) {
+    _upgradeAwaitingReconnect = false;
+    _upgradeReconnectDeadline = null;
+    _upgradeWatchdog?.cancel();
+    _upgradeWatchdog = null;
+    if (ref.mounted) _update(bridgeUpgrade: next);
   }
 
   /// Scans LAN once when the Connect screen opens, then connects to the last
@@ -1253,6 +1443,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   Future<void> _disconnect({String? deviceId, bool forget = true}) async {
     _autoConnectSuppressed = true;
+    _finishUpgrade(const BridgeUpgradeState.idle());
     if (deviceId != null) {
       // Only this row stays down; another bridge that later drops must still
       // be redialled on resume.

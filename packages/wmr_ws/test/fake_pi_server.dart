@@ -132,6 +132,12 @@ class FakePiServer {
         sendText({'type': 'unsubscribed'});
       case 'status':
         sendText(_options.statusJson());
+      case 'upgrade':
+        sendText({
+          'type': 'upgrade_status',
+          'state': _options.upgradeState,
+          if (_options.upgradeCode != null) 'code': _options.upgradeCode,
+        });
       case 'ping':
         sendText({
           'type': 'pong',
@@ -170,6 +176,9 @@ class FakePiOptions {
     this.recordSize = 56,
     this.batchMax = 9,
     this.fragmentCapacity = 244,
+    this.upgradeCapable = true,
+    this.upgradeState = 'started',
+    this.upgradeCode,
     this.subscribeError,
     this.serverTimeUs = 123456789,
     this.statusHands = 2,
@@ -187,6 +196,9 @@ class FakePiOptions {
   final int recordSize;
   final int batchMax;
   final int fragmentCapacity;
+  final bool upgradeCapable;
+  final String upgradeState;
+  final String? upgradeCode;
 
   /// When set, every subscribe is answered with this error code.
   final String? subscribeError;
@@ -202,6 +214,7 @@ class FakePiOptions {
     'version': version,
     'hostname': hostname,
     'authRequired': authRequired,
+    'upgradeCapable': upgradeCapable,
     'streams': streams,
     'recordSize': recordSize,
     'batchMax': batchMax,

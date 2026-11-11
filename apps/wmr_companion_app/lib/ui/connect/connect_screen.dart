@@ -323,7 +323,8 @@ class RealPanel extends ConsumerWidget {
             key: const Key('bridge-version'),
             style: mono,
           ),
-        if (s.connected) _BridgeUpdateBanner(connected: s.protocol),
+        if (s.connected || s.bridgeUpgrade.isActive)
+          _BridgeUpdateBanner(connected: s.protocol),
         if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null) ...[
           Text('Endpoint: ${s.wifiDeviceId}', style: mono),
           if (s.wifiFallback)
@@ -557,6 +558,12 @@ class RealPanel extends ConsumerWidget {
 /// Shown when the latest WMR_Bridge GitHub release is newer than the version
 /// the connected bridge reported. A missing or unparsable version on either
 /// side stays silent; this is a hint, not a connectivity state.
+///
+/// When the daemon advertises `upgradeCapable` the card offers the in-app
+/// upgrade; older daemons, or a link on the BLE fallback, get the one-line
+/// command to run on the Pi instead. While an accepted upgrade restarts the
+/// daemon the card stays visible even though the link is down, so progress is
+/// not lost with the connection.
 class _BridgeUpdateBanner extends ConsumerWidget {
   const _BridgeUpdateBanner({required this.connected});
 
@@ -565,23 +572,79 @@ class _BridgeUpdateBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final latest = ref.watch(latestBridgeReleaseProvider).value;
+    final upgrade = ref.watch(
+      realDeviceProvider.select((s) => s.bridgeUpgrade),
+    );
+    final upgradeCapable = ref.watch(
+      realDeviceProvider.select((s) => s.bridgeUpgradeCapable),
+    );
     final connectedVersion = connected?.semanticVersion;
-    if (latest == null ||
-        connectedVersion == null ||
-        latest.compareTo(connectedVersion) <= 0) {
+    final updateAvailable =
+        latest != null &&
+        connectedVersion != null &&
+        latest.compareTo(connectedVersion) > 0;
+    if (!updateAvailable && !upgrade.isActive) {
       return const SizedBox.shrink();
     }
     final theme = Theme.of(context);
+    final active = upgrade.isActive;
     return Card(
       key: const Key('bridge-update-banner'),
       color: theme.colorScheme.tertiaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Text(
-          'Bridge update available: $connectedVersion → $latest',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onTertiaryContainer,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              updateAvailable
+                  ? 'Bridge update available: $connectedVersion → $latest'
+                  : 'Bridge upgrade',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onTertiaryContainer,
+              ),
+            ),
+            if (upgrade.message != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                upgrade.message!,
+                key: const Key('bridge-upgrade-status'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onTertiaryContainer,
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            if (upgradeCapable || active)
+              FilledButton.icon(
+                key: const Key('bridge-upgrade'),
+                onPressed: active
+                    ? null
+                    : () {
+                        unawaited(
+                          ref
+                              .read(realDeviceProvider.notifier)
+                              .requestBridgeUpgrade(),
+                        );
+                      },
+                icon: active
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.system_update),
+                label: Text(active ? 'Upgrading…' : 'Upgrade Pi Bridge'),
+              )
+            else
+              SelectableText(
+                'Run this on the Pi: $bridgeManualUpgradeCommand',
+                key: const Key('bridge-upgrade-command'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onTertiaryContainer,
+                  fontFamily: 'monospace',
+                ),
+              ),
+          ],
         ),
       ),
     );
