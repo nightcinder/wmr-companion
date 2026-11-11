@@ -243,6 +243,45 @@ class _GatedScanBle extends FakeTransport {
       _scan.stream;
 }
 
+/// A BLE fake whose [connect] blocks until [gate] completes, so a test can
+/// hold a failover in its `switching` window.
+class _GatedConnectBle extends FakeTransport {
+  _GatedConnectBle({required super.devices});
+
+  final Completer<void> gate = Completer<void>();
+  final List<String> connectCalls = [];
+
+  @override
+  Future<void> connect(String deviceId) async {
+    connectCalls.add(deviceId);
+    await gate.future;
+    await super.connect(deviceId);
+  }
+}
+
+/// A BLE fake whose connection-state stream defers cancellation until
+/// [cancelGate] completes, like a transport that parks its generator over a
+/// delivery turn.
+class _StuckCancelBle extends FakeTransport {
+  _StuckCancelBle({required super.devices});
+
+  final Completer<void> cancelGate = Completer<void>();
+  final Map<String, StreamController<BleConnectionState>> _unsolicited = {};
+
+  @override
+  Stream<BleConnectionState> connectionState(String deviceId) async* {
+    yield BleConnectionState.connected;
+    yield* _unsolicited
+        .putIfAbsent(
+          deviceId,
+          () => StreamController<BleConnectionState>(
+            onCancel: () => cancelGate.future,
+          ),
+        )
+        .stream;
+  }
+}
+
 void main() {
   late _FakeTcp tcp;
   late FakeTransport ble;
@@ -665,6 +704,121 @@ void main() {
       await _settle();
       expect(received.last.value, [8]);
       expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [9]), isFalse);
+    },
+  );
+
+  test(
+    'a reconnect waits for an in-flight failover instead of returning early',
+    () async {
+      ble.dispose();
+      final gated =
+          _GatedConnectBle(
+              devices: const [
+                FakeDevice(
+                  id: _bleDeviceId,
+                  name: 'WMR Bridge',
+                  services: fakeBridgeDeviceServices,
+                ),
+              ],
+            )
+            ..onRead = (deviceId, characteristicUuid) {
+              if (characteristicUuid.toLowerCase() ==
+                  wmrBridgeVersionCharUuid) {
+                return _versionString();
+              }
+              throw StateError('unexpected read $characteristicUuid');
+            };
+      ble = gated;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+      addTearDown(sub.cancel);
+
+      // The TCP leg drops, so the composite starts moving the session to BLE
+      // and parks in its switching window until the gated connect returns.
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => gated.connectCalls.isNotEmpty,
+        reason: 'the failover never reached the BLE dial',
+      );
+
+      var reconnected = false;
+      final reconnect = transport
+          .connect(_tcpDeviceId)
+          .whenComplete(() => reconnected = true);
+      await _settle(50);
+      expect(
+        reconnected,
+        isFalse,
+        reason: 'connect returned while the failover was still in flight',
+      );
+
+      gated.gate.complete();
+      await reconnect.timeout(const Duration(seconds: 2));
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    },
+  );
+
+  test(
+    'disconnect does not wait for a deferred connection-state cancel',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      final stuck =
+          _StuckCancelBle(
+              devices: const [
+                FakeDevice(
+                  id: _bleDeviceId,
+                  name: 'WMR Bridge',
+                  services: fakeBridgeDeviceServices,
+                ),
+              ],
+            )
+            ..onRead = (deviceId, characteristicUuid) {
+              if (characteristicUuid.toLowerCase() ==
+                  wmrBridgeVersionCharUuid) {
+                return _versionString();
+              }
+              throw StateError('unexpected read $characteristicUuid');
+            };
+      ble = stuck;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(() async {
+        stuck.cancelGate.complete();
+        await transport.dispose();
+      });
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+      await transport
+          .disconnect(_tcpDeviceId)
+          .timeout(const Duration(seconds: 1));
+      expect(transport.activeLegFor(_tcpDeviceId), isNull);
+      expect(
+        await transport.connectionState(_tcpDeviceId).first,
+        BleConnectionState.disconnected,
+      );
     },
   );
 

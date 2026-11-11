@@ -35,7 +35,10 @@ final captureInputProvider = Provider<CaptureInput? Function()>((ref) {
     if (service == null || !device.connected) return null;
     return CaptureInput(
       frames: service.frames,
-      clock: ref.read(realTransportProvider).clock,
+      // Frames are stamped by the transport that produced them, so the
+      // capture timeline must use that same clock. The Bluetooth tab dials
+      // through the handoff composite, whose clock is not the raw BLE one.
+      clock: service.transport.clock,
       mtu: device.status.mtu,
     );
   };

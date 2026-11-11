@@ -12,8 +12,23 @@ import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import 'ui/raw_mode_notifier.dart';
+
+Future<void> _waitFor(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 2),
+  String? reason,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail(reason ?? 'condition not met within $timeout');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,9 +38,10 @@ void main() {
     WifiLink Function(WmrWsEndpoint)? compositeFactory,
     BleTransport Function(BleTransport)? bleHandoffFactory,
     Future<List<WmrWsEndpoint>> Function()? discovery,
+    FakeBleAdapter? adapter,
   }) {
     final ble = UniversalBleTransport(
-      adapter: FakeBleAdapter(),
+      adapter: adapter ?? FakeBleAdapter(),
       scanTimeout: const Duration(minutes: 5),
     );
     final container = ProviderContainer(
@@ -117,6 +133,43 @@ void main() {
       expect(container.read(realDeviceProvider).connected, isTrue);
     },
   );
+
+  test('a raw BLE drop after the handoff keeps the TCP session', () async {
+    const bridgeId = 'pi-1';
+    const bleDeviceId = 'ble-pi-1';
+    const lanDeviceId = '192.168.1.42:8765';
+    // The same radio serves the raw status stream and the composite's BLE
+    // leg. Its FF16 read names the LAN host, so the handoff goes to TCP.
+    final adapter = _EndpointAdapter(bridgeId: bridgeId);
+    final tcp = _ScriptedTcp(
+      FakeTransport(devices: const [FakeDevice(id: lanDeviceId, mtu: 4096)]),
+    );
+    addTearDown(tcp.dispose);
+    late CompositeBleTransport composite;
+    final container = makeContainer(
+      adapter: adapter,
+      bleHandoffFactory: (ble) => composite = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      ),
+    );
+
+    await container.read(realDeviceProvider.notifier).connect(bleDeviceId);
+    await _waitFor(
+      () => composite.activeLegFor(bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the FF16 LAN host was not dialled',
+    );
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    // The GATT link is now only the fallback. Losing it must not tear down
+    // the TCP session or clear the connected state.
+    adapter.dropLink(deviceId: bleDeviceId);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(composite.activeLegFor(bleDeviceId), CompositeLeg.tcp);
+  });
 
   test('LAN discovery publishes the endpoints it finds', () async {
     final endpoint = WmrWsEndpoint(
@@ -367,4 +420,136 @@ class _FailingTcp extends WmrWsTransport {
   @override
   Future<void> connect(String deviceId) async =>
       throw StateError('tcp refused');
+}
+
+/// Replays the bridge's GATT table and answers FF16 with a valid endpoint
+/// document, so a composite reading it learns the LAN host.
+class _EndpointAdapter extends FakeBleAdapter {
+  _EndpointAdapter({required this.bridgeId});
+
+  final String bridgeId;
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+      return Uint8List.fromList(
+        utf8.encode(
+          jsonEncode({
+            'type': 'wmr_ble_endpoint',
+            'protocol': 1,
+            'bridge_id': bridgeId,
+            'name': 'WMR Bridge',
+            'version': '0.2.4',
+            'hosts': ['192.168.1.42'],
+            'port': 8765,
+            'path': '/wmr',
+            'authRequired': false,
+          }),
+        ),
+      );
+    }
+    return super.read(deviceId, serviceUuid, characteristicUuid);
+  }
+}
+
+/// A [WmrWsTransport] over a [FakeTransport], for a composite that must reach
+/// its TCP leg without opening a socket.
+class _ScriptedTcp extends WmrWsTransport {
+  _ScriptedTcp(this.inner) : super(endpoints: const []);
+
+  final FakeTransport inner;
+  final Map<String, WmrWsEndpoint> endpoints = {};
+  final Map<String, WmrWsHello> hellos = {};
+
+  @override
+  Stream<BleScanResult> scan({List<String> withServices = const []}) =>
+      inner.scan(withServices: withServices);
+
+  @override
+  Future<void> stopScan() => inner.stopScan();
+
+  @override
+  Future<void> connect(String deviceId) => inner.connect(deviceId);
+
+  @override
+  Future<void> disconnect(String deviceId) => inner.disconnect(deviceId);
+
+  @override
+  Stream<BleConnectionState> connectionState(String deviceId) =>
+      inner.connectionState(deviceId);
+
+  @override
+  Future<List<BleServiceInfo>> discoverServices(String deviceId) =>
+      inner.discoverServices(deviceId);
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => inner.subscribe(deviceId, serviceUuid, characteristicUuid);
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => inner.unsubscribe(deviceId, serviceUuid, characteristicUuid);
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => inner.read(deviceId, serviceUuid, characteristicUuid);
+
+  @override
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) => inner.write(
+    deviceId,
+    serviceUuid,
+    characteristicUuid,
+    value,
+    withoutResponse: withoutResponse,
+  );
+
+  @override
+  Future<BleConnectionInfo> connectionInfo(String deviceId) =>
+      inner.connectionInfo(deviceId);
+
+  @override
+  Future<void> dispose() => inner.dispose();
+
+  @override
+  WmrWsEndpoint? endpointFor(String deviceId) => endpoints[deviceId];
+
+  @override
+  WmrWsHello? helloFor(String deviceId) => hellos[deviceId];
+
+  @override
+  void registerEndpoint(WmrWsEndpoint endpoint) {
+    endpoints[endpoint.resolvedDeviceId] = endpoint;
+    hellos[endpoint.resolvedDeviceId] = WmrWsHello(
+      protocol: 1,
+      transport: 'wifi',
+      device: 'wmr-pi',
+      version: '0.2.4',
+      hostname: 'pi',
+      bridgeId: endpoint.bridgeId ?? '',
+      authRequired: false,
+      streams: const {'raw', 'decoded', 'batched'},
+      recordSize: 56,
+      batchMax: 9,
+      fragmentCapacity: 244,
+    );
+  }
 }

@@ -177,7 +177,9 @@ final realLinkTransportProvider = Provider<BleTransport>((ref) {
     return ref.read(realDeviceProvider.notifier).wifiTransport ??
         ref.read(realTransportProvider);
   }
-  return ref.read(realTransportProvider);
+  // The Bluetooth tab dials through the handoff composite, so that is the
+  // transport whose clock stamped the frames the debug panels display.
+  return ref.read(realDeviceProvider.notifier).transport;
 });
 
 class RealDeviceState {
@@ -380,7 +382,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   @override
   RealDeviceState build() {
     final transport = ref.watch(realTransportProvider);
-    _statusSub = transport.statusChanges.listen(_handleLinkStatus);
+    _statusSub = transport.statusChanges.listen(_handleBleLinkStatus);
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
       onStateChange: (s) => unawaited(
@@ -458,6 +460,23 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// One place for a link status, whether it came from the BLE stack or was
   /// synthesized from a Wi-Fi connection state.
+  ///
+  /// The Bluetooth tab's transport is the handoff composite, which keeps the
+  /// GATT link open as a fallback after it upgrades the session to TCP. A raw
+  /// BLE event for that device therefore only describes the fallback leg, not
+  /// the session: a radio drop while TCP carries it must not tear the session
+  /// down.
+  void _handleBleLinkStatus(BleLinkStatus s) {
+    final id = s.deviceId;
+    final active = transport;
+    if (id != null &&
+        active is CompositeBleTransport &&
+        active.activeLegFor(id) == CompositeLeg.tcp) {
+      return;
+    }
+    _handleLinkStatus(s);
+  }
+
   void _handleLinkStatus(BleLinkStatus s) {
     if (state.activeTransport == BridgeTransportKind.wifi &&
         s.deviceId != null &&
