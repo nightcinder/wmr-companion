@@ -375,7 +375,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   int _disconnectEpoch = 0;
   bool _launchAutoConnectStarted = false;
   bool _autoConnectSuppressed = false;
+  bool _manualBrowseSuppressed = false;
   bool _disconnectedByUser = false;
+  final Set<String> _userDisconnectedDeviceIds = {};
+  final Set<String> _droppedDeviceIds = {};
 
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
@@ -506,6 +509,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _connectingDeviceIds.remove(id);
         _reconnectAttempts.remove(id);
         _reconnecting.remove(id);
+        _droppedDeviceIds.remove(id);
       } else if (s.phase == BleLinkPhase.disconnected ||
           s.phase == BleLinkPhase.disconnecting ||
           s.phase == BleLinkPhase.connectionLost ||
@@ -521,7 +525,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         if (!_intentionalDisconnect) {
           if (s.phase == BleLinkPhase.connectionLost) {
             // The link dropped on its own: start a fresh retry campaign.
-            _scheduleReconnect(id);
+            // Remember it so a resume can redial it even after the campaign
+            // exhausts its attempts. A bridge the user disconnected stays out.
+            if (!_userDisconnectedDeviceIds.contains(id)) {
+              _droppedDeviceIds.add(id);
+              _scheduleReconnect(id);
+            }
           } else if (s.isFailure && _reconnecting.contains(id)) {
             // An automatic re-dial failed. Keep trying with backoff until
             // the attempt cap, otherwise one transient failure would leave
@@ -617,7 +626,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   void _scheduleReconnect(String id) {
-    if (_intentionalDisconnect) return;
+    if (_intentionalDisconnect || _userDisconnectedDeviceIds.contains(id)) {
+      return;
+    }
     // Both the raw BLE loss and the composite's loss can report the same
     // drop; one pending retry is enough.
     if (_reconnectTimers[id] != null) return;
@@ -700,6 +711,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// here only need to be swallowed.
   Future<void> startScan() async {
     _autoConnectSuppressed = true;
+    _manualBrowseSuppressed = true;
     await _scanSub?.cancel();
     _seen.clear();
     _update(results: const []);
@@ -726,7 +738,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// connection: it repeats the whole sequence.
   Future<void> connect(String deviceId) async {
     _autoConnectSuppressed = true;
+    _manualBrowseSuppressed = false;
     _disconnectedByUser = false;
+    _userDisconnectedDeviceIds.remove(deviceId);
+    _droppedDeviceIds.remove(deviceId);
     if (_connectedDeviceIds.contains(deviceId) ||
         _connectingDeviceIds.contains(deviceId)) {
       return;
@@ -906,6 +921,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// state rather than thrown at the tap. A manual scan never auto-connects.
   Future<void> discoverLan() async {
     _autoConnectSuppressed = true;
+    _manualBrowseSuppressed = true;
     await _discoverLan();
   }
 
@@ -938,18 +954,37 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   ///
   /// Android can suspend the process while a link is down: the backoff
   /// campaign runs out, or its timer is frozen and fires only after the app
-  /// is back. A resume clears the exhausted counters and dials the bridge
+  /// is back. A resume clears the exhausted counters and dials every bridge
   /// that dropped, or repeats remembered-bridge discovery when no bridge was
-  /// ever up. An explicit Disconnect must stay down, so it suppresses the
-  /// automatic redial until the user connects again.
+  /// ever up.
+  ///
+  /// A bridge the user disconnected by itself stays down, and an explicit
+  /// Disconnect of every bridge suppresses the automatic redial until the
+  /// user connects again. A manual scan or LAN discovery also keeps the
+  /// automatic dial off: the user is browsing, not waiting to reconnect.
   Future<void> _handleAppResume() async {
     if (state.connected || state.busy || _intentionalDisconnect) return;
     _reconnectAttempts.clear();
     _reconnecting.clear();
-    if (_disconnectedByUser) return;
+    if (_disconnectedByUser || _manualBrowseSuppressed) return;
     _autoConnectSuppressed = false;
+    final dropped = _droppedDeviceIds
+        .where((id) => !_userDisconnectedDeviceIds.contains(id))
+        .toList(growable: false);
+    if (dropped.isNotEmpty) {
+      for (final id in dropped) {
+        _reconnectTimers.remove(id)?.cancel();
+      }
+      for (final id in dropped) {
+        await connect(id);
+      }
+      return;
+    }
     final target = state.deviceId;
     if (target != null) {
+      // The remembered primary may itself be the row the user disconnected;
+      // do not rediscover and dial it behind their back.
+      if (_userDisconnectedDeviceIds.contains(target)) return;
       _reconnectTimers.remove(target)?.cancel();
       await connect(target);
       return;
@@ -1176,8 +1211,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   Future<void> _disconnect({String? deviceId, bool forget = true}) async {
     _autoConnectSuppressed = true;
-    _disconnectedByUser = true;
     if (deviceId != null) {
+      // Only this row stays down; another bridge that later drops must still
+      // be redialled on resume.
+      _userDisconnectedDeviceIds.add(deviceId);
+      _droppedDeviceIds.remove(deviceId);
       _deviceDisconnectGenerations[deviceId] =
           (_deviceDisconnectGenerations[deviceId] ?? 0) + 1;
       _reconnectTimers.remove(deviceId)?.cancel();
@@ -1202,6 +1240,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       return;
     }
 
+    _disconnectedByUser = true;
+    _userDisconnectedDeviceIds.clear();
+    _droppedDeviceIds.clear();
     await _stopFallbackScan();
     _cancelBleCompositeState();
     _globalDisconnectGeneration++;

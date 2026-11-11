@@ -501,6 +501,96 @@ void main() {
   });
 
   test(
+    'resume redials a dropped bridge but not a user-disconnected one',
+    () async {
+      const policy = ReconnectPolicy(
+        baseDelay: Duration(milliseconds: 5),
+        maxDelay: Duration(milliseconds: 10),
+        maxAttempts: 3,
+      );
+      final container = makeContainer(policy: policy);
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connect(fakeBridgeLeftDeviceId);
+      await controller.connect(fakeBridgeRightDeviceId);
+      await controller.disconnect(fakeBridgeLeftDeviceId);
+      expect(
+        container
+            .read(realDeviceProvider)
+            .isDeviceConnected(fakeBridgeRightDeviceId),
+        isTrue,
+      );
+
+      // The surviving bridge drops while the app is in the background and its
+      // retry campaign exhausts. The earlier per-row Disconnect of the other
+      // bridge must not stop this one from being redialled on resume.
+      adapter.connectError = Exception('radio unavailable');
+      adapter.dropLink(deviceId: fakeBridgeRightDeviceId);
+      await wait(500);
+      expect(container.read(realDeviceProvider).connected, isFalse);
+
+      adapter.connectError = null;
+      backgroundApp();
+      await pump();
+      resumeApp();
+      await wait(300);
+
+      expect(
+        container
+            .read(realDeviceProvider)
+            .isDeviceConnected(fakeBridgeRightDeviceId),
+        isTrue,
+      );
+      expect(
+        container
+            .read(realDeviceProvider)
+            .isDeviceConnected(fakeBridgeLeftDeviceId),
+        isFalse,
+      );
+    },
+  );
+
+  test('resuming after a manual scan does not auto-dial', () async {
+    final wifi = _DroppableWifiTransport(
+      devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+    );
+    addTearDown(wifi.dispose);
+    final store = MemoryKnownBridgeStore(
+      const KnownBridge(
+        bridgeId: 'pi-bridge',
+        hosts: ['pi.local'],
+        port: 8765,
+        bleFallback: false,
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        realTransportProvider.overrideWithValue(transport),
+        wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+        knownBridgeStoreProvider.overrideWithValue(store),
+        lanDiscoveryProvider.overrideWithValue(
+          () async => [
+            WmrWsEndpoint(host: 'pi.local', port: 8765, bridgeId: 'pi-bridge'),
+          ],
+        ),
+        streamModeProvider.overrideWith(() => TestModeNotifier(StreamMode.raw)),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.startScan();
+    backgroundApp();
+    await pump();
+    resumeApp();
+    await wait(300);
+
+    // The user was browsing the scan list, not waiting for an automatic dial.
+    expect(container.read(realDeviceProvider).connected, isFalse);
+    expect(wifi.connectCalls, 0);
+    await controller.stopScan();
+  });
+
+  test(
     'resuming with no dropped link retries remembered-bridge discovery',
     () async {
       final wifi = _DroppableWifiTransport(
