@@ -197,7 +197,10 @@ class WmrWsTransport implements BleTransport {
     StackTrace? lastStackTrace;
     for (final host in endpoint.hosts) {
       final candidate = endpoint.forHost(host);
-      final session = _WmrWsSession(deviceId, candidate);
+      final session = _WmrWsSession(deviceId, candidate)
+        // A failed attempt is not a disconnect while another host is waiting;
+        // only the exhausted loop, or a failure after connect, reports one.
+        ..suppressDisconnectState = true;
       _sessions[deviceId] = session;
       _setState(deviceId, BleConnectionState.connecting);
 
@@ -222,6 +225,8 @@ class WmrWsTransport implements BleTransport {
         session.startHelloTimer(handshakeTimeout, _fail);
         await ready;
         session.cancelTimers();
+        // A later socket failure is terminal and must report `disconnected`.
+        session.suppressDisconnectState = false;
         _setState(deviceId, BleConnectionState.connected);
         return;
       } catch (error, stackTrace) {
@@ -547,7 +552,9 @@ class WmrWsTransport implements BleTransport {
     if (identical(_sessions[session.deviceId], session)) {
       _sessions.remove(session.deviceId);
     }
-    _setState(session.deviceId, BleConnectionState.disconnected);
+    if (!session.suppressDisconnectState) {
+      _setState(session.deviceId, BleConnectionState.disconnected);
+    }
   }
 
   void _setState(String deviceId, BleConnectionState state) {
@@ -617,6 +624,10 @@ class _WmrWsSession {
       phase == _SessionPhase.awaitingAuth;
 
   bool get isClosed => phase == _SessionPhase.closed;
+
+  /// Suppresses the `disconnected` state of a failed candidate while
+  /// `connect()` still has other hosts to try.
+  bool suppressDisconnectState = false;
 
   bool get authWasPending => phase == _SessionPhase.awaitingAuth;
 

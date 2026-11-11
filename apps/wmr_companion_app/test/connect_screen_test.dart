@@ -23,6 +23,7 @@ void main() {
         devices: const [FakeDevice(id: '192.168.1.42:8765', mtu: 4096)],
       );
       var compositeBuilds = 0;
+      WmrWsEndpoint? builtEndpoint;
       final ble = UniversalBleTransport(
         adapter: FakeBleAdapter(),
         scanTimeout: const Duration(minutes: 5),
@@ -39,11 +40,13 @@ void main() {
                   port: 8765,
                   bridgeId: 'pi-1',
                   name: 'LAN Bridge',
+                  candidateHosts: ['192.168.1.43'],
                 ),
               ],
             ),
-            compositeWifiTransportFactoryProvider.overrideWithValue((_) {
+            compositeWifiTransportFactoryProvider.overrideWithValue((endpoint) {
               compositeBuilds++;
+              builtEndpoint = endpoint;
               return WifiLink(wifi, activeLeg: () => WifiLinkLeg.tcp);
             }),
             wifiTransportFactoryProvider.overrideWithValue(
@@ -84,6 +87,9 @@ void main() {
       await tester.pump();
 
       expect(compositeBuilds, 1);
+      // The discovered bridge's other interface reaches the transport, so a
+      // failed primary host can fall back instead of the user losing the row.
+      expect(builtEndpoint?.hosts, ['192.168.1.42', '192.168.1.43']);
       expect(find.text('State: connected, streaming'), findsOneWidget);
       expect(find.text('Endpoint: 192.168.1.42:8765'), findsOneWidget);
       expect(find.text('Active leg: TCP'), findsOneWidget);

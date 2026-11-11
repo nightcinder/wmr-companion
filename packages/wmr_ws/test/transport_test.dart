@@ -113,7 +113,16 @@ void main() {
     );
     addTearDown(transport2.dispose);
 
+    final states = <BleConnectionState>[];
+    final subscription = transport2
+        .connectionState(grouped.resolvedDeviceId)
+        .listen(states.add);
+    addTearDown(subscription.cancel);
+    await pump();
+    expect(states, [BleConnectionState.disconnected]);
+
     await transport2.connect(grouped.resolvedDeviceId);
+    await pump();
 
     await server.connected;
     expect(
@@ -124,6 +133,14 @@ void main() {
       await transport2.connectionState(grouped.resolvedDeviceId).first,
       BleConnectionState.connected,
     );
+    // The failed first host is an attempt, not a disconnect: a consumer must
+    // not see `disconnected` while connect() is still retrying.
+    expect(states, [
+      BleConnectionState.disconnected,
+      BleConnectionState.connecting,
+      BleConnectionState.connecting,
+      BleConnectionState.connected,
+    ]);
   });
 
   test('connect performs the subprotocol handshake', () async {
