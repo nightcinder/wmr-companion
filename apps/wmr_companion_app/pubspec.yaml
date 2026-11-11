@@ -1,7 +1,7 @@
 name: wmr_companion_app
 description: "Companion app for the ESP32 WMR Bridge."
 publish_to: 'none'
-version: 0.3.21+26
+version: 0.3.22+27
 
 environment:
   sdk: ^3.13.5

@@ -3,6 +3,23 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## 0.3.22+27
+
+WMR Companion release, paired with WMR_Bridge `v0.3.23`.
+
+- LAN discovery reports a multi-interface bridge once. Replies that share a
+  `bridgeId` collapse into a single entry whose host list still carries every
+  address, and the transport tries each candidate in turn (ONY-1259).
+- A Bluetooth session with a Pi bridge upgrades to Wi-Fi when the bridge
+  answers the FF16 handoff with its LAN endpoint. The BLE leg stays open as the
+  fallback, and a radio drop no longer tears the session down while TCP carries
+  it (ONY-1260).
+- The Connect screen remembers the last bridge and auto-connects over the LAN
+  on launch, to that bridge when it answers or to the only one a scan finds,
+  and falls back to the stored hosts when discovery is blocked. A manual scan,
+  a transport switch or a disconnect suppresses the automatic dial, and the
+  remembered bridge can be forgotten (ONY-1261).
+
 ## 0.3.21+26
 
 WMR Companion release, paired with WMR_Bridge `v0.3.19`.
