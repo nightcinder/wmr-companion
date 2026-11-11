@@ -265,6 +265,50 @@ void main() {
     expect(status.batches, 42);
   });
 
+  test('hello advertises root upgrade capability', () async {
+    await start();
+    await transport.connect(id);
+    expect(transport.helloFor(id)?.upgradeCapable, isTrue);
+  });
+
+  test('a daemon without the upgrade unit reports not capable', () async {
+    await start(const FakePiOptions(upgradeCapable: false));
+    await transport.connect(id);
+    expect(transport.helloFor(id)?.upgradeCapable, isFalse);
+  });
+
+  test('a hello without upgradeCapable is not upgrade capable', () {
+    final hello = WmrWsHello.fromJson({
+      'type': 'hello',
+      'protocol': 1,
+      'streams': ['raw'],
+    });
+    expect(hello.upgradeCapable, isFalse);
+  });
+
+  test('requestUpgrade sends the control message and parses started', () async {
+    await start();
+    await transport.connect(id);
+    final status = await transport.requestUpgrade(id);
+    expect(status.state, WmrWsUpgradeState.started);
+    expect(status.code, isNull);
+    expect(server.messagesOfType('upgrade'), [
+      {'type': 'upgrade'},
+    ]);
+    expect(
+      WmrWsUpgradeStatus.fromJson({'type': 'upgrade_status', 'state': 'busy'})
+          .state,
+      WmrWsUpgradeState.busy,
+    );
+    final error = WmrWsUpgradeStatus.fromJson({
+      'type': 'upgrade_status',
+      'state': 'error',
+      'code': 'auth_failed',
+    });
+    expect(error.state, WmrWsUpgradeState.error);
+    expect(error.code, 'auth_failed');
+  });
+
   group('authentication', () {
     test('sends the token and completes on auth_ok', () async {
       await start(

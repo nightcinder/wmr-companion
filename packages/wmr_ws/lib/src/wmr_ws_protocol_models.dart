@@ -20,6 +20,7 @@ class WmrWsHello {
     required this.recordSize,
     required this.batchMax,
     required this.fragmentCapacity,
+    this.upgradeCapable = false,
   }) : streams = Set.unmodifiable(streams);
 
   /// Parses a decoded JSON control message. Throws
@@ -57,6 +58,7 @@ class WmrWsHello {
       recordSize: _int(json['recordSize'], 'recordSize', 56),
       batchMax: _int(json['batchMax'], 'batchMax', 9),
       fragmentCapacity: _int(json['fragmentCapacity'], 'fragmentCapacity', 244),
+      upgradeCapable: json['upgradeCapable'] == true,
     );
   }
 
@@ -96,6 +98,10 @@ class WmrWsHello {
   /// capacity, not an ATT MTU.
   final int fragmentCapacity;
 
+  /// Whether this daemon accepts `{"type":"upgrade"}`. Absent (and therefore
+  /// false) on daemons that predate the root upgrade unit.
+  final bool upgradeCapable;
+
   bool supportsStreamNamed(String name) => streams.contains(name);
 
   static int _int(Object? value, String field, [int? fallback]) {
@@ -111,6 +117,31 @@ class WmrWsHello {
     throw WmrWsHandshakeException('hello.$field is not a string');
   }
 }
+
+/// The `upgrade_status` reply to `{"type":"upgrade"}`.
+class WmrWsUpgradeStatus {
+  const WmrWsUpgradeStatus({required this.state, this.code});
+
+  factory WmrWsUpgradeStatus.fromJson(Map<String, Object?> json) {
+    final state = switch (json['state']) {
+      'started' => WmrWsUpgradeState.started,
+      'busy' => WmrWsUpgradeState.busy,
+      'error' => WmrWsUpgradeState.error,
+      _ => WmrWsUpgradeState.unknown,
+    };
+    final code = json['code'];
+    return WmrWsUpgradeStatus(state: state, code: code is String ? code : null);
+  }
+
+  final WmrWsUpgradeState state;
+
+  /// Protocol error code for [WmrWsUpgradeState.error]: `auth_failed` when the
+  /// bridge has no token, `unavailable` when it cannot run the upgrade unit.
+  final String? code;
+}
+
+/// The states the daemon reports for an upgrade request.
+enum WmrWsUpgradeState { started, busy, error, unknown }
 
 /// One hand in a `status` reply.
 class WmrWsHandStatus {

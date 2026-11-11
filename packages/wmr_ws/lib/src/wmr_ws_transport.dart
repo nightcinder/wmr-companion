@@ -408,6 +408,19 @@ class WmrWsTransport implements BleTransport {
   Future<WmrWsStatus> status(String deviceId) =>
       _requireReady(deviceId).requestStatus().then(WmrWsStatus.fromJson);
 
+  /// Asks the daemon to install its latest release and restart.
+  ///
+  /// The reply says whether the request was accepted ([WmrWsUpgradeState
+  /// .started]) or refused ([WmrWsUpgradeState.busy] while another upgrade
+  /// runs, [WmrWsUpgradeState.error] with `auth_failed` for a tokenless
+  /// bridge or `unavailable` when the upgrade unit is missing). An accepted
+  /// request restarts the daemon, so the caller must expect this session to
+  /// drop and reconnect.
+  Future<WmrWsUpgradeStatus> requestUpgrade(String deviceId) =>
+      _requireReady(deviceId)
+          .requestUpgrade()
+          .then(WmrWsUpgradeStatus.fromJson);
+
   /// The `hello` of the current session, or null when not connected.
   WmrWsHello? helloFor(String deviceId) => _sessions[deviceId]?.helloOrNull;
 
@@ -713,6 +726,8 @@ class _WmrWsSession {
         _onControlReply('unsubscribed', decoded);
       case 'status':
         _onControlReply('status', decoded);
+      case 'upgrade_status':
+        _onControlReply('upgrade_status', decoded);
       case 'pong':
         _onPong(decoded, receivedAtUs);
       default:
@@ -864,6 +879,9 @@ class _WmrWsSession {
 
   Future<Map<String, Object?>> requestStatus() =>
       _enqueue(() => _request({'type': 'status'}, 'status'));
+
+  Future<Map<String, Object?>> requestUpgrade() =>
+      _enqueue(() => _request({'type': 'upgrade'}, 'upgrade_status'));
 
   Future<Map<String, Object?>> _request(
     Map<String, Object?> message,
