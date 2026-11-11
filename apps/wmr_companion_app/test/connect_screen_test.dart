@@ -233,6 +233,45 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('shows the failed upgrade result after the bridge stays down', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _UpgradeableBridge(
+      wifiConnected: false,
+      upgrade: const BridgeUpgradeState(
+        BridgeUpgradePhase.failed,
+        message: 'The bridge did not come back after the upgrade.',
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(() => bridge),
+          latestBridgeReleaseProvider.overrideWith(
+            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.text('The bridge did not come back after the upgrade.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('bridge-upgrade')), findsNothing);
+    expect(find.byKey(const Key('bridge-upgrade-command')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
   testWidgets('hides the update banner when the bridge is current', (
     tester,
   ) async {
@@ -329,25 +368,31 @@ class _ConnectedBridge extends RealDeviceController {
 
 /// A connected Wi-Fi bridge whose daemon advertises the root upgrade unit.
 class _UpgradeableBridge extends RealDeviceController {
-  _UpgradeableBridge({this.upgrade = const BridgeUpgradeState.idle()});
+  _UpgradeableBridge({
+    this.upgrade = const BridgeUpgradeState.idle(),
+    this.wifiConnected = true,
+  });
 
   final BridgeUpgradeState upgrade;
+  final bool wifiConnected;
   bool requested = false;
 
   @override
   RealDeviceState build() => RealDeviceState(
-    status: const BleLinkStatus(
-      BleLinkPhase.ready,
+    status: BleLinkStatus(
+      wifiConnected ? BleLinkPhase.ready : BleLinkPhase.connectionLost,
       deviceId: '192.168.1.42:8765',
     ),
     deviceId: '192.168.1.42:8765',
-    connectedDeviceIds: const {'192.168.1.42:8765'},
+    connectedDeviceIds: wifiConnected ? const {'192.168.1.42:8765'} : const {},
     activeTransport: BridgeTransportKind.wifi,
     wifiDeviceId: '192.168.1.42:8765',
-    protocol: const WmrProtocolVersion(
-      features: WmrBridgeFeatures.none,
-      firmwareVersion: '0.3.19',
-    ),
+    protocol: wifiConnected
+        ? const WmrProtocolVersion(
+            features: WmrBridgeFeatures.none,
+            firmwareVersion: '0.3.19',
+          )
+        : null,
     bridgeUpgradeCapable: true,
     bridgeUpgrade: upgrade,
   );

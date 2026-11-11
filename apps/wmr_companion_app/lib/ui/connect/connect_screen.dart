@@ -323,7 +323,9 @@ class RealPanel extends ConsumerWidget {
             key: const Key('bridge-version'),
             style: mono,
           ),
-        if (s.connected || s.bridgeUpgrade.isActive)
+        if (s.connected ||
+            s.bridgeUpgrade.isActive ||
+            s.bridgeUpgrade.message != null)
           _BridgeUpdateBanner(connected: s.protocol),
         if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null) ...[
           Text('Endpoint: ${s.wifiDeviceId}', style: mono),
@@ -583,11 +585,14 @@ class _BridgeUpdateBanner extends ConsumerWidget {
         latest != null &&
         connectedVersion != null &&
         latest.compareTo(connectedVersion) > 0;
-    if (!updateAvailable && !upgrade.isActive) {
+    if (!updateAvailable && !upgrade.isActive && upgrade.message == null) {
       return const SizedBox.shrink();
     }
     final theme = Theme.of(context);
     final active = upgrade.isActive;
+    // A failed upgrade can leave the link down; the message stays visible but
+    // the in-app action needs the daemon on the other end of it.
+    final canRequest = upgradeCapable && connected != null;
     return Card(
       key: const Key('bridge-update-banner'),
       color: theme.colorScheme.tertiaryContainer,
@@ -615,7 +620,7 @@ class _BridgeUpdateBanner extends ConsumerWidget {
               ),
             ],
             const SizedBox(height: 8),
-            if (upgradeCapable || active)
+            if (active || canRequest)
               FilledButton.icon(
                 key: const Key('bridge-upgrade'),
                 onPressed: active
