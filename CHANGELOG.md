@@ -3,6 +3,24 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## 0.3.23+28
+
+WMR Companion release. The in-app bridge upgrade needs a WMR_Bridge build that
+advertises `upgradeCapable` (the Pi upgrade command, ONY-1223); an older bridge
+keeps the manual command.
+
+- The Connect screen's update banner can start a Pi bridge upgrade over the
+  connected Wi-Fi daemon. The app sends `{"type":"upgrade"}`, reports the
+  daemon's `started`, `busy` or `error` result, and extends the reconnect
+  campaign past its six attempts, bounded by a five-minute watchdog, so it
+  comes back after the package install and daemon restart. A daemon that
+  cannot upgrade, or is unreachable, gets the one-line
+  `install.sh | sudo bash` command instead (ONY-1224).
+- Returning to the app after Android backgrounded it reconnects a bridge whose
+  retry budget ran out. Disconnecting one bridge no longer suppresses the
+  redial of another that drops, while an explicit disconnect and a manual scan
+  still stay down on resume (ONY-1271).
+
 ## 0.3.22+27
 
 WMR Companion release, paired with WMR_Bridge `v0.3.23`.
