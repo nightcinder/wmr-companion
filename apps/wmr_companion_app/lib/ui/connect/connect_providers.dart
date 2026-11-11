@@ -375,6 +375,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   int _disconnectEpoch = 0;
   bool _launchAutoConnectStarted = false;
   bool _autoConnectSuppressed = false;
+  bool _disconnectedByUser = false;
 
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
@@ -394,15 +395,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _statusSub = transport.statusChanges.listen(_handleBleLinkStatus);
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
-      onStateChange: (s) => unawaited(
-        transport.handleAppLifecycle(switch (s) {
-          AppLifecycleState.resumed => BleAppLifecycle.resumed,
-          AppLifecycleState.inactive => BleAppLifecycle.inactive,
-          AppLifecycleState.paused => BleAppLifecycle.paused,
-          AppLifecycleState.detached => BleAppLifecycle.detached,
-          AppLifecycleState.hidden => BleAppLifecycle.inactive,
-        }),
-      ),
+      onStateChange: (s) {
+        unawaited(
+          transport.handleAppLifecycle(switch (s) {
+            AppLifecycleState.resumed => BleAppLifecycle.resumed,
+            AppLifecycleState.inactive => BleAppLifecycle.inactive,
+            AppLifecycleState.paused => BleAppLifecycle.paused,
+            AppLifecycleState.detached => BleAppLifecycle.detached,
+            AppLifecycleState.hidden => BleAppLifecycle.inactive,
+          }),
+        );
+        if (s == AppLifecycleState.resumed) unawaited(_handleAppResume());
+      },
     );
 
     ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
@@ -722,6 +726,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// connection: it repeats the whole sequence.
   Future<void> connect(String deviceId) async {
     _autoConnectSuppressed = true;
+    _disconnectedByUser = false;
     if (_connectedDeviceIds.contains(deviceId) ||
         _connectingDeviceIds.contains(deviceId)) {
       return;
@@ -918,6 +923,45 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         state.activeTransport != BridgeTransportKind.ble) {
       return;
     }
+    KnownBridge? remembered;
+    try {
+      remembered = await ref.read(knownBridgeStoreProvider).load();
+    } catch (_) {
+      // No storage, no remembered bridge: the sole discovered one still works.
+    }
+    if (!ref.mounted || _autoConnectSuppressed) return;
+    await _discoverLan(remembered: remembered);
+  }
+
+  /// Gives a dropped link a fresh attempt when the app returns to the
+  /// foreground.
+  ///
+  /// Android can suspend the process while a link is down: the backoff
+  /// campaign runs out, or its timer is frozen and fires only after the app
+  /// is back. A resume clears the exhausted counters and dials the bridge
+  /// that dropped, or repeats remembered-bridge discovery when no bridge was
+  /// ever up. An explicit Disconnect must stay down, so it suppresses the
+  /// automatic redial until the user connects again.
+  Future<void> _handleAppResume() async {
+    if (state.connected || state.busy || _intentionalDisconnect) return;
+    _reconnectAttempts.clear();
+    _reconnecting.clear();
+    if (_disconnectedByUser) return;
+    _autoConnectSuppressed = false;
+    final target = state.deviceId;
+    if (target != null) {
+      _reconnectTimers.remove(target)?.cancel();
+      await connect(target);
+      return;
+    }
+    await _resumeAutoConnect();
+  }
+
+  /// The launch auto-connect runs once per app run, so the resume path repeats
+  /// the remembered-bridge lookup here instead of calling it again.
+  Future<void> _resumeAutoConnect() async {
+    if (state.activeTransport != BridgeTransportKind.ble) return;
+    if (!ref.read(launchAutoConnectEnabledProvider)) return;
     KnownBridge? remembered;
     try {
       remembered = await ref.read(knownBridgeStoreProvider).load();
@@ -1132,6 +1176,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   Future<void> _disconnect({String? deviceId, bool forget = true}) async {
     _autoConnectSuppressed = true;
+    _disconnectedByUser = true;
     if (deviceId != null) {
       _deviceDisconnectGenerations[deviceId] =
           (_deviceDisconnectGenerations[deviceId] ?? 0) + 1;

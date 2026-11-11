@@ -1,6 +1,8 @@
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/hid/hid_output.dart';
+import 'package:wmr_companion_app/services/known_bridge_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
@@ -17,6 +19,7 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
 
 import '../hid/fake_hid.dart';
+import 'memory_known_bridge_store.dart';
 
 class _DroppableWifiTransport extends FakeTransport {
   _DroppableWifiTransport({required super.devices});
@@ -124,6 +127,33 @@ void main() {
       Future<void>.delayed(Duration(milliseconds: millis));
 
   Future<void> pump() => Future<void>.delayed(Duration.zero);
+
+  void setAppLifecycle(AppLifecycleState state) {
+    // The test binding forwards this to every AppLifecycleListener.
+    // ignore: invalid_use_of_protected_member
+    TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(state);
+  }
+
+  // The listener asserts on illegal transitions, so walk the real sequence.
+  void backgroundApp() {
+    for (final state in const [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      setAppLifecycle(state);
+    }
+  }
+
+  void resumeApp() {
+    for (final state in const [
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      setAppLifecycle(state);
+    }
+  }
 
   test('published stats follow the service created by a reconnect', () async {
     final container = makeContainer();
@@ -398,4 +428,130 @@ void main() {
     expect(container.read(realDeviceProvider).connected, isTrue);
     expect(wifi.connectCalls, greaterThanOrEqualTo(connectsBefore + 2));
   });
+
+  test(
+    'resuming after the retry cap reconnects to the dropped bridge',
+    () async {
+      const policy = ReconnectPolicy(
+        baseDelay: Duration(milliseconds: 5),
+        maxDelay: Duration(milliseconds: 10),
+        maxAttempts: 3,
+      );
+      final container = makeContainer(policy: policy);
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connect(fakeBridgeDeviceId);
+      final connectsBefore = adapter.calls.where((c) => c == 'connect').length;
+
+      // The link drops while the app is in the background: every retry fails
+      // and the campaign exhausts its attempts.
+      adapter.connectError = Exception('radio unavailable');
+      adapter.dropLink();
+      await wait(500);
+      final exhausted = adapter.calls.where((c) => c == 'connect').length;
+      expect(exhausted, connectsBefore + policy.maxAttempts);
+      expect(container.read(realDeviceProvider).connected, isFalse);
+
+      adapter.connectError = null;
+      backgroundApp();
+      await pump();
+      resumeApp();
+      await wait(300);
+
+      expect(container.read(realDeviceProvider).connected, isTrue);
+      expect(
+        adapter.calls.where((c) => c == 'connect').length,
+        greaterThan(exhausted),
+      );
+    },
+  );
+
+  test('resuming after an explicit disconnect stays disconnected', () async {
+    final container = makeContainer();
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+    await controller.disconnect();
+    expect(container.read(realDeviceProvider).connected, isFalse);
+    final connectsBefore = adapter.calls.where((c) => c == 'connect').length;
+
+    backgroundApp();
+    await pump();
+    resumeApp();
+    await wait(300);
+
+    expect(container.read(realDeviceProvider).connected, isFalse);
+    expect(adapter.calls.where((c) => c == 'connect').length, connectsBefore);
+    expect(controller.service, isNull);
+
+    // The per-bridge Disconnect control takes the other branch.
+    await controller.connect(fakeBridgeDeviceId);
+    await controller.disconnect(fakeBridgeDeviceId);
+    final afterRowDisconnect = adapter.calls
+        .where((c) => c == 'connect')
+        .length;
+    backgroundApp();
+    await pump();
+    resumeApp();
+    await wait(300);
+
+    expect(container.read(realDeviceProvider).connected, isFalse);
+    expect(
+      adapter.calls.where((c) => c == 'connect').length,
+      afterRowDisconnect,
+    );
+  });
+
+  test(
+    'resuming with no dropped link retries remembered-bridge discovery',
+    () async {
+      final wifi = _DroppableWifiTransport(
+        devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+      );
+      addTearDown(wifi.dispose);
+      final store = MemoryKnownBridgeStore(
+        const KnownBridge(
+          bridgeId: 'pi-bridge',
+          hosts: ['pi.local'],
+          port: 8765,
+          bleFallback: false,
+        ),
+      );
+      var discoveryFails = true;
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+          knownBridgeStoreProvider.overrideWithValue(store),
+          lanDiscoveryProvider.overrideWithValue(() async {
+            if (discoveryFails) throw Exception('network down');
+            return [
+              WmrWsEndpoint(
+                host: 'pi.local',
+                port: 8765,
+                bridgeId: 'pi-bridge',
+              ),
+            ];
+          }),
+          streamModeProvider.overrideWith(
+            () => TestModeNotifier(StreamMode.raw),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.launchAutoConnect();
+      expect(container.read(realDeviceProvider).connected, isFalse);
+
+      // Discovery recovers while the app is in the background; the resume must
+      // look the remembered bridge up again rather than waiting for a tap.
+      discoveryFails = false;
+      backgroundApp();
+      await pump();
+      resumeApp();
+      await wait(300);
+
+      expect(container.read(realDeviceProvider).connected, isTrue);
+      expect(wifi.connectCalls, 1);
+    },
+  );
 }
