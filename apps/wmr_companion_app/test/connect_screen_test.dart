@@ -33,6 +33,7 @@ void main() {
           overrides: [
             realTransportProvider.overrideWithValue(ble),
             streamModeProvider.overrideWith(RawModeNotifier.new),
+            launchAutoConnectEnabledProvider.overrideWithValue(false),
             lanDiscoveryProvider.overrideWithValue(
               () async => [
                 WmrWsEndpoint(
