@@ -717,17 +717,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     final generation = ++_scanGeneration;
     _seen.clear();
     _update(results: const []);
-    _scanSub = _transport.scan().listen((r) {
-      _seen[r.deviceId] = r;
-      ref
-          .read(bridgeTransportKindsProvider.notifier)
-          .set(r.deviceId, state.activeTransport);
-      _update(
-        results: _seen.values.toList()
-          ..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999)),
-      );
-    }, onError: (Object _) => _endBrowse(generation),
-        onDone: () => _endBrowse(generation));
+    _scanSub = _transport.scan().listen(
+      (r) {
+        _seen[r.deviceId] = r;
+        ref
+            .read(bridgeTransportKindsProvider.notifier)
+            .set(r.deviceId, state.activeTransport);
+        _update(
+          results: _seen.values.toList()
+            ..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999)),
+        );
+      },
+      onError: (Object _) => _endBrowse(generation),
+      onDone: () => _endBrowse(generation),
+    );
   }
 
   /// A scan can end without [stopScan]: the transport closes its stream after
