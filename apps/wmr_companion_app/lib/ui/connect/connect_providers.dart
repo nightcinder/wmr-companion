@@ -791,8 +791,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// kept in app state.
   ///
   /// [bridgeId] and [name] come from LAN discovery and let the transport
-  /// verify the WebSocket `hello` before sending a token. [bleFallback] opts
-  /// into the TCP-first [CompositeBleTransport] instead of a plain WebSocket.
+  /// verify the WebSocket `hello` before sending a token. [candidateHosts]
+  /// carries the other interface addresses discovery reported for the same
+  /// bridge, so the transport can fall back when [host] is unreachable.
+  /// [bleFallback] opts into the TCP-first [CompositeBleTransport] instead of
+  /// a plain WebSocket.
   Future<void> connectWifi({
     required String host,
     required int port,
@@ -801,11 +804,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     String? path,
     String? bridgeId,
     String? name,
+    Iterable<String> candidateHosts = const <String>[],
     bool bleFallback = false,
   }) async {
     final trimmedToken = token?.trim();
     final endpoint = WmrWsEndpoint(
       host: host.trim(),
+      candidateHosts: candidateHosts,
       port: port,
       path: path ?? wmrWsDefaultPath,
       secure: secure,

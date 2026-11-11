@@ -57,9 +57,11 @@ set; it never binds port 5353, so a unicast mDNS reply works on Android without
 a `MulticastLock`. Both replies are hints: they never carry the token. A
 discovered `WmrWsEndpoint` records the reply's stable `bridgeId`, and
 `connect()` refuses to send a token unless the WebSocket `hello` reports the
-same `bridge_id`. `scan()` yields the configured endpoints first, then the
-deduplicated discoveries. Static `WmrWsEndpoint` host/port entries remain
-supported as an override.
+same `bridge_id`. `scan()` yields the configured endpoints first, then one entry
+per discovered bridge: replies that share a `bridgeId` collapse into a single
+`WmrWsEndpoint` whose `hosts` list holds every interface address, and
+`connect()` tries those hosts in order. Static `WmrWsEndpoint` host/port entries
+remain supported as an override.
 
 ## The seam, and where it leaks
 

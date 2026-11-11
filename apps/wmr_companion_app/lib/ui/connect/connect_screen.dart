@@ -628,6 +628,7 @@ class _WifiConnectPanel extends ConsumerWidget {
         path: endpoint.path,
         bridgeId: endpoint.bridgeId,
         name: endpoint.name,
+        candidateHosts: endpoint.hosts.skip(1),
         token: ui.token.text,
         secure: ui.secure,
         bleFallback: ui.bleFallback,

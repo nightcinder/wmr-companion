@@ -75,28 +75,31 @@ class _MdnsResponder {
     String instance = 'pi-mdns',
     int metadataPort = 9322,
     String address = '127.0.0.1',
+    List<_MdnsAdvertisement>? advertisements,
   }) async {
     final socket = await RawDatagramSocket.bind(
       InternetAddress.loopbackIPv4,
       0,
     );
     final responder = _MdnsResponder._(socket);
+    final reply = _mdnsResponse(
+      advertisements ??
+          <_MdnsAdvertisement>[
+            _MdnsAdvertisement(
+              bridgeId: bridgeId,
+              instance: instance,
+              metadataPort: metadataPort,
+              addresses: <String>[address],
+            ),
+          ],
+    );
     socket.listen((RawSocketEvent event) {
       if (event != RawSocketEvent.read) return;
       final datagram = socket.receive();
       if (datagram == null) return;
       responder.lastQuery = datagram.data;
       responder.lastSourcePort = datagram.port;
-      socket.send(
-        _mdnsResponse(
-          bridgeId: bridgeId,
-          instance: instance,
-          metadataPort: metadataPort,
-          address: address,
-        ),
-        datagram.address,
-        datagram.port,
-      );
+      socket.send(reply, datagram.address, datagram.port);
     });
     return responder;
   }
@@ -104,47 +107,91 @@ class _MdnsResponder {
   void close() => socket.close();
 }
 
-Uint8List _mdnsResponse({
-  required String bridgeId,
-  required String instance,
-  required int metadataPort,
-  required String address,
-}) {
-  final fqdn = '$instance.$wmrWsMdnsServiceType';
-  final target = '$instance.local';
+class _MdnsAdvertisement {
+  const _MdnsAdvertisement({
+    required this.bridgeId,
+    required this.instance,
+    required this.metadataPort,
+    required this.addresses,
+  });
+
+  final String bridgeId;
+  final String instance;
+  final int metadataPort;
+  final List<String> addresses;
+}
+
+Uint8List _mdnsResponse(List<_MdnsAdvertisement> advertisements) {
   final builder = BytesBuilder(copy: false);
-  // Response, authoritative; one PTR answer and SRV/TXT/A additionals.
-  builder.add(const <int>[0, 0, 0x84, 0x00, 0, 0, 0, 1, 0, 0, 0, 3]);
-  _record(
-    builder,
-    name: wmrWsMdnsServiceType,
-    type: 12,
-    data: _encodeName(fqdn),
+  // Response, authoritative; one PTR answer per advertisement, then SRV/TXT
+  // and one A record per advertised address.
+  final count = advertisements.length;
+  final addressCount = advertisements.fold<int>(
+    0,
+    (sum, advertisement) => sum + advertisement.addresses.length,
   );
-  final srv = BytesBuilder(copy: false)
-    ..add(const <int>[0, 0, 0, 0])
-    ..add(<int>[(metadataPort >> 8) & 0xFF, metadataPort & 0xFF])
-    ..add(_encodeName(target));
-  _record(builder, name: fqdn, type: 33, data: srv.toBytes());
-  _record(
-    builder,
-    name: fqdn,
-    type: 16,
-    data: _txtData(<String, String>{
-      'id': bridgeId,
-      'path': '/wmr',
-      'version': '0.4.0',
-      'hands': 'left,right',
-    }),
-  );
-  _record(
-    builder,
-    name: target,
-    type: 1,
-    data: Uint8List.fromList(
-      address.split('.').map(int.parse).toList(growable: false),
-    ),
-  );
+  final additionalCount = 2 * count + addressCount;
+  builder.add(<int>[
+    0,
+    0,
+    0x84,
+    0,
+    0,
+    0,
+    0,
+    count,
+    0,
+    0,
+    (additionalCount >> 8) & 0xFF,
+    additionalCount & 0xFF,
+  ]);
+  for (final advertisement in advertisements) {
+    final fqdn = '${advertisement.instance}.$wmrWsMdnsServiceType';
+    _record(
+      builder,
+      name: wmrWsMdnsServiceType,
+      type: 12,
+      data: _encodeName(fqdn),
+    );
+  }
+  for (final advertisement in advertisements) {
+    final fqdn = '${advertisement.instance}.$wmrWsMdnsServiceType';
+    final target = '${advertisement.instance}.local';
+    final srv = BytesBuilder(copy: false)
+      ..add(const <int>[0, 0, 0, 0])
+      ..add(<int>[
+        (advertisement.metadataPort >> 8) & 0xFF,
+        advertisement.metadataPort & 0xFF,
+      ])
+      ..add(_encodeName(target));
+    _record(builder, name: fqdn, type: 33, data: srv.toBytes());
+  }
+  for (final advertisement in advertisements) {
+    final fqdn = '${advertisement.instance}.$wmrWsMdnsServiceType';
+    _record(
+      builder,
+      name: fqdn,
+      type: 16,
+      data: _txtData(<String, String>{
+        'id': advertisement.bridgeId,
+        'path': '/wmr',
+        'version': '0.4.0',
+        'hands': 'left,right',
+      }),
+    );
+  }
+  for (final advertisement in advertisements) {
+    for (final address in advertisement.addresses) {
+      _record(
+        builder,
+        name: '${advertisement.instance}.local',
+        type: 1,
+        data: Uint8List.fromList(
+          address.split('.').map(int.parse).toList(growable: false),
+        ),
+      );
+    }
+  }
   return builder.toBytes();
 }
 
@@ -269,6 +316,42 @@ void main() {
     expect(endpoint.path, '/wmr');
     expect(endpoint.bridgeId, 'pi-mdns-1');
     expect(endpoint.name, 'pi-mdns');
+  });
+
+  test('mDNS replies with one bridge id collapse into ordered hosts', () async {
+    final responder = await _MdnsResponder.start(
+      advertisements: const <_MdnsAdvertisement>[
+        _MdnsAdvertisement(
+          bridgeId: 'pi-multi',
+          instance: 'pi-eth0',
+          metadataPort: 9322,
+          addresses: <String>['10.0.0.5', '10.0.0.7'],
+        ),
+        _MdnsAdvertisement(
+          bridgeId: 'pi-multi',
+          instance: 'pi-wlan0',
+          metadataPort: 9322,
+          addresses: <String>['10.0.0.6'],
+        ),
+      ],
+    );
+    addTearDown(responder.close);
+    final discovery = _loopbackDiscovery(
+      timeout: timeout,
+      udpPort: 1,
+      mdnsPort: responder.port,
+    );
+
+    final endpoints = await discovery.discover();
+
+    expect(endpoints, hasLength(1));
+    final endpoint = endpoints.single;
+    expect(endpoint.bridgeId, 'pi-multi');
+    expect(endpoint.port, 9322);
+    expect(endpoint.hosts, <String>['10.0.0.5', '10.0.0.7', '10.0.0.6']);
+    expect(endpoint.host, '10.0.0.5');
+    expect(endpoint.uri, Uri.parse('ws://10.0.0.5:9322/wmr'));
+    expect(endpoint.uriFor('10.0.0.6'), Uri.parse('ws://10.0.0.6:9322/wmr'));
   });
 
   test('scan merges static, UDP and mDNS endpoints', () async {
