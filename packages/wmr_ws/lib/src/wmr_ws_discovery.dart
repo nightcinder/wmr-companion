@@ -70,13 +70,19 @@ class WmrWsDiscovery {
 
   /// Runs both paths and returns every endpoint whose reply verified.
   ///
-  /// Results are deduplicated by [WmrWsEndpoint.resolvedDeviceId]; the first
-  /// reply for a host and port wins.
+  /// Replies with the same non-empty `bridgeId` are one bridge seen on more
+  /// than one interface, so they collapse into a single endpoint: the first
+  /// reply supplies the metadata and [WmrWsEndpoint.host], later replies add
+  /// their address to [WmrWsEndpoint.hosts] in arrival order. Replies without
+  /// a bridge id (none are produced by the two parsers today) fall back to
+  /// deduplication by [WmrWsEndpoint.resolvedDeviceId].
   Future<List<WmrWsEndpoint>> discover() async {
-    final results = <String, WmrWsEndpoint>{};
+    final results = <String, _EndpointGroup>{};
     final nonce = _newNonce();
     await Future.wait<void>([_probeUdp(nonce, results), _queryMdns(results)]);
-    return List<WmrWsEndpoint>.unmodifiable(results.values);
+    return List<WmrWsEndpoint>.unmodifiable(
+      results.values.map((group) => group.endpoint),
+    );
   }
 
   String _newNonce() {
@@ -86,7 +92,7 @@ class WmrWsDiscovery {
 
   Future<void> _probeUdp(
     String nonce,
-    Map<String, WmrWsEndpoint> results,
+    Map<String, _EndpointGroup> results,
   ) async {
     RawDatagramSocket? socket;
     try {
@@ -122,7 +128,7 @@ class WmrWsDiscovery {
     }
   }
 
-  Future<void> _queryMdns(Map<String, WmrWsEndpoint> results) async {
+  Future<void> _queryMdns(Map<String, _EndpointGroup> results) async {
     RawDatagramSocket? socket;
     final records = _MdnsRecords();
     try {
@@ -151,10 +157,14 @@ class WmrWsDiscovery {
   }
 
   static void _remember(
-    Map<String, WmrWsEndpoint> results,
+    Map<String, _EndpointGroup> results,
     WmrWsEndpoint endpoint,
   ) {
-    results.putIfAbsent(endpoint.resolvedDeviceId, () => endpoint);
+    final bridgeId = endpoint.bridgeId;
+    final key = bridgeId != null && bridgeId.isNotEmpty
+        ? 'bridge:$bridgeId'
+        : 'device:${endpoint.resolvedDeviceId}';
+    results.putIfAbsent(key, () => _EndpointGroup(endpoint)).add(endpoint);
   }
 
   static WmrWsEndpoint? _parseUdpReply(
@@ -205,6 +215,27 @@ class WmrWsDiscovery {
   }
 }
 
+class _EndpointGroup {
+  _EndpointGroup(this._primary);
+
+  final WmrWsEndpoint _primary;
+  final List<String> _candidateHosts = <String>[];
+
+  void add(WmrWsEndpoint endpoint) {
+    for (final host in endpoint.hosts) {
+      if (host != _primary.host && !_candidateHosts.contains(host)) {
+        _candidateHosts.add(host);
+      }
+    }
+  }
+
+  /// The first reply's endpoint, plus every other host that answered for the
+  /// same bridge id.
+  WmrWsEndpoint get endpoint => _candidateHosts.isEmpty
+      ? _primary
+      : _primary.withCandidateHosts(_candidateHosts);
+}
+
 class _Srv {
   const _Srv(this.port, this.target);
 
@@ -218,8 +249,8 @@ class _Srv {
 class _MdnsRecords {
   final Map<String, _Srv> _srv = {};
   final Map<String, Map<String, String>> _txt = {};
-  final Map<String, InternetAddress> _ipv4 = {};
-  final Map<String, InternetAddress> _ipv6 = {};
+  final Map<String, List<InternetAddress>> _ipv4 = {};
+  final Map<String, List<InternetAddress>> _ipv6 = {};
 
   void absorb(Uint8List data) {
     final reader = _DnsReader(data);
@@ -242,14 +273,18 @@ class _MdnsRecords {
       switch (type) {
         case 1:
           if (length == 4) {
-            _ipv4[name] = InternetAddress.fromRawAddress(
-              Uint8List.fromList(data.sublist(dataStart, dataEnd)),
+            (_ipv4[name] ??= <InternetAddress>[]).add(
+              InternetAddress.fromRawAddress(
+                Uint8List.fromList(data.sublist(dataStart, dataEnd)),
+              ),
             );
           }
         case 28:
           if (length == 16) {
-            _ipv6[name] = InternetAddress.fromRawAddress(
-              Uint8List.fromList(data.sublist(dataStart, dataEnd)),
+            (_ipv6[name] ??= <InternetAddress>[]).add(
+              InternetAddress.fromRawAddress(
+                Uint8List.fromList(data.sublist(dataStart, dataEnd)),
+              ),
             );
           }
         case 12:
@@ -282,11 +317,17 @@ class _MdnsRecords {
       if (srv.port < 1 || srv.port > 65535) continue;
 
       final target = _normalize(srv.target);
-      final host =
-          _ipv4[target]?.address ??
-          _ipv6[target]?.address ??
-          _normalize(srv.target);
-      if (host.isEmpty) continue;
+      // A multi-homed responder publishes one SRV target with an A/AAAA record
+      // per interface. Emit each address; discovery groups them again by
+      // bridge id so the endpoint carries every host.
+      final hosts = <String>[
+        for (final address in _ipv4[target] ?? const <InternetAddress>[])
+          address.address,
+        for (final address in _ipv6[target] ?? const <InternetAddress>[])
+          address.address,
+      ];
+      if (hosts.isEmpty) hosts.add(target);
+      if (hosts.first.isEmpty) continue;
 
       final rawPath = txt['path'];
       final path = rawPath != null && rawPath.startsWith('/')
@@ -295,7 +336,8 @@ class _MdnsRecords {
       final label = _instanceLabel(instance);
       endpoints.add(
         WmrWsEndpoint(
-          host: host,
+          host: hosts.first,
+          candidateHosts: hosts.skip(1),
           port: srv.port,
           path: path,
           bridgeId: bridgeId,

@@ -191,40 +191,58 @@ class WmrWsTransport implements BleTransport {
     }
     existing?.teardown();
 
-    final session = _WmrWsSession(deviceId, endpoint);
-    _sessions[deviceId] = session;
-    _setState(deviceId, BleConnectionState.connecting);
+    // A discovered bridge may answer on several interfaces. Try them in the
+    // order discovery reported; only the last failure is surfaced.
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (final host in endpoint.hosts) {
+      final candidate = endpoint.forHost(host);
+      final session = _WmrWsSession(deviceId, candidate);
+      _sessions[deviceId] = session;
+      _setState(deviceId, BleConnectionState.connecting);
 
-    try {
-      final socket = await _openSocket(endpoint);
-      session.socket = socket;
-      session
-        ..phase = _SessionPhase.awaitingHello
-        ..configureTimeouts(auth: authTimeout, request: requestTimeout);
-      session.subscription = socket.listen(
-        (Object? data) => _onSocketData(session, data),
-        onError: (Object error, StackTrace stackTrace) {
-          _fail(session, WmrWsException('socket error', cause: error));
-        },
-        onDone: () => _onSocketDone(session),
-        cancelOnError: false,
-      );
-      session.startHelloTimer(handshakeTimeout, _fail);
-      await session.ready.future;
-      session.cancelTimers();
-      _setState(deviceId, BleConnectionState.connected);
-    } catch (error) {
-      session.teardown();
-      if (identical(_sessions[deviceId], session)) {
-        _sessions.remove(deviceId);
+      final ready = session.ready.future;
+      // The attempt may fail before this future is awaited; keep its error
+      // from being reported as unhandled.
+      unawaited(ready.catchError((Object _) {}));
+      try {
+        final socket = await _openSocket(candidate);
+        session.socket = socket;
+        session
+          ..phase = _SessionPhase.awaitingHello
+          ..configureTimeouts(auth: authTimeout, request: requestTimeout);
+        session.subscription = socket.listen(
+          (Object? data) => _onSocketData(session, data),
+          onError: (Object error, StackTrace stackTrace) {
+            _fail(session, WmrWsException('socket error', cause: error));
+          },
+          onDone: () => _onSocketDone(session),
+          cancelOnError: false,
+        );
+        session.startHelloTimer(handshakeTimeout, _fail);
+        await ready;
+        session.cancelTimers();
+        _setState(deviceId, BleConnectionState.connected);
+        return;
+      } catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        session.teardown();
+        if (identical(_sessions[deviceId], session)) {
+          _sessions.remove(deviceId);
+        }
       }
-      _setState(deviceId, BleConnectionState.disconnected);
-      if (error is WmrWsException) rethrow;
-      throw WmrWsException(
-        'could not connect to ${endpoint.uri}',
-        cause: error,
-      );
     }
+
+    _setState(deviceId, BleConnectionState.disconnected);
+    final failure = lastError;
+    if (failure is WmrWsException) {
+      Error.throwWithStackTrace(failure, lastStackTrace!);
+    }
+    throw WmrWsException(
+      'could not connect to ${endpoint.uri}',
+      cause: failure,
+    );
   }
 
   @override

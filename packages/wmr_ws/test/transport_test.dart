@@ -100,6 +100,32 @@ void main() {
     },
   );
 
+  test('connect falls back to the next candidate host', () async {
+    await start();
+    final grouped = WmrWsEndpoint(
+      host: '127.0.0.2',
+      port: server.port,
+      candidateHosts: ['127.0.0.1'],
+    );
+    final transport2 = WmrWsTransport(
+      endpoints: [grouped],
+      connectTimeout: const Duration(seconds: 1),
+    );
+    addTearDown(transport2.dispose);
+
+    await transport2.connect(grouped.resolvedDeviceId);
+
+    await server.connected;
+    expect(
+      transport2.helloFor(grouped.resolvedDeviceId)?.version,
+      '0.1.0-test',
+    );
+    expect(
+      await transport2.connectionState(grouped.resolvedDeviceId).first,
+      BleConnectionState.connected,
+    );
+  });
+
   test('connect performs the subprotocol handshake', () async {
     await start();
     await transport.connect(id);
