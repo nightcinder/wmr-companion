@@ -13,6 +13,7 @@ import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import 'package:wmr_ble/testing.dart';
 
@@ -32,6 +33,10 @@ void main() {
         overrides: [
           realTransportProvider.overrideWithValue(transport),
           appVersionProvider.overrideWith((ref) => '0.3.0+5'),
+          lanDiscoveryProvider.overrideWithValue(
+            () async => const <WmrWsEndpoint>[],
+          ),
+          launchAutoConnectEnabledProvider.overrideWithValue(false),
           if (rawDefault) streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -56,6 +61,10 @@ void main() {
         overrides: [
           realTransportProvider.overrideWithValue(transport),
           appVersionProvider.overrideWith((ref) => '0.3.0+5'),
+          lanDiscoveryProvider.overrideWithValue(
+            () async => const <WmrWsEndpoint>[],
+          ),
+          launchAutoConnectEnabledProvider.overrideWithValue(false),
           streamModeProvider.overrideWith(RawModeNotifier.new),
           debugTrackingSelectorProvider.overrideWithValue(selector),
         ],

@@ -14,6 +14,7 @@ import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import '../../services/known_bridge_store.dart';
 import '../debug/stream_settings.dart';
 
 /// The real BLE transport. Created on first use, so the fake-bridge path
@@ -165,6 +166,10 @@ final compositeWifiTransportFactoryProvider =
 final lanDiscoveryProvider = Provider<Future<List<WmrWsEndpoint>> Function()>(
   (ref) => WmrWsDiscovery().discover,
 );
+
+/// Whether the Connect screen runs the launch-time LAN scan and auto-dial.
+/// Tests that exercise other screen behaviour override it to false.
+final launchAutoConnectEnabledProvider = Provider<bool>((ref) => true);
 
 /// The transport behind the selected link, recomputed when the link or its
 /// Wi-Fi device changes. Debug screens read live parameters through it.
@@ -368,6 +373,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   int _globalDisconnectGeneration = 0;
   bool _intentionalDisconnect = false;
   int _disconnectEpoch = 0;
+  bool _launchAutoConnectStarted = false;
+  bool _autoConnectSuppressed = false;
 
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
@@ -688,6 +695,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// Failures arrive on the transport's status stream as well, so errors
   /// here only need to be swallowed.
   Future<void> startScan() async {
+    _autoConnectSuppressed = true;
     await _scanSub?.cancel();
     _seen.clear();
     _update(results: const []);
@@ -713,6 +721,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// Connects and subscribes. Also the way to reconnect after a lost
   /// connection: it repeats the whole sequence.
   Future<void> connect(String deviceId) async {
+    _autoConnectSuppressed = true;
     if (_connectedDeviceIds.contains(deviceId) ||
         _connectingDeviceIds.contains(deviceId)) {
       return;
@@ -876,9 +885,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// Chooses the link the connect screen shows. Only one link is active at a
   /// time; switching disconnects what the other one had.
   Future<void> selectTransport(BridgeTransportKind kind) async {
+    _autoConnectSuppressed = true;
     if (state.activeTransport == kind) return;
     await stopScan();
-    await disconnect();
+    await _disconnect(forget: false);
     if (kind == BridgeTransportKind.ble) {
       await _disposeWifiTransport();
     }
@@ -886,19 +896,126 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _update(activeTransport: kind);
   }
 
-  /// Runs one LAN discovery pass and publishes the results. Best-effort:
-  /// no network means an empty list, and a failure is shown in state rather
-  /// than thrown at the tap.
+  /// Runs one user-requested LAN discovery pass and publishes the results.
+  /// Best-effort: no network means an empty list, and a failure is shown in
+  /// state rather than thrown at the tap. A manual scan never auto-connects.
   Future<void> discoverLan() async {
+    _autoConnectSuppressed = true;
+    await _discoverLan();
+  }
+
+  /// Scans LAN once when the Connect screen opens, then connects to the last
+  /// bridge this app used, or to the only bridge discovery found.
+  ///
+  /// One attempt per app run. Any explicit user action (manual scan, BLE
+  /// connect, transport switch or disconnect) suppresses the automatic dial.
+  Future<void> launchAutoConnect() async {
+    if (_launchAutoConnectStarted) return;
+    _launchAutoConnectStarted = true;
+    if (!ref.read(launchAutoConnectEnabledProvider)) return;
+    if (state.connected ||
+        state.busy ||
+        state.activeTransport != BridgeTransportKind.ble) {
+      return;
+    }
+    KnownBridge? remembered;
+    try {
+      remembered = await ref.read(knownBridgeStoreProvider).load();
+    } catch (_) {
+      // No storage, no remembered bridge: the sole discovered one still works.
+    }
+    if (!ref.mounted || _autoConnectSuppressed) return;
+    await _discoverLan(remembered: remembered);
+  }
+
+  Future<void> _discoverLan({KnownBridge? remembered}) async {
     if (state.discoveringLan) return;
     _update(discoveringLan: true, clearLanError: true);
     try {
-      final found = await ref.read(lanDiscoveryProvider)();
+      final found = _deduplicateLanEndpoints(
+        await ref.read(lanDiscoveryProvider)(),
+      );
+      if (!ref.mounted) return;
       _update(lanEndpoints: found);
+      if (remembered != null || found.length == 1) {
+        await _autoConnect(found, remembered);
+      }
     } catch (error) {
-      _update(lanError: '$error');
+      if (ref.mounted) _update(lanError: '$error');
     } finally {
-      _update(discoveringLan: false);
+      if (ref.mounted) _update(discoveringLan: false);
+    }
+  }
+
+  /// Discovery already groups one bridge id across interfaces. Grouping here
+  /// again keeps the UI and the auto-dial correct for any other source.
+  static List<WmrWsEndpoint> _deduplicateLanEndpoints(
+    List<WmrWsEndpoint> found,
+  ) {
+    final groups = <String, WmrWsEndpoint>{};
+    for (final endpoint in found) {
+      final bridgeId = endpoint.bridgeId;
+      final key = bridgeId != null && bridgeId.isNotEmpty
+          ? 'bridge:$bridgeId'
+          : 'device:${endpoint.resolvedDeviceId}';
+      final prior = groups[key];
+      groups[key] = prior == null
+          ? endpoint
+          : prior.withCandidateHosts([
+              ...prior.hosts.skip(1),
+              ...endpoint.hosts,
+            ]);
+    }
+    return List<WmrWsEndpoint>.unmodifiable(groups.values);
+  }
+
+  Future<void> _autoConnect(
+    List<WmrWsEndpoint> found,
+    KnownBridge? remembered,
+  ) async {
+    if (_autoConnectSuppressed || state.connected || state.busy) return;
+    WmrWsEndpoint? target;
+    var bleFallback = true;
+    final rememberedId = remembered?.bridgeId;
+    if (rememberedId != null && rememberedId.isNotEmpty) {
+      for (final endpoint in found) {
+        if (endpoint.bridgeId == rememberedId) {
+          target = endpoint;
+          bleFallback = remembered!.bleFallback;
+          break;
+        }
+      }
+    }
+    if (target == null && found.length == 1) target = found.single;
+    if (target == null &&
+        found.isEmpty &&
+        remembered != null &&
+        remembered.hosts.isNotEmpty) {
+      // Discovery can be blocked even when the last bridge is still reachable;
+      // the remembered address is the fallback, with the expected bridge id
+      // still verified by the transport during `hello`.
+      target = WmrWsEndpoint(
+        host: remembered.hosts.first,
+        candidateHosts: remembered.hosts.skip(1),
+        port: remembered.port,
+        bridgeId: remembered.bridgeId,
+      );
+      bleFallback = remembered.bleFallback;
+    }
+    if (target == null) return;
+    try {
+      await connectWifi(
+        host: target.host,
+        port: target.port,
+        path: target.path,
+        bridgeId: target.bridgeId,
+        name: target.name,
+        candidateHosts: target.hosts.skip(1),
+        secure: target.secure,
+        bleFallback: bleFallback,
+      );
+    } catch (_) {
+      // The Wi-Fi panel and the link state report a failed automatic dial.
     }
   }
 
@@ -937,7 +1054,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     );
     final id = endpoint.resolvedDeviceId;
 
-    await disconnect();
+    await _disconnect(forget: false);
     await _disposeWifiTransport();
     _lastStatus = const BleLinkStatus(BleLinkPhase.connecting);
     _wifiDeviceId = id;
@@ -958,6 +1075,45 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     );
     if (bleFallback) _startFallbackScan(transport);
     await connect(id);
+    if (state.connectedDeviceIds.contains(id)) {
+      await _rememberBridge(
+        bridgeId: bridgeId,
+        hosts: endpoint.hosts,
+        port: endpoint.port,
+        bleFallback: bleFallback,
+      );
+    }
+  }
+
+  Future<void> _rememberBridge({
+    required String? bridgeId,
+    required List<String> hosts,
+    required int port,
+    required bool bleFallback,
+  }) async {
+    if (bridgeId == null || bridgeId.isEmpty) return;
+    try {
+      await ref
+          .read(knownBridgeStoreProvider)
+          .save(
+            KnownBridge(
+              bridgeId: bridgeId,
+              hosts: hosts,
+              port: port,
+              bleFallback: bleFallback,
+            ),
+          );
+    } catch (_) {
+      // Losing the memory only costs the next launch one tap.
+    }
+  }
+
+  Future<void> _forgetBridge() async {
+    try {
+      await ref.read(knownBridgeStoreProvider).clear();
+    } catch (_) {
+      // Nothing saved, or no storage on this platform.
+    }
   }
 
   /// Switches between the FF11, FF12 and FF14 streams (CCC order is
@@ -971,7 +1127,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _update();
   }
 
-  Future<void> disconnect([String? deviceId]) async {
+  Future<void> disconnect([String? deviceId]) =>
+      _disconnect(deviceId: deviceId);
+
+  Future<void> _disconnect({String? deviceId, bool forget = true}) async {
+    _autoConnectSuppressed = true;
     if (deviceId != null) {
       _deviceDisconnectGenerations[deviceId] =
           (_deviceDisconnectGenerations[deviceId] ?? 0) + 1;
@@ -1022,6 +1182,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           await _transport.disconnect(id);
         } catch (_) {}
       }
+      if (forget) await _forgetBridge();
       _update();
     } finally {
       _intentionalDisconnect = false;

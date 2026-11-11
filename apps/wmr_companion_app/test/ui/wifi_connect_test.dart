@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_companion_app/services/known_bridge_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
@@ -11,6 +12,7 @@ import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import 'memory_known_bridge_store.dart';
 import 'raw_mode_notifier.dart';
 
 void main() {
@@ -18,6 +20,8 @@ void main() {
     WidgetTester tester,
     FakeTransport wifi, {
     bool rawDefault = true,
+    Future<List<WmrWsEndpoint>> Function()? discovery,
+    KnownBridgeStore? store,
     void Function(WmrWsEndpoint endpoint)? onEndpoint,
   }) async {
     tester.view.physicalSize = const Size(900, 1600);
@@ -31,6 +35,13 @@ void main() {
       ProviderScope(
         overrides: [
           realTransportProvider.overrideWithValue(ble),
+          launchAutoConnectEnabledProvider.overrideWithValue(false),
+          lanDiscoveryProvider.overrideWithValue(
+            discovery ?? () async => const <WmrWsEndpoint>[],
+          ),
+          knownBridgeStoreProvider.overrideWithValue(
+            store ?? MemoryKnownBridgeStore(),
+          ),
           wifiTransportFactoryProvider.overrideWithValue((endpoint) {
             onEndpoint?.call(endpoint);
             return wifi;
@@ -177,6 +188,53 @@ void main() {
     expect(find.textContaining('cleartext'), findsNothing);
   });
 
+  testWidgets(
+    'connecting to a discovered bridge remembers it for next launch',
+    (tester) async {
+      final store = MemoryKnownBridgeStore();
+      final endpoint = WmrWsEndpoint(
+        host: '192.168.1.42',
+        port: 8765,
+        bridgeId: 'bridge-1',
+        name: 'LAN Bridge',
+      );
+      final wifi = FakeTransport(
+        devices: const [FakeDevice(id: '192.168.1.42:8765', mtu: 4096)],
+      );
+      await open(tester, wifi, store: store, discovery: () async => [endpoint]);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+
+      await tester.ensureVisible(find.byKey(const Key('wifi-discover')));
+      await tester.tap(find.byKey(const Key('wifi-discover')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+
+      final connect = find.byKey(
+        const Key('wifi-lan-connect-192.168.1.42:8765'),
+      );
+      await tester.ensureVisible(connect);
+      await tester.tap(connect);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+
+      expect(find.text('State: connected, streaming'), findsOneWidget);
+      expect(store.saved?.bridgeId, 'bridge-1');
+      expect(store.saved?.hosts, ['192.168.1.42']);
+      expect(store.saved?.port, 8765);
+      expect(store.saved?.bleFallback, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
   testWidgets('switching from BLE to Wi-Fi hides the old BLE endpoint', (
     tester,
   ) async {
@@ -197,6 +255,11 @@ void main() {
           compositeWifiTransportFactoryProvider.overrideWithValue(
             (_) => WifiLink(wifi, activeLeg: () => WifiLinkLeg.tcp),
           ),
+          launchAutoConnectEnabledProvider.overrideWithValue(false),
+          lanDiscoveryProvider.overrideWithValue(
+            () async => const <WmrWsEndpoint>[],
+          ),
+          knownBridgeStoreProvider.overrideWithValue(MemoryKnownBridgeStore()),
           streamModeProvider.overrideWith(RawModeNotifier.new),
         ],
         child: const MaterialApp(home: ConnectScreen()),

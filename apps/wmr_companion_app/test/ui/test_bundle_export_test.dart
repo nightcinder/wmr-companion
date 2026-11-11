@@ -22,6 +22,7 @@ import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/capture_files.dart';
 import 'package:wmr_core/services/latency_files.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
+import 'package:wmr_ws/wmr_ws.dart';
 
 import 'raw_mode_notifier.dart';
 
@@ -84,6 +85,10 @@ void main() {
       ProviderScope(
         overrides: [
           realTransportProvider.overrideWithValue(transport),
+          lanDiscoveryProvider.overrideWithValue(
+            () async => const <WmrWsEndpoint>[],
+          ),
+          launchAutoConnectEnabledProvider.overrideWithValue(false),
           streamModeProvider.overrideWith(RawModeNotifier.new),
           latencyStoreProvider.overrideWith((ref) => LatencyStore(latencyDir)),
           captureStoreProvider.overrideWith((ref) => CaptureStore(captureDir)),
@@ -284,6 +289,10 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         realTransportProvider.overrideWithValue(transport),
+        lanDiscoveryProvider.overrideWithValue(
+          () async => const <WmrWsEndpoint>[],
+        ),
+        launchAutoConnectEnabledProvider.overrideWithValue(false),
         streamModeProvider.overrideWith(RawModeNotifier.new),
         latencyStoreProvider.overrideWith(
           (ref) => LatencyStore(Directory('${dir.path}/latency')),

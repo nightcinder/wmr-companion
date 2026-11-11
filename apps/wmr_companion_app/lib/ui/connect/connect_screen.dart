@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -126,6 +128,14 @@ class ConnectUiState extends ChangeNotifier {
 
 class _ConnectScreenState extends ConsumerState<ConnectScreen> {
   final _ui = ConnectUiState();
+
+  @override
+  void initState() {
+    super.initState();
+    // One launch-time LAN pass; it auto-connects to a remembered or sole
+    // bridge. Any manual connect or disconnect cancels it.
+    unawaited(ref.read(realDeviceProvider.notifier).launchAutoConnect());
+  }
 
   @override
   void dispose() {
@@ -671,11 +681,15 @@ class _WifiConnectPanel extends ConsumerWidget {
             Text('LAN bridges', style: theme.textTheme.titleSmall),
             for (final endpoint in state.lanEndpoints)
               ListTile(
+                key: Key(
+                  'wifi-lan-row-${endpoint.bridgeId ?? endpoint.resolvedDeviceId}',
+                ),
                 contentPadding: EdgeInsets.zero,
                 title: Text(endpoint.displayName),
                 subtitle: Text(
                   '${endpoint.resolvedDeviceId}'
-                  '${endpoint.bridgeId == null ? '' : ' · ${endpoint.bridgeId}'}',
+                  '${endpoint.bridgeId == null ? '' : ' · ${endpoint.bridgeId}'}'
+                  '${endpoint.hosts.length > 1 ? ' · also ${endpoint.hosts.skip(1).join(', ')}' : ''}',
                 ),
                 trailing: TextButton(
                   key: Key('wifi-lan-connect-${endpoint.resolvedDeviceId}'),
