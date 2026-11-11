@@ -365,6 +365,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleLinkStatus> _deviceStatuses = {};
   final Map<String, Timer> _reconnectTimers = {};
   StreamSubscription<BleScanResult>? _scanSub;
+  int _scanGeneration = 0;
   StreamSubscription<BleLinkStatus>? _statusSub;
   AppLifecycleListener? _lifecycle;
   ControllerService? _service;
@@ -375,6 +376,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   int _disconnectEpoch = 0;
   bool _launchAutoConnectStarted = false;
   bool _autoConnectSuppressed = false;
+  bool _manualBrowseSuppressed = false;
+  bool _disconnectedByUser = false;
+  final Set<String> _userDisconnectedDeviceIds = {};
+  final Set<String> _droppedDeviceIds = {};
 
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _reconnecting = {};
@@ -394,15 +399,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _statusSub = transport.statusChanges.listen(_handleBleLinkStatus);
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
-      onStateChange: (s) => unawaited(
-        transport.handleAppLifecycle(switch (s) {
-          AppLifecycleState.resumed => BleAppLifecycle.resumed,
-          AppLifecycleState.inactive => BleAppLifecycle.inactive,
-          AppLifecycleState.paused => BleAppLifecycle.paused,
-          AppLifecycleState.detached => BleAppLifecycle.detached,
-          AppLifecycleState.hidden => BleAppLifecycle.inactive,
-        }),
-      ),
+      onStateChange: (s) {
+        unawaited(
+          transport.handleAppLifecycle(switch (s) {
+            AppLifecycleState.resumed => BleAppLifecycle.resumed,
+            AppLifecycleState.inactive => BleAppLifecycle.inactive,
+            AppLifecycleState.paused => BleAppLifecycle.paused,
+            AppLifecycleState.detached => BleAppLifecycle.detached,
+            AppLifecycleState.hidden => BleAppLifecycle.inactive,
+          }),
+        );
+        if (s == AppLifecycleState.resumed) unawaited(_handleAppResume());
+      },
     );
 
     ref.listen(axisMappingProvider, (_, m) => _service?.setMapping(m));
@@ -502,6 +510,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _connectingDeviceIds.remove(id);
         _reconnectAttempts.remove(id);
         _reconnecting.remove(id);
+        _droppedDeviceIds.remove(id);
       } else if (s.phase == BleLinkPhase.disconnected ||
           s.phase == BleLinkPhase.disconnecting ||
           s.phase == BleLinkPhase.connectionLost ||
@@ -517,7 +526,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         if (!_intentionalDisconnect) {
           if (s.phase == BleLinkPhase.connectionLost) {
             // The link dropped on its own: start a fresh retry campaign.
-            _scheduleReconnect(id);
+            // Remember it so a resume can redial it even after the campaign
+            // exhausts its attempts. A bridge the user disconnected stays out.
+            if (!_userDisconnectedDeviceIds.contains(id)) {
+              _droppedDeviceIds.add(id);
+              _scheduleReconnect(id);
+            }
           } else if (s.isFailure && _reconnecting.contains(id)) {
             // An automatic re-dial failed. Keep trying with backoff until
             // the attempt cap, otherwise one transient failure would leave
@@ -613,7 +627,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   void _scheduleReconnect(String id) {
-    if (_intentionalDisconnect) return;
+    if (_intentionalDisconnect || _userDisconnectedDeviceIds.contains(id)) {
+      return;
+    }
     // Both the raw BLE loss and the composite's loss can report the same
     // drop; one pending retry is enough.
     if (_reconnectTimers[id] != null) return;
@@ -633,7 +649,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _reconnecting.remove(id);
         return;
       }
-      await connect(id);
+      await _connect(id, userInitiated: false);
     });
   }
 
@@ -696,32 +712,71 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// here only need to be swallowed.
   Future<void> startScan() async {
     _autoConnectSuppressed = true;
+    _manualBrowseSuppressed = true;
     await _scanSub?.cancel();
+    final generation = ++_scanGeneration;
     _seen.clear();
     _update(results: const []);
-    _scanSub = _transport.scan().listen((r) {
-      _seen[r.deviceId] = r;
-      ref
-          .read(bridgeTransportKindsProvider.notifier)
-          .set(r.deviceId, state.activeTransport);
-      _update(
-        results: _seen.values.toList()
-          ..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999)),
-      );
-    }, onError: (Object _) {});
+    _scanSub = _transport.scan().listen(
+      (r) {
+        _seen[r.deviceId] = r;
+        ref
+            .read(bridgeTransportKindsProvider.notifier)
+            .set(r.deviceId, state.activeTransport);
+        _update(
+          results: _seen.values.toList()
+            ..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999)),
+        );
+      },
+      onError: (Object _) => _endBrowse(generation),
+      onDone: () => _endBrowse(generation),
+    );
+  }
+
+  /// A scan can end without [stopScan]: the transport closes its stream after
+  /// its own timeout. The browse is over then too, otherwise a later resume
+  /// would stay suppressed until the next explicit user action.
+  void _endBrowse(int generation) {
+    // A stale stream must not clear the suppression of a newer scan.
+    if (generation != _scanGeneration) return;
+    _scanSub = null;
+    _manualBrowseSuppressed = false;
+    if (ref.mounted) _update();
   }
 
   Future<void> stopScan() async {
+    // A screen may be disposed after the provider itself is; there is nothing
+    // left to stop and touching state would throw.
+    if (!ref.mounted) return;
+    final transport = _transport;
     await _scanSub?.cancel();
     _scanSub = null;
-    await _transport.stopScan();
-    _update();
+    try {
+      await transport.stopScan();
+    } catch (_) {
+      // A disposed transport has nothing left to stop.
+    }
+    // The browse is over: it must not keep a later resume from redialling.
+    _manualBrowseSuppressed = false;
+    if (ref.mounted) _update();
   }
 
   /// Connects and subscribes. Also the way to reconnect after a lost
   /// connection: it repeats the whole sequence.
-  Future<void> connect(String deviceId) async {
+  ///
+  /// An automatic retry must not clear the records a resume relies on, so the
+  /// user-action bookkeeping lives in the [userInitiated] branch.
+  Future<void> connect(String deviceId) =>
+      _connect(deviceId, userInitiated: true);
+
+  Future<void> _connect(String deviceId, {required bool userInitiated}) async {
     _autoConnectSuppressed = true;
+    if (userInitiated) {
+      _manualBrowseSuppressed = false;
+      _disconnectedByUser = false;
+      _userDisconnectedDeviceIds.remove(deviceId);
+      _droppedDeviceIds.remove(deviceId);
+    }
     if (_connectedDeviceIds.contains(deviceId) ||
         _connectingDeviceIds.contains(deviceId)) {
       return;
@@ -901,7 +956,14 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// state rather than thrown at the tap. A manual scan never auto-connects.
   Future<void> discoverLan() async {
     _autoConnectSuppressed = true;
-    await _discoverLan();
+    _manualBrowseSuppressed = true;
+    try {
+      await _discoverLan();
+    } finally {
+      // The one-shot pass is over; keep the suppression only for an active
+      // browse, not for the rest of the run.
+      _manualBrowseSuppressed = false;
+    }
   }
 
   /// Scans LAN once when the Connect screen opens, then connects to the last
@@ -918,6 +980,65 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         state.activeTransport != BridgeTransportKind.ble) {
       return;
     }
+    KnownBridge? remembered;
+    try {
+      remembered = await ref.read(knownBridgeStoreProvider).load();
+    } catch (_) {
+      // No storage, no remembered bridge: the sole discovered one still works.
+    }
+    if (!ref.mounted || _autoConnectSuppressed) return;
+    await _discoverLan(remembered: remembered);
+  }
+
+  /// Gives a dropped link a fresh attempt when the app returns to the
+  /// foreground.
+  ///
+  /// Android can suspend the process while a link is down: the backoff
+  /// campaign runs out, or its timer is frozen and fires only after the app
+  /// is back. A resume clears the exhausted counters and dials every bridge
+  /// that dropped, or repeats remembered-bridge discovery when no bridge was
+  /// ever up.
+  ///
+  /// A bridge the user disconnected by itself stays down, and an explicit
+  /// Disconnect of every bridge suppresses the automatic redial until the
+  /// user connects again. An active manual scan or LAN discovery also keeps
+  /// the automatic dial off while it runs: the user is browsing, not waiting
+  /// to reconnect. Both clear that suppression when they finish.
+  Future<void> _handleAppResume() async {
+    if (state.connected || state.busy || _intentionalDisconnect) return;
+    _reconnectAttempts.clear();
+    _reconnecting.clear();
+    if (_disconnectedByUser || _manualBrowseSuppressed) return;
+    _autoConnectSuppressed = false;
+    final dropped = _droppedDeviceIds
+        .where((id) => !_userDisconnectedDeviceIds.contains(id))
+        .toList(growable: false);
+    if (dropped.isNotEmpty) {
+      for (final id in dropped) {
+        _reconnectTimers.remove(id)?.cancel();
+      }
+      for (final id in dropped) {
+        await _connect(id, userInitiated: false);
+      }
+      return;
+    }
+    final target = state.deviceId;
+    if (target != null) {
+      // The remembered primary may itself be the row the user disconnected;
+      // do not rediscover and dial it behind their back.
+      if (_userDisconnectedDeviceIds.contains(target)) return;
+      _reconnectTimers.remove(target)?.cancel();
+      await _connect(target, userInitiated: false);
+      return;
+    }
+    await _resumeAutoConnect();
+  }
+
+  /// The launch auto-connect runs once per app run, so the resume path repeats
+  /// the remembered-bridge lookup here instead of calling it again.
+  Future<void> _resumeAutoConnect() async {
+    if (state.activeTransport != BridgeTransportKind.ble) return;
+    if (!ref.read(launchAutoConnectEnabledProvider)) return;
     KnownBridge? remembered;
     try {
       remembered = await ref.read(knownBridgeStoreProvider).load();
@@ -1133,6 +1254,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   Future<void> _disconnect({String? deviceId, bool forget = true}) async {
     _autoConnectSuppressed = true;
     if (deviceId != null) {
+      // Only this row stays down; another bridge that later drops must still
+      // be redialled on resume.
+      _userDisconnectedDeviceIds.add(deviceId);
+      _droppedDeviceIds.remove(deviceId);
       _deviceDisconnectGenerations[deviceId] =
           (_deviceDisconnectGenerations[deviceId] ?? 0) + 1;
       _reconnectTimers.remove(deviceId)?.cancel();
@@ -1157,6 +1282,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       return;
     }
 
+    _disconnectedByUser = true;
+    _userDisconnectedDeviceIds.clear();
+    _droppedDeviceIds.clear();
     await _stopFallbackScan();
     _cancelBleCompositeState();
     _globalDisconnectGeneration++;

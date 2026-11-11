@@ -128,17 +128,22 @@ class ConnectUiState extends ChangeNotifier {
 
 class _ConnectScreenState extends ConsumerState<ConnectScreen> {
   final _ui = ConnectUiState();
+  late final RealDeviceController _controller;
 
   @override
   void initState() {
     super.initState();
+    _controller = ref.read(realDeviceProvider.notifier);
     // One launch-time LAN pass; it auto-connects to a remembered or sole
     // bridge. Any manual connect or disconnect cancels it.
-    unawaited(ref.read(realDeviceProvider.notifier).launchAutoConnect());
+    unawaited(_controller.launchAutoConnect());
   }
 
   @override
   void dispose() {
+    // Leaving the screen ends a browse; otherwise it would keep suppressing
+    // the resume redial for the rest of the run.
+    unawaited(_controller.stopScan());
     _ui.dispose();
     super.dispose();
   }
