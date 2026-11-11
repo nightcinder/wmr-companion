@@ -666,6 +666,53 @@ void main() {
     );
   });
 
+  test('a scan that ends on its own does not suppress the resume redial', () async {
+    const policy = ReconnectPolicy(
+      baseDelay: Duration(milliseconds: 5),
+      maxDelay: Duration(milliseconds: 10),
+      maxAttempts: 3,
+    );
+    final scanAdapter = FakeBleAdapter();
+    final scanTransport = UniversalBleTransport(
+      adapter: scanAdapter,
+      scanTimeout: const Duration(milliseconds: 100),
+    );
+    addTearDown(scanTransport.dispose);
+    final container = ProviderContainer(
+      overrides: [
+        realTransportProvider.overrideWithValue(scanTransport),
+        streamModeProvider.overrideWith(() => TestModeNotifier(StreamMode.raw)),
+        reconnectPolicyProvider.overrideWithValue(policy),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connect(fakeBridgeDeviceId);
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    // The BLE scan stream closes at its own timeout, with no stopScan call.
+    await controller.startScan();
+    await wait(300);
+
+    scanAdapter.connectError = Exception('radio unavailable');
+    scanAdapter.dropLink();
+    await wait(500);
+    final exhausted = scanAdapter.calls.where((c) => c == 'connect').length;
+    expect(container.read(realDeviceProvider).connected, isFalse);
+
+    scanAdapter.connectError = null;
+    backgroundApp();
+    await pump();
+    resumeApp();
+    await wait(300);
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(
+      scanAdapter.calls.where((c) => c == 'connect').length,
+      greaterThan(exhausted),
+    );
+  });
+
   test(
     'resuming with no dropped link retries remembered-bridge discovery',
     () async {

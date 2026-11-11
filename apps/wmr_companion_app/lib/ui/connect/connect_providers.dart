@@ -365,6 +365,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   final Map<String, BleLinkStatus> _deviceStatuses = {};
   final Map<String, Timer> _reconnectTimers = {};
   StreamSubscription<BleScanResult>? _scanSub;
+  int _scanGeneration = 0;
   StreamSubscription<BleLinkStatus>? _statusSub;
   AppLifecycleListener? _lifecycle;
   ControllerService? _service;
@@ -713,6 +714,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _autoConnectSuppressed = true;
     _manualBrowseSuppressed = true;
     await _scanSub?.cancel();
+    final generation = ++_scanGeneration;
     _seen.clear();
     _update(results: const []);
     _scanSub = _transport.scan().listen((r) {
@@ -724,7 +726,19 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         results: _seen.values.toList()
           ..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999)),
       );
-    }, onError: (Object _) {});
+    }, onError: (Object _) => _endBrowse(generation),
+        onDone: () => _endBrowse(generation));
+  }
+
+  /// A scan can end without [stopScan]: the transport closes its stream after
+  /// its own timeout. The browse is over then too, otherwise a later resume
+  /// would stay suppressed until the next explicit user action.
+  void _endBrowse(int generation) {
+    // A stale stream must not clear the suppression of a newer scan.
+    if (generation != _scanGeneration) return;
+    _scanSub = null;
+    _manualBrowseSuppressed = false;
+    if (ref.mounted) _update();
   }
 
   Future<void> stopScan() async {
