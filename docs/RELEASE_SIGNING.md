@@ -1,4 +1,4 @@
-# Release signing (; key rotated in )
+# Release signing (key rotated once)
 
 External-tester APKs are signed with a project-owned key so that every build
 installs over the previous one and `apksigner` reports a single, stable
@@ -113,8 +113,8 @@ attaches the assets to that tag's GitHub Release. `release-checksums` then
 writes one `SHA256SUMS` covering the published APKs.
 
 CI publishes only the `unified` flavor. `base` remains buildable locally with
-`tool/build_flavor.sh`, but it has no release path . The per-vendor
-`viture`/`xreal` flavors are retired .
+`tool/build_flavor.sh`, but it has no release path. The per-vendor
+`viture`/`xreal` flavors are retired.
 
 | Job | Flavor | Build |
 |---|---|---|

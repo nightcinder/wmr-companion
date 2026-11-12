@@ -37,7 +37,7 @@ XREAL exposes passthrough RGB but hides the grayscale tracking cameras.
 No pass/fail.
 
 ## 4. Gate 3 - Unity-in-Flutter smoke test
-Same procedure as [pose-viture.md](pose-viture.md) section 4, with the XREAL source. Also record `XREALPlugin.GetDeviceType` raw and normalised names.
+Same procedure as [pose-viture.md](pose-viture.md) section 4, with the XREAL source. Also record `XREALPlugin.GetDeviceType()` raw and normalised names.
 
 ```bash
 adb logcat -v threadtime > pose-xreal-gate3-<YYYYMMDD-HHMMSS>.log
@@ -49,7 +49,7 @@ adb logcat -v threadtime > pose-xreal-gate3-<YYYYMMDD-HHMMSS>.log
 | `start` received by C#? | |
 | JSON frames arrive in Dart? | |
 | Frame rate (Hz) | |
-| `GetDeviceType` raw / normalised | |
+| `GetDeviceType()` raw / normalised | |
 | Hot restart survives? | |
 | Activity recreation recovers? | |
 | Pause/resume deadlocks? | |
@@ -60,7 +60,7 @@ Pass: commands round-trip, frames arrive, the device name is recognised, and the
 Question: does the Air 2 Ultra deliver 26 joints with the input source Hands, and is a hand tracked while gripping a WMR controller?
 
 1. Start tracking. The handshake fails with `unsupported` unless the glasses are an Air 2 Ultra.
-2. Log 60 s with an empty visible hand; record joint count and rate, and the raw `GetDeviceType` name.
+2. Log 60 s with an empty visible hand; record joint count and rate, and the raw `GetDeviceType()` name.
 3. Repeat while gripping a WMR controller (awake, not streaming); record whether joints arrive.
 4. Record the input-source API if one exists, and any permissions beyond `CAMERA`.
 5. Stop and dispose; confirm no leak on repeat.
@@ -76,7 +76,7 @@ adb logcat -v threadtime > pose-xreal-gate5-<YYYYMMDD-HHMMSS>.log
 | Joint rate, empty hand / gripping (Hz) | |
 | Hand tracked while gripping? | |
 | Joints present (of 26) | |
-| `GetDeviceType` raw / normalised | |
+| `GetDeviceType()` raw / normalised | |
 | Runtime permissions requested | |
 | Runtime input-source API found? | |
 | Errors / exceptions | |

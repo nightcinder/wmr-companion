@@ -42,7 +42,7 @@ the exact notifications the ESP32 sends.
 - **Requested MTU** 517 (`wmrRequestedMtu`), on every connect. The app must
   use the negotiated value it gets back. Not verified on hardware: Android 14+
   drives the MTU itself, so the result can differ from the request.
-- **Reconnects.** `ControllerService.start` must run again after every
+- **Reconnects.** `ControllerService.start()` must run again after every
   reconnect (the bridge forgets subscription, MTU and priority).
 - **Frame payload.** FF11 frames stay undecoded and feed the Capture screen
   and the raw debug view. Orientation comes from FF12 (see "FF12 decoded
@@ -77,22 +77,22 @@ scan filter, permission prompts, reconnects and the interval callback.
 - `BleAdapter` (`lib/ble/ble_adapter.dart`) is the thin interface over the
   package; `UniversalBleAdapter` is the only file that imports
   `universal_ble`.
-- `connect` runs: permissions, radio state, link, `requestMtu(517)` (record
+- `connect()` runs: permissions, radio state, link, `requestMtu(517)` (record
   the result), high priority if supported, service discovery, check for
-  FF10/FF11. `subscribe` then enables notifications; it is queued behind
+  FF10/FF11. `subscribe()` then enables notifications; it is queued behind
   the setup, so it cannot run before the MTU result. All steps go through one
   serial queue. A failed MTU or priority request is a warning in
   `BleLinkStatus.warnings`; missing FF10/FF11 or a failed link is an error.
-- The sequence runs again on every `connect`. After an unexpected drop the
+- The sequence runs again on every `connect()`. After an unexpected drop the
   transport reports `connectionLost` and does nothing else; the UI offers
-  Reconnect, which calls `ControllerService.start` again. `start` also
+  Reconnect, which calls `ControllerService.start()` again. `start()` also
   resets the per-hand sequence baseline, since the ESP32 keeps counting
   while the phone is away.
 - Scan matches the name `WMR Bridge` or service FF10 (the package ORs the
   filter conditions) and times out after 15 s with `scanTimeout` if nothing
   matched. Devices the platform already connected (for example a bridge the
   phone holds as a HID gamepad) no longer advertise, so the scan also lists
-  `getSystemDevices` results filtered by the same service; a failure there
+  `getSystemDevices()` results filtered by the same service; a failure there
   does not fail the scan. That enumeration runs before the 15 s timeout window
   starts, because Android opens a GATT link per system device to check the
   service and can take longer than the window with several connected devices.
@@ -132,7 +132,7 @@ fragmentation. Little-endian; floats are IEEE 754 binary32.
 | 2 | u8 | `flags` | bit0 `CALIBRATED`, always 0 in version 1 |
 | 3 | u8 | `buttons` | bit0 stick click, 1 home, 2 menu, 3 squeeze, 4 trackpad click, 5 BT pairing, 6 trackpad touch |
 | 4 | u32 | `sequence` | same per-hand number as the raw FF11 frame it came from |
-| 8 | u64 | `rx_time_us` | ESP32 `esp_timer_get_time` at receipt; diagnostics only |
+| 8 | u64 | `rx_time_us` | ESP32 `esp_timer_get_time()` at receipt; diagnostics only |
 | 16 | u32 | `device_ticks` | controller timer, 100 ns/tick, wraps at 2^32; the sensor clock |
 | 20 | 3 x f32 | `gyro` | rad/s, uncalibrated, raw sensor axes |
 | 32 | 3 x f32 | `accel` | m/s^2 (about 10.0-10.1 at rest, not 9.81), uncalibrated, raw sensor axes |
@@ -204,14 +204,14 @@ calibration was parsed and shown but not applied to the fusion.
 | De-obfuscation (skip 2 bytes, XOR `key[i % 1024]`) and JSON to calibration | `packages/wmr_core/lib/protocol/config_decode.dart` |
 | Reads a hand's blob in 496-byte windows, checks CRC, polls while READING | `packages/wmr_core/lib/services/config_client.dart` |
 | GATT read on the transport | `BleTransport.read` |
-| FF13 in the fake bridge | `FakeWmrBridge(configBlobs: ...)` |
+| FF13 in the fake bridge | `FakeWmrBridge(configBlobs:...)` |
 
 Not done, deliberately:
 
 - **The XOR key table is not in this repository.** It is Monado's
   `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0) and is
   fetched, not committed: from `apps/wmr_companion_app`, run
-  `dart run ../../tool/fetch_wmr_config_key.dart` once
+  `dart run../../tool/fetch_wmr_config_key.dart` once
   (or `--file` with a downloaded header); it writes the gitignored
   `apps/wmr_companion_app/assets/monado/wmr_config_key.bin`, which the app
   bundles on the next build.
@@ -280,7 +280,7 @@ about-10 vs 9.81 accel scale (WMR_Bridge #19).
 **Not verified on hardware, and the bridge driver is not merged yet.** These
 are the `wmr_core` side of the Switch Joy-Con/Pro support
 (`packages/wmr_core/lib/protocol/switch_calibration.dart` and
-`switch_burst.dart`); the firmware half is WMR_Bridge .
+`switch_burst.dart`); the firmware half is WMR_Bridge.
 
 FF17 reports a Switch hand as model `2` (`ControllerModel.nintendoSwitch`).
 For that hand only:
@@ -337,7 +337,7 @@ and exercised only with fakes (`FakeAdapter`, `FakeTransport`,
 
 - `ControllerService` has a `StreamMode` (`raw` = FF11, `decoded` = FF12,
   `batched` = FF14; see the FF14 section).
-  `setMode` is a re-subscribe; `start` repeats it after every reconnect.
+  `setMode` is a re-subscribe; `start()` repeats it after every reconnect.
 - `UniversalBleTransport.subscribe` knows the two bridge streams are
   exclusive: it forgets the other one from the wanted set at once and, in its
   serial GATT queue, writes `0x0000` to the other CCC (if enabled) before it

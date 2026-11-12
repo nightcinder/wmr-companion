@@ -28,11 +28,11 @@ docs do not state are configurable instead of guessed.
 
 ```dart
 final selector = TrackingSourceSelector(
-  detector: const PlatformGlassesDetector,
+  detector: const PlatformGlassesDetector(),
   flags: TrackingSourceFlags(viture: VitureTracking.enabled),
   vitureSource: VitureNeckbandTrackingSource.create);
 
-final selection = await selector.select;
+final selection = await selector.select();
 if (selection.hasSource) {
   // selection.source is started; dispose it when done.
 }

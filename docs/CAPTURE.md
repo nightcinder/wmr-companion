@@ -48,7 +48,7 @@ F 0.014000 1 500 a1010f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3d
 
 ### Time base
 
-Desktop: `time.perf_counter - t0`. App: the transport's monotonic
+Desktop: `time.perf_counter() - t0`. App: the transport's monotonic
 `Stopwatch` (`BleNotification.receivedAtUs`, the stamp of the last fragment of
 the frame) minus its value when the capture file was opened. Phase markers use
 the same clock, read when the user finishes the countdown or taps Finish. The
@@ -106,7 +106,7 @@ the begin action.
 
 `packages/wmr_core/test/capture_recorder_test.dart` compares the output byte for byte
 with `packages/wmr_core/test/fixtures/capture_golden.txt`, which was written by hand following
-the desktop format (`%.6f` times, `bytes.hex`). It was not produced by
+the desktop format (`%.6f` times, `bytes.hex()`). It was not produced by
 running `capture_ble.py` or checked by `analyze_capture.py`. The tests also
 cover the gap and Hz summary and 100,000 frames fed back to back.
 `apps/wmr_companion_app/test/ui/capture_controller_test.dart` drives the whole guided run with a fake

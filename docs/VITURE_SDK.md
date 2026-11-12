@@ -2,7 +2,7 @@
 
 The unified release APK bundles `libglasses.so` from the VITURE XR Glasses SDK
 for Android 2.4.1. The guided-bench Gate 1, checkerboard and Gate 9 steps call
-into it; without it those steps report `sdkUnavailable` .
+into it; without it those steps report `sdkUnavailable`.
 
 ## Provenance
 
@@ -29,7 +29,7 @@ the licensed self-hosted release runner at:
 the size and digest, and fails the job if the file is missing or different. A
 provisioned runner therefore needs those three files before it can publish a
 release. The debug flavor does not stage the SDK. The job removes its copy in
-an `always` step (the self-hosted workspace survives between runs), and the
+an `always()` step (the self-hosted workspace survives between runs), and the
 `jniLibs/` path is gitignored so a local staging step cannot be committed.
 
 ## Licence conditions
@@ -65,7 +65,7 @@ the matching source, so `wmr_tracking_viture` (and the VITURE C SDK) is only
 used for VITURE devices, and `wmr_tracking_xreal` for XREAL devices. No VITURE
 SDK code path runs against another vendor's hardware, and the APK is still a
 Developed Program designed to function with VITURE products (1.3). The unified
-APK has shipped this way since .
+APK has shipped this way since.
 
 ## Updating the SDK
 

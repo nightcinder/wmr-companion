@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Flutter companion library and reference app for ESP32 (BTstack) WMR controllers. Current state, hardware results and roadmap: `docs/STATUS.md`. Plan and architecture: `docs/PLAN.md`. Library architecture: `docs/LIBRARY.md`. Milestone plan: `/PAP/issues/#document-plan`. Read before starting work.
+Flutter companion library and reference app for ESP32 (BTstack) WMR controllers. Current state, hardware results and roadmap: `docs/STATUS.md`. Plan and architecture: `docs/PLAN.md`. Library architecture: `docs/LIBRARY.md`. Milestone plan: `docs/PLAN.md`. Read before starting work.
 
 ## Architecture rules
 - The repo is structured as federated packages (`packages/wmr_core`, `packages/wmr_companion` facade, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`, `packages/wmr_tracking`, `packages/wmr_tracking_dispatch`, `packages/wmr_tracking_android_xr`, `packages/wmr_tracking_viture`, `packages/wmr_tracking_xreal`, `packages/WMRCompanionKit`, `apps/wmr_visionos_app`, `example/`). The app under `apps/wmr_companion_app` (`wmr_companion_app`) is the reference consumer driving its real connection through the facade or ControllerService.
@@ -18,7 +18,7 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
 ## Commands
 - App (`apps/wmr_companion_app`; run these from that directory):
   - `flutter pub get`
-  - `dart format --set-exit-if-changed .`
+  - `dart format --set-exit-if-changed.`
   - `flutter analyze`
   - `flutter test`
   - `flutter run --flavor base -d <device>` (BLE needs a physical phone; emulators do not work)

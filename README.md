@@ -31,7 +31,7 @@ A fake bridge (raw and decoded) drives tests without hardware. The app only conn
 ```
 cd apps/wmr_companion_app
 flutter pub get
-dart format --set-exit-if-changed .
+dart format --set-exit-if-changed.
 flutter analyze
 flutter test
 ```
@@ -41,4 +41,3 @@ Package suites and build commands are listed in [HANDOFF.md](HANDOFF.md).
 ## License
 
 MIT, see [LICENSE](LICENSE). Third-party packages keep their own licenses. The firmware repository is under a separate license (derived from BlueKitchen BTstack).
-path: /tmp/paperclip-run-ony-1300-b43a7198-9b3-qwgZBo/companion-worktree/README.md

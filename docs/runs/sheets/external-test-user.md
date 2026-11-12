@@ -142,4 +142,3 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - Files: manifest, exports
 - What happened (3 lines max):
 ```
-path: /tmp/paperclip-run-ony-1300-b43a7198-9b3-qwgZBo/companion-worktree/docs/runs/sheets/external-test-user.md

@@ -38,7 +38,7 @@ With "Measure round trip" on (the default) and a bridge that has FF15 (WMR_Bridg
 
 The per-ping clock offset estimate (`((t2 - t1) + (t3 - t4)) / 2`, error up to rtt/2) is written to the echo CSV for each ping and not summarized or applied to the delay figures.
 
-A bridge without FF15 (older firmware) is detected from service discovery before anything is subscribed: the run goes ahead without a round trip and the screen says why. If the switch is off, or no pings are used, `round_trip` in the JSON is `{"measured": false, ...}`.
+A bridge without FF15 (older firmware) is detected from service discovery before anything is subscribed: the run goes ahead without a round trip and the screen says why. If the switch is off, or no pings are used, `round_trip` in the JSON is `{"measured": false,...}`.
 
 One earlier data point, a single 24 ms turnaround seen in nRF Connect (user-reported), was not a distribution; the first run from this screen is below.
 

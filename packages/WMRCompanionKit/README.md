@@ -32,7 +32,7 @@ Add `WMRCompanionKit` to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(path: "packages/WMRCompanionKit")
+.package(path: "packages/WMRCompanionKit")
 ]
 ```
 
@@ -49,14 +49,14 @@ let client = WMRCompanionClient.shared
 
 // Observe discovered bridges
 client.$discoveredBridges
-    .sink { bridges in
+.sink { bridges in
         if let bridge = bridges.first {
             client.connect(to: bridge)
         }
     }
-    .store(in: &cancellables)
+.store(in: &cancellables)
 
-client.startScanning
+client.startScanning()
 ```
 
 ### 2. Stream Orientation and Inputs
@@ -67,26 +67,26 @@ client.setStreamMode(.batchedFF14)
 
 // Listen to Left Controller updates
 client.leftControllerPublisher
-    .sink { state in
+.sink { state in
         guard state.isConnected else { return }
         print("Left Quat: \(state.orientation), Euler: \(state.euler)")
         print("Buttons: \(state.buttons), Trigger: \(state.trigger)")
         print("Tick Loss: \(state.lossPercent)%, Packet Rate: \(state.packetRateHz) Hz")
     }
-    .store(in: &cancellables)
+.store(in: &cancellables)
 ```
 
 ### 3. Measure Latency via FF15 Echo
 
 ```swift
 client.echoLatencyPublisher
-    .sink { sample in
+.sink { sample in
         print("Round trip: \(sample.roundTripTimeMs) ms, ESP turnaround: \(sample.espTurnaroundUs) µs, queue: \(sample.espQueueDepth)")
     }
-    .store(in: &cancellables)
+.store(in: &cancellables)
 
 // Send periodic pings (e.g. 50 ms / 250 ms / 1000 ms)
-client.sendEchoPing
+client.sendEchoPing()
 ```
 
 ### 4. Read the firmware version and control controllers (FF16/FF17)
@@ -94,29 +94,29 @@ client.sendEchoPing
 ```swift
 // FF16: firmware version and the GATT feature matrix.
 client.firmwareVersionPublisher
-    .sink { version in
+.sink { version in
         print("Firmware: \(version.version ?? "unknown")")
         print("FF17 control: \(version.features.controllerControl)")
     }
-    .store(in: &cancellables)
+.store(in: &cancellables)
 
 // FF17: status v2 notifications and commands.
 client.controllerStatusPublisher
-    .sink { status in
+.sink { status in
         print("LEFT connected: \(status.hands[0].connected)")
         print("Discovery: \(status.discoveryState)")
     }
-    .store(in: &cancellables)
+.store(in: &cancellables)
 
-client.readControllerStatus
+client.readControllerStatus()
 try client.sendControllerCommand(.discover)
-try client.sendControllerCommand(.connect, hand: .left)
+try client.sendControllerCommand(.connect, hand:.left)
 ```
 
 ### 5. Dual-Bridge Setup (Zero Contention)
 
 ```swift
-let multiBridge = WMRMultiBridgeSession
+let multiBridge = WMRMultiBridgeSession()
 multiBridge.leftBridgeSession.bleManager.connect(to: leftBridge)
 multiBridge.rightBridgeSession.bleManager.connect(to: rightBridge)
 multiBridge.setStreamMode(.batchedFF14)

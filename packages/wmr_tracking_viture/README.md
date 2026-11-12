@@ -14,9 +14,9 @@ initialises; Unity exposes `XRSettings.stereoRenderingMode` read-only, so the
 player cannot switch modes at runtime. The unified bridge is embedded in
 Flutter, so it never starts the display provider: it starts the input and hand
 subsystems, and hand tracking runs without the stereo display ; the
-input subsystem is what drives 6DoF head pose . A Vulkan
+input subsystem is what drives 6DoF head pose. A Vulkan
 player also cannot host the GLES-only display provider and takes the same
-hand-only path . The pinned `unity-export-1.4` was built from merge
+hand-only path. The pinned `unity-export-1.4` was built from merge
 commit `35d8015` (; subtree identical to `main` at `94573b2`) and carries
 both the embedded hand-only gate and the input-subsystem start; the earlier
 `unity-export-1.3` predates the input start, so 6DoF needs 1.4;
@@ -37,10 +37,10 @@ Flutter:
    scene `stage` (`playerHosted`, `loaderStarted`, `firstFrame`).
 1. Kotlin sends `UnityRelayCommand` JSON (`start`, `stop`, `dispose`,
    `recenter`, `configure`) via `UnityPlayer.UnitySendMessage("WmrTrackingRelay", "OnCommand", json)`.
-   `recenter` delegates to `Viture.XR.VitureXR.HeadTracking.SetWorldOrigin`.
+   `recenter` delegates to `Viture.XR.VitureXR.HeadTracking.SetWorldOrigin()`.
 2. The minimal C# component (`unity/Assets/WmrTrackingViture/Runtime/VitureTrackingRelayBridge.cs`)
-   calls `Viture.XR.VitureXR.Glasses.GetGlassesModel`, `Viture.XR.VitureXR.HandTracking.Start` /
-   `.Stop`, reads the head pose and 26 `XRHandJointID` joints from
+   calls `Viture.XR.VitureXR.Glasses.GetGlassesModel()`, `Viture.XR.VitureXR.HandTracking.Start()` /
+   `.Stop()`, reads the head pose and 26 `XRHandJointID` joints from
    `XRHandSubsystem`, converts left-handed Unity coordinates to right-handed
    OpenXR coordinates, and forwards frames to
    `WmrTrackingViturePlugin.onUnityFrame(json)`.
@@ -50,14 +50,14 @@ Flutter:
    hand-anchor filter).
 
 ```dart
-final source = await VitureNeckbandTrackingSource.create; // null when off
+final source = await VitureNeckbandTrackingSource.create(); // null when off
 if (source != null) {
   await companion.attachTrackingSource(source);
 }
 ```
 
 Enable the slice with `--dart-define=WMR_VITURE_TRACKING=true`. With the flag
-off, `create` returns `null` without touching a platform channel, so BLE,
+off, `create()` returns `null` without touching a platform channel, so BLE,
 controller IMU and 3DoF output are unchanged.
 
 Failures are typed `TrackingException`s:
@@ -71,7 +71,7 @@ Failures are typed `TrackingException`s:
 - `unsupported`: the reported glasses model is not a `LumaUltra` (`One`,
   `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`, or an
   unclassifiable name), or the host is not a VITURE Pro Neckband. An unreported
-  model is not an error: `create` succeeds and the Unity `start` handshake
+  model is not an error: `create()` succeeds and the Unity `start` handshake
   reports the real model.
 - `permissionDenied`: `android.permission.CAMERA` was denied. The permission is
   declared in the plugin manifest (with `android.hardware.camera` optional)

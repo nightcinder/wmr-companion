@@ -28,7 +28,7 @@ hand tracking) with `unsupported`. Detection never overrides the model check.
    ID (Google Aura reports the XREAL-built headset as `0x3318:0x043A`), so an
    Android XR host must be settled before USB or host-marker detection. Starting
    the shared vendor Unity player there loads VITURE's Android plugin, which
-   crashes on the missing vendor runtime class .
+   crashes on the missing vendor runtime class.
 2. **Host marker.** `Build.MANUFACTURER`/`MODEL` contains a configured marker:
    VITURE -> `neckband` host and `viture`; XREAL/Nreal -> `beamPro` host and
    `xreal`. The host is the vendor compute unit, so its glasses are known even
@@ -68,7 +68,7 @@ No product ID is guessed. Until a vendor publishes them, supply known-good IDs
 at runtime:
 
 ```dart
-await const PlatformGlassesDetector.configureIds(
+await const PlatformGlassesDetector().configureIds(
   vitureProductIds: [0x1011], // only IDs confirmed from vendor docs/hardware
   xrealProductIds: [0x0424]);
 ```

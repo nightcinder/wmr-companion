@@ -4,7 +4,7 @@ Only the unified APK ships. The app has two product flavors under the `vendor`
 dimension: `unified`, which links one shared `unityLibrary` carrying both
 VITURE and XREAL and selects the vendor at runtime, and `base`, the emulator and
 BLE/3DoF fallback with no Unity code. The per-vendor `viture` and `xreal`
-flavors and their exports are retired .
+flavors and their exports are retired.
 
 | Flavor | Unity runtime | Intended target | Dart flags |
 | --- | --- | --- | --- |
@@ -34,12 +34,11 @@ is a library here, started from the app, but the XREAL SDK still marks its
 standalone Unity apps, and Unity can mark `UnityPlayerActivity` the same way.
 If those filters survive manifest merging, the APK installs two icons; the
 extra one opens the bare Unity scene, which shows the Unity splash and then a
-black screen . The `unified` flavor manifest in
+black screen. The `unified` flavor manifest in
 `android/app/src/unified/` removes those filters with `tools:node="remove"` and
 sets `android:exported="false"` (`tools:replace`) on the Unity and XREAL player
 activities. An exported player activity still lets the Neckband launcher start
-the bare Unity scene after a crash, with no Flutter UI and no loader command
-, so keep both overrides when upgrading a vendor SDK. Check the built
+the bare Unity scene after a crash, with no Flutter UI and no loader command , so keep both overrides when upgrading a vendor SDK. Check the built
 APK:
 
 ```sh
@@ -128,7 +127,7 @@ exporting machine :
   `project.android.ndkDirectory`;
 - set `android:exported="false"` on the Unity/XREAL player activities in
   `unityLibrary/src/main/AndroidManifest.xml` and
-  `unityLibrary/xrmanifest.androidlib/AndroidManifest.xml` .
+  `unityLibrary/xrmanifest.androidlib/AndroidManifest.xml`.
 
 The installer treats its zip/directory input as immutable and only rewrites the
 copy. `tool/test_unity_export_install.sh` checks that normalisation without

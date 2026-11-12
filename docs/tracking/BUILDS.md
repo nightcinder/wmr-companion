@@ -20,7 +20,7 @@ hardware; these are compile/packaging facts only.
 | Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution  |
 
 Release notes: [`v0.3.19`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.19).
-This is the signed (project-key) cut at commit `136be00`. It adds pure-Dart LAN discovery in `wmr_ws` , a `CompositeBleTransport` TCP-to-BLE fallback in `wmr_companion` , a native visionOS app scaffold ( and ), and CI scanning with CodeQL, OSV and MobSF ( and ). It removes the GATT latency probe . The 0.3.17 Semgrep, gitleaks and Dependabot scans remain , as do the six-run pose-filter corpus , the 0.3.16 Android XR gate and vendor-player guard , the 0.3.15 six-run pose capture protocol ( / ), the 0.3.14 `unity-export-1.4` head-pose path, Bench skeleton and stereo panes ( /  / ).
+This is the signed (project-key) cut at commit `136be00`. It adds pure-Dart LAN discovery in `wmr_ws`, a `CompositeBleTransport` TCP-to-BLE fallback in `wmr_companion`, a native visionOS app scaffold ( and ), and CI scanning with CodeQL, OSV and MobSF ( and ). It removes the GATT latency probe. The 0.3.17 Semgrep, gitleaks and Dependabot scans remain, as do the six-run pose-filter corpus, the 0.3.16 Android XR gate and vendor-player guard, the 0.3.15 six-run pose capture protocol, the 0.3.14 `unity-export-1.4` head-pose path, Bench skeleton and stereo panes ( /  / ).
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
@@ -56,7 +56,7 @@ unified APK ships and there is no per-vendor flavor to build.
   `android/unity/unified/unityLibrary` exists).
 - A leftover per-vendor export under `android/unity/viture` or
   `android/unity/xreal` fails configuration with "retired per-vendor Unity
-  export"; delete it .
+  export"; delete it.
 - Each vendor SDK contributes its own native libraries, XR loader and manifest
   entries; the supported way to get both vendors into one APK is the unified export.
 
@@ -69,7 +69,7 @@ the 3DoF fallback and XREAL reports `unavailable` when asked to start.
 `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry
 `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are
 selected, and the per-vendor relay JSON is unchanged. The 0.2.1 export migrated the
-vendors to VITURE 0.9.0 / XREAL 3.1.0 .
+vendors to VITURE 0.9.0 / XREAL 3.1.0.
 
 The `unified` app flavor links that shared export from
 `android/unity/unified/unityLibrary` only. To build it:
@@ -79,11 +79,11 @@ The `unified` app flavor links that shared export from
    vendors' SDK terms; the export is gitignored and is never committed. The
    configuration step pins **Graphics APIs = OpenGLES3 only**: VITURE's display
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
-   `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts .
+   `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts.
    The unified bridge is embedded in Flutter, so the runtime gate always starts
    VITURE's input and hand subsystems without the display subsystem, because the
    display provider would take over the host activity ; the input
-   subsystem is what drives 6DoF head pose . The pinned
+   subsystem is what drives 6DoF head pose. The pinned
    `unity-export-1.4` was built from merge commit `35d8015` (; Unity
    subtree identical to `main` at `94573b2`) and carries both the hand-only gate
    and the input start; `unity-export-1.3` carries the gate but predates the

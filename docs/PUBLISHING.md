@@ -108,7 +108,7 @@ dependencies:
 
 dependency_overrides:
   wmr_core:
-    path: ../wmr_core
+    path:../wmr_core
 ```
 
 **Drawbacks:**
@@ -196,7 +196,7 @@ The two application hosts (`wmr_companion_app` and `example/`) are workspace mem
 
 ## 5. First Publication
 
-**Status: on hold.** The owner decided on 2026-10-23  to hold the
+**Status: on hold.** The owner decided on 2026-10-23 to hold the
 first release. The same decision waived the iOS 18 device gate for this
 release line, so the hold is a choice about timing, not an unresolved gate:
 nothing is published, and a release still needs an explicit owner go-ahead.

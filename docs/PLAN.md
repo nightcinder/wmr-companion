@@ -64,7 +64,7 @@ wmr-companion/
   docs/STATUS.md    # current state and roadmap
   docs/PLAN.md      # this file
   docs/PROTOCOL.md  # links to WMR_Bridge docs + app-side decisions
-  .github/workflows/ci.yml
+.github/workflows/ci.yml
   CLAUDE.md
 ```
 

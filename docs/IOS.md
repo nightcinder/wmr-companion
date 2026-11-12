@@ -46,7 +46,7 @@ Building a low-latency companion client on iOS requires handling several CoreBlu
 1. **MTU Negotiation**:
    - Unlike Android, iOS applications cannot explicitly request a target ATT MTU (such as MTU 517).
    - CoreBluetooth automatically negotiates MTU during initial service and characteristic discovery (typically 185 bytes on older devices, up to 517 bytes on modern hardware).
-   - `WMRCompanionKit` queries `peripheral.maximumWriteValueLength(for: .withoutResponse)` and adjusts packet chunking dynamically.
+   - `WMRCompanionKit` queries `peripheral.maximumWriteValueLength(for:.withoutResponse)` and adjusts packet chunking dynamically.
 2. **Connection Parameters & Interval**:
    - iOS controls connection intervals autonomously through its Apple Bluetooth Accessory Design Guidelines (typically 15 ms to 30 ms). The app cannot directly request `CONNECTION_PRIORITY_HIGH`.
    - Latency tests (`WMREcho`) measure actual observed round-trip times and quantize them against the underlying connection interval.
@@ -55,7 +55,7 @@ Building a low-latency companion client on iOS requires handling several CoreBlu
    - Subscribing to one while another is active returns ATT error `0x80` (`attErrorOtherStreamActive`).
    - `WMRBleCentralManager` strictly handles this transition: whenever changing stream modes, it writes `0x0000` to disable the active CCC before enabling the target stream's CCC.
 4. **Nanosecond Arrival Stamping**:
-   - To separate BLE delivery and OS queueing jitter from application processing, `WMRBleCentralManager` captures `DispatchTime.now.uptimeNanoseconds` at the very first line of `peripheral(_:didUpdateValueFor:error:)`.
+   - To separate BLE delivery and OS queueing jitter from application processing, `WMRBleCentralManager` captures `DispatchTime.now().uptimeNanoseconds` at the very first line of `peripheral(_:didUpdateValueFor:error:)`.
 
 ## 3. `WMRCompanionKit` Swift Package
 

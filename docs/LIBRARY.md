@@ -111,7 +111,7 @@ framework.
 ## 3. What is reusable today
 
 Inventory as it stood before phase 1 (imports checked; see
-`grep '^import .package:' lib`). Protocol, domain, `BleTransport`, the controller
+`grep '^import.package:' lib`). Protocol, domain, `BleTransport`, the controller
 service and the pure services have since moved to `packages/wmr_core/`; the
 paths below are the original ones, quoted in the rest of the document where the
 plan was written:
@@ -197,8 +197,8 @@ final wmr = WmrCompanion(
     streamMode: StreamMode.batched,          // FF14
     fusion: FusionConfig.madgwick(beta: 0.05)));
 
-await wmr.initialize;                      // adapter state, permissions (wmr_ble)
-await wmr.startScan;
+await wmr.initialize();                      // adapter state, permissions (wmr_ble)
+await wmr.startScan();
 await for (final devices in wmr.bridges) {   // Stream<List<WmrBridgeDevice>>
   WmrBridgeDevice? bridge;
   for (final device in devices) {
@@ -227,7 +227,7 @@ final subs = [
   }),
 ];
 
-await wmr.dispose;
+await wmr.dispose();
 ```
 
 The example above is the one in `packages/wmr_companion/README.md`, and
@@ -265,9 +265,9 @@ class WmrCompanionConfig {
 
 The `0.3.0` facade also wraps the control characteristics outside the stream set:
 
-- `controllerStatus`, `readControllerStatus` and `sendControllerCommand` for FF17.
+- `controllerStatus`, `readControllerStatus()` and `sendControllerCommand()` for FF17.
 - `readConfig(Hand)` for the FF13 configuration block, with CRC-32 checking.
-- `ping` for one FF15 echo round trip.
+- `ping()` for one FF15 echo round trip.
 
 Reconnect uses `WmrCompanionConfig.reconnectBackoff`. Its default is
 `[500 ms, 1 s, 2 s, 4 s, 8 s]`, with one attempt per entry.
@@ -332,7 +332,7 @@ and measure it.
 #37) already built `packages/WMRCompanionKit`: CoreBluetooth central,
 FF11–FF17 parsing, fusion, multi-bridge and a Combine/async facade, with a
 SwiftUI probe. `WMRCompanionClient` publishes `firmwareVersionPublisher` and
-`controllerStatusPublisher`, and exposes `readControllerStatus` and
+`controllerStatusPublisher`, and exposes `readControllerStatus()` and
 `sendControllerCommand(_:hand:)`. For the Flutter library, reuse its **transport**
 and, if needed, its native pipeline behind a platform channel or FFI. Two viable shapes:
 
@@ -464,7 +464,7 @@ the directory move changed paths, not imports.
   (recommend `vector_math`'s `Quaternion`/`Vector3`), and keep the conversion at
   the fusion boundary. Do not leak two quaternion types to consumers.
 - **Minimum platforms:** Android `minSdk` per `universal_ble`; iOS 18 is the
-  floor, as decided by the owner on . Revisit only if it blocks a specific
+  floor, as decided by the owner on. Revisit only if it blocks a specific
   target; a library with a high floor is an adoption tax.
 - **No plugin leakage:** `path_provider`, `share_plus` and `permission_handler`
   stay in the app or in optional packages. Core services take a `Directory` or
@@ -558,7 +558,7 @@ Sequencing notes:
    open for any later release.**
 3. **App placement:** move the app to `apps/` (cleaner boundary) or keep it at
    the repo root during extraction (less churn)? : **settled: moved to
-   `apps/wmr_companion_app` in M10.5 .**
+   `apps/wmr_companion_app` in M10.5.**
 4. **Android HID:** keep the HID output as a supported optional package, or
    park it once the in-process API exists? : **settled: kept as the optional
    `wmr_companion_hid_android` package ( phase 7).**
@@ -600,7 +600,7 @@ prefers TCP and falls back to BLE without closing the logical connection.
    group from an ephemeral port with the QU bit set. The caller never binds
    port 5353, so Android needs no `MulticastLock`.
 
-Both replies are hints. `WmrWsTransport.connect` refuses to send a token
+Both replies are hints. `WmrWsTransport.connect()` refuses to send a token
 unless the WebSocket `hello` reports the same `bridge_id`.
 
 ### Fallback state machine
@@ -634,13 +634,13 @@ import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
-final tcp = WmrWsTransport(endpoints: const [], enableDiscovery: true);
-final ble = UniversalBleTransport(adapter: UniversalBleAdapter);
+final tcp = WmrWsTransport(endpoints: const, enableDiscovery: true);
+final ble = UniversalBleTransport(adapter: UniversalBleAdapter());
 final transport = CompositeBleTransport(tcp: tcp, ble: ble);
 
 final wmr = WmrCompanion(ble: transport);
-await wmr.initialize;
-await wmr.startScan;
+await wmr.initialize();
+await wmr.startScan();
 ```
 
 ### Host permissions

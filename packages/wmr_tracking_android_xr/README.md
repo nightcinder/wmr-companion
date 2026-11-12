@@ -17,14 +17,14 @@ scene geometry, and this source reads head and hand poses only. The Dart
 `SixDofFuser`.
 
 ```dart
-final source = await AndroidXrTrackingSource.create; // null when off
+final source = await AndroidXrTrackingSource.create(); // null when off
 if (source != null) {
   await companion.attachTrackingSource(source);
 }
 ```
 
 Enable the slice with `--dart-define=WMR_ANDROID_XR_TRACKING=true`. With the
-flag off, `create` returns null without touching a platform channel.
+flag off, `create()` returns null without touching a platform channel.
 
 Failures are typed `TrackingException`s: a denied permission is
 `permissionDenied`, a non-XR device or a refused `SPATIAL` mode is

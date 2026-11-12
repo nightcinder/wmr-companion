@@ -67,8 +67,8 @@ Future<void> run(BleTransport transport) async {
       streamMode: StreamMode.batched, // FF14
       fusion: FusionConfig.madgwick(beta: 0.05)));
 
-  await wmr.initialize;
-  await wmr.startScan;
+  await wmr.initialize();
+  await wmr.startScan();
   await for (final devices in wmr.bridges) {
     WmrBridgeDevice? bridge;
     for (final device in devices) {
@@ -98,12 +98,12 @@ Future<void> run(BleTransport transport) async {
     }),
   ];
 
-  // ... use the streams ...
+  //... use the streams...
 
   for (final sub in subs) {
-    await sub.cancel;
+    await sub.cancel();
   }
-  await wmr.dispose;
+  await wmr.dispose();
 }
 ```
 
@@ -116,16 +116,16 @@ One class, one config, a handful of models.
 
 | Member | Meaning |
 | --- | --- |
-| `initialize` | Reset to idle. Adapter/permission checks live in the BLE package (`wmr_ble`). |
-| `startScan` / `stopScan` | Scan and publish `bridges`, strongest RSSI first, de-duplicated by id. |
+| `initialize()` | Reset to idle. Adapter/permission checks live in the BLE package (`wmr_ble`). |
+| `startScan()` / `stopScan()` | Scan and publish `bridges`, strongest RSSI first, de-duplicated by id. |
 | `connect(WmrBridgeDevice)` | Connect and enable the configured stream. Also the reconnect call. |
 | `setStreamMode(StreamMode)` | Switch FF11 raw, FF12 decoded, FF14 batched or none. |
-| `disconnect` | Close the link and return to idle. |
+| `disconnect()` | Close the link and return to idle. |
 | `controllers` | FF11 frames or FF12/FF14 samples, one event per frame/sample. |
 | `gamepad` | Mapped two-handed `GamepadState`, one event per decoded sample. |
 | `poses` | Fused `ControllerPose` per decoded sample while a `TrackingSource` is attached; position is null without a head or hand anchor. |
 | `attachTrackingSource(TrackingSource)` | Start and own a head/hand tracking source, align its clock to the BLE stream and enable `poses`. |
-| `detachTrackingSource` | Stop and dispose the attached source and disable `poses`. |
+| `detachTrackingSource()` | Stop and dispose the attached source and disable `poses`. |
 | `link` | `WmrLinkSnapshot`: state, MTU, RSSI, interval, mode, fault, protocol, counters. |
 | `protocol` | The bridge's `WmrProtocolVersion` (FF16 firmware version and feature matrix) after the one-time read. |
 | `failures` | Typed non-fatal errors (scan failures, stream faults). |
@@ -134,11 +134,11 @@ One class, one config, a handful of models.
 | `setFf13Calibration` | Per-hand FF13 calibration, stored across reconnects. |
 | `recalibrate` / `resetYaw` | Gyro bias and yaw, per hand. |
 | `controllerStatus` | FF17 status notifications: discovery state, per-hand connection flags and the last command result. |
-| `readControllerStatus` | One FF17 status read (`ControllerStatusV2`). |
+| `readControllerStatus()` | One FF17 status read (`ControllerStatusV2`). |
 | `sendControllerCommand(ControllerCommand, {Hand? hand})` | FF17 discover, connect, disconnect and forget commands; returns a `ControllerCommandOutcome`. |
 | `readConfig(Hand)` | Reads one hand's FF13 configuration block into a `ConfigReadResult` with its CRC-32. |
-| `ping` | One FF15 echo round trip, returned as an `EchoResult`. |
-| `dispose` | Close the BLE link and release the session, subscriptions and timers. The transport is the caller's. |
+| `ping()` | One FF15 echo round trip, returned as an `EchoResult`. |
+| `dispose()` | Close the BLE link and release the session, subscriptions and timers. The transport is the caller's. |
 
 State machine: `idle → scanning → connecting → ready`, with `reconnecting`
 after an unexpected drop (configurable backoff when `autoReconnect` is on) and
@@ -228,7 +228,7 @@ FF11/FF12/FF14 stream exclusion:
 final statuses = wmr.controllerStatus.listen((status) {
   final left = status.hands[0]; // connected, connecting, model, address tail
 });
-final status = await wmr.readControllerStatus;
+final status = await wmr.readControllerStatus();
 final outcome = await wmr.sendControllerCommand(
   ControllerCommand.connect,
   hand: Hand.left);
@@ -242,7 +242,7 @@ final config = await wmr.readConfig(Hand.left);
 final block = config.blob; // null when config.failure is set
 
 // FF15: one measured echo round trip.
-final echo = await wmr.ping;
+final echo = await wmr.ping();
 final rttUs = echo.sample?.rttUs; // null on timeout or a failed write
 ```
 

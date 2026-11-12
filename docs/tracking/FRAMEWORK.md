@@ -52,13 +52,13 @@ abstract interface class TrackingSource {
   TrackingVendor get vendor;
   TrackingCapabilities get capabilities;
   Stream<TrackingFrame> get frames;
-  Future<void> start;
-  Future<void> stop;
-  Future<void> dispose;
+  Future<void> start();
+  Future<void> stop();
+  Future<void> dispose();
 }
 ```
 
-`TrackingCapabilities` declares head pose, hand joints, controller pose, stereo/passthrough cameras, pose prediction and origin reset before `start`. The app can therefore choose a fusion strategy without probing the hardware. `knownTrackingProfiles` records the public facts per device; `FakeTrackingSource` covers tests and `RelayTrackingSource` decodes the JSON contract from a sidecar.
+`TrackingCapabilities` declares head pose, hand joints, controller pose, stereo/passthrough cameras, pose prediction and origin reset before `start()`. The app can therefore choose a fusion strategy without probing the hardware. `knownTrackingProfiles` records the public facts per device; `FakeTrackingSource` covers tests and `RelayTrackingSource` decodes the JSON contract from a sidecar.
 
 A `TrackingFrame` carries a source timestamp, an optional host timestamp, a head `TrackedPose`, left/right `HandPose`, and any runtime controller poses. `HandPose` maps OpenXR-named `HandJoint`s to poses and falls back from `grip` to `palm` to `wrist` for the controller anchor.
 
@@ -85,7 +85,7 @@ fuser.onTrackingFrame(frame.withHostTime(hostNs));
 | `headRelative` | Head pose * last learned head-local offset | Low | Moves with the head; not positional tracking |
 | `orientationOnly` | null | None | Current 3DoF behaviour |
 
-Hand-anchor positions pass through the shared `OneEuroFilter` (`packages/wmr_tracking/lib/src/one_euro.dart`) on the anchor sample clock, once per new anchor sample; the fuser holds the last filtered value between samples. The tuning constants are still the published defaults (`minCutoff=1.0 Hz`, `beta=0.02`, `dCutoff=1.0 Hz`);  ships the grid harness that replaces them from recorded captures, and does not pick values by reasoning. `minDt` is the structural exception: it follows the anchor rate (about 11 ms at 90 Hz), not the 240 Hz IMU, with `maxDt` still 100 ms. The filter works in centimetres internally because the paper's `beta` is scale-dependent. Orientation is never filtered: it stays the controller IMU quaternion. The filter resets on the first sample, a gap over 100 ms, a source transition, a source restart or `SixDofFuser.reset`, so a head-relative fallback is never smoothed into a tracked pose. The capture procedure, harness and acceptance metric are in [pose-filter.md](../runs/sheets/pose-filter.md).
+Hand-anchor positions pass through the shared `OneEuroFilter` (`packages/wmr_tracking/lib/src/one_euro.dart`) on the anchor sample clock, once per new anchor sample; the fuser holds the last filtered value between samples. The tuning constants are still the published defaults (`minCutoff=1.0 Hz`, `beta=0.02`, `dCutoff=1.0 Hz`);  ships the grid harness that replaces them from recorded captures, and does not pick values by reasoning. `minDt` is the structural exception: it follows the anchor rate (about 11 ms at 90 Hz), not the 240 Hz IMU, with `maxDt` still 100 ms. The filter works in centimetres internally because the paper's `beta` is scale-dependent. Orientation is never filtered: it stays the controller IMU quaternion. The filter resets on the first sample, a gap over 100 ms, a source transition, a source restart or `SixDofFuser.reset()`, so a head-relative fallback is never smoothed into a tracked pose. The capture procedure, harness and acceptance metric are in [pose-filter.md](../runs/sheets/pose-filter.md).
 
 The last absolute position is converted to a head-local offset and reused when the hand drops out. That keeps the controller stable through brief occlusion but avoids pretending the fallback is real tracking. `positionSmoothing` (default 0.5) remains for runtime-tracked controller poses only; it does not apply to hand anchors. `calibrateGrip` captures a real controller-to-palm offset when a runtime provides both poses; otherwise the default offset is 2 cm below and 6 cm forward of the palm.
 
@@ -101,12 +101,12 @@ companion.poses.listen((pose) {
 });
 ```
 
-The facade owns the source (start, alignment, stop and dispose), emits one `ControllerPose` per decoded controller sample, and keeps tracking independent of the BLE connection. Attaching another source disposes the first. A failed `start` throws `WmrTrackingException` and detaches cleanly.
+The facade owns the source (start(), alignment, stop and dispose), emits one `ControllerPose` per decoded controller sample, and keeps tracking independent of the BLE connection. Attaching another source disposes the first. A failed `start` throws `WmrTrackingException` and detaches cleanly.
 
 
 ### Debug viewer and simulator
 
-The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. A **Tracking source** selector offers None, Simulated, Android XR, VITURE and XREAL and defaults to None, which shows the controller IMU orientation and an `orientationOnly` badge. Selecting a vendor calls that package's `create` only when its `--dart-define` flag is on, starts the source, aligns its frames to the viewer clock and feeds `SixDofFuser`; a typed `TrackingException` (`unsupported`, `unavailable`, `permissionDenied`, `protocol`) is shown in the selector status instead of crashing. For VITURE, a build without the Unity runtime keeps the controller 3DoF path and shows which APK to install, rather than a failed start; XREAL still reports typed `unavailable` in that build. Simulated keeps the deterministic `FakeTrackingSource` hand trajectory that moves the viewer without a headset. One APK built with all three flags is safe to run with no Unity runtime linked. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
+The reference app's debug screen shows `ControllerPoseView` for the selected hand plus position (metres) and position-source readouts for both hands. A **Tracking source** selector offers None, Simulated, Android XR, VITURE and XREAL and defaults to None, which shows the controller IMU orientation and an `orientationOnly` badge. Selecting a vendor calls that package's `create()` only when its `--dart-define` flag is on, starts the source, aligns its frames to the viewer clock and feeds `SixDofFuser`; a typed `TrackingException` (`unsupported`, `unavailable`, `permissionDenied`, `protocol`) is shown in the selector status instead of crashing. For VITURE, a build without the Unity runtime keeps the controller 3DoF path and shows which APK to install, rather than a failed start; XREAL still reports typed `unavailable` in that build. Simulated keeps the deterministic `FakeTrackingSource` hand trajectory that moves the viewer without a headset. One APK built with all three flags is safe to run with no Unity runtime linked. The debug screen still runs on `ControllerService` rather than the `WmrCompanion` facade, so it fuses the same decoded samples locally; no exported API changed.
 
 ### Native detection and one UnityPlayer
 
@@ -119,15 +119,15 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 1. `packages/wmr_tracking_android_xr` is the Kotlin plugin; the debug screen's tracking-source selector starts it when `WMR_ANDROID_XR_TRACKING` is on.
 2. The plugin requests `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and `HEAD_TRACKING` — never `SCENE_UNDERSTANDING_FINE` — then configures `HandTrackingMode.BOTH` and `DeviceTrackingMode.SPATIAL`.
 3. It reads `ArDevice.getInstance(session).state` and `Hand.left/right(session).state`, maps all 26 `HandJointType`s to the OpenXR `HandJoint` names, and sends `TrackingFrameCodec` JSON over an event channel.
-4. Frames use `System.nanoTime`; the facade's aligner maps them to the BLE clock. No wall-clock comparison is made.
-5. `AndroidXrTrackingSource.create` returns null when the flag is off and throws `unsupported`/`permissionDenied`/`unavailable` when the device cannot deliver the slice.
+4. Frames use `System.nanoTime()`; the facade's aligner maps them to the BLE clock. No wall-clock comparison is made.
+5. `AndroidXrTrackingSource.create()` returns null when the flag is off and throws `unsupported`/`permissionDenied`/`unavailable` when the device cannot deliver the slice.
 
 **Unity bridge (VITURE Neckband, XREAL, RayNeo, Rokid).**
 1. Build a Unity Android project with the vendor XR plugin and one scene that reads head pose and, where available, `XRHandSubsystem` joints.
 2. Export with Unity as a Library and add the `unityLibrary` module to the Flutter plugin's Gradle build. One Unity runtime per process, full-screen only.
 3. Kotlin starts/stops the player and sends commands with `UnityPlayer.UnitySendMessage(go, "OnCommand", json)`; C# receives `void OnCommand(string)`.
 4. C# sends poses back through a Kotlin callback (JNI/`AndroidJavaProxy`) as one `TrackingFrameCodec` JSON string per sample. The plugin forwards it on an event channel.
-5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor: ...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction : it is string-only, one-way, one frame late.
+5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor:...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction : it is string-only, one-way, one frame late.
 6. Keep the Unity scene tracking-only. It must not own BLE or the gamepad mapping; that stays in Dart.
 
 **VITURE C SDK (head pose only, no Neckband).**
@@ -170,7 +170,7 @@ cd packages/wmr_tracking && dart test
 cd packages/wmr_tracking_android_xr && flutter test && flutter analyze
 cd apps/wmr_companion_app && flutter analyze && flutter test
 cd apps/wmr_companion_app && tool/build_flavor.sh base
-cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_android_xr:testDebugUnitTest
+cd apps/wmr_companion_app/android &&./gradlew :wmr_tracking_android_xr:testDebugUnitTest
 ```
 
 The APK build and the Kotlin unit test are compile/host gates, not hardware results. The 26-joint fixture and every error path are synthetic. The remaining hardware questions are unchanged: permission prompts and `SPATIAL` support on a real headset/glasses, joint and head rates, whether a gripping hand is tracked, and the BLE/pose relay latency.
@@ -204,7 +204,7 @@ cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_viture && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
 cd apps/wmr_companion_app && tool/build_flavor.sh unified
-cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_viture:testDebugUnitTest
+cd apps/wmr_companion_app/android &&./gradlew :wmr_tracking_viture:testDebugUnitTest
 ```
 
 Explicit unknowns and SDK-bound gates:
@@ -221,9 +221,9 @@ What landed, and what remains an external SDK or hardware gate:
 | Reusable Unity relay contract (`UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`) | Reused from `packages/wmr_tracking` ; no public API change |
 | Unity → OpenXR conversion (`p=(x,y,z) -> (x,y,-z)`, `q=(qx,qy,qz,qw) -> (-qx,-qy,qz,qw)`) | Implemented in Kotlin and C# (the C# bridge emits `"space": "openxr"`); Dart also converts `"space": "unity"` sidecar frames; verified within `1e-6` with round-trip (`frame_conversion`) |
 | Dart `XrealAir2UltraTrackingSource`, default-off `WMR_XREAL_TRACKING` flag, typed errors | Implemented in `packages/wmr_tracking_xreal` and host-tested |
-| Glasses capability matrix | `Air2Ultra` only advertises 6DoF head + 26 hands; `One`/`OnePro` report 6DoF head only (XREAL Eye); `Air`/`Air2`/`Air2Pro`/`Light` report 3DoF head only. All non-Ultra models fail `create` with `unsupported` |
+| Glasses capability matrix | `Air2Ultra` only advertises 6DoF head + 26 hands; `One`/`OnePro` report 6DoF head only (XREAL Eye); `Air`/`Air2`/`Air2Pro`/`Light` report 3DoF head only. All non-Ultra models fail `create()` with `unsupported` |
 | Kotlin `WmrTrackingXrealPlugin`, camera permission gate (`PendingStartGate`), reflective `UnitySendMessage` bridge | Implemented and JVM-tested; compiles without the proprietary `unityLibrary` AAR |
-| Minimal Unity C# bridge (`XrealTrackingRelayBridge.cs` + `.asmdef`) | Implemented in `packages/wmr_tracking_xreal/unity/`; reads `XREALPlugin.GetDeviceType` and the running `XRHandSubsystem`. Unity 2021.3+/6000.0 and XREAL SDK 3.x (`com.xreal.xr`) are external SDK gates |
+| Minimal Unity C# bridge (`XrealTrackingRelayBridge.cs` + `.asmdef`) | Implemented in `packages/wmr_tracking_xreal/unity/`; reads `XREALPlugin.GetDeviceType()` and the running `XRHandSubsystem`. Unity 2021.3+/6000.0 and XREAL SDK 3.x (`com.xreal.xr`) are external SDK gates |
 | Flag-off BLE/3DoF parity | `apps/wmr_companion_app/test/xreal_flag_off_test.dart` replays 400 deterministic bridge ticks, matches PR #78 (`c3be059`) golden orientations, and touches no XREAL channel |
 | Hardware / Unity UaaL smoke test | **Not run** |
 
@@ -239,12 +239,12 @@ cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_xreal && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
 cd apps/wmr_companion_app && tool/build_flavor.sh unified
-cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_xreal:testDebugUnitTest
+cd apps/wmr_companion_app/android &&./gradlew :wmr_tracking_xreal:testDebugUnitTest
 ```
 
 Explicit unknowns and SDK-bound gates:
-- **External SDK gate:** Unity 2021.3+/6000.0 Android build support, `com.unity.xr.hands`, and the XREAL SDK for Unity 3.x (`com.xreal.xr`) are not redistributable in this repo. `WmrTrackingXrealPlugin` isolates `com.unity3d.player.UnityPlayer` behind `XrealUnityBridge`, and the C# bridge guards `XREALPlugin.GetDeviceType` and the XR Hands API behind `WMR_XREAL_XR_SDK` / `WMR_UNITY_XR_HANDS`; CI without the AAR compiles and reports `unavailable`.
+- **External SDK gate:** Unity 2021.3+/6000.0 Android build support, `com.unity.xr.hands`, and the XREAL SDK for Unity 3.x (`com.xreal.xr`) are not redistributable in this repo. `WmrTrackingXrealPlugin` isolates `com.unity3d.player.UnityPlayer` behind `XrealUnityBridge`, and the C# bridge guards `XREALPlugin.GetDeviceType()` and the XR Hands API behind `WMR_XREAL_XR_SDK` / `WMR_UNITY_XR_HANDS`; CI without the AAR compiles and reports `unavailable`.
 - **Project-setting gate:** the XREAL XR Plug-in must be enabled with **Initial Input Source = Hands**, Unity XR Hands + XRI installed, and `XREAL_DEVICE_CATEGORY_REALITY` included in Support Devices. The bridge does not change the input source at runtime because no runtime API for it was verified; a project left on Controller input reports `unavailable` when `start` cannot find a running `XRHandSubsystem`.
-- **Undocumented vendor parameters:** XREAL does not publish Unity head or hand update rates (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); the Android permissions the XREAL Unity runtime needs are not documented, so `android.permission.CAMERA` is an unverified assumption (declared optional and inert while the flag is off); `XREALPlugin.GetDeviceType` enum spellings are not fully documented, so both Dart and Kotlin normalise and alias the name and fail closed on anything unrecognised; and whether an Air 2 Ultra keeps tracking a hand gripping a WMR controller is unproven. Passthrough camera frames are not relayed.
+- **Undocumented vendor parameters:** XREAL does not publish Unity head or hand update rates (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); the Android permissions the XREAL Unity runtime needs are not documented, so `android.permission.CAMERA` is an unverified assumption (declared optional and inert while the flag is off); `XREALPlugin.GetDeviceType()` enum spellings are not fully documented, so both Dart and Kotlin normalise and alias the name and fail closed on anything unrecognised; and whether an Air 2 Ultra keeps tracking a hand gripping a WMR controller is unproven. Passthrough camera frames are not relayed.
 
 

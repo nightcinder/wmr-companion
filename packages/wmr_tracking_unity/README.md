@@ -23,7 +23,7 @@ and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
 vendor selection and the coexistence points below are still unverified.
 
-**Embedded VITURE is hand-only .** The unified
+**Embedded VITURE is hand-only.** The unified
 bridge only runs as a UaaL player, so the loader gate starts VITURE's input and
 hand subsystems and never its display provider: the provider owns a surface
 view that conflicts with the Flutter host activity, and the input subsystem is
@@ -52,7 +52,7 @@ packages/wmr_tracking_unity/
     Assets/WmrTrackingViture/Runtime/     copy of the VITURE relay scripts + asmdef
     Assets/WmrTrackingXreal/Runtime/      copy of the XREAL relay scripts + asmdef
     Assets/Scenes/WmrTrackingUnifiedSmoke.unity
-  tests/WmrTrackingUnity.Dispatch.Tests/  .NET console tests for the dispatch
+  tests/WmrTrackingUnity.Dispatch.Tests/.NET console tests for the dispatch
   tests/WmrTrackingUnity.LoaderGate.Tests/ switch-after-start loader gate checks
   tool/sync_vendor_unity_runtime.sh       copy + --check for the vendor Runtime folders
   tool/test_dispatch.sh                   compile + test gate
@@ -139,7 +139,7 @@ carries `WmrStereoCameraRig`, keeps `stereoTargetEye = Both`, and can build
 three depth markers at 1.5/2.5/3.5 m so a tester can see whether both eyes get
 a coherent 3D image. The markers are opt-in and off by default because their
 built-in material can render as the magenta error shader in the embedded UaaL
-export . The rig never switches a mono player into stereo; it reads
+export. The rig never switches a mono player into stereo; it reads
 the mode the VITURE loader chose and reports the startup stages to Kotlin
 through `WmrTrackingViturePlugin.onUnityStage(stage, stereoMode)`:
 
@@ -178,7 +178,7 @@ Import both proprietary SDKs into the same project first:
    OpenGLES3 only** (remove Vulkan; do not leave Auto). VITURE's Unity display
    provider is EGL/OpenGL ES only: on a Vulkan player its gfx thread cannot
    acquire the Unity EGL context, stops, and null-derefs inside
-   `VitureDisplayProvider::GfxThread_Stop` . `WMR > Configure unified
+   `VitureDisplayProvider::GfxThread_Stop`. `WMR > Configure unified
    XR` pins GLES3, so the menu and batch export both write it.
 
 Then use **WMR > Export unified unityLibrary** or:
@@ -191,7 +191,7 @@ Unity -batchmode -quit \
   -logFile -
 ```
 
-`Export` calls `ConfigureUnifiedXr.Configure` first, which creates the
+`Export()` calls `ConfigureUnifiedXr.Configure()` first, which creates the
 XR Management settings if missing, assigns `VitureLoader` and `XREALXRLoader`,
 and disables startup initialisation. It also creates the XREAL and VITURE
 settings assets, which are build artefacts and stay untracked.
@@ -223,7 +223,7 @@ minimal Unity/XR Management stubs:
 packages/wmr_tracking_unity/tool/test_dispatch.sh
 ```
 
-Requires the .NET 8 SDK. It:
+Requires the.NET 8 SDK. It:
 
 - runs `tool/sync_vendor_unity_runtime.sh --check`;
 - compiles the unified bridge plus both copied vendor bridges in the Android
@@ -246,14 +246,14 @@ Everything below is **unproven**. Do not read this project as evidence that
 both SDKs coexist in one build.
 
 1. **Two XR Management loaders.** Unity's `XRManagerSettings` has one
-   `activeLoader`; `InitializeLoaderSync` initialises the first assigned
+   `activeLoader`; `InitializeLoaderSync()` initialises the first assigned
    loader that succeeds. The gate caches the full assigned list, reorders the
    selected vendor first and keeps the other assigned, but whether both vendor
    loaders can be assigned together, whether their loader type names are
    recognisable by `viture`/`xreal`, and whether XREAL tolerates
    deinitialise-then-reinitialise are untested.
 2. **Deferred loader init.** The design requires **Initialize XR on Startup**
-   off and calls `InitializeLoaderSync` when `start` arrives. Whether VITURE
+   off and calls `InitializeLoaderSync()` when `start` arrives. Whether VITURE
    or XREAL can initialise that late (camera/JNI/session assumptions, Android
    lifecycle timing) is unknown and needs a device. If one SDK must own startup,
    the unified project is not viable as designed.
@@ -281,17 +281,17 @@ both SDKs coexist in one build.
 7. **Kotlin dispatch.** This project only dispatches inside Unity. The host
    still needs both vendor Flutter plugin Kotlin classes in one app and an
    app-level selection path; that is out of scope here (a separate issue) and
-   depends on .
+   depends on.
 8. **Glasses detection.** Unity does not auto-detect the vendor. The Kotlin
    host must detect the glasses and send the correct `vendor`; `auto` is
    intentionally rejected.
 9. **Per-vendor `recenter`.** Only the VITURE bridge implements recenter today.
    XREAL's bridge treats `recenter` as a no-op rather than inventing an API.
 10. **No hardware run.** A real export and the 0.2.1 unified APK exist
-    (/), but there is no Neckband, Air 2 Ultra or measured-frame
+, but there is no Neckband, Air 2 Ultra or measured-frame
     run. The C# assertions, export checks and APK inspection are the evidence
     base.
 
 If any of items 1–4 is shown impossible on paper or by a real export, record it
 here and stop: `base` remains the no-Unity fallback and the per-vendor
- flavors are retired .
+ flavors are retired.
