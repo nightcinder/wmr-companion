@@ -218,7 +218,7 @@ What landed, and what remains an external SDK or hardware gate:
 
 | Piece | State |
 |---|---|
-| Reusable Unity relay contract (`UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`) | Reused from `packages/wmr_tracking` ; no public API change |
+| Reusable Unity relay contract (`UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`) | Reused from `packages/wmr_tracking`; no public API change |
 | Unity → OpenXR conversion (`p=(x,y,z) -> (x,y,-z)`, `q=(qx,qy,qz,qw) -> (-qx,-qy,qz,qw)`) | Implemented in Kotlin and C# (the C# bridge emits `"space": "openxr"`); Dart also converts `"space": "unity"` sidecar frames; verified within `1e-6` with round-trip (`frame_conversion`) |
 | Dart `XrealAir2UltraTrackingSource`, default-off `WMR_XREAL_TRACKING` flag, typed errors | Implemented in `packages/wmr_tracking_xreal` and host-tested |
 | Glasses capability matrix | `Air2Ultra` only advertises 6DoF head + 26 hands; `One`/`OnePro` report 6DoF head only (XREAL Eye); `Air`/`Air2`/`Air2Pro`/`Light` report 3DoF head only. All non-Ultra models fail `create()` with `unsupported` |

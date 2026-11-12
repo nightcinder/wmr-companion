@@ -11,7 +11,7 @@ Companion research: [CAMERAS.md](CAMERAS.md) covers raw camera access.
 - `packages/wmr_tracking_viture`: default-off VITURE Pro Neckband Unity UaaL relay. Host/JVM-tested; Unity 6000.0.27f1 / VITURE XR SDK v0.9.0 (`Viture.XR.VitureXR`) external gate.
 - `packages/wmr_tracking_xreal`: default-off XREAL Air 2 Ultra Unity UaaL relay. Host/JVM-tested; Unity/XREAL SDK external gate.
 - `packages/wmr_tracking_dispatch`: native glasses detection and one shared `SharedUnityRuntime` for VITURE/XREAL.
-- Unified Unity prototype: `packages/wmr_tracking_unity` ; coexistence unproven.
+- Unified Unity prototype: `packages/wmr_tracking_unity`; coexistence unproven.
 - Android build flavors `base`/`unified` (per-vendor flavors retired); see [BUILDS.md](tracking/BUILDS.md).
 
 ## Native visionOS companion app (`apps/wmr_visionos_app`)

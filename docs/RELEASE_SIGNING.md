@@ -164,7 +164,7 @@ wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
 SHA256SUMS
 ```
 
-The standalone GATT latency probe was retired with ; the tag job no
+The standalone GATT latency probe was retired; the tag job no
 longer builds or publishes a probe APK.
 
 `wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or

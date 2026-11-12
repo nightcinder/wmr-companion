@@ -17,7 +17,7 @@ repository. Neither vendor's native code is vendored. Nothing here is a
 hardware result.
 
 **Status (0.2.1, 2026-10-27):** the owner approved redistributing both SDKs and
-supplied the export (; SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`).
+supplied the export (SHA-256 `945bd4254310766313fac81d0daa472408223c82cbee55186bcbcf3d144333b5`).
 `apps/wmr_companion_app/tool/install_unity_export.sh unified <zip>` normalises it
 and `tool/build_flavor.sh unified --debug` builds the unified APK. The APK is
 debug-signed and **has not been run on a VITURE or XREAL device**; runtime
@@ -271,8 +271,7 @@ both SDKs coexist in one build.
 5. **SDK licence terms.** Redistributing both proprietary SDKs inside one
    `unityLibrary`/APK can be restricted by each vendor's terms. This repository
    only points at the vendor packages; it does not grant redistribution
-   rights. The project owner approved bundling both runtimes for the 0.2.1 APK
-   ; the SDKs remain under their vendors' licences, so that approval
+   rights. The project owner approved bundling both runtimes for the 0.2.1 APK; the SDKs remain under their vendors' licences, so that approval
    does not extend to other redistributors.
 6. **Both vendors' static initialisers.** Even if only one XR loader is
    active, content providers, `JNI_OnLoad` hooks and static initialisers from

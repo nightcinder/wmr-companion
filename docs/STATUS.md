@@ -50,7 +50,7 @@ Release notes: [`v0.3.19`](https://github.com/nightcinder/wmr-companion/releases
 
 ### Milestones (see [PLAN.md](PLAN.md))
 
-Work is planned across milestones M10–M15 (governed by ; see `HANDOFF.md` §7 and `docs/PLAN.md`). The earlier milestones (M1–M6: scaffold, GATT stream, 3DoF orientation, latency screen, iOS probe) established the baseline pipeline; active work is organized under M10–M15:
+Work is planned across milestones M10–M15 (see `HANDOFF.md` §7 and `docs/PLAN.md`). The earlier milestones (M1–M6: scaffold, GATT stream, 3DoF orientation, latency screen, iOS probe) established the baseline pipeline; active work is organized under M10–M15:
 
 | Milestone | Scope | State |
 |---|---|---|
@@ -162,7 +162,7 @@ The roadmap is governed by [PLAN.md](PLAN.md) and [HANDOFF.md](../HANDOFF.md) §
    - Complete as engineering; hardware bench verification (Sitting B′ / Sitting B) remains open.
 3. **M12: The verification campaign (Open)**:
    - Turn run sheets into empirical hardware answers across campaign index (`WMR_Bridge` `docs/runs/README.md`, #42):
-     - *Sitting A (one bridge, no reflash):* latency v2 closed 2026-11-07: **Stay Flutter** ; tracking quality remains open.
+     - *Sitting A (one bridge, no reflash):* latency v2 closed 2026-11-07: **Stay Flutter**; tracking quality remains open.
      - *Sitting P (Pi bridge):* Pi bridge hardware verification (Pi being bought).
      - *Sitting R (one board, no purchase):* RIGHT-alone asymmetry (`right-asymmetry.md` #41).
      - *Sitting B′ (one board):* one board `--variant left`.

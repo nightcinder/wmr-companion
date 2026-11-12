@@ -42,7 +42,7 @@ versionCode bump are documented in [RELEASE_SIGNING.md](../RELEASE_SIGNING.md).
 | `base` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | none | Android XR, emulator, BLE/3DoF; every Dart adapter exists, but with no Unity runtime linked VITURE reports the 3DoF fallback and XREAL reports typed `unavailable` |
 | `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (required for a real unified APK) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, VITURE reports the 3DoF fallback and XREAL reports typed `unavailable` |
 
-The per-vendor `viture` and `xreal` flavors are retired ; only the
+The per-vendor `viture` and `xreal` flavors are retired; only the
 unified APK ships and there is no per-vendor flavor to build.
 
 `unified` requires Android 13 (API 33) when the VITURE runtime is linked, because
@@ -82,9 +82,9 @@ The `unified` app flavor links that shared export from
    `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts.
    The unified bridge is embedded in Flutter, so the runtime gate always starts
    VITURE's input and hand subsystems without the display subsystem, because the
-   display provider would take over the host activity ; the input
+   display provider would take over the host activity; the input
    subsystem is what drives 6DoF head pose. The pinned
-   `unity-export-1.4` was built from merge commit `35d8015` (; Unity
+   `unity-export-1.4` was built from merge commit `35d8015` (Unity
    subtree identical to `main` at `94573b2`) and carries both the hand-only gate
    and the input start; `unity-export-1.3` carries the gate but predates the
    input start, so it stays at 0DoF; `unity-export-1.2` and earlier still

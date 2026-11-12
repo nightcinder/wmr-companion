@@ -13,11 +13,11 @@ of stalling. The stereo mode is fixed by the loader when its display subsystem
 initialises; Unity exposes `XRSettings.stereoRenderingMode` read-only, so the
 player cannot switch modes at runtime. The unified bridge is embedded in
 Flutter, so it never starts the display provider: it starts the input and hand
-subsystems, and hand tracking runs without the stereo display ; the
+subsystems, and hand tracking runs without the stereo display; the
 input subsystem is what drives 6DoF head pose. A Vulkan
 player also cannot host the GLES-only display provider and takes the same
 hand-only path. The pinned `unity-export-1.4` was built from merge
-commit `35d8015` (; subtree identical to `main` at `94573b2`) and carries
+commit `35d8015` (subtree identical to `main` at `94573b2`) and carries
 both the embedded hand-only gate and the input-subsystem start; the earlier
 `unity-export-1.3` predates the input start, so 6DoF needs 1.4;
 `unity-export-1.2` and earlier still start
