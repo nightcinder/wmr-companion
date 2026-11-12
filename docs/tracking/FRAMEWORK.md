@@ -22,7 +22,7 @@ The Dart/Kotlin relay contract and the VITURE Neckband slice (`packages/wmr_trac
 
 ### One `unityLibrary` for both vendors
 
-`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, record the limitation and stop: the per-vendor ONY-271 flavors were retired in ONY-565, so `base` is the only no-Unity fallback.
+`packages/wmr_tracking_unity` is a prototype that puts one Unity 6000.0 project and one `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are selected, and the per-vendor relay JSON is unchanged. Its [README](../../packages/wmr_tracking_unity/README.md) lists the coexistence unknowns: two XR Management loaders and deferred init, duplicate native `.so`/manifest entries, SDK redistribution terms, static initialisers from the inactive vendor, Kotlin-side selection, and the absence of any export or hardware run. The dispatch is compiled and tested outside Unity; the Unity assembly and export remain an external gate. If coexistence is ruled out, record the limitation and stop: the per-vendor flavors were retired, so `base` is the only no-Unity fallback.
 
 
 ## The framework
@@ -85,7 +85,7 @@ fuser.onTrackingFrame(frame.withHostTime(hostNs));
 | `headRelative` | Head pose * last learned head-local offset | Low | Moves with the head; not positional tracking |
 | `orientationOnly` | null | None | Current 3DoF behaviour |
 
-Hand-anchor positions pass through the shared `OneEuroFilter` (`packages/wmr_tracking/lib/src/one_euro.dart`) on the anchor sample clock, once per new anchor sample; the fuser holds the last filtered value between samples. The tuning constants are still the published defaults (`minCutoff=1.0 Hz`, `beta=0.02`, `dCutoff=1.0 Hz`); ONY-502 ships the grid harness that replaces them from recorded captures, and does not pick values by reasoning. `minDt` is the structural exception: it follows the anchor rate (about 11 ms at 90 Hz), not the 240 Hz IMU, with `maxDt` still 100 ms. The filter works in centimetres internally because the paper's `beta` is scale-dependent. Orientation is never filtered: it stays the controller IMU quaternion. The filter resets on the first sample, a gap over 100 ms, a source transition, a source restart or `SixDofFuser.reset()`, so a head-relative fallback is never smoothed into a tracked pose. The capture procedure, harness and acceptance metric are in [pose-filter.md](../runs/sheets/pose-filter.md).
+Hand-anchor positions pass through the shared `OneEuroFilter` (`packages/wmr_tracking/lib/src/one_euro.dart`) on the anchor sample clock, once per new anchor sample; the fuser holds the last filtered value between samples. The tuning constants are still the published defaults (`minCutoff=1.0 Hz`, `beta=0.02`, `dCutoff=1.0 Hz`); the project ships the grid harness that replaces them from recorded captures, and does not pick values by reasoning. `minDt` is the structural exception: it follows the anchor rate (about 11 ms at 90 Hz), not the 240 Hz IMU, with `maxDt` still 100 ms. The filter works in centimetres internally because the paper's `beta` is scale-dependent. Orientation is never filtered: it stays the controller IMU quaternion. The filter resets on the first sample, a gap over 100 ms, a source transition, a source restart or `SixDofFuser.reset()`, so a head-relative fallback is never smoothed into a tracked pose. The capture procedure, harness and acceptance metric are in [pose-filter.md](../runs/sheets/pose-filter.md).
 
 The last absolute position is converted to a head-local offset and reused when the hand drops out. That keeps the controller stable through brief occlusion but avoids pretending the fallback is real tracking. `positionSmoothing` (default 0.5) remains for runtime-tracked controller poses only; it does not apply to hand anchors. `calibrateGrip` captures a real controller-to-palm offset when a runtime provides both poses; otherwise the default offset is 2 cm below and 6 cm forward of the palm.
 
@@ -101,7 +101,7 @@ companion.poses.listen((pose) {
 });
 ```
 
-The facade owns the source (start, alignment, stop and dispose), emits one `ControllerPose` per decoded controller sample, and keeps tracking independent of the BLE connection. Attaching another source disposes the first. A failed `start()` throws `WmrTrackingException` and detaches cleanly.
+The facade owns the source (start(), alignment, stop and dispose), emits one `ControllerPose` per decoded controller sample, and keeps tracking independent of the BLE connection. Attaching another source disposes the first. A failed `start` throws `WmrTrackingException` and detaches cleanly.
 
 
 ### Debug viewer and simulator
@@ -127,7 +127,7 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 2. Export with Unity as a Library and add the `unityLibrary` module to the Flutter plugin's Gradle build. One Unity runtime per process, full-screen only.
 3. Kotlin starts/stops the player and sends commands with `UnityPlayer.UnitySendMessage(go, "OnCommand", json)`; C# receives `void OnCommand(string)`.
 4. C# sends poses back through a Kotlin callback (JNI/`AndroidJavaProxy`) as one `TrackingFrameCodec` JSON string per sample. The plugin forwards it on an event channel.
-5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor: ...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction : it is string-only, one-way, one frame late.
+5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor:...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction: it is string-only, one-way, one frame late.
 6. Keep the Unity scene tracking-only. It must not own BLE or the gamepad mapping; that stays in Dart.
 
 **VITURE C SDK (head pose only, no Neckband).**
@@ -146,7 +146,7 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 **Relay/native test.** `TrackingFrameCodec.encodeToString` / `decodeString` is the wire contract. It is versioned (`v: 1`), uses metres and `[x, y, z, w]` quaternions, and ignores unknown joints for forward compatibility.
 
 
-## Android XR vertical slice (ONY-212)
+## Android XR vertical slice 
 
 What landed, and what is still unverified:
 
@@ -176,7 +176,7 @@ cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_android_xr:testDebu
 The APK build and the Kotlin unit test are compile/host gates, not hardware results. The 26-joint fixture and every error path are synthetic. The remaining hardware questions are unchanged: permission prompts and `SPATIAL` support on a real headset/glasses, joint and head rates, whether a gripping hand is tracked, and the BLE/pose relay latency.
 
 
-## VITURE Pro Neckband vertical slice (ONY-213)
+## VITURE Pro Neckband vertical slice 
 
 What landed, and what remains an external SDK or hardware gate:
 
@@ -212,13 +212,13 @@ Explicit unknowns and SDK-bound gates:
 - **Undocumented vendor parameters:** Unity head and hand update rates on the Pro Neckband are not stated in VITURE's public docs (`maxHeadRateHz: 0`, `maxHandRateHz: 0`); Android permissions required by the VITURE Unity runtime beyond `android.permission.CAMERA` are not documented; and whether a hand gripping a WMR controller stays tracked by `Viture.XR.VitureXR.HandTracking` is unproven.
 
 
-## XREAL Air 2 Ultra vertical slice (ONY-214)
+## XREAL Air 2 Ultra vertical slice 
 
 What landed, and what remains an external SDK or hardware gate:
 
 | Piece | State |
 |---|---|
-| Reusable Unity relay contract (`UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`) | Reused from `packages/wmr_tracking` (ONY-213); no public API change |
+| Reusable Unity relay contract (`UnityRelayCommand`, `UnityRelayFrameCodec`, `UnityXrHandJoints`) | Reused from `packages/wmr_tracking`; no public API change |
 | Unity → OpenXR conversion (`p=(x,y,z) -> (x,y,-z)`, `q=(qx,qy,qz,qw) -> (-qx,-qy,qz,qw)`) | Implemented in Kotlin and C# (the C# bridge emits `"space": "openxr"`); Dart also converts `"space": "unity"` sidecar frames; verified within `1e-6` with round-trip (`frame_conversion`) |
 | Dart `XrealAir2UltraTrackingSource`, default-off `WMR_XREAL_TRACKING` flag, typed errors | Implemented in `packages/wmr_tracking_xreal` and host-tested |
 | Glasses capability matrix | `Air2Ultra` only advertises 6DoF head + 26 hands; `One`/`OnePro` report 6DoF head only (XREAL Eye); `Air`/`Air2`/`Air2Pro`/`Light` report 3DoF head only. All non-Ultra models fail `create()` with `unsupported` |

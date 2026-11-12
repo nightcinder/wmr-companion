@@ -13,11 +13,11 @@ of stalling. The stereo mode is fixed by the loader when its display subsystem
 initialises; Unity exposes `XRSettings.stereoRenderingMode` read-only, so the
 player cannot switch modes at runtime. The unified bridge is embedded in
 Flutter, so it never starts the display provider: it starts the input and hand
-subsystems, and hand tracking runs without the stereo display (ONY-840); the
-input subsystem is what drives 6DoF head pose (ONY-856). A Vulkan
+subsystems, and hand tracking runs without the stereo display; the
+input subsystem is what drives 6DoF head pose. A Vulkan
 player also cannot host the GLES-only display provider and takes the same
-hand-only path (ONY-802). The pinned `unity-export-1.4` was built from merge
-commit `35d8015` (ONY-856; subtree identical to `main` at `94573b2`) and carries
+hand-only path. The pinned `unity-export-1.4` was built from merge
+commit `35d8015` (subtree identical to `main` at `94573b2`) and carries
 both the embedded hand-only gate and the input-subsystem start; the earlier
 `unity-export-1.3` predates the input start, so 6DoF needs 1.4;
 `unity-export-1.2` and earlier still start
@@ -96,8 +96,7 @@ Then trigger one 12 s capture and write it to a directory you can pull:
 
 ```dart
 final report = await VitureCarinaDiagnostics.capture(
-  outputDirectory: '/data/user/0/com.onyxlens.wmr_companion/cache/carina-1',
-);
+  outputDirectory: '/data/user/0/com.onyxlens.wmr_companion/cache/carina-1');
 ```
 
 The native harness (`android/src/main/cpp/carina_diag.c`, built as
@@ -118,7 +117,7 @@ pose rate.
 `android/unity/unified/unityLibrary/src/main/jniLibs/arm64-v8a/` (or any path
 in `WMR_CARINA_LIBGLASSES`). Without it the capture returns a typed
 `sdkUnavailable` error and never dereferences a missing symbol. Shipping the
-SDK still needs written VITURE permission (ONY-732 audit).
+SDK still needs written VITURE permission (audit).
 
 The Kotlin side only requests USB permission and returns
 `UsbDeviceConnection.fileDescriptor`. `flutter test` covers the ladder and

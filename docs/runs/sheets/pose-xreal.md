@@ -1,7 +1,7 @@
 # Run sheet: pose validation - XREAL Air 2 Ultra (named 1.0 path)
 Status: proposed, not run. The Unity-in-Flutter relay is implemented and host-tested; no Air 2 Ultra run has happened. Result tables are empty.
 
-ONY-440 selected this as the 6DoF path for 1.0; VITURE is the fallback. The desk pre-flight is in [PREFLIGHT.md](../../tracking/PREFLIGHT.md).
+ selected this as the 6DoF path for 1.0; VITURE is the fallback. The desk pre-flight is in [PREFLIGHT.md](../../tracking/PREFLIGHT.md).
 
 Gates: 3, 5, 7, 8. Gate 1 is informational (no app-visible tracking camera; passthrough RGB only); gate 9 is VITURE-only. See [GATES.md](../../tracking/GATES.md).
 

@@ -32,8 +32,7 @@ import 'package:wmr_ws/wmr_ws.dart';
 final transport = WmrWsTransport(
   endpoints: [
     WmrWsEndpoint(host: 'wmr-pi.local', token: 'shared-secret'),
-  ],
-);
+  ]);
 final wmr = WmrCompanion(ble: transport);
 final id = 'wmr-pi.local:8765';
 await transport.connect(id);
@@ -46,7 +45,7 @@ Discovery is opt-in and needs no plugin:
 ```dart
 final transport = WmrWsTransport(
   endpoints: const [],
-  enableDiscovery: true, // or inject WmrWsDiscovery(timeout: ...)
+  enableDiscovery: true, // or inject WmrWsDiscovery(timeout:...)
 );
 ```
 
@@ -85,7 +84,7 @@ remain supported as an override.
 
 ### Null means not observable
 
-ONY-98 established that a null link parameter means "this transport cannot see
+ established that a null link parameter means "this transport cannot see
 it", not "use a placeholder". Wi-Fi has no RSSI, connection interval or PHY, so
 all three stay null. `mtu` is filled because the daemon really does report a
 fragment capacity; it is a payload size, not an ATT MTU.
@@ -148,7 +147,7 @@ The optional, hardware-free end-to-end check starts the Pi daemon in replay
 mode and drives it with `WmrWsTransport`:
 
 ```sh
-WMR_BRIDGE_DIR=/path/to/WMR_Bridge ./tool/loopback_check.sh
+WMR_BRIDGE_DIR=/path/to/WMR_Bridge./tool/loopback_check.sh
 ```
 
 It needs a WMR_Bridge checkout (for `samples/controller_frames.txt` and the

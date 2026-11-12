@@ -19,7 +19,7 @@ Companion research: [CAMERAS.md](../CAMERAS.md) covers raw camera access. This p
   3. Controller IMU only → the current 3DoF behaviour, unchanged.
 - **The framework** is `packages/wmr_tracking` plus `WmrCompanion.attachTrackingSource`: a `TrackingSource` seam, a normalised `TrackingFrame`, vendor capability profiles, a clock aligner, a JSON relay codec, a reusable Unity UaaL relay contract with left-handed Unity to right-handed OpenXR conversion, a shared One Euro filter and `SixDofFuser`. It is pure Dart and hardware-free to test. Kotlin and Unity belong in Flutter *plugin* packages around it, not inside it.
 - **The Android XR adapter is implemented** in `packages/wmr_tracking_android_xr` (Kotlin + Dart, default off). It compiles and its host tests pass, but it has not run on an Android XR device or glasses, so nothing here is a hardware result.
-- **The VITURE Pro Neckband relay is implemented** in `packages/wmr_tracking_viture` (Dart + Kotlin UaaL relay plugin + minimal Unity C# bridge script, default off). Dart and Kotlin compile and pass host/JVM tests without the proprietary Unity 6000.0+ UaaL export or VITURE Unity SDK (`com.viture.xr` v0.9.0; targeted by current code per ONY-378, while v0.7.0 is historical); no Neckband or glasses hardware run has happened.
+- **The VITURE Pro Neckband relay is implemented** in `packages/wmr_tracking_viture` (Dart + Kotlin UaaL relay plugin + minimal Unity C# bridge script, default off). Dart and Kotlin compile and pass host/JVM tests without the proprietary Unity 6000.0+ UaaL export or VITURE Unity SDK (`com.viture.xr` v0.9.0; targeted by current code per while v0.7.0 is historical); no Neckband or glasses hardware run has happened.
 
 
 ## What "hand tracking" means for this project
@@ -114,7 +114,7 @@ Official docs: [Rokid Open Platform](https://open.rokid.com/), [SDK selection](h
 
 Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glasses-sdk/glasses) and [VITURE XR SDK for Unity](https://www.viture.com/developer/unity-sdk/unity).
 
-> **Current SDK note (ONY-378):** current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The 0.7.0 API names and findings below are kept as the research record.
+> **Current SDK note:** current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The 0.7.0 API names and findings below are kept as the research record.
 
 ### C glasses SDK
 
@@ -130,7 +130,7 @@ Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glas
   | Phantom Beast | 3DoF (native mode) | None |
 
 - **Head pose:**
-  - Gen1/Gen2 (One/Lite/Pro/Luma/Luma Cyber/Beast/Phantom Beast/Pro 2): `xr_device_provider_register_imu_pose_callback` + `open_imu(VITURE_IMU_MODE_POSE, ...)`. Callback data is `[roll, pitch, yaw, qw, qx, qy, qz]` in **North-West-Up** (X north, Y west, Z up), with a timestamp in the device timebase.
+  - Gen1/Gen2 (One/Lite/Pro/Luma/Luma Cyber/Beast/Phantom Beast/Pro 2): `xr_device_provider_register_imu_pose_callback` + `open_imu(VITURE_IMU_MODE_POSE,...)`. Callback data is `[roll, pitch, yaw, qw, qx, qy, qz]` in **North-West-Up** (X north, Y west, Z up), with a timestamp in the device timebase.
   - Carina/Luma Ultra: poll `xr_device_provider_get_gl_pose_carina(handle, pose, predict_time, &status)`. `pose` is `[px, py, pz, qw, qx, qy, qz]` in **OpenGL** (X right, Y up, Z backward), with forward prediction in seconds and a status flag. This is already the companion's convention, up to the quaternion order.
   - `set_dof_type_carina` selects 3DoF or 6DoF and must be called between create and initialize. `reset_origin_carina` recentres; `reset_pose_carina` reinitialises VIO.
 - **Cameras:** the UVC passthrough stream is 1920×1080 at 30 fps MJPEG. On Luma Ultra, `register_callbacks_carina` delivers four 8-bit grayscale buffers per frame (left/right primary and secondary) at 25 Hz, with manual exposure/gain. This is the only app-visible stereo tracking feed found in this research.
@@ -146,7 +146,7 @@ Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glas
 
 **Companion path:** two VITURE adapters, in preference order.
 1. **Neckband + embedded Unity (implemented in `wmr_tracking_viture`, default off).** Flutter app on the Pro Neckband, Unity 6000.0+ UaaL module with the VITURE XR SDK (`com.viture.xr` v0.9.0; v0.7.0 historical) and `com.unity.xr.hands`, `UnitySendMessage` for `UnityRelayCommand`s (`start`, `stop`, `dispose`, `recenter`, `configure`) and a JNI/`AndroidJavaClass` callback (`WmrTrackingViturePlugin.onUnityFrame`) streaming `TrackingFrame` JSON back to Dart. Head recentering delegates to `VitureXR.HeadTracking.SetWorldOrigin()`. Only `LumaUltra` advertises 6DoF head and 26-joint hand tracking; 3DoF glasses (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) and unreported glasses models are rejected as `unsupported` for hand tracking. Enable with `--dart-define=WMR_VITURE_TRACKING=true`.
-2. **C SDK over FFI (head only, out of scope for ONY-213).** Wrap `libglasses` on the phone; poll `get_gl_pose_carina` or register the IMU callback. It gives head pose but no hands, so it lands on the head-relative fallback. The stereo grayscale feed is interesting for future LED tracking but not usable yet: 25 Hz, unknown IR sensitivity, and no calibration or extrinsic documentation in what was read.
+2. **C SDK over FFI (head only, out of scope).** Wrap `libglasses` on the phone; poll `get_gl_pose_carina` or register the IMU callback. It gives head pose but no hands, so it lands on the head-relative fallback. The stereo grayscale feed is interesting for future LED tracking but not usable yet: 25 Hz, unknown IR sensitivity, and no calibration or extrinsic documentation in what was read.
 
 
 ## Comparison

@@ -204,7 +204,7 @@ calibration was parsed and shown but not applied to the fusion.
 | De-obfuscation (skip 2 bytes, XOR `key[i % 1024]`) and JSON to calibration | `packages/wmr_core/lib/protocol/config_decode.dart` |
 | Reads a hand's blob in 496-byte windows, checks CRC, polls while READING | `packages/wmr_core/lib/services/config_client.dart` |
 | GATT read on the transport | `BleTransport.read` |
-| FF13 in the fake bridge | `FakeWmrBridge(configBlobs: ...)` |
+| FF13 in the fake bridge | `FakeWmrBridge(configBlobs:...)` |
 
 Not done, deliberately:
 
@@ -280,7 +280,7 @@ about-10 vs 9.81 accel scale (WMR_Bridge #19).
 **Not verified on hardware, and the bridge driver is not merged yet.** These
 are the `wmr_core` side of the Switch Joy-Con/Pro support
 (`packages/wmr_core/lib/protocol/switch_calibration.dart` and
-`switch_burst.dart`); the firmware half is WMR_Bridge ONY-946.
+`switch_burst.dart`); the firmware half is WMR_Bridge.
 
 FF17 reports a Switch hand as model `2` (`ControllerModel.nintendoSwitch`).
 For that hand only:

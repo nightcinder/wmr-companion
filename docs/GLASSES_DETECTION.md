@@ -5,7 +5,7 @@ Neckband, Beam Pro, phone, glasses or Android XR headset.**
 
 ## Why detection runs before Unity
 
-The VITURE (ONY-213) and XREAL (ONY-214) relays learn the glasses model by
+The VITURE  and XREAL  relays learn the glasses model by
 asking Unity (`queryGlassesModel`). That cannot choose which vendor SDK Unity
 starts: Unity has to be told the vendor first. The native detector therefore
 runs before any `start` command and returns a typed `GlassesDetection`:
@@ -28,7 +28,7 @@ hand tracking) with `unsupported`. Detection never overrides the model check.
    ID (Google Aura reports the XREAL-built headset as `0x3318:0x043A`), so an
    Android XR host must be settled before USB or host-marker detection. Starting
    the shared vendor Unity player there loads VITURE's Android plugin, which
-   crashes on the missing vendor runtime class (ONY-879).
+   crashes on the missing vendor runtime class.
 2. **Host marker.** `Build.MANUFACTURER`/`MODEL` contains a configured marker:
    VITURE -> `neckband` host and `viture`; XREAL/Nreal -> `beamPro` host and
    `xreal`. The host is the vendor compute unit, so its glasses are known even
@@ -70,8 +70,7 @@ at runtime:
 ```dart
 await const PlatformGlassesDetector().configureIds(
   vitureProductIds: [0x1011], // only IDs confirmed from vendor docs/hardware
-  xrealProductIds: [0x0424],
-);
+  xrealProductIds: [0x0424]);
 ```
 
 Empty product-ID sets match any product from that vendor ID. Both vendor IDs
