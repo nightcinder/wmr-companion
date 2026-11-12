@@ -39,6 +39,9 @@ final bleHandoffTransportFactoryProvider =
           (ble) => CompositeBleTransport(
             tcp: WmrWsTransport(endpoints: const []),
             ble: ble,
+            // With Wi-Fi off the Pi's LAN address cannot answer; probe the
+            // interfaces first so the BLE dial is not held up by TCP.
+            lanAvailable: () => ref.read(lanInterfaceProbeProvider)(),
             // The shared BLE transport outlives the composite and is disposed
             // by [realTransportProvider].
             disposeBle: false,
@@ -157,6 +160,9 @@ final compositeWifiTransportFactoryProvider =
         final composite = CompositeBleTransport(
           tcp: WmrWsTransport(endpoints: [endpoint]),
           ble: UniversalBleTransport(adapter: UniversalBleAdapter()),
+          // No Wi-Fi: skip the TCP probe so the BLE leg is dialled at once
+          // instead of waiting out the remembered LAN address.
+          lanAvailable: () => ref.read(lanInterfaceProbeProvider)(),
           onTokenLearned: (bridgeId, hosts, port, token) {
             unawaited(
               ref
@@ -248,6 +254,62 @@ class BridgeUpgradeState {
 final lanDiscoveryProvider = Provider<Future<List<WmrWsEndpoint>> Function()>(
   (ref) => WmrWsDiscovery().discover,
 );
+
+/// Whether a LAN interface is up right now.
+///
+/// Wi-Fi off leaves only loopback (or mobile data, which cannot reach the Pi),
+/// so a WebSocket dial to the Pi's LAN address can only run down its timeouts
+/// while Bluetooth is the only working link. The transport composites consult
+/// this before probing TCP. Tests replace it with a fixed answer.
+final lanInterfaceProbeProvider = Provider<Future<bool> Function()>(
+  (ref) => hasLanInterface,
+);
+
+/// Interface name prefixes that are never a LAN the Pi is reachable on:
+/// Android/iOS mobile data, VPN tunnels and peer-to-peer links.
+const List<String> _nonLanInterfacePrefixes = [
+  'rmnet',
+  'ccmni',
+  'pdp',
+  'clat',
+  'dummy',
+  'tun',
+  'utun',
+  'ppp',
+  'ipsec',
+  'awdl',
+  'llw',
+];
+
+/// Whether [name] is an interface a LAN bridge can be dialled on.
+///
+/// Mobile data, VPN and peer-to-peer interfaces carry a non-loopback address
+/// too, but mDNS and a direct WebSocket to the Pi's LAN address do not work
+/// over them.
+bool isLanInterfaceName(String name) {
+  final lower = name.toLowerCase();
+  return !_nonLanInterfacePrefixes.any(lower.startsWith);
+}
+
+/// Whether an active, non-loopback LAN interface exists.
+///
+/// A platform that cannot list interfaces answers true: guessing "no LAN"
+/// would disable Wi-Fi for everyone.
+Future<bool> hasLanInterface() async {
+  try {
+    final interfaces = await NetworkInterface.list(
+      includeLoopback: false,
+      includeLinkLocal: false,
+      type: InternetAddressType.IPv4,
+    );
+    return interfaces.any(
+      (interface) =>
+          interface.addresses.isNotEmpty && isLanInterfaceName(interface.name),
+    );
+  } catch (_) {
+    return true;
+  }
+}
 
 /// Whether the Connect screen runs the launch-time LAN scan and auto-dial.
 /// Tests that exercise other screen behaviour override it to false.

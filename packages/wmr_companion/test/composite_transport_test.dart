@@ -71,6 +71,10 @@ class _FakeTcp extends WmrWsTransport {
   final List<String> connectCalls = [];
   final List<String> unsubscribeCalls = [];
   bool failConnect = false;
+
+  /// When true, [connect] never answers, like a LAN address that no longer
+  /// exists: the socket attempt runs until the transport's own timeout.
+  bool hangConnect = false;
   bool _disposed = false;
 
   @override
@@ -83,6 +87,7 @@ class _FakeTcp extends WmrWsTransport {
   @override
   Future<void> connect(String deviceId) async {
     connectCalls.add(deviceId);
+    if (hangConnect) await Completer<void>().future;
     if (failConnect) throw StateError('tcp down');
     final endpoint = endpoints[deviceId];
     if (endpoint == null) throw StateError('unknown endpoint $deviceId');
@@ -890,6 +895,55 @@ void main() {
     expect(
       await ble.connectionState(_bleDeviceId).first,
       BleConnectionState.disconnected,
+    );
+  });
+
+  test('dialing BLE at once when no LAN interface is up', () async {
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      lanAvailable: () async => false,
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+
+    expect(tcp.connectCalls, isEmpty);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    expect(
+      await ble.connectionState(_bleDeviceId).first,
+      BleConnectionState.connected,
+    );
+  });
+
+  test('caps a TCP dial that never answers and falls back to BLE', () async {
+    tcp.hangConnect = true;
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 100),
+      upgradeInterval: Duration.zero,
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    final elapsed = Stopwatch()..start();
+    await transport.connect(_tcpDeviceId);
+    elapsed.stop();
+
+    expect(tcp.connectCalls, [_tcpDeviceId]);
+    expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+  });
+
+  test('keeps the TCP budget at three seconds or less', () {
+    final transport = CompositeBleTransport(tcp: tcp, ble: ble);
+    addTearDown(transport.dispose);
+
+    expect(
+      transport.tcpProbeBudget,
+      lessThanOrEqualTo(const Duration(seconds: 3)),
     );
   });
 }

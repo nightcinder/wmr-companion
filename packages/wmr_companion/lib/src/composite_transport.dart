@@ -19,7 +19,9 @@ enum CompositeLeg { tcp, ble }
 /// or because the FF16 endpoint document was read over BLE. When TCP cannot
 /// connect, or drops later, the same bridge is dialled over BLE GATT. While
 /// the bridge is on BLE, [upgradeInterval] retries TCP; when it succeeds the
-/// notification subscriptions move to TCP without being closed.
+/// notification subscriptions move to TCP without being closed. TCP is probed
+/// only while a LAN interface is up, and never for longer than
+/// [tcpProbeBudget], so a phone with Wi-Fi off reaches BLE immediately.
 ///
 /// Bridges are identified by the daemon's stable `bridge_id` once a hello or
 /// an FF16 endpoint document has supplied it. Two scan results that resolve
@@ -44,6 +46,8 @@ class CompositeBleTransport implements BleTransport {
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
     this.bleScanWait = const Duration(seconds: 5),
+    this.tcpProbeBudget = const Duration(seconds: 3),
+    this.lanAvailable,
     this.disposeBle = true,
     this.onTokenLearned,
   }) : clock = tcp.clock;
@@ -71,6 +75,23 @@ class CompositeBleTransport implements BleTransport {
   /// Without this, a TCP refusal that returns faster than the radio scan can
   /// leave the BLE leg with no candidate, so the failover never happens.
   final Duration bleScanWait;
+
+  /// Total time allowed for dialling the TCP candidates of one bridge.
+  ///
+  /// The BLE leg is always available here, so a Wi-Fi dial that hangs must not
+  /// hold the session: after the budget the composite gives up on TCP and
+  /// dials BLE instead. Each candidate gets an equal share of what is left, so
+  /// a dead address cannot consume the whole budget before a live one is
+  /// tried. A non-positive duration disables the TCP probe entirely.
+  final Duration tcpProbeBudget;
+
+  /// Whether a LAN interface is currently up, checked before any TCP probe.
+  ///
+  /// A host supplies this (the companion app checks its network interfaces).
+  /// With Wi-Fi off, dialling the Pi's remembered LAN address can only time
+  /// out, and doing so before the BLE fallback is what made a Bluetooth
+  /// connect look like a 30 s stall. Null means unknown, and TCP is attempted.
+  final Future<bool> Function()? lanAvailable;
 
   /// Whether [dispose] also disposes [ble]. A host that shares one BLE
   /// transport between several composites (the Bluetooth tab and an opt-in
@@ -485,19 +506,51 @@ class CompositeBleTransport implements BleTransport {
 
   Future<String?> _tryTcp(_Route route, List<String> candidates) async {
     if (candidates.isEmpty) return null;
+    if (tcpProbeBudget <= Duration.zero) return null;
+    if (!await _lanAvailable()) return null;
     Object? lastError;
+    final stopwatch = Stopwatch()..start();
+    var left = candidates.length;
     for (final id in candidates) {
+      final remaining = tcpProbeBudget - stopwatch.elapsed;
+      if (remaining <= Duration.zero) break;
+      // Share what is left evenly, so one unresponsive address cannot use the
+      // whole budget and hide a reachable candidate behind it.
+      final slice = remaining ~/ left;
+      left--;
       route.tcpCandidates.add(id);
+      final pending = tcp.connect(id);
       try {
-        await tcp.connect(id);
+        await pending.timeout(slice);
         route.tcpDeviceId = id;
         _rememberBridge(route, tcp.helloFor(id)?.bridgeId);
         return id;
+      } on TimeoutException {
+        lastError = TimeoutException(
+          'TCP connect to $id took longer than ${slice.inMilliseconds} ms',
+          slice,
+        );
+        // The dial may still land after the budget. Close it when it does, so
+        // a late socket cannot stay open behind the BLE fallback.
+        unawaited(
+          pending.then((_) => tcp.disconnect(id), onError: (Object _) {}),
+        );
       } catch (error) {
         lastError = error;
       }
     }
     throw lastError ?? StateError('No TCP endpoint answered');
+  }
+
+  Future<bool> _lanAvailable() async {
+    final probe = lanAvailable;
+    if (probe == null) return true;
+    try {
+      return await probe();
+    } catch (_) {
+      // A platform that cannot answer must not disable TCP.
+      return true;
+    }
   }
 
   List<String> _bleCandidatesFor(

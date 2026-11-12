@@ -91,6 +91,24 @@ int? parseAttError(String text) {
   return null;
 }
 
+final _writeRequestBusy = RegExp(
+  r'write[_\s-]*request[_\s-]*busy',
+  caseSensitive: false,
+);
+
+/// Whether [error] says a GATT write was refused because an earlier one was
+/// still in flight.
+///
+/// Android reports this for a CCCD write that lands while the stack is busy
+/// and `universal_ble` surfaces the platform wording, for example
+/// "failed to update descriptor write_Request_busy". It is not an ATT error
+/// code, so it is recognised from the message: an immediate retry fails the
+/// same way, while a short settle followed by a retry succeeds.
+bool isWriteRequestBusy(Object error) {
+  final text = error is BleAdapterException ? error.message : '$error';
+  return _writeRequestBusy.hasMatch(text);
+}
+
 /// The thin layer between [UniversalBleTransport] and a BLE package.
 ///
 /// Every method maps to one package call, so the transport's sequencing can

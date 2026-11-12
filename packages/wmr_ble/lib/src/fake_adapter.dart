@@ -181,6 +181,15 @@ class FakeBleAdapter implements BleAdapter {
   final Map<String, Object> enableErrors = {};
   final Map<String, Object> disableErrors = {};
 
+  /// Upcoming [enableNotifications] calls refused with the platform's
+  /// "write request busy" wording, as Android does when a CCCD write lands
+  /// before the previous one landed.
+  int enableBusyCount = 0;
+
+  /// When set, [enableNotifications] waits for this before answering, so a
+  /// test can hold the serial queue open.
+  Completer<void>? enableGate;
+
   static String _short(String uuid) => uuid.substring(4, 8);
   static const _bridgeStreams = {'ff11', 'ff12', 'ff14'};
 
@@ -191,7 +200,17 @@ class FakeBleAdapter implements BleAdapter {
     String characteristicUuid,
   ) async {
     calls.add('enableNotifications');
+    await enableGate?.future;
     final name = _short(characteristicUuid);
+    if (enableBusyCount > 0) {
+      // Android's "write request busy": the previous CCCD write had not
+      // landed when this one was asked for.
+      enableBusyCount--;
+      ccc.add('BUSY on $name');
+      throw const BleAdapterException(
+        'failed to update descriptor write_Request_busy',
+      );
+    }
     final error = enableErrors[characteristicUuid];
     if (error != null) {
       ccc.add('FAIL on $name');

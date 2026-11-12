@@ -113,6 +113,8 @@ class UniversalBleTransport implements BleTransport {
     this.scanTimeout = const Duration(seconds: 15),
     this.availabilityWait = const Duration(seconds: 3),
     this.requestedMtu = wmrRequestedMtu,
+    this.enableRetries = 2,
+    this.enableRetryDelay = const Duration(milliseconds: 250),
   }) : _adapter = adapter,
        clock = clock ?? MonotonicClock() {
     _paramsSub = adapter.connectionParams.listen(
@@ -124,6 +126,16 @@ class UniversalBleTransport implements BleTransport {
   final Duration scanTimeout;
   final Duration availabilityWait;
   final int requestedMtu;
+
+  /// Extra `enableNotifications` attempts after the platform reports
+  /// `WRITE_REQUEST_BUSY`.
+  ///
+  /// The CCCD write that reported busy is still in flight; retrying at once
+  /// fails the same way, so each retry waits [enableRetryDelay] first.
+  final int enableRetries;
+
+  /// Settle time before retrying a busy CCCD write.
+  final Duration enableRetryDelay;
 
   @override
   final MonotonicClock clock;
@@ -654,11 +666,29 @@ class UniversalBleTransport implements BleTransport {
   Future<void> _enable(_Session session, String key, _Wanted w) async {
     if (session.enabled.contains(key)) return;
     _emit(BleLinkPhase.subscribing);
-    await _adapter.enableNotifications(
-      w.deviceId,
-      w.serviceUuid,
-      w.characteristicUuid,
-    );
+    var attempt = 0;
+    while (true) {
+      try {
+        await _adapter.enableNotifications(
+          w.deviceId,
+          w.serviceUuid,
+          w.characteristicUuid,
+        );
+        break;
+      } on BleAdapterException catch (e) {
+        // The previous CCCD write has not landed yet. Retrying immediately
+        // fails the same way, so let the stack settle and try again.
+        if (!isWriteRequestBusy(e) || attempt >= enableRetries) rethrow;
+        attempt++;
+        await Future<void>.delayed(enableRetryDelay);
+        if (_sessions[w.deviceId] != session) {
+          throw BleTransportException(
+            BleLinkPhase.connectionLost,
+            'Disconnected while enabling notifications',
+          );
+        }
+      }
+    }
     session.enabled.add(key);
   }
 
@@ -697,18 +727,22 @@ class UniversalBleTransport implements BleTransport {
       key.endsWith('|$wmrBridgeBatchedCharUuid');
 
   @override
-  Future<void> disconnect(String deviceId) async {
-    // Clearing the session first makes the link event this causes harmless.
-    _sessions.remove(deviceId);
-    _emit(BleLinkPhase.disconnecting, deviceId: deviceId);
-    await _closeStreams(deviceId);
-    try {
-      await _adapter.disconnect(deviceId);
-    } finally {
-      _linkSubs.remove(deviceId)?.cancel();
-      _setState(deviceId, BleConnectionState.disconnected);
-      _emit(BleLinkPhase.disconnected, deviceId: deviceId);
-    }
+  Future<void> disconnect(String deviceId) {
+    // Queued behind any GATT step still in flight, so the platform never sees
+    // a disconnect race the CCCD write that preceded it.
+    return _serial(() async {
+      // Clearing the session first makes the link event this causes harmless.
+      _sessions.remove(deviceId);
+      _emit(BleLinkPhase.disconnecting, deviceId: deviceId);
+      await _closeStreams(deviceId);
+      try {
+        await _adapter.disconnect(deviceId);
+      } finally {
+        _linkSubs.remove(deviceId)?.cancel();
+        _setState(deviceId, BleConnectionState.disconnected);
+        _emit(BleLinkPhase.disconnected, deviceId: deviceId);
+      }
+    });
   }
 
   Future<void> _closeStreams(String deviceId) async {
@@ -765,6 +799,11 @@ class UniversalBleTransport implements BleTransport {
         }
       }),
     );
+    // Already enabled on this session: share the pipe that exists instead of
+    // queueing another CCCD write that can only report busy.
+    if (session != null && session.ready && session.enabled.contains(key)) {
+      return ctl.stream;
+    }
     // FF11, FF12 and FF14 are mutually exclusive on the bridge. Forget the
     // others now, so a setup that is already queued enables only this one.
     if (_isBridgeStream(key)) {
@@ -814,6 +853,13 @@ class UniversalBleTransport implements BleTransport {
           await _enable(session, key, w);
         } on BleAdapterException catch (e) {
           if (!ctl.isClosed) ctl.addError(_streamFault(w, e));
+          if (isWriteRequestBusy(e)) {
+            // The CCCD write never settled on this link, so another enable
+            // would hit the same busy queue. Drop the link cleanly; the host
+            // reconnects with a fresh session instead of looping on it.
+            unawaited(disconnect(deviceId));
+            return;
+          }
           if (e.attError != attErrorOtherStreamActive) {
             _fail(
               BleLinkPhase.connectFailed,
@@ -926,18 +972,20 @@ class UniversalBleTransport implements BleTransport {
   Future<void> dispose() async {
     await stopScan();
     await _scanCtl?.close();
-    for (final s in _linkSubs.values) {
+    for (final s in _linkSubs.values.toList()) {
       await s.cancel();
     }
     _linkSubs.clear();
     await _paramsSub?.cancel();
-    for (final s in _valueSubs.values) {
+    // A reconnect in flight can still add a key while these awaits yield, so
+    // iterate a snapshot instead of the live map.
+    for (final s in _valueSubs.values.toList()) {
       await s.cancel();
     }
-    for (final c in _streams.values) {
+    for (final c in _streams.values.toList()) {
       await c.close();
     }
-    for (final c in _stateCtls.values) {
+    for (final c in _stateCtls.values.toList()) {
       await c.close();
     }
     _valueSubs.clear();
