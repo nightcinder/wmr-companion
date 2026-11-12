@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.24+29
+
+- With Wi-Fi off, a Bluetooth connect no longer waits on a LAN address that can
+  only time out. The transport skips the TCP probe when no LAN interface is up
+  and caps the probe at three seconds in total, so the BLE leg opens at once
+  (ONY-1309).
+- A GATT notification setup that Android refuses with `WRITE_REQUEST_BUSY` is
+  retried twice after a short settle, an enable on a session that already holds
+  the subscription shares it, and a link whose CCCD write still reports busy is
+  dropped and reconnected with a fresh session instead of looping (ONY-1309).
+- The companion saves the FF13 bridge token in platform secure storage and
+  remembers the authenticated FF16 endpoint, so the next launch reconnects over
+  Wi-Fi by default and authenticates with Bluetooth off (ONY-1291).
+- An exported test bundle carries the relay's hand-tracking diagnostics
+  (ONY-1315).
+
 ## 0.3.23+28
 
 - The Connect screen's update banner can start a Pi bridge upgrade over the
