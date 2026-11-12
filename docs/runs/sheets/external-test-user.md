@@ -116,7 +116,7 @@ The VITURE Pro Neckband has no physical D-pad. Use only these controls:
 - Paired Bluetooth controller or mouse.
 
 Follow this checklist to find which tracking layer fails:
-1. Connect screen test: make sure that the SpaceWalker OS hand pointer works before you open Bench or Debug.
+1. Connect screen test: on release 0.3.21 and later, make sure that the SpaceWalker OS hand pointer works before you open Bench or Debug.
 2. Empty hand test: during `handEmpty` on the Bench screen, make sure that the 26-joint skeleton appears in the HUD.
 3. Controller grip test: during `handGrip` on the Bench screen, observe whether tracking drops out when you hold a controller.
 

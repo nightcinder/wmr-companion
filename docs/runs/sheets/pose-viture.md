@@ -1,7 +1,7 @@
 # Run sheet: pose validation - VITURE (Pro Neckband + Luma Ultra)
 Status: proposed, not run. The Unity-in-Flutter relay is implemented and host-tested; no Neckband run has happened. Result tables are empty. Code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1.
 
-Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.19 runs these gates.
+Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.23 runs these gates.
 
 The VITURE Pro Neckband has no physical D-pad. Valid controls are Power, Volume Up and Down, Settings, the air-mouse pointer, hand gestures, the Neckband Remote app, or a paired Bluetooth controller.
 ## 1. Prerequisites
@@ -9,7 +9,7 @@ The VITURE Pro Neckband has no physical D-pad. Valid controls are Power, Volume 
 |---|---|
 | Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (One, OneLite, Pro, Pro2, Luma, LumaPro, LumaCyber, Beast) are rejected for hand tracking. |
 | Host | VITURE Pro Neckband (Android, wireless ADB) for gates 3/4/7/8. Gate 9 needs an Android phone with USB host. |
-| App | Signed v0.3.19 unified APK (versionCode 2024). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1); no export or debug flags are needed. Record version, export SHA and firmware SHA. |
+| App | Signed v0.3.23 unified APK (versionCode 2028, with v0.3.21 or newer required). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1). No export or debug flags are needed. Record version, export SHA and firmware SHA. |
 | Bridge | One board on `main`, both controllers paired and awake. |
 | Tooling | `adb` (wireless for the Neckband), terminal, logcat, screenshots. |
 | Checkerboard | Gate 1: flat, rigid, at least 8x6 inner corners, known square size. |
@@ -93,7 +93,7 @@ The VITURE Pro Neckband has no physical D-pad. Use only these valid controls:
 - Paired Bluetooth controller or mouse.
 
 Follow this disambiguation checklist when hand-tracking issues occur:
-1. Connect screen test: make sure that the SpaceWalker OS hand pointer works before you open Bench or Debug.
+1. Connect screen test: on release 0.3.21 and later, make sure that the SpaceWalker OS hand pointer works before you open Bench or Debug.
 2. Empty hand test: during `handEmpty` on the Bench screen, make sure that the 26-joint skeleton appears in the HUD.
 3. Controller grip test: during `handGrip` on the Bench screen, observe whether tracking drops out when you hold a controller.
 
