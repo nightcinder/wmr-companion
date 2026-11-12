@@ -22,8 +22,7 @@ import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 
 SizedBox(
   height: 320,
-  child: OrientationView(orientation: update.orientation!),
-)
+  child: OrientationView(orientation: update.orientation!))
 ```
 
 The host owns the state layer: pass the latest facade model from whatever

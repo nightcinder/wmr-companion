@@ -40,8 +40,7 @@ import 'package:wmr_core/services/controller_service.dart';
 // Coordinate raw, decoded, or batched streams over an abstract BleTransport:
 final service = ControllerService(
   transport: myTransport,
-  mode: StreamMode.decoded,
-);
+  mode: StreamMode.decoded);
 ```
 
 ## Testing

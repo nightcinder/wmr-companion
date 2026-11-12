@@ -30,8 +30,7 @@ docs do not state are configurable instead of guessed.
 final selector = TrackingSourceSelector(
   detector: const PlatformGlassesDetector(),
   flags: TrackingSourceFlags(viture: VitureTracking.enabled),
-  vitureSource: VitureNeckbandTrackingSource.create,
-);
+  vitureSource: VitureNeckbandTrackingSource.create);
 
 final selection = await selector.select();
 if (selection.hasSource) {

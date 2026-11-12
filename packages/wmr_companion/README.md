@@ -65,9 +65,7 @@ Future<void> run(BleTransport transport) async {
     ble: transport, // UniversalBleTransport, a native transport or FakeTransport
     config: WmrCompanionConfig(
       streamMode: StreamMode.batched, // FF14
-      fusion: FusionConfig.madgwick(beta: 0.05),
-    ),
-  );
+      fusion: FusionConfig.madgwick(beta: 0.05)));
 
   await wmr.initialize();
   await wmr.startScan();
@@ -233,8 +231,7 @@ final statuses = wmr.controllerStatus.listen((status) {
 final status = await wmr.readControllerStatus();
 final outcome = await wmr.sendControllerCommand(
   ControllerCommand.connect,
-  hand: Hand.left,
-);
+  hand: Hand.left);
 if (!outcome.isOk) {
   // outcome.result is the firmware's code; outcome.error is the transport
   // failure when the write itself failed.

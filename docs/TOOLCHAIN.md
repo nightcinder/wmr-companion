@@ -1,6 +1,6 @@
 # Toolchain
 
-## Built-in Kotlin (ONY-521)
+## Built-in Kotlin 
 
 The five Android plugins (`wmr_companion_hid_android`,
 `wmr_tracking_android_xr`, `wmr_tracking_dispatch`, `wmr_tracking_viture` and
@@ -20,7 +20,7 @@ regression. Remove the pin once the pinned AGP bundles a new-enough Kotlin.
 This is why `android.newDsl` stays `false`: the new AGP DSL is a separate
 migration, and the build has not adopted it.
 
-## Dependency review (ONY-521)
+## Dependency review 
 
 Reviewed `flutter pub outdated` on 2026-10-29. Eleven packages are behind.
 None of them is needed by the built-in Kotlin migration, so this task upgrades

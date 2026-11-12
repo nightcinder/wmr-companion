@@ -40,7 +40,7 @@ If the app drops to 0DoF with **6DoF only** greyed out, check the status line. 6
 | Approx. LED blobs per still | | | | |
 | Distance at which LEDs disappear | | | | |
 
-Pass: at least 5 LED blobs in at least 90% of frames at 0.8 m. The tester returns the raw PGMs and telemetry; ONY-736 counts blobs.
+Pass: at least 5 LED blobs in at least 90% of frames at 0.8 m. The tester returns the raw PGMs and telemetry;  counts blobs.
 
 Checkerboard (`carinaCheckerboard`): 10 captures, 2 distances (0.5, 0.8 m) x 5 angles (fronto-parallel, left, right, up, down), 4 s each. Power the controllers off so their blobs do not confuse the corner detector. Record the square size (mm), inner corners and distances; return the images with pose labels.
 ## 4. Gate 3 - Unity-in-Flutter smoke test
@@ -108,9 +108,9 @@ Capture diagnostic logs and display layers over wireless ADB:
    ```
 3. Filter hand tracking and relay log messages:
    ```bash
-   grep -E "HAND_HEARTBEAT|WmrTrackingUnitySmoke|VitureXR|WmrTrackingUnity|WmrTrackingViture" pose-viture-hand-diag-<timestamp>.log
+   grep -E "WmrTrackingUnitySmoke|VitureXR|WmrTrackingUnity|WmrTrackingViture" pose-viture-hand-diag-<timestamp>.log
    ```
-   `WmrTrackingUnitySmoke` reports relay frame intervals and whether `hasHands` is true. `HAND_HEARTBEAT` reports camera frame rate.
+   `WmrTrackingUnitySmoke` reports frame count, payload size, and whether `hasHands` is true. The exported test bundle records frame rate and gap metrics in `hand_tracking_diagnostics.effective_hz` and `hand_tracking_diagnostics.max_gap_ms`.
 4. Capture SurfaceFlinger and display layers while the Bench screen is visible:
    ```bash
    adb shell dumpsys SurfaceFlinger > pose-viture-surfaceflinger.txt

@@ -4,12 +4,12 @@
 
 - Version aligned with the v0.3.0 release; `wmr_tracking` constraint raised to `^0.3.0`.
 
-- ONY-669: the Android XR `capabilities` hand probe and `Config.Builder`
+- the Android XR `capabilities` hand probe and `Config.Builder`
   construction are wrapped as `Throwable` so a runtime fault becomes a typed
   answer instead of a crash. A collector that faults while `start` is still held
   reports `trackingStart` instead of a stage-less detached-activity cancel. The
   Dart Android XR profile now lists all four runtime permissions.
-- ONY-614: request `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and
+- request `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING` and
   `HEAD_TRACKING`, and create/configure the XR session only after every grant
   and after the activity resumes. Native failures are caught as `Throwable` and
   return typed errors naming the `permissions`, `sessionCreate`,

@@ -47,8 +47,7 @@ final listener = AppLifecycleListener(
     AppLifecycleState.paused => BleAppLifecycle.paused,
     AppLifecycleState.detached => BleAppLifecycle.detached,
     AppLifecycleState.hidden => BleAppLifecycle.inactive,
-  }),
-);
+  }));
 ```
 
 An inactive/paused/detached host stops scanning; a resumed host restarts the
