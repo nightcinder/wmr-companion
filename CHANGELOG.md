@@ -3,6 +3,28 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## 0.3.24+29
+
+WMR Companion release.
+
+- With Wi-Fi off, a Bluetooth connect no longer waits on a LAN address that can
+  only time out. The transport skips the TCP probe when no LAN interface is up
+  and caps the probe at three seconds in total, sharing what is left across the
+  candidate addresses, so the BLE leg opens at once (ONY-1309).
+- A GATT notification setup that Android refuses with `WRITE_REQUEST_BUSY` is
+  retried twice after a short settle, and an enable on a session that already
+  holds the subscription shares it instead of queueing another CCCD write. A
+  link whose CCCD write still reports busy is dropped and reconnected with a
+  fresh session rather than looping, and a disconnect queues behind the GATT
+  step in flight (ONY-1309).
+- The companion saves the FF13 bridge token in platform secure storage and
+  remembers the authenticated FF16 endpoint, so the next launch reconnects over
+  Wi-Fi by default, authenticates with Bluetooth off, and redials a dropped
+  link without a restart (ONY-1291).
+- An exported test bundle carries the relay's hand-tracking diagnostics:
+  effective rate, longest frame gap, per-hand presence and viewer pose sources
+  (ONY-1315).
+
 ## 0.3.23+28
 
 WMR Companion release. The in-app bridge upgrade needs a WMR_Bridge build that
