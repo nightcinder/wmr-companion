@@ -17,10 +17,10 @@ hardware; these are compile/packaging facts only.
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified. The 0.3.15 and 0.3.16 builds ran on a Google Aura headset for pose-filter captures (`../runs/sheets/pose-filter.md`) |
-| Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution  |
+| Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution |
 
 Release notes: [`v0.3.19`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.19).
-This is the signed (project-key) cut at commit `136be00`. It adds pure-Dart LAN discovery in `wmr_ws`, a `CompositeBleTransport` TCP-to-BLE fallback in `wmr_companion`, a native visionOS app scaffold ( and ), and CI scanning with CodeQL, OSV and MobSF ( and ). It removes the GATT latency probe. The 0.3.17 Semgrep, gitleaks and Dependabot scans remain, as do the six-run pose-filter corpus, the 0.3.16 Android XR gate and vendor-player guard, the 0.3.15 six-run pose capture protocol, the 0.3.14 `unity-export-1.4` head-pose path, Bench skeleton and stereo panes ( /  / ).
+This is the signed (project-key) cut at commit `136be00`. It adds pure-Dart LAN discovery in `wmr_ws`, a `CompositeBleTransport` TCP-to-BLE fallback in `wmr_companion`, a native visionOS app scaffold, and CI scanning with CodeQL, OSV and MobSF. It removes the GATT latency probe. The 0.3.17 Semgrep, gitleaks and Dependabot scans remain, as do the six-run pose-filter corpus, the 0.3.16 Android XR gate and vendor-player guard, the 0.3.15 six-run pose capture protocol, the 0.3.14 `unity-export-1.4` head-pose path, Bench skeleton and stereo panes.
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor

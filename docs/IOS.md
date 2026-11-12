@@ -46,7 +46,7 @@ Building a low-latency companion client on iOS requires handling several CoreBlu
 1. **MTU Negotiation**:
    - Unlike Android, iOS applications cannot explicitly request a target ATT MTU (such as MTU 517).
    - CoreBluetooth automatically negotiates MTU during initial service and characteristic discovery (typically 185 bytes on older devices, up to 517 bytes on modern hardware).
-   - `WMRCompanionKit` queries `peripheral.maximumWriteValueLength(for:.withoutResponse)` and adjusts packet chunking dynamically.
+   - `WMRCompanionKit` queries `peripheral.maximumWriteValueLength(for: .withoutResponse)` and adjusts packet chunking dynamically.
 2. **Connection Parameters & Interval**:
    - iOS controls connection intervals autonomously through its Apple Bluetooth Accessory Design Guidelines (typically 15 ms to 30 ms). The app cannot directly request `CONNECTION_PRIORITY_HIGH`.
    - Latency tests (`WMREcho`) measure actual observed round-trip times and quantize them against the underlying connection interval.

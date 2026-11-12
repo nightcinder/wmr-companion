@@ -1,7 +1,7 @@
 # Unified VITURE + XREAL Unity project
 
 One Unity 6000.0 project, one `WmrTrackingRelay` object and one dispatching
-bridge for both vendors. This is the  prototype for shipping both SDKs
+bridge for both vendors. This is the prototype for shipping both SDKs
 in a **single** `unityLibrary`. The per-vendor projects in
 `packages/wmr_tracking_viture/unity` and `packages/wmr_tracking_xreal/unity`
 stay in place and remain the source of truth for their scripts; their Runtime
@@ -9,7 +9,7 @@ folders are copied into this project and kept byte-identical by a sync check.
 
 The `v0.2.1` release shipped a real export from this project and the `unified`
 Android APK built from it ( owner export build); there has still
-been no device run. The per-vendor  flavors were retired in ;
+been no device run. The per-vendor flavors were retired;
 `base` is the no-Unity fallback.
 
 No proprietary SDK, no Unity install and no hardware are used by this
@@ -31,7 +31,7 @@ what feeds 6DoF head poses to the player camera. `ConfigureUnifiedXr` still
 pins OpenGLES3 so a standalone or stale player cannot take the Vulkan stop
 path, and a non-GLES3 player also falls back to hand-only. Both live in
 `unity/Assets`, so they reach a device only through a rebuilt export. The
-pinned `unity-export-1.4` was built from merge commit `35d8015`  and
+pinned `unity-export-1.4` was built from merge commit `35d8015` and
 carries both the hand-only gate and the input-subsystem start; its
 `packages/wmr_tracking_unity` subtree matches `main` at `94573b2`. The earlier
 `unity-export-1.3` carries the gate but starts only the hand subsystem, so
@@ -223,7 +223,7 @@ minimal Unity/XR Management stubs:
 packages/wmr_tracking_unity/tool/test_dispatch.sh
 ```
 
-Requires the.NET 8 SDK. It:
+Requires the .NET 8 SDK. It:
 
 - runs `tool/sync_vendor_unity_runtime.sh --check`;
 - compiles the unified bridge plus both copied vendor bridges in the Android

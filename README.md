@@ -31,7 +31,7 @@ A fake bridge (raw and decoded) drives tests without hardware. The app only conn
 ```
 cd apps/wmr_companion_app
 flutter pub get
-dart format --set-exit-if-changed.
+dart format --set-exit-if-changed .
 flutter analyze
 flutter test
 ```

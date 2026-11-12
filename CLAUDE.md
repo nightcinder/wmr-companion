@@ -5,7 +5,7 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
 ## Architecture rules
 - The repo is structured as federated packages (`packages/wmr_core`, `packages/wmr_companion` facade, `packages/wmr_ble`, `packages/wmr_ws`, `packages/wmr_fusion`, `packages/wmr_companion_ui`, `packages/wmr_companion_hid_android`, `packages/wmr_tracking`, `packages/wmr_tracking_dispatch`, `packages/wmr_tracking_android_xr`, `packages/wmr_tracking_viture`, `packages/wmr_tracking_xreal`, `packages/WMRCompanionKit`, `apps/wmr_visionos_app`, `example/`). The app under `apps/wmr_companion_app` (`wmr_companion_app`) is the reference consumer driving its real connection through the facade or ControllerService.
 - Layers: UI -> Riverpod state -> `WmrCompanion` facade (`packages/wmr_companion`) -> `ControllerService` (`packages/wmr_core`) -> (protocol parsers in `packages/wmr_core` + `BleTransport`).
-- `BleTransport` is an abstract interface living in `packages/wmr_core`. Implementations: `UniversalBleTransport` in `packages/wmr_ble` (default on Android/iOS for BLE), `WmrWsTransport` in `packages/wmr_ws` (WebSocket transport for Linux/Pi Wi-Fi daemon; host-tested/loopback-only), `WmrWsDiscovery` for LAN discovery of Pi bridges, `CompositeBleTransport` in `packages/wmr_companion` (opt-in TCP-first with BLE GATT fallback), `FakeTransport` in `packages/wmr_companion/testing.dart` (tests/UI dev), and native CoreBluetooth via `packages/WMRCompanionKit` (iOS). `BleTransport` is GATT-shaped, but its name is settled for 0.1.0: the owner decided on  to keep it (it wraps third-party libraries). Keep it swappable.
+- `BleTransport` is an abstract interface living in `packages/wmr_core`. Implementations: `UniversalBleTransport` in `packages/wmr_ble` (default on Android/iOS for BLE), `WmrWsTransport` in `packages/wmr_ws` (WebSocket transport for Linux/Pi Wi-Fi daemon; host-tested/loopback-only), `WmrWsDiscovery` for LAN discovery of Pi bridges, `CompositeBleTransport` in `packages/wmr_companion` (opt-in TCP-first with BLE GATT fallback), `FakeTransport` in `packages/wmr_companion/testing.dart` (tests/UI dev), and native CoreBluetooth via `packages/WMRCompanionKit` (iOS). `BleTransport` is GATT-shaped, but its name is settled for 0.1.0: the owner decided to keep it (it wraps third-party libraries). Keep it swappable.
 - Protocol parser is pure Dart in `packages/wmr_core` (no Flutter, Riverpod, or plugin imports; verified by CI grep) and unit tested with golden byte arrays.
 - Timestamp notifications with a monotonic `Stopwatch` at the transport boundary (`wmr_ble`).
 - Never compare ESP32 timestamps with the phone clock; use inter-arrival deltas and sequence numbers. For FF12/FF14, the time step comes from `device_ticks` (100 ns), not from arrival time.
@@ -18,7 +18,7 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
 ## Commands
 - App (`apps/wmr_companion_app`; run these from that directory):
   - `flutter pub get`
-  - `dart format --set-exit-if-changed.`
+  - `dart format --set-exit-if-changed .`
   - `flutter analyze`
   - `flutter test`
   - `flutter run --flavor base -d <device>` (BLE needs a physical phone; emulators do not work)

@@ -108,7 +108,7 @@ dependencies:
 
 dependency_overrides:
   wmr_core:
-    path:../wmr_core
+    path: ../wmr_core
 ```
 
 **Drawbacks:**

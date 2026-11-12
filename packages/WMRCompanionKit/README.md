@@ -110,7 +110,7 @@ client.controllerStatusPublisher
 
 client.readControllerStatus()
 try client.sendControllerCommand(.discover)
-try client.sendControllerCommand(.connect, hand:.left)
+try client.sendControllerCommand(.connect, hand: .left)
 ```
 
 ### 5. Dual-Bridge Setup (Zero Contention)

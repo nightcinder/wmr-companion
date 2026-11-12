@@ -22,9 +22,9 @@ selects the vendor source for them. No vendor adapter has run on hardware (see
 The reference app depends on the packages through the workspace and drives its
 real connection through `ControllerService`. `example/` is a minimal Flutter host
 that uses the facade. `BleTransport` is GATT-shaped. Its name is settled for
-`0.1.0` and later. The owner decided on  to keep it, so no rename is made.
+`0.1.0` and later. The owner decided to keep it, so no rename is made.
 
-**Release status (owner, 2026-10-23 on ).** `0.3.0` is **not published**
+**Release status (owner, 2026-10-23).** `0.3.0` is **not published**
 to pub.dev. Publication is on hold. The iOS 18 device gate (phase 5) is
 **waived for this release line**. This release ships without iOS hardware
 evidence. That waives the gate, not the fact: **nothing here has been run on
@@ -111,7 +111,7 @@ framework.
 ## 3. What is reusable today
 
 Inventory as it stood before phase 1 (imports checked; see
-`grep '^import.package:' lib`). Protocol, domain, `BleTransport`, the controller
+`grep '^import .package:' lib`). Protocol, domain, `BleTransport`, the controller
 service and the pure services have since moved to `packages/wmr_core/`; the
 paths below are the original ones, quoted in the rest of the document where the
 plan was written:
@@ -464,7 +464,7 @@ the directory move changed paths, not imports.
   (recommend `vector_math`'s `Quaternion`/`Vector3`), and keep the conversion at
   the fusion boundary. Do not leak two quaternion types to consumers.
 - **Minimum platforms:** Android `minSdk` per `universal_ble`; iOS 18 is the
-  floor, as decided by the owner on. Revisit only if it blocks a specific
+  floor, as decided by the owner. Revisit only if it blocks a specific
   target; a library with a high floor is an adoption tax.
 - **No plugin leakage:** `path_provider`, `share_plus` and `permission_handler`
   stay in the app or in optional packages. Core services take a `Directory` or
@@ -634,7 +634,7 @@ import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
-final tcp = WmrWsTransport(endpoints: const, enableDiscovery: true);
+final tcp = WmrWsTransport(endpoints: const [], enableDiscovery: true);
 final ble = UniversalBleTransport(adapter: UniversalBleAdapter());
 final transport = CompositeBleTransport(tcp: tcp, ble: ble);
 

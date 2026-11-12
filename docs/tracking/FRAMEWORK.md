@@ -170,7 +170,7 @@ cd packages/wmr_tracking && dart test
 cd packages/wmr_tracking_android_xr && flutter test && flutter analyze
 cd apps/wmr_companion_app && flutter analyze && flutter test
 cd apps/wmr_companion_app && tool/build_flavor.sh base
-cd apps/wmr_companion_app/android &&./gradlew :wmr_tracking_android_xr:testDebugUnitTest
+cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_android_xr:testDebugUnitTest
 ```
 
 The APK build and the Kotlin unit test are compile/host gates, not hardware results. The 26-joint fixture and every error path are synthetic. The remaining hardware questions are unchanged: permission prompts and `SPATIAL` support on a real headset/glasses, joint and head rates, whether a gripping hand is tracked, and the BLE/pose relay latency.
@@ -204,7 +204,7 @@ cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_viture && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
 cd apps/wmr_companion_app && tool/build_flavor.sh unified
-cd apps/wmr_companion_app/android &&./gradlew :wmr_tracking_viture:testDebugUnitTest
+cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_viture:testDebugUnitTest
 ```
 
 Explicit unknowns and SDK-bound gates:
@@ -239,7 +239,7 @@ cd packages/wmr_tracking && dart analyze && dart test
 cd packages/wmr_tracking_xreal && flutter analyze && flutter test
 cd apps/wmr_companion_app && flutter analyze && flutter test
 cd apps/wmr_companion_app && tool/build_flavor.sh unified
-cd apps/wmr_companion_app/android &&./gradlew :wmr_tracking_xreal:testDebugUnitTest
+cd apps/wmr_companion_app/android && ./gradlew :wmr_tracking_xreal:testDebugUnitTest
 ```
 
 Explicit unknowns and SDK-bound gates:

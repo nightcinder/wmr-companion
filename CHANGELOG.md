@@ -79,7 +79,7 @@ WMR Companion release, paired with WMR_Bridge `v0.3.15`.
   link and falls back to BLE GATT, retrying TCP every 2 seconds. The fallback
   is opt-in for library hosts; the reference app still connects through the
   WebSocket transport directly. It is not yet tested on hardware and is
-  waiting on.
+  waiting.
 - The Pi TCP/BLE fallback contract and LAN discovery are documented in
   `docs/LIBRARY.md` and `packages/wmr_ws/README.md`.
 - A native visionOS app is scaffolded with an ARKit tracking seam, a SwiftUI

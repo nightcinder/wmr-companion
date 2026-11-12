@@ -44,7 +44,7 @@ Discovery is opt-in and needs no plugin:
 
 ```dart
 final transport = WmrWsTransport(
-  endpoints: const,
+  endpoints: const [],
   enableDiscovery: true, // or inject WmrWsDiscovery(timeout:...)
 );
 ```

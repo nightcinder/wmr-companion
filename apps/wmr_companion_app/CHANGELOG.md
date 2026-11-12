@@ -69,7 +69,7 @@
   `CompositeBleTransport` keeps one logical connection: TCP first, BLE GATT as
   fallback, and a retry every 2 seconds to move back to TCP. The fallback is opt-in for library hosts; the reference app still
   connects through the WebSocket transport directly. It is not yet tested on
-  hardware; that test is waiting on.
+  hardware; that test is waiting.
 - `docs/LIBRARY.md` and `packages/wmr_ws/README.md` document the Pi TCP/BLE
   fallback contract and library discovery.
 - The native visionOS app is scaffolded with an ARKit tracking seam, a SwiftUI

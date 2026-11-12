@@ -98,7 +98,7 @@ Future<void> run(BleTransport transport) async {
     }),
   ];
 
-  //... use the streams...
+  // ... use the streams ...
 
   for (final sub in subs) {
     await sub.cancel();

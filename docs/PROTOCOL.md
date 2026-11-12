@@ -211,7 +211,7 @@ Not done, deliberately:
 - **The XOR key table is not in this repository.** It is Monado's
   `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0) and is
   fetched, not committed: from `apps/wmr_companion_app`, run
-  `dart run../../tool/fetch_wmr_config_key.dart` once
+  `dart run ../../tool/fetch_wmr_config_key.dart` once
   (or `--file` with a downloaded header); it writes the gitignored
   `apps/wmr_companion_app/assets/monado/wmr_config_key.bin`, which the app
   bundles on the next build.

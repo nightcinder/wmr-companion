@@ -22,7 +22,7 @@ import 'package:wmr_companion/wmr_companion.dart';
 
 final transport = UniversalBleTransport(adapter: UniversalBleAdapter());
 final wmr = WmrCompanion(ble: transport);
-// initialize, scan, connect, streams, dispose...
+// initialize, scan, connect, streams, dispose ...
 ```
 
 `UniversalBleTransport` runs the bridge sequence: link, MTU request (records
