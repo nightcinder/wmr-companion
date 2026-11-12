@@ -236,7 +236,7 @@ Six runs is one position, one phone, one session; the 2026-10-24 pass covers the
 The library package split is merged through phase 4. Phase 5 is the first real
 iOS evidence and needs a device; it is not a CI-only result.
 
-**Status: not run : waived by the owner on 2026-10-23 for the `0.1.0`
+**Status: not run.** Waived by the owner on 2026-10-23 for the `0.1.0`
 release line.** The steps below stay the sheet for any release that claims iOS
 support; this release does not have that evidence.
 

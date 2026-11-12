@@ -34,7 +34,7 @@ measurements do not exist.
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
 [PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions), and
-[IOS.md](IOS.md) with the native `WMRCompanionKit` from (PR #37).
+[IOS.md](IOS.md) with the native `WMRCompanionKit` from PR #37.
 
 ## 1. Decision in one page
 
@@ -320,7 +320,7 @@ WmrCompanion
 subscribe → `Stream<Uint8List>` with arrival timestamp, write, disconnect, plus
 MTU/RSSI/connection info. The native transports and `WmrWsTransport` implement the same interface;
 nothing above knows which one is in use. Note that `BleTransport` is GATT-shaped, but its
-name is settled for `0.1.0` (owner decision on ); no rename.
+name is settled for `0.1.0` (owner decision); no rename.
 
 **Phase 1 (lowest risk): `universal_ble` on both platforms.** The Dart pipeline
 already runs on Android at ~200 Hz per hand. On iOS, `universal_ble` uses
@@ -399,7 +399,7 @@ wmr-companion/
   packages/
     wmr_core/                    # phase 1: pure Dart (landed)
     wmr_fusion/                  # existing, kept pure Dart (landed)
-    wmr_tracking/                # : head/hand tracking seam + 6DoF fusion
+    wmr_tracking/                # head/hand tracking seam + 6DoF fusion
     wmr_ble/                     # phase 3: universal_ble transport, link status, lifecycle hook (landed)
     wmr_ws/                      # M14.1: WebSocket transport for Linux/Pi Wi-Fi daemon (landed)
     wmr_companion/               # phase 2: umbrella facade (landed)
@@ -522,7 +522,7 @@ Sequencing notes:
   symbol is removed without a major version bump (optional, later).
 - **Platform CI:** Linux format/analyze/test for packages and app; Android
   debug APK; macOS `swift test` for `WMRCompanionKit` and
-  `flutter build ios --config-only --no-codesign` (already added by ).
+  `flutter build ios --config-only --no-codesign` (already added).
 - **Hardware checks stay with the owner.** The library README must say what was
   and was not run on hardware, and keep the existing "user-reported" rule.
 - **Latency decision rule:** reuse `docs/LATENCY.md` / the M7.2 run sheet to
@@ -552,7 +552,7 @@ Sequencing notes:
    `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
    `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` (now `0.3.0`) is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
-   straight to the  `WMRCompanionKit` transport on iOS? : **settled that
+   straight to the `WMRCompanionKit` transport on iOS? : **settled that
    `universal_ble` is the v1 transport on both platforms. It is still
    unmeasured on iOS because the device run was waived, so "measure" remains
    open for any later release.**
@@ -566,9 +566,8 @@ Sequencing notes:
    also need a non-Flutter SDK (then the native kits become products too)?
 
 Settled: **iOS 18 is the minimum** (owner). **Android and iOS are both
-in v1 scope** (owner, 2026-10-23 on ). **Publication to pub.dev is the
-release target and `0.1.0` (now `0.3.0`) is held for now** (owner and 2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
-2026-10-23 on ).
+in v1 scope** (owner, 2026-10-23). **Publication to pub.dev is the
+release target and `0.1.0` (now `0.3.0`) is held for now** (owner, 2026-10-23). **The iOS 18 device gate is waived for this release line** (owner, 2026-10-23).
 
 ## 14. What this framework does not claim
 

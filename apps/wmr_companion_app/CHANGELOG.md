@@ -77,7 +77,7 @@
   are documented.
 - The GATT latency probe is retired; its tool and release packaging are
   removed.
-- CI adds CodeQL and OSV dependency scanning with SARIF to code scanning , and scans the published APK with MobSF plus a native-library
+- CI adds CodeQL and OSV dependency scanning with SARIF to code scanning, and scans the published APK with MobSF plus a native-library
   inventory diff against the previous release.
 - Paired with WMR_Bridge `v0.3.15`, which adds the Pi bridge, the 5 GHz
   preference and keep-alive.

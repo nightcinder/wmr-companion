@@ -4,7 +4,7 @@ Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR mot
 
 The pipeline is split into twelve packages that other apps can import on Android and iOS. The app is the reference consumer. A native Swift framework covers iOS 18+, macOS 12+, and visionOS 1+.
 
-Current release: v0.3.19 (signed unified Android APK). It is paired with WMR_Bridge v0.3.15. See [docs/STATUS.md](docs/STATUS.md) for state, hardware results, and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
+Current release: v0.3.23 (signed unified Android APK). The in-app bridge upgrade needs a WMR_Bridge build with `upgradeCapable`. See [docs/STATUS.md](docs/STATUS.md) for state, hardware results, and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
 
 ## What is in the app
 

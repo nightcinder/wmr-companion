@@ -114,7 +114,7 @@ Official docs: [Rokid Open Platform](https://open.rokid.com/), [SDK selection](h
 
 Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glasses-sdk/glasses) and [VITURE XR SDK for Unity](https://www.viture.com/developer/unity-sdk/unity).
 
-> **Current SDK note :** current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The 0.7.0 API names and findings below are kept as the research record.
+> **Current SDK note:** current code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1. The 0.7.0 API names and findings below are kept as the research record.
 
 ### C glasses SDK
 
@@ -146,7 +146,7 @@ Official docs: [VITURE XR Glasses SDK (C)](https://www.viture.com/developer/glas
 
 **Companion path:** two VITURE adapters, in preference order.
 1. **Neckband + embedded Unity (implemented in `wmr_tracking_viture`, default off).** Flutter app on the Pro Neckband, Unity 6000.0+ UaaL module with the VITURE XR SDK (`com.viture.xr` v0.9.0; v0.7.0 historical) and `com.unity.xr.hands`, `UnitySendMessage` for `UnityRelayCommand`s (`start`, `stop`, `dispose`, `recenter`, `configure`) and a JNI/`AndroidJavaClass` callback (`WmrTrackingViturePlugin.onUnityFrame`) streaming `TrackingFrame` JSON back to Dart. Head recentering delegates to `VitureXR.HeadTracking.SetWorldOrigin()`. Only `LumaUltra` advertises 6DoF head and 26-joint hand tracking; 3DoF glasses (`One`, `OneLite`, `Pro`, `Pro2`, `Luma`, `LumaPro`, `LumaCyber`, `Beast`) and unreported glasses models are rejected as `unsupported` for hand tracking. Enable with `--dart-define=WMR_VITURE_TRACKING=true`.
-2. **C SDK over FFI (head only, out of scope for ).** Wrap `libglasses` on the phone; poll `get_gl_pose_carina` or register the IMU callback. It gives head pose but no hands, so it lands on the head-relative fallback. The stereo grayscale feed is interesting for future LED tracking but not usable yet: 25 Hz, unknown IR sensitivity, and no calibration or extrinsic documentation in what was read.
+2. **C SDK over FFI (head only, out of scope).** Wrap `libglasses` on the phone; poll `get_gl_pose_carina` or register the IMU callback. It gives head pose but no hands, so it lands on the head-relative fallback. The stereo grayscale feed is interesting for future LED tracking but not usable yet: 25 Hz, unknown IR sensitivity, and no calibration or extrinsic documentation in what was read.
 
 
 ## Comparison

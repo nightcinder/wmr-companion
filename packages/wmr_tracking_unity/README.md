@@ -134,7 +134,7 @@ Keeping them inactive prevents either vendor's `Awake` from running before the
 host selects it. A host that puts a vendor bridge on the relay object itself
 loses that guarantee.
 
-The scene is also the minimal VITURE stereo screen : the Main Camera
+The scene is also the minimal VITURE stereo screen: the Main Camera
 carries `WmrStereoCameraRig`, keeps `stereoTargetEye = Both`, and can build
 three depth markers at 1.5/2.5/3.5 m so a tester can see whether both eyes get
 a coherent 3D image. The markers are opt-in and off by default because their
@@ -279,8 +279,7 @@ both SDKs coexist in one build.
    packaged. Whether that is harmless is unknown.
 7. **Kotlin dispatch.** This project only dispatches inside Unity. The host
    still needs both vendor Flutter plugin Kotlin classes in one app and an
-   app-level selection path; that is out of scope here (a separate issue) and
-   depends on.
+   app-level selection path; that is out of scope here (a separate issue).
 8. **Glasses detection.** Unity does not auto-detect the vendor. The Kotlin
    host must detect the glasses and send the correct `vendor`; `auto` is
    intentionally rejected.

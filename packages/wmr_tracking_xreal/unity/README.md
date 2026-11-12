@@ -74,7 +74,7 @@ keep generated Gradle changes.
 
 ## What the smoke scene does
 
-- Can send the same `start()` envelope as `XrealRelayCommandBuilder.start` via
+- Can send the same `start()` envelope as `XrealRelayCommandBuilder.start()` via
   `SendStart()`, or on editor Play when `autoStart` is enabled. Player builds
   never send it.
 - Subscribes to `XrealTrackingRelayBridge.FrameEmitted`, logs the first full

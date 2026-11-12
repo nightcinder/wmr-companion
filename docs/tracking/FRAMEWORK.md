@@ -127,7 +127,7 @@ The reference app's debug screen shows `ControllerPoseView` for the selected han
 2. Export with Unity as a Library and add the `unityLibrary` module to the Flutter plugin's Gradle build. One Unity runtime per process, full-screen only.
 3. Kotlin starts/stops the player and sends commands with `UnityPlayer.UnitySendMessage(go, "OnCommand", json)`; C# receives `void OnCommand(string)`.
 4. C# sends poses back through a Kotlin callback (JNI/`AndroidJavaProxy`) as one `TrackingFrameCodec` JSON string per sample. The plugin forwards it on an event channel.
-5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor:...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction : it is string-only, one-way, one frame late.
+5. Dart adapts the channel to `RelayTrackingSource(messages: channelStream, vendor:...)`; the facade aligns the timestamp. Do not use `UnitySendMessage` for the return direction: it is string-only, one-way, one frame late.
 6. Keep the Unity scene tracking-only. It must not own BLE or the gamepad mapping; that stays in Dart.
 
 **VITURE C SDK (head pose only, no Neckband).**

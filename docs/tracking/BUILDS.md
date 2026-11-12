@@ -1,4 +1,4 @@
-# Build matrix : tracking flavors (v0.3.19)
+# Build matrix: tracking flavors
 
 Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.sh`,
 `apps/wmr_companion_app/tool/install_unity_export.sh`,
@@ -6,7 +6,7 @@ Companion app Android builds. Source: `apps/wmr_companion_app/tool/build_flavor.
 `apps/wmr_companion_app/android/settings.gradle.kts`. No build here has been run on
 hardware; these are compile/packaging facts only.
 
-## Current release: v0.3.19 unified APK
+## Last documented release: v0.3.19 unified APK
 
 | Item | Value |
 |---|---|

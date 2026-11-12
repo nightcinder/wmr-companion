@@ -38,7 +38,7 @@ black screen. The `unified` flavor manifest in
 `android/app/src/unified/` removes those filters with `tools:node="remove"` and
 sets `android:exported="false"` (`tools:replace`) on the Unity and XREAL player
 activities. An exported player activity still lets the Neckband launcher start
-the bare Unity scene after a crash, with no Flutter UI and no loader command , so keep both overrides when upgrading a vendor SDK. Check the built
+the bare Unity scene after a crash, with no Flutter UI and no loader command, so keep both overrides when upgrading a vendor SDK. Check the built
 APK:
 
 ```sh
@@ -107,7 +107,7 @@ cp -R packages/wmr_tracking_unity/unity/Build/Android/unityLibrary \
 A manual copy needs the same edits the installer makes to
 `unityLibrary/build.gradle` and `unityLibrary/src/main/AndroidManifest.xml`,
 because Unity generates those files for a module named `:unityLibrary` on the
-exporting machine :
+exporting machine:
 
 - remove `apply from: '../shared/keepUnitySymbols.gradle'` (the zip has no
   sibling `shared/` directory);

@@ -9,7 +9,7 @@ into it; without it those steps report `sdkUnavailable`.
 | Item | Value |
 |---|---|
 | SDK | VITURE XR Glasses SDK for Android 2.4.1 |
-| Archive | `VITURE_XR_Glasses_SDK_for_Android.zip` (link supplied by the owner in ) |
+| Archive | `VITURE_XR_Glasses_SDK_for_Android.zip` (link supplied by the owner) |
 | Vendored ABI | `arm64-v8a` only |
 | `libglasses.so` size | 2,076,360 bytes |
 | `libglasses.so` SHA-256 | `8ac615769b76cfe6fa05354b73048117f3d6ba2f54fef5b6ea6b128cbb2eb0a3` |

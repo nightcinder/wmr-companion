@@ -83,7 +83,7 @@ keep generated Gradle changes.
 
 ## What the smoke scene does
 
-- Can send the same `start()` envelope as `VitureRelayCommandBuilder.start`
+- Can send the same `start()` envelope as `VitureRelayCommandBuilder.start()`
   (`filter_mode=responsive`, `aim_sensitivity=high`) via `SendStart()`, or on
   editor Play when `autoStart` is enabled. Player builds never send it.
 - Subscribes to `VitureTrackingRelayBridge.FrameEmitted`, logs the first full

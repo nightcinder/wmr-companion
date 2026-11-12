@@ -1,4 +1,4 @@
-# External tester quickstart: WMR Companion v0.3.19
+# External tester quickstart: WMR Companion v0.3.23
 
 Three setups, 20-40 minutes. Android 13+ host (phone, Neckband, or headset). The bridge steps are for the ESP32 bridge. The Raspberry Pi bridge is still in development.
 
@@ -24,15 +24,15 @@ Android XR hand tracking runs on the headset. It requests `CAMERA`, `SCENE_UNDER
 
 ### URXR One day-one checks
 
-URXR One connects to the host phone over USB-C. Day-one checks need no paired controllers or bridge. They need an app build from `main` after commit `75655c8` (the device environment probe). v0.3.19 does not include it. The app captures USB identities, display metrics, and OpenXR features into `device_environment.json` inside the diagnostic bundle.
+URXR One connects to the host phone over USB-C. Day-one checks need no paired controllers or bridge. The device environment probe is in v0.3.20 and later, so the current release includes it. The app captures USB identities, display metrics, and OpenXR features into `device_environment.json` inside the diagnostic bundle.
 
 ## 1. Get the APK
 
-https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk
+https://github.com/nightcinder/wmr-companion/releases/download/v0.3.23/wmr-companion-0.3.23-unified-arm64-v8a.apk
 
-SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/SHA256SUMS
+SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.23/SHA256SUMS
 
-Confirm the v0.3.19 release exists and the installed APK reports `versionName` 0.3.19 before testing. If it reports 0.3.18, record it and stop.
+Confirm the v0.3.23 release exists and the installed APK reports `versionName` 0.3.23 before testing. If it reports 0.3.22, record it and stop.
 
 One APK carries VITURE and XREAL and runs on a Galaxy XR. Uninstall an older WMR Companion first: `adb uninstall com.onyxlens.wmr_companion` or app settings.
 
@@ -92,11 +92,11 @@ Stereo check (VITURE, setup B). The Unity player must render stereo 3D (SpaceWal
 Capture 6DoF pose. Appears only while the glasses report hand tracking. It records six short runs: still, held drifting, slow pan, medium pan, fast flick, and one occlusion check. Each lasts 15-20 s; the step takes about 1.5 min and alternates hands. Brace your arm for still. For drifting, hold as if aiming and let the hand wander. Pan 30 cm in 3 s for slow, 50 cm in 1 s for medium, flick 45 cm in 0.3 s for fast. Hide the hand for a second or two for occlusion. Skipped runs are recorded as skipped, and the files are in the bundle.
 
 - 6C: PSVR2 Sense (experimental). Support is on by default and compiled into every image, but it has never run on a controller: treat it as data collection, not pass/fail. Pair as in section 4; the app labels it `PSVR2`. PSVR2 is raw-only: FF11 carries `0xA1 0x31` frames up to 79 bytes; FF12/FF14 have no PSVR2 decoder, FF13 is not read, and the 3D view may show nothing. Use FF11 raw and the serial log. Record `model PSVR2`, the wake line, and the first report's `frame_len`. One retry only.
-- 6D: Luma Ultra + Pro Neckband black right eye. On older builds the app draws only in the left eye of the 32:9 (3840x1080) viewport. v0.3.9 and later mirror both eyes. If v0.3.19 still shows a black right eye, record a regression.
+- 6D: Luma Ultra + Pro Neckband black right eye. On older builds the app draws only in the left eye of the 32:9 (3840x1080) viewport. v0.3.9 and later mirror both eyes. If v0.3.23 still shows a black right eye, record a regression.
   1. Switch the glasses to 2D mode with the glasses 2D/3D button; the app fills the view.
   2. In 3D mode use the Neckband controls: short Volume Up/Down move the focus ring, hold Volume Down selects, hold Volume Up goes back. With headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. Do not use ADB to inject touches.
   3. Switch back to 3D before Capture 6DoF pose, which needs stereo.
-- 6E: Neckband 0DoF / 6DoF triage. On older builds the app could open and drop to 0DoF with **6DoF only** greyed out. If the app still shows 0DoF on v0.3.19, record the status line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
+- 6E: Neckband 0DoF / 6DoF triage. On older builds the app could open and drop to 0DoF with **6DoF only** greyed out. If the app still shows 0DoF on v0.3.23, record the status line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
 
 Mirroring the screen (6D and 6E). Do not use Android Studio Device Mirroring, and do not use plain `scrcpy`: the Neckband exposes an empty virtual Display 5 (`SYSTEM_NOTIFICATION_VD`) that the tools attach to, while the real UI is on Display 3, which excludes touch. View only with `scrcpy --display-id=3`. Drive the app with the physical Volume Up/Down keys, headgaze, the phone Neckband Remote app, or a paired Bluetooth controller.
 
@@ -124,7 +124,7 @@ Zip the exported files plus the intake block. Send in the thread where you recei
 - Handle:
 - Date/timezone:
 - Firmware: 0.3.5
-- App: <versionName from ADB> unified (signed release) (expected 0.3.19, or a build after the device environment probe for URXR One)
+- App: <versionName from ADB> unified (signed release) (expected 0.3.23)
 - Host: Neckband / Android XR headset / URXR One / phone (make/model/OS)
 - Phone: make/model/Android
 - Controllers: make/model (WMR / PSVR2), or none

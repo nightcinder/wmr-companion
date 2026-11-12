@@ -76,7 +76,7 @@ remain supported as an override.
 | `connectionInfo().mtu` | `hello.fragmentCapacity` (raw fragment value size) |
 | `connectionInfo().rssi`, `.connectionIntervalUs`, `.phy` | **null**: a WebSocket has no link-layer measurements |
 | `scan` | configured endpoints, then UDP/mDNS discoveries when enabled |
-| FF11 status() read | not synthesized; use `WmrWsTransport.status` |
+| FF11 status read | not synthesized; use `WmrWsTransport.status()` |
 | FF13 calibration | **not implemented by the daemon**; absent from `discoverServices`, and `read`/`write` throw `WmrWsUnsupportedException` |
 
 `ConfigClient` already treats an absent FF13 characteristic as
