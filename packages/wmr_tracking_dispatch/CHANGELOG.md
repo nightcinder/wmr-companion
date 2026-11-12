@@ -8,7 +8,7 @@
   construct the vendor Unity player on one. Google Aura exposes the headset as
   XREAL USB `0x3318:0x043A`, so dispatch selected XREAL and started the shared
   Unity player; loading the player reached VITURE's Android plugin, which
-  crashed on the missing `android.viture.xr.XRManager` class (ONY-879).
+  crashed on the missing `android.viture.xr.XRManager` class .
 - Migrate the Android plugin to AGP 9 built-in Kotlin: drop the Kotlin Gradle Plugin classpath and `org.jetbrains.kotlin.android`, and require Flutter 3.44 or later.
 
 ## 0.2.2

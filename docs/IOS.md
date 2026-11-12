@@ -55,7 +55,7 @@ Building a low-latency companion client on iOS requires handling several CoreBlu
    - Subscribing to one while another is active returns ATT error `0x80` (`attErrorOtherStreamActive`).
    - `WMRBleCentralManager` strictly handles this transition: whenever changing stream modes, it writes `0x0000` to disable the active CCC before enabling the target stream's CCC.
 4. **Nanosecond Arrival Stamping**:
-   - To separate BLE delivery and OS queueing jitter from application processing, `WMRBleCentralManager` captures `DispatchTime.now().uptimeNanoseconds` at the very first line of `peripheral(_:didUpdateValueFor:error:)`.
+   - To separate BLE delivery and OS queueing jitter from application processing, `WMRBleCentralManager` captures `DispatchTime.now.uptimeNanoseconds` at the very first line of `peripheral(_:didUpdateValueFor:error:)`.
 
 ## 3. `WMRCompanionKit` Swift Package
 

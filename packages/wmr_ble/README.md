@@ -20,7 +20,7 @@ dependencies:
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_companion/wmr_companion.dart';
 
-final transport = UniversalBleTransport(adapter: UniversalBleAdapter());
+final transport = UniversalBleTransport(adapter: UniversalBleAdapter);
 final wmr = WmrCompanion(ble: transport);
 // initialize, scan, connect, streams, dispose ...
 ```
@@ -47,8 +47,7 @@ final listener = AppLifecycleListener(
     AppLifecycleState.paused => BleAppLifecycle.paused,
     AppLifecycleState.detached => BleAppLifecycle.detached,
     AppLifecycleState.hidden => BleAppLifecycle.inactive,
-  }),
-);
+  }));
 ```
 
 An inactive/paused/detached host stops scanning; a resumed host restarts the

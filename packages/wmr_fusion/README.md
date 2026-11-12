@@ -18,10 +18,10 @@ filter.update(
 );
 
 final q = filter.orientation;    // body -> world, unit quaternion
-final e = q.toEuler();           // (yaw, pitch, roll) in radians
+final e = q.toEuler;           // (yaw, pitch, roll) in radians
 
-filter.resetYaw();               // zero heading, keep tilt
-filter.reset();                  // re-seed tilt from the next accel sample
+filter.resetYaw;               // zero heading, keep tilt
+filter.reset;                  // re-seed tilt from the next accel sample
 print(filter.skippedUpdates);    // samples rejected (bad dt, non-finite input)
 ```
 
@@ -49,7 +49,7 @@ print(filter.skippedUpdates);    // samples rejected (bad dt, non-finite input)
 
 ## Not handled
 
-- No magnetometer: yaw has no absolute reference and drifts. Use `resetYaw()` to re-zero it.
+- No magnetometer: yaw has no absolute reference and drifts. Use `resetYaw` to re-zero it.
 - No calibration: gyro bias (beyond Mahony's slow integral estimate), scale and sensor-axis mapping must be applied before calling `update`.
 - Sustained linear acceleration (swinging the controller) corrupts the gravity reference and briefly bends tilt.
 - No timestamp handling; the caller supplies dt.

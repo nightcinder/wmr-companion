@@ -1,10 +1,10 @@
-# Release signing (ONY-492; key rotated in ONY-493)
+# Release signing (; key rotated in )
 
 External-tester APKs are signed with a project-owned key so that every build
 installs over the previous one and `apksigner` reports a single, stable
 certificate instead of `CN=Android Debug`.
 
-The ONY-492 key was regenerated in ONY-493 before any tester build was
+The  key was regenerated in  before any tester build was
 distributed: its store and key passwords were not recoverable, so every release
 build failed at signing. The current key uses a random store password and a
 separate key password, both kept in Paperclip secrets. Two release APKs from
@@ -25,8 +25,8 @@ described in [Installing a release APK](#installing-a-release-apk).
 | Certificate SHA-256 | `BD:AA:32:B5:1A:D3:AF:D2:67:D0:F8:0F:28:A4:73:B8:53:19:F8:C3:7E:26:28:9C:F1:DC:1F:F7:CF:AA:E2:56` |
 | Password secrets | store password: Paperclip `wmr-companion/release-store-password`; key password: Paperclip `wmr-companion/release-key-password` |
 
-The keystore file is attached to the ONY-493 task for the owner's offline
-backup (the ONY-492 attachment is the superseded first key). It is not part of
+The keystore file is attached to the  task for the owner's offline
+backup (the  attachment is the superseded first key). It is not part of
 the repository.
 
 ## Configuration
@@ -105,7 +105,7 @@ Since 0.3.3 debug builds use the `com.onyxlens.wmr_companion.debug` package
 longer has to be removed before the release APK installs, and both can stay
 installed side by side. Release APKs share one key and update in place.
 
-## CI release: tag to downloadable APK (ONY-493, ONY-508, ONY-520)
+## CI release: tag to downloadable APK 
 
 Pushing a `v*` tag runs one build job in `.github/workflows/ci.yml`; no local
 build is needed. It decodes the keystore, checks the APK with `apksigner`, and
@@ -113,8 +113,8 @@ attaches the assets to that tag's GitHub Release. `release-checksums` then
 writes one `SHA256SUMS` covering the published APKs.
 
 CI publishes only the `unified` flavor. `base` remains buildable locally with
-`tool/build_flavor.sh`, but it has no release path (ONY-520). The per-vendor
-`viture`/`xreal` flavors are retired (ONY-565).
+`tool/build_flavor.sh`, but it has no release path . The per-vendor
+`viture`/`xreal` flavors are retired .
 
 | Job | Flavor | Build |
 |---|---|---|
@@ -126,13 +126,13 @@ selects the vendor at runtime. The export is never committed or built in CI;
 `release-unified` downloads `unityLibrary.zip` from the `unity-export-1.4`
 release (a prerelease on purpose, so the export never takes the repository's
 "Latest release" flag), refuses it unless its SHA-256 is
-`da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3` (the ONY-856
+`da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3` (the 
 export, built from merge commit `35d8015` whose `packages/wmr_tracking_unity`
 subtree is identical to `main` at `94573b2`, graphics APIs pinned to
 OpenGL ES 3), runs `tool/check_unity_export.py`
 on the zip to reject a stale export, one that still emits the `mono` stereo
-mode, one built before the ONY-840 hand-only UaaL gate (`_embeddedUaaL`), or one
-built before the ONY-856 input start (`VITURE input subsystem did not start`),
+mode, one built before the  hand-only UaaL gate (`_embeddedUaaL`), or one
+built before the  input start (`VITURE input subsystem did not start`),
 and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
 publishing. The Monado config key fetch is not optional: the job fails unless
 the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that
@@ -141,7 +141,7 @@ asset is a one-off from a machine holding the zip:
 ```sh
 gh release create unity-export-1.4 --prerelease --target <merge-commit> \
   --title unity-export-1.4 \
-  --notes "Approved Unity UaaL export (VITURE 0.9.0 + XREAL 3.1.0, ONY-840 hand-only UaaL, ONY-856 input start, GLES3 player) used by the unified release job."
+  --notes "Approved Unity UaaL export (VITURE 0.9.0 + XREAL 3.1.0 hand-only UaaL input start, GLES3 player) used by the unified release job."
 gh release upload unity-export-1.4 unityLibrary.zip unityLibrary.zip.sha256
 ```
 
@@ -164,7 +164,7 @@ wmr-companion-X.Y.Z-unified-arm64-v8a.apk    # VITURE + XREAL glasses
 SHA256SUMS
 ```
 
-The standalone GATT latency probe was retired with ONY-1012; the tag job no
+The standalone GATT latency probe was retired with ; the tag job no
 longer builds or publishes a probe APK.
 
 `wmr-companion-X.Y.Z-unified-arm64-v8a.apk` is the asset testers with VITURE or
@@ -206,8 +206,8 @@ git push origin :refs/tags/v0.3.7-dryrun
 
 Do this once now, then after any re-export of the keystore (key rotation).
 
-1. Download `wmr-release.keystore` from the ONY-493 task attachment — the
-   ONY-492 attachment is the superseded key — or copy it from
+1. Download `wmr-release.keystore` from the  task attachment — the
+    attachment is the superseded key — or copy it from
    `apps/wmr_companion_app/android/wmr-release.keystore`.
 2. Copy it to **two** offline media in separate physical locations (for example
    two USB sticks or an encrypted archive on a disconnected drive). Do not keep

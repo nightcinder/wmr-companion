@@ -19,14 +19,14 @@ dependencies:
 ```
 
 ```dart
-final hid = MethodChannelHidGamepad();
+final hid = MethodChannelHidGamepad;
 await for (final status in hid.status) {
   // unsupported | idle | registered | connected | error
 }
-await hid.start();                  // registers the descriptor
+await hid.start;                  // registers the descriptor
 await hid.connect('AA:BB:CC:DD:EE:FF');
 await hid.sendReport(encodeHidReport(gamepadState));
-await hid.stop();
+await hid.stop;
 ```
 
 `encodeHidReport`/`hidReportDescriptor` are pure Dart and usable without a

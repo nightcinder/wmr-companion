@@ -5,12 +5,12 @@
 - Version aligned with the v0.3.0 release; `wmr_core` and `wmr_tracking` constraints raised to `^0.3.0`.
 
 - `WmrCompanion` now wraps the FF17 controller-control client: `controllerStatus`
-  notifications, `readControllerStatus()` and `sendControllerCommand()`, with
+  notifications, `readControllerStatus` and `sendControllerCommand`, with
   the `ControllerStatusV2`, `ControllerCommand`, `ControllerCommandOutcome` and
   `ControllerResult` types re-exported.
 - `WmrCompanion.readConfig(Hand)` reads the FF13 configuration block and returns
   a `ConfigReadResult` (CRC checked, unsupported/not-ready/failed reported).
-- `WmrCompanion.ping()` measures one FF15 echo round trip and returns an
+- `WmrCompanion.ping` measures one FF15 echo round trip and returns an
   `EchoResult`.
 - Automatic reconnect now uses the configurable `WmrCompanionConfig.reconnectBackoff`
   list instead of one fixed 500 ms retry. The default is

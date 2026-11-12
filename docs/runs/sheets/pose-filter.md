@@ -1,7 +1,7 @@
-# Pose filter tuning against recorded captures (ONY-502)
+# Pose filter tuning against recorded captures 
 Status: **blocked awaiting a scorable capture. No constants chosen.**
 
-Normative source: ONY-501 `filter-spec` rev 4, including its note on the 6-run default. Where this sheet and that document disagree, the document wins. Revision 1's grid, speeds and acceptance text are superseded.
+Normative source:  `filter-spec` rev 4, including its note on the 6-run default. Where this sheet and that document disagree, the document wins. Revision 1's grid, speeds and acceptance text are superseded.
 
 Two complete 6-run Android XR corpora have been replayed. Neither full 4,264-point grid has a passing point, so the published defaults stay. Lag passes with margin. The next capture needs the section 8 prompts: forearm resting on a table, and D moving at 10-50 cm/s.
 ## What landed
@@ -10,7 +10,7 @@ Two complete 6-run Android XR corpora have been replayed. Neither full 4,264-poi
 - the filter uses the anchor sample's own `fusionTimeNs`, not the display tick;
 - it runs once per new anchor sample and holds the value between samples;
 - `minDt` follows the anchor rate (about 11 ms at 90 Hz), `maxDt` stays 100 ms;
-- a source transition, a gap over 100 ms, a source restart or `SixDofFuser.reset()` resets it.
+- a source transition, a gap over 100 ms, a source restart or `SixDofFuser.reset` resets it.
 
 `SixDofFusionConfig.poseFilter` and `PoseFilterConfig` accept a tuned config. `PoseCapture.fromRecording` takes the raw anchor joint position (`anchor.pose.translation`) and the tracking timestamp; `R_imu * offset` is applied after filtering.
 
@@ -29,7 +29,7 @@ That is **4,264 points per runtime**, all replayed, with no early stop and no pr
 
 Per point the harness reports static jitter `J`, drift jitter `J_D`, median best-fit lag `L` on slow/medium/fast sweeps, and fast-flick 90% rise time. It selects the passing point with the lowest `J_D`, then the lowest medium `L`.
 
-**Edge rule.** If the selected point or the only passing region touches a bar-limited boundary (`beta = 0.40`, `minCutoff = 1.0` or `4.0`, `dCutoff = 0.5` or `4.0`), the result is inconclusive. The harness extends that axis by 50% at the same step, reruns, and writes both. If the extended run still selects a boundary point, it exits 3 and says to take both grids to ONY-501.
+**Edge rule.** If the selected point or the only passing region touches a bar-limited boundary (`beta = 0.40`, `minCutoff = 1.0` or `4.0`, `dCutoff = 0.5` or `4.0`), the result is inconclusive. The harness extends that axis by 50% at the same step, reruns, and writes both. If the extended run still selects a boundary point, it exits 3 and says to take both grids to .
 
 ## Results
 | Corpus | App | Best `J` (mm) | `J_D` (mm) | `L` slow / medium / fast (ms) | Points that pass |

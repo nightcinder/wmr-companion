@@ -2,14 +2,14 @@
 
 The unified release APK bundles `libglasses.so` from the VITURE XR Glasses SDK
 for Android 2.4.1. The guided-bench Gate 1, checkerboard and Gate 9 steps call
-into it; without it those steps report `sdkUnavailable` (ONY-740).
+into it; without it those steps report `sdkUnavailable` .
 
 ## Provenance
 
 | Item | Value |
 |---|---|
 | SDK | VITURE XR Glasses SDK for Android 2.4.1 |
-| Archive | `VITURE_XR_Glasses_SDK_for_Android.zip` (link supplied by the owner in ONY-400) |
+| Archive | `VITURE_XR_Glasses_SDK_for_Android.zip` (link supplied by the owner in ) |
 | Vendored ABI | `arm64-v8a` only |
 | `libglasses.so` size | 2,076,360 bytes |
 | `libglasses.so` SHA-256 | `8ac615769b76cfe6fa05354b73048117f3d6ba2f54fef5b6ea6b128cbb2eb0a3` |
@@ -29,7 +29,7 @@ the licensed self-hosted release runner at:
 the size and digest, and fails the job if the file is missing or different. A
 provisioned runner therefore needs those three files before it can publish a
 release. The debug flavor does not stage the SDK. The job removes its copy in
-an `always()` step (the self-hosted workspace survives between runs), and the
+an `always` step (the self-hosted workspace survives between runs), and the
 `jniLibs/` path is gitignored so a local staging step cannot be committed.
 
 ## Licence conditions
@@ -51,7 +51,7 @@ VITURE's SDK License Agreement (effective September 2025, ships as
   under **About → Licences**.
 - **2.1.7** forbids disclosing SDK performance benchmarks without VITURE's
   written consent. Gate measurements such as the Gate 9 pose rate are
-  benchmark results; check before publishing the ONY-736 scorecard.
+  benchmark results; check before publishing the  scorecard.
 - **9** forbids using "VITURE" in the application name. The app is
   "WMR Companion"; VITURE appears only in the licence and notice text.
 
@@ -65,7 +65,7 @@ the matching source, so `wmr_tracking_viture` (and the VITURE C SDK) is only
 used for VITURE devices, and `wmr_tracking_xreal` for XREAL devices. No VITURE
 SDK code path runs against another vendor's hardware, and the APK is still a
 Developed Program designed to function with VITURE products (1.3). The unified
-APK has shipped this way since ONY-354.
+APK has shipped this way since .
 
 ## Updating the SDK
 

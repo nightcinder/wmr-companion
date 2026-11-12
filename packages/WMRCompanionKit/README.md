@@ -56,7 +56,7 @@ client.$discoveredBridges
     }
     .store(in: &cancellables)
 
-client.startScanning()
+client.startScanning
 ```
 
 ### 2. Stream Orientation and Inputs
@@ -86,7 +86,7 @@ client.echoLatencyPublisher
     .store(in: &cancellables)
 
 // Send periodic pings (e.g. 50 ms / 250 ms / 1000 ms)
-client.sendEchoPing()
+client.sendEchoPing
 ```
 
 ### 4. Read the firmware version and control controllers (FF16/FF17)
@@ -108,7 +108,7 @@ client.controllerStatusPublisher
     }
     .store(in: &cancellables)
 
-client.readControllerStatus()
+client.readControllerStatus
 try client.sendControllerCommand(.discover)
 try client.sendControllerCommand(.connect, hand: .left)
 ```
@@ -116,7 +116,7 @@ try client.sendControllerCommand(.connect, hand: .left)
 ### 5. Dual-Bridge Setup (Zero Contention)
 
 ```swift
-let multiBridge = WMRMultiBridgeSession()
+let multiBridge = WMRMultiBridgeSession
 multiBridge.leftBridgeSession.bleManager.connect(to: leftBridge)
 multiBridge.rightBridgeSession.bleManager.connect(to: rightBridge)
 multiBridge.setStreamMode(.batchedFF14)

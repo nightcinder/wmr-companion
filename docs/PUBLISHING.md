@@ -6,7 +6,7 @@ This document defines the publication process for the `wmr-companion` multi-pack
 
 ## 1. Background & Target
 
-As decided by the project owner (2026-10-23, ONY-50), **pub.dev is the release target after the API freeze**.
+As decided by the project owner (2026-10-23), **pub.dev is the release target after the API freeze**.
 
 The repository contains modular Dart and Flutter packages that are intended to be independently published to [pub.dev](https://pub.dev):
 - `wmr_fusion` (pure-Dart 6-axis Madgwick and Mahony orientation filters)
@@ -17,12 +17,12 @@ The repository contains modular Dart and Flutter packages that are intended to b
 - `wmr_ws` (pure-Dart WebSocket transport for Linux/Pi Wi-Fi daemon, landed in PR #61)
 - `wmr_companion_ui` (optional Flutter UI widgets, landed in PR #45)
 - `wmr_companion_hid_android` (optional Android BLE HID output plugin, landed in PR #48)
-- `wmr_tracking_android_xr` (optional Android XR head/hand tracking plugin, ONY-212)
-- `wmr_tracking_dispatch` (Flutter/Android plugin for vendor detection and `TrackingSource` selection, ONY-568)
-- `wmr_tracking_viture` (optional VITURE Pro Neckband Unity UaaL head/hand tracking relay plugin, ONY-213)
-- `wmr_tracking_xreal` (optional XREAL Air 2 Ultra Unity UaaL head/hand tracking relay plugin, ONY-214)
+- `wmr_tracking_android_xr` (optional Android XR head/hand tracking plugin)
+- `wmr_tracking_dispatch` (Flutter/Android plugin for vendor detection and `TrackingSource` selection)
+- `wmr_tracking_viture` (optional VITURE Pro Neckband Unity UaaL head/hand tracking relay plugin)
+- `wmr_tracking_xreal` (optional XREAL Air 2 Ultra Unity UaaL head/hand tracking relay plugin)
 
-All twelve package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.3.0` (owner decision on ONY-146); no rename is made here.
+All twelve package names have been verified as available and unclaimed on pub.dev (each returns 404 from `https://pub.dev/api/packages/<name>`). No renaming is required. `BleTransport` is GATT-shaped but keeps its name for `0.3.0` (owner decision on ); no rename is made here.
 
 The root application (`wmr_companion_app`) and `example/` (`wmr_companion_example`) remain application hosts and retain `publish_to: none`.
 
@@ -196,7 +196,7 @@ The two application hosts (`wmr_companion_app` and `example/`) are workspace mem
 
 ## 5. First Publication
 
-**Status: on hold.** The owner decided on 2026-10-23 (ONY-41) to hold the
+**Status: on hold.** The owner decided on 2026-10-23  to hold the
 first release. The same decision waived the iOS 18 device gate for this
 release line, so the hold is a choice about timing, not an unresolved gate:
 nothing is published, and a release still needs an explicit owner go-ahead.

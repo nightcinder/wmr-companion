@@ -30,7 +30,7 @@ missing.
    OpenGLES3 only** (remove Vulkan; do not leave Auto). The export script applies
    these and `WMR > Configure VITURE XR` pins the graphics API. VITURE's display
    provider is EGL/OpenGL ES only; on Vulkan its gfx thread cannot get the Unity
-   EGL context and `VitureDisplayProvider::GfxThread_Stop` null-derefs (ONY-802).
+   EGL context and `VitureDisplayProvider::GfxThread_Stop` null-derefs .
    The same menu item also configures **XR Plug-in Management > Android**: the
    VITURE loader is assigned and **Initialize XR on Startup** is on, so the
    exported player renders in stereo 3D from launch. VITURE hand tracking only
@@ -83,8 +83,8 @@ keep generated Gradle changes.
 
 ## What the smoke scene does
 
-- Can send the same `start` envelope as `VitureRelayCommandBuilder.start()`
-  (`filter_mode=responsive`, `aim_sensitivity=high`) via `SendStart()`, or on
+- Can send the same `start` envelope as `VitureRelayCommandBuilder.start`
+  (`filter_mode=responsive`, `aim_sensitivity=high`) via `SendStart`, or on
   editor Play when `autoStart` is enabled. Player builds never send it.
 - Subscribes to `VitureTrackingRelayBridge.FrameEmitted`, logs the first full
   frame and every 30th frame (size, head/hands presence).

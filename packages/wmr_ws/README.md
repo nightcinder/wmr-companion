@@ -32,13 +32,12 @@ import 'package:wmr_ws/wmr_ws.dart';
 final transport = WmrWsTransport(
   endpoints: [
     WmrWsEndpoint(host: 'wmr-pi.local', token: 'shared-secret'),
-  ],
-);
+  ]);
 final wmr = WmrCompanion(ble: transport);
 final id = 'wmr-pi.local:8765';
 await transport.connect(id);
 final controller = ControllerService(transport, id, mode: StreamMode.batched);
-await controller.start();
+await controller.start;
 ```
 
 Discovery is opt-in and needs no plugin:
@@ -56,11 +55,11 @@ final transport = WmrWsTransport(
 set; it never binds port 5353, so a unicast mDNS reply works on Android without
 a `MulticastLock`. Both replies are hints: they never carry the token. A
 discovered `WmrWsEndpoint` records the reply's stable `bridgeId`, and
-`connect()` refuses to send a token unless the WebSocket `hello` reports the
-same `bridge_id`. `scan()` yields the configured endpoints first, then one entry
+`connect` refuses to send a token unless the WebSocket `hello` reports the
+same `bridge_id`. `scan` yields the configured endpoints first, then one entry
 per discovered bridge: replies that share a `bridgeId` collapse into a single
 `WmrWsEndpoint` whose `hosts` list holds every interface address, and
-`connect()` tries those hosts in order. Static `WmrWsEndpoint` host/port entries
+`connect` tries those hosts in order. Static `WmrWsEndpoint` host/port entries
 remain supported as an override.
 
 ## The seam, and where it leaks
@@ -74,10 +73,10 @@ remain supported as an override.
 | `unsubscribe` | `{"type":"unsubscribe"}`; switching streams unsubscribes first, like zeroing the old CCC |
 | `read(FF16)` | `hello.version`, no round trip |
 | FF15 | JSON `ping` / `pong`; the 20-byte FF15 answer is synthesized for `EchoClient` |
-| `connectionInfo().mtu` | `hello.fragmentCapacity` (raw fragment value size) |
-| `connectionInfo().rssi`, `.connectionIntervalUs`, `.phy` | **null**: a WebSocket has no link-layer measurements |
+| `connectionInfo.mtu` | `hello.fragmentCapacity` (raw fragment value size) |
+| `connectionInfo.rssi`, `.connectionIntervalUs`, `.phy` | **null**: a WebSocket has no link-layer measurements |
 | `scan` | configured endpoints, then UDP/mDNS discoveries when enabled |
-| FF11 status read | not synthesized; use `WmrWsTransport.status()` |
+| FF11 status read | not synthesized; use `WmrWsTransport.status` |
 | FF13 calibration | **not implemented by the daemon**; absent from `discoverServices`, and `read`/`write` throw `WmrWsUnsupportedException` |
 
 `ConfigClient` already treats an absent FF13 characteristic as
@@ -85,7 +84,7 @@ remain supported as an override.
 
 ### Null means not observable
 
-ONY-98 established that a null link parameter means "this transport cannot see
+ established that a null link parameter means "this transport cannot see
 it", not "use a placeholder". Wi-Fi has no RSSI, connection interval or PHY, so
 all three stay null. `mtu` is filled because the daemon really does report a
 fragment capacity; it is a payload size, not an ATT MTU.
@@ -110,10 +109,10 @@ fragment capacity; it is a payload size, not an ATT MTU.
 
 ### Reconnect and sequence reset
 
-There is no hidden auto-reconnect. Call `connect()` again and then
-`ControllerService.start()` again, exactly as with BLE. The daemon resets its
+There is no hidden auto-reconnect. Call `connect` again and then
+`ControllerService.start` again, exactly as with BLE. The daemon resets its
 per-hand sequence numbers only on daemon start; a controller reconnect does
-not. `ControllerService.start()` rebaselines sequence and loss windows, so a
+not. `ControllerService.start` rebaselines sequence and loss windows, so a
 daemon restart after reconnect is not reported as catastrophic loss. The
 reconnect tests in `test/reconnect_test.dart` pin that.
 
@@ -127,7 +126,7 @@ and is paced into the stream one at a time, so a synchronous consumer that is
 slow, unpaused or not yet attached cannot grow the stream controller's internal
 buffer. An asynchronous `onData` that returns before it has consumed a frame
 can still hold already-delivered events in the controller; `ControllerService`
-is synchronous, which is the contract this transport is written for. `WmrWsTransport.status()` exposes the
+is synchronous, which is the contract this transport is written for. `WmrWsTransport.status` exposes the
 daemon's own `dropped`/`delivered` counters.
 
 ## Tests

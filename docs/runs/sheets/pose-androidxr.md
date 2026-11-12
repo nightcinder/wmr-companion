@@ -70,7 +70,7 @@ Pass: permissions granted or denial documented, `SPATIAL` supported, joints arri
 ## 5. Gate 6 - RayNeo and Rokid (optional)
 Only if the hardware is on hand; otherwise mark "not run - no hardware".
 
-- RayNeo X3 Pro: install a Unity ARDK build with `Algorithm.EnableSlamHeadTracker()`; log `Algorithm.GetSlamStatus()` to `FFVINS_TRACKING_SUCCESS` or `FFVINS_TRACKING_FAIL`; capture `HeadTrackedPoseDriver.OnPostUpdate` rate for 60 s; record whether the VGA spatial camera is reachable outside the ARDK.
+- RayNeo X3 Pro: install a Unity ARDK build with `Algorithm.EnableSlamHeadTracker`; log `Algorithm.GetSlamStatus` to `FFVINS_TRACKING_SUCCESS` or `FFVINS_TRACKING_FAIL`; capture `HeadTrackedPoseDriver.OnPostUpdate` rate for 60 s; record whether the VGA spatial camera is reachable outside the ARDK.
 - Rokid AR Studio: run a UXR 3.0 scene; log which gestures `InputManager` emits and whether joint data is reachable from C# (expected gesture-only).
 
 | Item | RayNeo X3 Pro | Rokid AR Studio |

@@ -17,10 +17,10 @@ hardware; these are compile/packaging facts only.
 | Unified or fallback | Truly unified. Per-vendor build flavors were dropped in 0.3.2; `unified` is the only published flavor |
 | Signing | Project release key (`CN=WMR Companion`); signed by CI on `v*` tags |
 | Hardware | **Not run on a VITURE or XREAL device**; vendor dispatch, tracking rates and permissions are unverified. The 0.3.15 and 0.3.16 builds ran on a Google Aura headset for pose-filter captures (`../runs/sheets/pose-filter.md`) |
-| Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution (ONY-354) |
+| Licence gate | Pinned `unity-export-1.4` (SHA-256 `da077615c7925a37fea7c41f8815ff2ff25e760b7c5c4be3c04f84a7467bfae3`); owner approved SDK redistribution  |
 
 Release notes: [`v0.3.19`](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.19).
-This is the signed (project-key) cut at commit `136be00`. It adds pure-Dart LAN discovery in `wmr_ws` (ONY-1071), a `CompositeBleTransport` TCP-to-BLE fallback in `wmr_companion` (ONY-1072), a native visionOS app scaffold (ONY-1039 and ONY-1040), and CI scanning with CodeQL, OSV and MobSF (ONY-1079 and ONY-1085). It removes the GATT latency probe (ONY-1012). The 0.3.17 Semgrep, gitleaks and Dependabot scans remain (ONY-890), as do the six-run pose-filter corpus (ONY-502), the 0.3.16 Android XR gate and vendor-player guard (ONY-879), the 0.3.15 six-run pose capture protocol (ONY-869 / ONY-871), the 0.3.14 `unity-export-1.4` head-pose path, Bench skeleton and stereo panes (ONY-856 / ONY-857 / ONY-858).
+This is the signed (project-key) cut at commit `136be00`. It adds pure-Dart LAN discovery in `wmr_ws` , a `CompositeBleTransport` TCP-to-BLE fallback in `wmr_companion` , a native visionOS app scaffold ( and ), and CI scanning with CodeQL, OSV and MobSF ( and ). It removes the GATT latency probe . The 0.3.17 Semgrep, gitleaks and Dependabot scans remain , as do the six-run pose-filter corpus , the 0.3.16 Android XR gate and vendor-player guard , the 0.3.15 six-run pose capture protocol ( / ), the 0.3.14 `unity-export-1.4` head-pose path, Bench skeleton and stereo panes ( /  / ).
 
 Host-side pre-flight (no device): `python3 apps/wmr_companion_app/tool/check_unified_apk.py <apk>`
 checks the merged permissions, both Unity runtimes and their versions, the vendor
@@ -42,7 +42,7 @@ versionCode bump are documented in [RELEASE_SIGNING.md](../RELEASE_SIGNING.md).
 | `base` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | none | Android XR, emulator, BLE/3DoF; every Dart adapter exists, but with no Unity runtime linked VITURE reports the 3DoF fallback and XREAL reports typed `unavailable` |
 | `unified` | `WMR_ANDROID_XR_TRACKING=true`, `WMR_VITURE_TRACKING=true`, `WMR_XREAL_TRACKING=true` | `android/unity/unified/unityLibrary` (required for a real unified APK) | one shared Unity UaaL runtime that selects VITURE or XREAL at runtime; with no export, VITURE reports the 3DoF fallback and XREAL reports typed `unavailable` |
 
-The per-vendor `viture` and `xreal` flavors are retired (ONY-565); only the
+The per-vendor `viture` and `xreal` flavors are retired ; only the
 unified APK ships and there is no per-vendor flavor to build.
 
 `unified` requires Android 13 (API 33) when the VITURE runtime is linked, because
@@ -56,20 +56,20 @@ unified APK ships and there is no per-vendor flavor to build.
   `android/unity/unified/unityLibrary` exists).
 - A leftover per-vendor export under `android/unity/viture` or
   `android/unity/xreal` fails configuration with "retired per-vendor Unity
-  export"; delete it (ONY-565).
+  export"; delete it .
 - Each vendor SDK contributes its own native libraries, XR loader and manifest
   entries; the supported way to get both vendors into one APK is the unified export.
 
 A missing Unity export is not an error: `unified` still builds; VITURE reports
 the 3DoF fallback and XREAL reports `unavailable` when asked to start.
 
-## Unified Unity library (ONY-273, ONY-355, ONY-388)
+## Unified Unity library 
 
 `packages/wmr_tracking_unity` puts one Unity 6000.0 project and one
 `WmrTrackingRelay` in front of both vendor bridges. `configure`/`start` carry
 `"vendor":"viture"` or `"vendor":"xreal"`; only that vendor's bridge and XR loader are
 selected, and the per-vendor relay JSON is unchanged. The 0.2.1 export migrated the
-vendors to VITURE 0.9.0 / XREAL 3.1.0 (ONY-378).
+vendors to VITURE 0.9.0 / XREAL 3.1.0 .
 
 The `unified` app flavor links that shared export from
 `android/unity/unified/unityLibrary` only. To build it:
@@ -79,12 +79,12 @@ The `unified` app flavor links that shared export from
    vendors' SDK terms; the export is gitignored and is never committed. The
    configuration step pins **Graphics APIs = OpenGLES3 only**: VITURE's display
    provider is EGL/OpenGL ES only, and a Vulkan player null-derefs in
-   `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts (ONY-802).
+   `VitureDisplayProvider::GfxThread_Stop` when hand tracking starts .
    The unified bridge is embedded in Flutter, so the runtime gate always starts
    VITURE's input and hand subsystems without the display subsystem, because the
-   display provider would take over the host activity (ONY-840); the input
-   subsystem is what drives 6DoF head pose (ONY-856). The pinned
-   `unity-export-1.4` was built from merge commit `35d8015` (ONY-856; Unity
+   display provider would take over the host activity ; the input
+   subsystem is what drives 6DoF head pose . The pinned
+   `unity-export-1.4` was built from merge commit `35d8015` (; Unity
    subtree identical to `main` at `94573b2`) and carries both the hand-only gate
    and the input start; `unity-export-1.3` carries the gate but predates the
    input start, so it stays at 0DoF; `unity-export-1.2` and earlier still
@@ -111,7 +111,7 @@ The `unified` app flavor links that shared export from
 
 No export is needed for CI: `tool/build_flavor.sh unified` still builds; VITURE
 reports the 3DoF fallback and XREAL reports `unavailable`. The 0.2.1 release installed the owner export
-(SHA-256 `945bd42…`, ONY-354), which carried both vendor runtimes in one `unityLibrary`.
+(SHA-256 `945bd42…`), which carried both vendor runtimes in one `unityLibrary`.
 
 ## Commands
 

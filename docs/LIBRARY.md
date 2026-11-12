@@ -22,9 +22,9 @@ selects the vendor source for them. No vendor adapter has run on hardware (see
 The reference app depends on the packages through the workspace and drives its
 real connection through `ControllerService`. `example/` is a minimal Flutter host
 that uses the facade. `BleTransport` is GATT-shaped. Its name is settled for
-`0.1.0` and later. The owner decided on ONY-146 to keep it, so no rename is made.
+`0.1.0` and later. The owner decided on  to keep it, so no rename is made.
 
-**Release status (owner, 2026-10-23 on ONY-41).** `0.3.0` is **not published**
+**Release status (owner, 2026-10-23 on ).** `0.3.0` is **not published**
 to pub.dev. Publication is on hold. The iOS 18 device gate (phase 5) is
 **waived for this release line**. This release ships without iOS hardware
 evidence. That waives the gate, not the fact: **nothing here has been run on
@@ -34,7 +34,7 @@ measurements do not exist.
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
 [PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions), and
-[IOS.md](IOS.md) with the native `WMRCompanionKit` from ONY-38 (PR #37).
+[IOS.md](IOS.md) with the native `WMRCompanionKit` from  (PR #37).
 
 ## 1. Decision in one page
 
@@ -195,12 +195,10 @@ final wmr = WmrCompanion(
   ble: transport,                            // any BleTransport
   config: WmrCompanionConfig(
     streamMode: StreamMode.batched,          // FF14
-    fusion: FusionConfig.madgwick(beta: 0.05),
-  ),
-);
+    fusion: FusionConfig.madgwick(beta: 0.05)));
 
-await wmr.initialize();                      // adapter state, permissions (wmr_ble)
-await wmr.startScan();
+await wmr.initialize;                      // adapter state, permissions (wmr_ble)
+await wmr.startScan;
 await for (final devices in wmr.bridges) {   // Stream<List<WmrBridgeDevice>>
   WmrBridgeDevice? bridge;
   for (final device in devices) {
@@ -229,7 +227,7 @@ final subs = [
   }),
 ];
 
-await wmr.dispose();
+await wmr.dispose;
 ```
 
 The example above is the one in `packages/wmr_companion/README.md`, and
@@ -267,9 +265,9 @@ class WmrCompanionConfig {
 
 The `0.3.0` facade also wraps the control characteristics outside the stream set:
 
-- `controllerStatus`, `readControllerStatus()` and `sendControllerCommand()` for FF17.
+- `controllerStatus`, `readControllerStatus` and `sendControllerCommand` for FF17.
 - `readConfig(Hand)` for the FF13 configuration block, with CRC-32 checking.
-- `ping()` for one FF15 echo round trip.
+- `ping` for one FF15 echo round trip.
 
 Reconnect uses `WmrCompanionConfig.reconnectBackoff`. Its default is
 `[500 ms, 1 s, 2 s, 4 s, 8 s]`, with one attempt per entry.
@@ -322,7 +320,7 @@ WmrCompanion
 subscribe → `Stream<Uint8List>` with arrival timestamp, write, disconnect, plus
 MTU/RSSI/connection info. The native transports and `WmrWsTransport` implement the same interface;
 nothing above knows which one is in use. Note that `BleTransport` is GATT-shaped, but its
-name is settled for `0.1.0` (owner decision on ONY-146); no rename.
+name is settled for `0.1.0` (owner decision on ); no rename.
 
 **Phase 1 (lowest risk): `universal_ble` on both platforms.** The Dart pipeline
 already runs on Android at ~200 Hz per hand. On iOS, `universal_ble` uses
@@ -330,11 +328,11 @@ CoreBluetooth; the open questions are latency and jitter, MTU visibility, and
 background behavior. This is the cheapest way to get a real iOS library build
 and measure it.
 
-**Phase 2 (when measurements justify it): native iOS transport.** ONY-38 (PR
+**Phase 2 (when measurements justify it): native iOS transport.**  (PR
 #37) already built `packages/WMRCompanionKit`: CoreBluetooth central,
 FF11–FF17 parsing, fusion, multi-bridge and a Combine/async facade, with a
 SwiftUI probe. `WMRCompanionClient` publishes `firmwareVersionPublisher` and
-`controllerStatusPublisher`, and exposes `readControllerStatus()` and
+`controllerStatusPublisher`, and exposes `readControllerStatus` and
 `sendControllerCommand(_:hand:)`. For the Flutter library, reuse its **transport**
 and, if needed, its native pipeline behind a platform channel or FFI. Two viable shapes:
 
@@ -396,23 +394,23 @@ imported by `wmr_core` or `wmr_companion`.
 
 ```
 wmr-companion/
-  apps/wmr_companion_app/        # reference app (moved here in M10.5, ONY-71)
+  apps/wmr_companion_app/        # reference app (moved here in M10.5)
   example/                       # phase 4: minimal host (one facade, gamepad stream) (landed)
   packages/
     wmr_core/                    # phase 1: pure Dart (landed)
     wmr_fusion/                  # existing, kept pure Dart (landed)
-    wmr_tracking/                # ONY-202: head/hand tracking seam + 6DoF fusion
+    wmr_tracking/                # : head/hand tracking seam + 6DoF fusion
     wmr_ble/                     # phase 3: universal_ble transport, link status, lifecycle hook (landed)
     wmr_ws/                      # M14.1: WebSocket transport for Linux/Pi Wi-Fi daemon (landed)
     wmr_companion/               # phase 2: umbrella facade (landed)
     wmr_companion_ui/            # phase 7: optional widgets (landed)
     wmr_companion_hid_android/   # phase 7: optional Android HID output (landed)
-    WMRCompanionKit/             # native Swift kit (ONY-38, PR #37)
+    WMRCompanionKit/             # native Swift kit (PR #37)
   docs/                          # unchanged, plus this file
   tool/                          # capture/analysis, probes
 ```
 
-The app lives in `apps/wmr_companion_app` (M10.5, ONY-71) and depends on the
+The app lives in `apps/wmr_companion_app` (M10.5) and depends on the
 packages through the workspace. Its pubspec package name is already
 `wmr_companion_app` (phase 2) so the facade can own the `wmr_companion` name;
 the directory move changed paths, not imports.
@@ -443,7 +441,7 @@ the directory move changed paths, not imports.
   All twelve packages at `0.3.0` in source speak to every era. Two critical statuses
   must be stated, not implied:
   - **The library is not published:** All twelve packages are at `0.3.0` in source/git
-    only; publication to pub.dev is on hold by owner decision (2026-10-23, ONY-41;
+    only; publication to pub.dev is on hold by owner decision (2026-10-23;
     see [PUBLISHING.md](PUBLISHING.md) §5). Nothing is available on pub.dev.
   - **The firmware release is a prerelease:** `v0.1.0-rc1` is flagged prerelease
     and is not "Latest"; it is hardware-unverified (CI-compiled only; no board has
@@ -466,7 +464,7 @@ the directory move changed paths, not imports.
   (recommend `vector_math`'s `Quaternion`/`Vector3`), and keep the conversion at
   the fusion boundary. Do not leak two quaternion types to consumers.
 - **Minimum platforms:** Android `minSdk` per `universal_ble`; iOS 18 is the
-  floor, as decided by the owner on ONY-38. Revisit only if it blocks a specific
+  floor, as decided by the owner on . Revisit only if it blocks a specific
   target; a library with a high floor is an adoption tax.
 - **No plugin leakage:** `path_provider`, `share_plus` and `permission_handler`
   stay in the app or in optional packages. Core services take a `Directory` or
@@ -485,7 +483,7 @@ phase says so.
 | 1 | Pure-Dart core | Move `protocol/`, `domain/`, `controller_service` and pure services into `packages/wmr_core`; app depends by path; move tests and golden fixtures | App and core tests green; `wmr_core` has no Flutter/Riverpod import (CI grep) |
 | 2 | Public facade | Add `WmrCompanion`, config, models, typed errors, `FakeTransport` example, API README; app uses the facade through a thin adapter | App works unchanged; README example compiles as a test; no `package:flutter` in `wmr_companion`'s public exports except the plugin type (met: the phase-2 facade has no Flutter dependency at all) |
 | 3 | BLE package | Move `lib/ble/` into `wmr_ble`; keep `UniversalBleTransport` and fakes; add permission/adapter-state docs; inject app lifecycle | Android debug APK connects and streams on hardware (user-reported); fake tests green |
-| 4 | Reference app | Move the current app to `apps/wmr_companion_app` (M10.5, ONY-71); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
+| 4 | Reference app | Move the current app to `apps/wmr_companion_app` (M10.5); move UI/Riverpod/HID there; add an `example/` mini-app showing 20 lines to gamepad state | CI builds app; example builds; no UI code in core/facade |
 | 5 | iOS in v1 | Ship iOS in the same first release: add iOS to the BLE package, `Info.plist`/Podfile docs, macOS CI compile; measure `universal_ble` latency with the existing probe/decision rule; decide native transport **- device gate waived for this release line (owner, 2026-10-23); config/compile checks are in CI, no device run, no latency decision** | iOS example builds and connects on a device (user-reported); Android and iOS both pass the example app; latency decision recorded in `LATENCY.md` |
 | 6 | Native iOS transport (conditional) | Platform channel to `WMRCompanionKit`'s transport; same `BleTransport` contract; parity tests on shared fixtures **- not started: its trigger (phase-5 measurements) does not exist** | iOS latency/background requirement met or explicitly declined with numbers |
 | 7 | Optional packages | `wmr_companion_ui` (3D view/stats) and `wmr_companion_hid_android` (existing HID output) **landed** | App consumes the UI kit; HID package tested as before; neither is required by the facade |
@@ -524,7 +522,7 @@ Sequencing notes:
   symbol is removed without a major version bump (optional, later).
 - **Platform CI:** Linux format/analyze/test for packages and app; Android
   debug APK; macOS `swift test` for `WMRCompanionKit` and
-  `flutter build ios --config-only --no-codesign` (already added by ONY-38).
+  `flutter build ios --config-only --no-codesign` (already added by ).
 - **Hardware checks stay with the owner.** The library README must say what was
   and was not run on hardware, and keep the existing "user-reported" rule.
 - **Latency decision rule:** reuse `docs/LATENCY.md` / the M7.2 run sheet to
@@ -554,24 +552,23 @@ Sequencing notes:
    `wmr_core`, `wmr_ble`, `wmr_companion`, `wmr_companion_ui` and
    `wmr_companion_hid_android`, and pub.dev is the target; `0.1.0` (now `0.3.0`) is held.**
 2. **iOS phase 1 transport:** accept `universal_ble` first and measure, or go
-   straight to the ONY-38 `WMRCompanionKit` transport on iOS? : **settled that
+   straight to the  `WMRCompanionKit` transport on iOS? : **settled that
    `universal_ble` is the v1 transport on both platforms. It is still
    unmeasured on iOS because the device run was waived, so "measure" remains
    open for any later release.**
 3. **App placement:** move the app to `apps/` (cleaner boundary) or keep it at
    the repo root during extraction (less churn)? : **settled: moved to
-   `apps/wmr_companion_app` in M10.5 (ONY-71).**
+   `apps/wmr_companion_app` in M10.5 .**
 4. **Android HID:** keep the HID output as a supported optional package, or
    park it once the in-process API exists? : **settled: kept as the optional
-   `wmr_companion_hid_android` package (ONY-41 phase 7).**
+   `wmr_companion_hid_android` package ( phase 7).**
 5. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
    also need a non-Flutter SDK (then the native kits become products too)?
 
-Settled: **iOS 18 is the minimum** (owner, ONY-38). **Android and iOS are both
-in v1 scope** (owner, 2026-10-23 on ONY-41). **Publication to pub.dev is the
-release target and `0.1.0` (now `0.3.0`) is held for now** (owner, ONY-50 and ONY-41,
-2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
-2026-10-23 on ONY-41).
+Settled: **iOS 18 is the minimum** (owner). **Android and iOS are both
+in v1 scope** (owner, 2026-10-23 on ). **Publication to pub.dev is the
+release target and `0.1.0` (now `0.3.0`) is held for now** (owner and 2026-10-23). **The iOS 18 device gate is waived for this release line** (owner,
+2026-10-23 on ).
 
 ## 14. What this framework does not claim
 
@@ -582,7 +579,7 @@ release target and `0.1.0` (now `0.3.0`) is held for now** (owner, ONY-50 and ON
 - It does not promise iOS background operation, MTU, or connection interval.
 - It does not fix the upstream controller-to-ESP32 report loss
   (WMR_Bridge issue #18); it exposes the statistics needed to see it.
-- Nothing here has been run on iOS hardware. ONY-38's Swift kit is unit-tested
+- Nothing here has been run on iOS hardware. 's Swift kit is unit-tested
   and CI-compiled; hardware behavior is still unverified.
 
 ## 15. Pi TCP/BLE fallback and discovery
@@ -603,7 +600,7 @@ prefers TCP and falls back to BLE without closing the logical connection.
    group from an ephemeral port with the QU bit set. The caller never binds
    port 5353, so Android needs no `MulticastLock`.
 
-Both replies are hints. `WmrWsTransport.connect()` refuses to send a token
+Both replies are hints. `WmrWsTransport.connect` refuses to send a token
 unless the WebSocket `hello` reports the same `bridge_id`.
 
 ### Fallback state machine
@@ -638,12 +635,12 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 final tcp = WmrWsTransport(endpoints: const [], enableDiscovery: true);
-final ble = UniversalBleTransport(adapter: UniversalBleAdapter());
+final ble = UniversalBleTransport(adapter: UniversalBleAdapter);
 final transport = CompositeBleTransport(tcp: tcp, ble: ble);
 
 final wmr = WmrCompanion(ble: transport);
-await wmr.initialize();
-await wmr.startScan();
+await wmr.initialize;
+await wmr.startScan;
 ```
 
 ### Host permissions

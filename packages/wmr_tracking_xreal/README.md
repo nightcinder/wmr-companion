@@ -12,7 +12,7 @@ Unity-as-a-Library (UaaL) tracking scene to Flutter:
 1. Kotlin sends `UnityRelayCommand` JSON (`start`, `stop`, `dispose`) via
    `UnityPlayer.UnitySendMessage("WmrTrackingRelay", "OnCommand", json)`.
 2. The minimal C# component (`unity/Assets/WmrTrackingXreal/Runtime/XrealTrackingRelayBridge.cs`)
-   calls `XREALPlugin.GetDeviceType()`, reads the head pose and the 26
+   calls `XREALPlugin.GetDeviceType`, reads the head pose and the 26
    `XRHandJointID` joints from the running `XRHandSubsystem`, converts
    left-handed Unity coordinates to right-handed OpenXR coordinates, and
    forwards frames to `WmrTrackingXrealPlugin.onUnityFrame(json)`.
@@ -22,14 +22,14 @@ Unity-as-a-Library (UaaL) tracking scene to Flutter:
    hand-anchor filter).
 
 ```dart
-final source = await XrealAir2UltraTrackingSource.create(); // null when off
+final source = await XrealAir2UltraTrackingSource.create; // null when off
 if (source != null) {
   await companion.attachTrackingSource(source);
 }
 ```
 
 Enable the slice with `--dart-define=WMR_XREAL_TRACKING=true`. With the flag
-off, `create()` returns `null` without touching a platform channel, so BLE,
+off, `create` returns `null` without touching a platform channel, so BLE,
 controller IMU and 3DoF output are unchanged.
 
 Failures are typed `TrackingException`s:
@@ -37,7 +37,7 @@ Failures are typed `TrackingException`s:
   XREAL XR Hands subsystem or the host activity is missing.
 - `unsupported`: the reported glasses model is not an Air 2 Ultra (`One`,
   `OnePro`, `Air`, `Air2`, `Air2Pro`, `Light`, or an unclassifiable name). An
-  unreported model is not an error: `create()` succeeds and the Unity `start`
+  unreported model is not an error: `create` succeeds and the Unity `start`
   handshake reports the real model. That handshake result is not surfaced back
   to Dart (`glassesModel` is the pre-start snapshot), so on the deferred path a
   successful `start` is the Air 2 Ultra confirmation; any other model fails
