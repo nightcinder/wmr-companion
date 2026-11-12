@@ -3,7 +3,113 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:wmr_core/domain/stick_centre.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
+
+/// Unity relay frame timing and hand presence over one observation window.
+///
+/// Computed in Dart from the frames the app received, so a stalled or
+/// half-working relay shows up as a low rate, a long gap or a low per-hand
+/// presence ratio instead of an absent stream.
+class HandTrackingDiagnostics {
+  const HandTrackingDiagnostics({
+    this.frameCount = 0,
+    this.effectiveHz,
+    this.maxGapMs,
+    this.leftHandPresenceRatio,
+    this.rightHandPresenceRatio,
+    this.poseSourceCounts = const {},
+  });
+
+  /// Relay frames received in the window.
+  final int frameCount;
+
+  /// `(frames - 1) / span` between the first and last frame, null below two.
+  final double? effectiveHz;
+
+  /// Longest gap between two consecutive frames in ms, null below two frames.
+  final double? maxGapMs;
+
+  /// Fraction of frames that carried a tracked left/right hand, null when no
+  /// frame arrived.
+  final double? leftHandPresenceRatio;
+  final double? rightHandPresenceRatio;
+
+  /// Viewer updates per [ControllerPoseSource], only for sources observed.
+  final Map<ControllerPoseSource, int> poseSourceCounts;
+
+  Map<String, Object?> toJson() => {
+    'relay_frame_count': frameCount,
+    'effective_hz': effectiveHz,
+    'max_gap_ms': maxGapMs,
+    'left_hand_presence_ratio': leftHandPresenceRatio,
+    'right_hand_presence_ratio': rightHandPresenceRatio,
+    'pose_source_counts': {
+      for (final source in ControllerPoseSource.values)
+        if (poseSourceCounts[source] != null)
+          source.name: poseSourceCounts[source],
+    },
+  };
+}
+
+/// Accumulates [HandTrackingDiagnostics] from relay frames and fused poses.
+class HandTrackingAccumulator {
+  int _frameCount = 0;
+  int? _firstNs;
+  int? _lastNs;
+  int _maxGapNs = 0;
+  int _leftFrames = 0;
+  int _rightFrames = 0;
+  final Map<ControllerPoseSource, int> _poseSources = {};
+
+  void addFrame(TrackingFrame frame) {
+    final time = frame.fusionTimeNs;
+    _frameCount++;
+    if (frame.leftHand != null) _leftFrames++;
+    if (frame.rightHand != null) _rightFrames++;
+    final last = _lastNs;
+    if (last == null) {
+      _firstNs = time;
+    } else if (time > last && time - last > _maxGapNs) {
+      _maxGapNs = time - last;
+    }
+    _lastNs = time;
+  }
+
+  void addPose(ControllerPoseSource source) {
+    _poseSources[source] = (_poseSources[source] ?? 0) + 1;
+  }
+
+  void clear() {
+    _frameCount = 0;
+    _firstNs = null;
+    _lastNs = null;
+    _maxGapNs = 0;
+    _leftFrames = 0;
+    _rightFrames = 0;
+    _poseSources.clear();
+  }
+
+  HandTrackingDiagnostics get diagnostics {
+    final first = _firstNs;
+    final last = _lastNs;
+    final spanNs = first == null || last == null ? 0 : last - first;
+    return HandTrackingDiagnostics(
+      frameCount: _frameCount,
+      effectiveHz: _frameCount < 2 || spanNs <= 0
+          ? null
+          : (_frameCount - 1) * 1e9 / spanNs,
+      maxGapMs: _frameCount < 2 ? null : _maxGapNs / 1e6,
+      leftHandPresenceRatio: _frameCount == 0
+          ? null
+          : _leftFrames / _frameCount,
+      rightHandPresenceRatio: _frameCount == 0
+          ? null
+          : _rightFrames / _frameCount,
+      poseSourceCounts: Map.unmodifiable(_poseSources),
+    );
+  }
+}
 
 /// One connected bridge, as the diagnostics and the manifest describe it.
 class BundleBridge {
@@ -212,6 +318,7 @@ class TestBundleInput {
     this.wifiFallback = false,
     this.activeLeg,
     this.stickSettings = const StickSettings(),
+    this.handTrackingDiagnostics = const HandTrackingDiagnostics(),
   });
 
   /// Local time; the file name uses its date and the manifest its timestamp.
@@ -270,6 +377,10 @@ class TestBundleInput {
 
   /// Dead zone, rest-centre learning and the per-hand centres on screen.
   final StickSettings stickSettings;
+
+  /// Relay timing, per-hand presence and fused pose sources from the attached
+  /// tracking source's observation window.
+  final HandTrackingDiagnostics handTrackingDiagnostics;
 }
 
 /// What one export produced, for the screen and for tests.
@@ -307,7 +418,7 @@ Future<TestBundle> writeTestBundle(
   final present = <String>[
     '`manifest.md` — date, phone, Android version, firmware, MTU',
     '`diagnostics.json` — app, FF16 firmware, MTU, stream and link stats, '
-        'composite leg and stick settings',
+        'composite leg, stick settings and relay hand-tracking stats',
   ];
   final missing = <String>[];
   final files = <String, List<int>>{};
@@ -479,6 +590,7 @@ Future<TestBundle> writeTestBundle(
     'firmware_sha': input.firmwareSha,
     'ble_fallback': input.wifiFallback,
     'active_leg': input.activeLeg,
+    'hand_tracking_diagnostics': input.handTrackingDiagnostics.toJson(),
     'stick': {
       'dead_zone': input.stickSettings.config.deadZone,
       'learn_centre': input.stickSettings.config.learn,

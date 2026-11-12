@@ -16,6 +16,7 @@ import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 import 'package:wmr_tracking_viture/wmr_tracking_viture.dart';
 import 'package:wmr_tracking_xreal/wmr_tracking_xreal.dart';
 
+import '../../services/test_bundle.dart';
 import '../connect/connect_providers.dart';
 import 'pose_replay.dart';
 import 'stream_settings.dart';
@@ -319,6 +320,61 @@ final debugTrackingSourceProvider =
       DebugTrackingSourceNotifier.new,
     );
 
+/// Relay timing and hand presence over the attached tracking source.
+///
+/// Fed from the source's own frames, so the debug viewer and the bench's
+/// separate frame subscription see the same window, and from the viewer's
+/// fused poses. The counters outlive the screen that filled them, so an export
+/// after the tester leaves the debug viewer still carries the figures.
+final handTrackingDiagnosticsProvider =
+    NotifierProvider<HandTrackingDiagnosticsNotifier, HandTrackingDiagnostics>(
+      HandTrackingDiagnosticsNotifier.new,
+    );
+
+class HandTrackingDiagnosticsNotifier
+    extends Notifier<HandTrackingDiagnostics> {
+  final HandTrackingAccumulator _accumulator = HandTrackingAccumulator();
+  final Stopwatch _publishClock = Stopwatch()..start();
+  int _lastPublishMs = -1000;
+
+  /// A relay at 60-120 Hz would rebuild every listener on every frame; half a
+  /// second keeps the live readout honest without that cost.
+  static const int publishIntervalMs = 500;
+
+  @override
+  HandTrackingDiagnostics build() => const HandTrackingDiagnostics();
+
+  void addFrame(TrackingFrame frame) {
+    _accumulator.addFrame(frame);
+    _maybePublish();
+  }
+
+  void addPose(ControllerPoseSource source) {
+    // The viewer's tick runs inside the poses stream provider's build, where
+    // Riverpod forbids writing another provider; the next relay frame
+    // publishes both the frame figures and these counts.
+    _accumulator.addPose(source);
+  }
+
+  /// The window as accumulated so far, including frames since the last
+  /// throttled publish. An export reads this so its tail is not dropped.
+  HandTrackingDiagnostics get snapshot => _accumulator.diagnostics;
+
+  /// Drops the previous source's window when a new one attaches.
+  void reset() {
+    _accumulator.clear();
+    _lastPublishMs = -1000;
+    state = const HandTrackingDiagnostics();
+  }
+
+  void _maybePublish() {
+    final now = _publishClock.elapsedMilliseconds;
+    if (now - _lastPublishMs < publishIntervalMs) return;
+    _lastPublishMs = now;
+    state = _accumulator.diagnostics;
+  }
+}
+
 /// The selected source and its create/start outcome.
 class DebugTrackingSelection {
   const DebugTrackingSelection({
@@ -424,11 +480,16 @@ Future<void> releaseDebugTrackingSource(TrackingSource source) async {
 /// crashing the debug screen.
 class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
   TrackingSource? _owned;
+  StreamSubscription<TrackingFrame>? _diagnosticSub;
+  TrackingSource? _diagnosticSource;
   int _generation = 0;
 
   @override
   DebugTrackingSelection build() {
     ref.onDispose(() {
+      unawaited(_diagnosticSub?.cancel() ?? Future<void>.value());
+      _diagnosticSub = null;
+      _diagnosticSource = null;
       final source = _owned;
       _owned = null;
       if (source != null) unawaited(releaseDebugTrackingSource(source));
@@ -471,6 +532,9 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
     final generation = ++_generation;
     final previous = _owned;
     _owned = null;
+    unawaited(_diagnosticSub?.cancel() ?? Future<void>.value());
+    _diagnosticSub = null;
+    _diagnosticSource = null;
     state = DebugTrackingSelection(
       choice: choice,
       attachment: const AsyncValue.loading(),
@@ -567,6 +631,20 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
 
   void _publish(int generation, DebugTrackingAttachment attachment) {
     if (generation != _generation) return;
+    final source = attachment.source;
+    if (source != null && !identical(source, _diagnosticSource)) {
+      unawaited(_diagnosticSub?.cancel() ?? Future<void>.value());
+      final diagnostics = ref.read(handTrackingDiagnosticsProvider.notifier)
+        ..reset();
+      _diagnosticSource = source;
+      _diagnosticSub = source.frames.listen(
+        diagnostics.addFrame,
+        onError: (Object _, StackTrace _) {
+          // The attachment status shows source failures; the diagnostics keep
+          // the frames received before the relay stopped.
+        },
+      );
+    }
     state = DebugTrackingSelection(
       choice: attachment.choice,
       attachment: AsyncValue.data(attachment),
@@ -686,6 +764,7 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
   final tracking = selection.attachment.value?.source;
   final simulated = choice == DebugTrackingSource.simulated;
   final fuser = ref.watch(debugFuserProvider(source));
+  final diagnostics = ref.read(handTrackingDiagnosticsProvider.notifier);
   const motion = SyntheticMotion();
   final clock = Stopwatch()..start();
   final transport = source == DebugSource.fake
@@ -801,13 +880,13 @@ final debugPosesProvider = StreamProvider.family<DebugPoses, DebugSource>((
       );
     }
 
+    final left = poseFor(0);
+    final right = poseFor(1);
+    diagnostics
+      ..addPose(left.source)
+      ..addPose(right.source);
     controller.add(
-      DebugPoses(
-        left: poseFor(0),
-        right: poseFor(1),
-        head: head,
-        tracking: lastTracking,
-      ),
+      DebugPoses(left: left, right: right, head: head, tracking: lastTracking),
     );
   }
 

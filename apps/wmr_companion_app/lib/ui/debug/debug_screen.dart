@@ -16,6 +16,7 @@ import '../gamepad/gamepad_screen.dart';
 
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 
+import '../../services/test_bundle.dart';
 import 'config_panel.dart';
 import 'controller_panel.dart';
 import 'debug_providers.dart';
@@ -149,6 +150,10 @@ class DebugScreen extends ConsumerWidget {
             ),
           ),
           PoseReadout(poses: poses, style: mono),
+          HandTrackingStatsView(
+            diagnostics: ref.watch(handTrackingDiagnosticsProvider),
+            style: mono,
+          ),
           Text(
             'q  w ${_f(q.w)}  x ${_f(q.x)}  y ${_f(q.y)}  z ${_f(q.z)}',
             style: mono,
@@ -339,6 +344,53 @@ class PoseReadout extends StatelessWidget {
               '${_metres(position.z)} m';
     return '$name  $positionText  source ${pose?.source.name ?? 'waiting'}';
   }
+}
+
+/// Live Unity relay rate, longest gap and per-hand presence over the window
+/// the debug viewer and the attached tracking source have observed.
+class HandTrackingStatsView extends StatelessWidget {
+  const HandTrackingStatsView({
+    super.key,
+    required this.diagnostics,
+    this.style,
+  });
+
+  final HandTrackingDiagnostics diagnostics;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_relayLine(diagnostics), style: style),
+        Text(_handsLine(diagnostics), style: style),
+        if (diagnostics.poseSourceCounts.isNotEmpty)
+          Text(_sourcesLine(diagnostics), style: style),
+      ],
+    );
+  }
+
+  static String _relayLine(HandTrackingDiagnostics d) {
+    if (d.frameCount == 0) return 'relay no frames';
+    final hz = d.effectiveHz;
+    final gap = d.maxGapMs;
+    return 'relay ${hz == null ? '—' : hz.toStringAsFixed(1)} Hz  '
+        'frames ${d.frameCount}  '
+        'gap ${gap == null ? '—' : gap.toStringAsFixed(1)} ms';
+  }
+
+  static String _handsLine(HandTrackingDiagnostics d) =>
+      'LEFT present ${_percent(d.leftHandPresenceRatio)}  '
+      'RIGHT present ${_percent(d.rightHandPresenceRatio)}';
+
+  static String _sourcesLine(HandTrackingDiagnostics d) =>
+      'sources '
+      '${[for (final source in ControllerPoseSource.values)
+        if (d.poseSourceCounts[source] != null) '${source.name} ${d.poseSourceCounts[source]}'].join(', ')}';
+
+  static String _percent(double? ratio) =>
+      ratio == null ? '—' : '${(ratio * 100).toStringAsFixed(0)}%';
 }
 
 /// Raw FF11, decoded FF12 or batched FF14. The app listens to one at a

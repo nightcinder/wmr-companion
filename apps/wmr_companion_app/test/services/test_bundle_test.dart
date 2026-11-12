@@ -5,6 +5,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_core/domain/stick_centre.dart';
+import 'package:wmr_tracking/wmr_tracking.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 void main() {
@@ -599,4 +600,54 @@ void main() {
       ),
     );
   });
+
+  test(
+    'diagnostics record relay timing, hand presence and pose sources',
+    () async {
+      TrackingFrame frame(
+        int timeNs, {
+        bool left = false,
+        bool right = false,
+      }) => TrackingFrame(
+        timeNs: timeNs,
+        leftHand: left ? HandPose(hand: TrackedHand.left) : null,
+        rightHand: right ? HandPose(hand: TrackedHand.right) : null,
+      );
+
+      final accumulator = HandTrackingAccumulator()
+        ..addFrame(frame(0, left: true))
+        ..addFrame(frame(10000000, left: true, right: true))
+        ..addFrame(frame(20000000, right: true))
+        ..addFrame(frame(50000000, right: true))
+        ..addPose(ControllerPoseSource.handAnchor)
+        ..addPose(ControllerPoseSource.handAnchor)
+        ..addPose(ControllerPoseSource.runtimeController);
+
+      final bundle = await writeTestBundle(
+        TestBundleInput(
+          now: DateTime(2026, 11, 11, 12),
+          appVersion: '0.3.23+28',
+          phone: 'Test Phone',
+          androidVersion: 'Android 14 (API 34)',
+          streamMode: 'decoded',
+          handTrackingDiagnostics: accumulator.diagnostics,
+        ),
+        Directory('${dir.path}/out'),
+      );
+
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final diagnostics =
+          jsonDecode(text(archive, 'diagnostics.json')) as Map<String, Object?>;
+      expect(diagnostics['hand_tracking_diagnostics'], {
+        'relay_frame_count': 4,
+        'effective_hz': 60.0,
+        'max_gap_ms': 30.0,
+        'left_hand_presence_ratio': 0.5,
+        'right_hand_presence_ratio': 0.75,
+        'pose_source_counts': {'handAnchor': 2, 'runtimeController': 1},
+      });
+    },
+  );
 }
