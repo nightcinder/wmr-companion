@@ -148,7 +148,7 @@ Reports are lost between the controller and the ESP32 (Classic Bluetooth), befor
 | WMR_Bridge | #19 | Unknowns in `docs/DECODING.md` | Deep dive into Monado decoding merged (#26); tracking quality run sheet merged (#35). Open: hardware sitting M12.2 / Sitting A |
 | WMR_Bridge | #20 | Build/flash framework and browser installer | One-command `build.py` and browser installer variants landed (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`); M13.1 prerelease done |
 | wmr-companion | #19 | iOS build | **Superseded.** iOS 18 settled as floor, both platforms in v1; `WMRCompanionKit`, probe, and macOS CI compile check landed (#37, #44) |
-| wmr-companion | #20 | `universal_ble` gaps | Latency comparison closed 2026-11-07: **Stay Flutter**; run sheet v2 archived and the probe's retirement tracked in. Track the `universal_ble` gaps upstream |
+| wmr-companion | #20 | `universal_ble` gaps | Latency comparison closed 2026-11-07: **Stay Flutter**; run sheet v2 archived and the probe's retirement tracked in #20. Track the `universal_ble` gaps upstream |
 | wmr-companion | - | Reusable Flutter library | Phases 1–4 merged on `main` (#39, #41, #42, #43); phase 5 CI compile merged (#44); phase 7 UI package merged (#45); phase 7b HID Android package merged (#48); release hygiene merged (#49/#50/#52/#54). Open: iOS device run (device gate waived for the release line) |
 | Both | - | FF16 firmware version reporting | Firmware reports packaged version over FF16 (`WMR_Bridge` #38); app/facade `WmrProtocolVersion` and feature matrix landed in #46 |
 
