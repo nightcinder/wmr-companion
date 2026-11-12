@@ -661,6 +661,18 @@ void main() {
       );
     });
 
+    test('snapshot carries frames since the last throttled publish', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(handTrackingDiagnosticsProvider.notifier);
+
+      notifier.addFrame(const TrackingFrame(timeNs: 0));
+      notifier.addFrame(const TrackingFrame(timeNs: 10000000));
+
+      expect(notifier.snapshot.frameCount, 2);
+      expect(container.read(handTrackingDiagnosticsProvider).frameCount, 1);
+    });
+
     testWidgets('shows live relay rate and per-hand presence', (tester) async {
       await open(
         tester,

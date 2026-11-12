@@ -200,7 +200,9 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       wifiFallback: device.wifiFallback,
       activeLeg: device.wifiLeg?.label,
       stickSettings: stickSettings,
-      handTrackingDiagnostics: ref.read(handTrackingDiagnosticsProvider),
+      handTrackingDiagnostics: ref
+          .read(handTrackingDiagnosticsProvider.notifier)
+          .snapshot,
     );
   };
 });

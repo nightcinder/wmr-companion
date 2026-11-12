@@ -356,6 +356,10 @@ class HandTrackingDiagnosticsNotifier
     _accumulator.addPose(source);
   }
 
+  /// The window as accumulated so far, including frames since the last
+  /// throttled publish. An export reads this so its tail is not dropped.
+  HandTrackingDiagnostics get snapshot => _accumulator.diagnostics;
+
   /// Drops the previous source's window when a new one attaches.
   void reset() {
     _accumulator.clear();
@@ -633,7 +637,13 @@ class DebugTrackingSourceNotifier extends Notifier<DebugTrackingSelection> {
       final diagnostics = ref.read(handTrackingDiagnosticsProvider.notifier)
         ..reset();
       _diagnosticSource = source;
-      _diagnosticSub = source.frames.listen(diagnostics.addFrame);
+      _diagnosticSub = source.frames.listen(
+        diagnostics.addFrame,
+        onError: (Object _, StackTrace _) {
+          // The attachment status shows source failures; the diagnostics keep
+          // the frames received before the relay stopped.
+        },
+      );
     }
     state = DebugTrackingSelection(
       choice: attachment.choice,
