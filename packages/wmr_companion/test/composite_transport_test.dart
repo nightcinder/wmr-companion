@@ -287,6 +287,37 @@ class _StuckCancelBle extends FakeTransport {
   }
 }
 
+/// A TCP fake that hands every concurrent caller the same in-flight dial, like
+/// [WmrWsTransport.connect] joining an existing session, and holds it until
+/// [release] so a test can land a dial after its probe budget expired.
+class _HeldDialTcp extends _FakeTcp {
+  final Completer<void> release = Completer<void>();
+  final List<String> disconnectCalls = [];
+  Future<void>? _pending;
+  int dialAttempts = 0;
+
+  @override
+  Future<void> connect(String deviceId) {
+    dialAttempts++;
+    final pending = _pending;
+    if (pending != null) return pending;
+    final dial = _dial(deviceId);
+    _pending = dial;
+    return dial;
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) {
+    disconnectCalls.add(deviceId);
+    return super.disconnect(deviceId);
+  }
+
+  Future<void> _dial(String deviceId) async {
+    await release.future;
+    await super.connect(deviceId);
+  }
+}
+
 void main() {
   late _FakeTcp tcp;
   late FakeTransport ble;
@@ -944,6 +975,53 @@ void main() {
     expect(
       transport.tcpProbeBudget,
       lessThanOrEqualTo(const Duration(seconds: 3)),
+    );
+  });
+
+  test('a slow dial adopted by a later upgrade probe stays connected', () async {
+    await tcp.dispose();
+    final held = _HeldDialTcp()
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = held;
+
+    final transport = CompositeBleTransport(
+      tcp: held,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 60),
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    // The upgrade timer joins the dial the first attempt abandoned. Landing it
+    // now must upgrade the route, not be closed as a stale socket.
+    await _waitFor(
+      () => held.dialAttempts >= 2,
+      reason: 'the upgrade probe never joined the held dial',
+    );
+    held.release.complete();
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the adopted dial did not upgrade the route',
+    );
+    await _settle(50);
+
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    expect(
+      held.disconnectCalls,
+      isEmpty,
+      reason: 'the adopted dial was closed as a stale socket',
     );
   });
 }

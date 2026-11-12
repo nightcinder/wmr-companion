@@ -294,14 +294,11 @@ bool isLanInterfaceName(String name) {
 /// Whether an active, non-loopback LAN interface exists.
 ///
 /// A platform that cannot list interfaces answers true: guessing "no LAN"
-/// would disable Wi-Fi for everyone.
+/// would disable Wi-Fi for everyone. Both IPv4 and IPv6 addresses count, so an
+/// IPv6-only Wi-Fi link is not mistaken for a missing LAN.
 Future<bool> hasLanInterface() async {
   try {
-    final interfaces = await NetworkInterface.list(
-      includeLoopback: false,
-      includeLinkLocal: false,
-      type: InternetAddressType.IPv4,
-    );
+    final interfaces = await NetworkInterface.list(includeLoopback: false);
     return interfaces.any(
       (interface) =>
           interface.addresses.isNotEmpty && isLanInterfaceName(interface.name),

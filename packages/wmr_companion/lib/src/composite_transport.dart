@@ -519,9 +519,15 @@ class CompositeBleTransport implements BleTransport {
       final slice = remaining ~/ left;
       left--;
       route.tcpCandidates.add(id);
+      // Each attempt owns its dial. A transport can hand a later probe the
+      // same in-flight connection, so the cleanup of an abandoned dial must
+      // not close one that has since been taken over.
+      final dial = ++route.tcpDialSeq;
+      route.tcpDials[id] = dial;
       final pending = tcp.connect(id);
       try {
         await pending.timeout(slice);
+        if (route.tcpDials[id] == dial) route.tcpDials.remove(id);
         route.tcpDeviceId = id;
         _rememberBridge(route, tcp.helloFor(id)?.bridgeId);
         return id;
@@ -531,9 +537,16 @@ class CompositeBleTransport implements BleTransport {
           slice,
         );
         // The dial may still land after the budget. Close it when it does, so
-        // a late socket cannot stay open behind the BLE fallback.
+        // a late socket cannot stay open behind the BLE fallback. If a later
+        // probe has joined this dial or an earlier one was adopted, leave the
+        // connection alone: closing it here would tear down a live upgrade.
         unawaited(
-          pending.then((_) => tcp.disconnect(id), onError: (Object _) {}),
+          pending.then<void>((_) async {
+            if (route.tcpDials[id] != dial) return;
+            if (route.tcpDeviceId == id) return;
+            route.tcpDials.remove(id);
+            await tcp.disconnect(id);
+          }, onError: (Object _) {}),
         );
       } catch (error) {
         lastError = error;
@@ -964,6 +977,11 @@ class _Route {
   String? bleDeviceId;
   String? tcpDeviceId;
   final Set<String> tcpCandidates = {};
+
+  /// The dial attempt that currently owns each TCP candidate, so a probe that
+  /// timed out can tell whether its connection was adopted or replaced.
+  final Map<String, int> tcpDials = {};
+  int tcpDialSeq = 0;
   _Lane? active;
   BleConnectionState state = BleConnectionState.disconnected;
   bool intentional = false;
