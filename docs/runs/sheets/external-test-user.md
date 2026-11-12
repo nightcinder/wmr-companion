@@ -96,18 +96,61 @@ The exported environment bundle completes the day-one check.
 
 Capture: `adb shell dumpsys package com.onyxlens.wmr_companion | grep -E "versionName|versionCode"`, `adb shell wm size`, `adb shell dumpsys display | grep -iE "DisplayDeviceInfo|size=|density=|mode="`, and `adb logcat -v threadtime > wmr-neckband-sbs-<YYYYMMDD-HHMMSS>.log`. Connect wireless ADB first: `adb connect <neckband-ip>:5555`.
 
-**6E: Neckband 0DoF / 6DoF triage.** On v0.3.10 and earlier the app could open and drop to 0DoF with **6DoF only** greyed out. v0.3.11 fixed two causes: the Unity player was paused/unfocused on first host, and 6DoF needs VITURE stereo 3D (SpaceWalker). **The Pro Neckband has no D-pad.** Use short Volume Up/Down to move focus, hold Volume Down to select, hold Volume Up to go back; with headgaze on (Settings + Power), Volume Down selects and Volume Up goes back. If the app still shows 0DoF on v0.3.19, record the status line and capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
+### 6E: Neckband 0DoF / 6DoF triage
+In release 0.3.10 and earlier, the app could drop to 0DoF with 6DoF disabled. Release 0.3.11 fixed the Unity player pause state and required stereo 3D. The Pro Neckband has no physical D-pad. Use short Volume Up or Down presses to move focus. Hold Volume Down to select. Hold Volume Up to go back. If headgaze is active (Settings and Power), Volume Down selects and Volume Up goes back. If the app still shows 0DoF, record the status line. Capture logcat filtered on `0DoF|6DoF|spacewalker|running in 2d`. Do not use ADB to inject touches.
 
-**Mirroring during triage (6E).** Android Studio Device Mirroring attaches to the empty virtual Display 5 (`SYSTEM_NOTIFICATION_VD`) and drops touch injection; the UI is on Display 3, which excludes touch. For a visible screen use `scrcpy --display-id=3` for viewing only, and send input with the physical Volume Up/Down keys, headgaze (Settings + Power), the phone Neckband Remote app, or a paired Bluetooth controller.
+Do not use Android Studio Device Mirroring. Do not use plain `scrcpy`. The Neckband exposes an empty virtual Display 5 (`SYSTEM_NOTIFICATION_VD`). The active UI runs on Display 3, which rejects touch injection. For a visible screen, run `scrcpy --display-id=3` for viewing only. Send input with the Volume buttons, headgaze, the phone Neckband Remote app, or a paired Bluetooth controller.
+
+### 6F: Pro Neckband hand-tracking disambiguation
+
+The Pro Neckband uses three distinct hand-tracking layers:
+- SpaceWalker OS hand pointer: SpaceWalker displays an optical hand pointer. The pointer disappears when `VitureHandTracking.Start` runs, because the camera enters exclusive mode. In release 0.3.21 and later, the app starts Unity only after you open the Bench screen or the Debug screen.
+- In-app optical hand skeleton: Unity runs the 26-joint optical hand skeleton in the app. The bare hand skeleton appears in the HUD on the Bench screen during the `handEmpty` step.
+- SixDofFuser controller anchor: `SixDofFuser` fuses controller IMU orientation with optical hand anchor pose data. When a controller covers fingers during `handGrip`, optical tracking drops out. The pose then falls back to head-relative tracking.
+
+The VITURE Pro Neckband has no physical D-pad. Use only these controls:
+- Physical Volume Up and Volume Down buttons. Short press moves focus. Long press Volume Down selects. Long press Volume Up navigates back.
+- Settings button together with Power button to turn on headgaze navigation.
+- Phone Neckband Remote application.
+- Paired Bluetooth controller or mouse.
+
+Follow this checklist to find which tracking layer fails:
+1. Connect screen test: make sure that the SpaceWalker OS hand pointer works before you open Bench or Debug.
+2. Empty hand test: during `handEmpty` on the Bench screen, make sure that the 26-joint skeleton appears in the HUD.
+3. Controller grip test: during `handGrip` on the Bench screen, observe whether tracking drops out when you hold a controller.
+
+Capture diagnostic evidence over wireless ADB:
+1. Connect to the Neckband:
+   ```bash
+   adb connect <neckband-ip>:5555
+   ```
+2. Clear the logcat buffer and start capture:
+   ```bash
+   adb logcat -c && adb logcat -v threadtime > wmr-neckband-hand-diag-<timestamp>.log
+   ```
+3. Filter hand tracking and relay log messages:
+   ```bash
+   grep -E "HAND_HEARTBEAT|WmrTrackingUnitySmoke|VitureXR|WmrTrackingUnity|WmrTrackingViture" wmr-neckband-hand-diag-<timestamp>.log
+   ```
+   `WmrTrackingUnitySmoke` reports relay frame intervals and whether `hasHands` is true. `HAND_HEARTBEAT` reports the camera frame rate.
+4. Capture SurfaceFlinger and display layers while the Bench screen is visible:
+   ```bash
+   adb shell dumpsys SurfaceFlinger > wmr-neckband-surfaceflinger.txt
+   adb shell dumpsys display > wmr-neckband-display.txt
+   ```
+   Make sure that `MainActivity` appears on `layerStack=3` with `coveredRegion=[0, 0, 0, 0]`.
 
 ## 7. Logs and files
 Capture for every run and include in the zip:
 
 - `adb logcat -v threadtime > wmr-<setup>-<YYYYMMDD-HHMMSS>.log`
 - Filter tracking problems: `grep -iE "WmrTracking|TrackingException|stage=|stereo=|UnityPlayer|playerHosted" wmr-*.log`
+- Filter hand tracking problems: `grep -E "HAND_HEARTBEAT|WmrTrackingUnitySmoke" wmr-*.log`
+- SurfaceFlinger layer dump for Neckband runs: `adb shell dumpsys SurfaceFlinger > wmr-surfaceflinger-<timestamp>.txt`
+- Display dump for Neckband runs: `adb shell dumpsys display > wmr-display-<timestamp>.txt`
 - Bridge serial: save the `STREAM`/`LINKLOG` lines as `wmr-serial-<timestamp>.txt`
 - Screenshot the debug overlay showing `playerHosted`, `stereoMode` and `stage` (VITURE) or the permission list (Android XR)
-- If a file is missing, say which; do not reconstruct numbers from memory.
+- If a file is missing, state the missing file name. Do not reconstruct numbers from memory.
 
 ## 8. Send
 Zip the exported files plus the intake block. Send in the thread where you received this runbook.
