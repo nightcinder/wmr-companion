@@ -29,7 +29,7 @@ UI (screens, widgets)
 ```
 
 Rules:
-- `BleTransport` is an abstract class: scan, connect, discover, subscribe(characteristic) -> Stream<Uint8List>, write, disconnect, plus connection info (MTU, RSSI, connection interval/PHY where available). Note: `BleTransport` is currently GATT-shaped (UUIDs, CCC subscription, read/write characteristics). `WmrWsTransport` maps WebSocket messages to this seam without changing `ControllerService`. The name is settled: the project owner decided on  to keep `BleTransport` as-is for 0.1.0 (it wraps third-party libraries), rather than rename it to e.g. `WmrTransport` or `BridgeTransport`; no rename.
+- `BleTransport` is an abstract class: scan, connect, discover, subscribe(characteristic) -> Stream<Uint8List>, write, disconnect, plus connection info (MTU, RSSI, connection interval/PHY where available). Note: `BleTransport` is currently GATT-shaped (UUIDs, CCC subscription, read/write characteristics). `WmrWsTransport` maps WebSocket messages to this seam without changing `ControllerService`. The name is settled: the project owner decided to keep `BleTransport` as-is for 0.1.0 (it wraps third-party libraries), rather than rename it to e.g. `WmrTransport` or `BridgeTransport`; no rename.
 - Parser is pure Dart, no Flutter imports, fully unit tested with golden byte arrays.
 - Timestamp every received notification with a monotonic `Stopwatch` **at the transport boundary** (as early as possible) and carry it in the packet object.
 - Heavy work (fusion, stats) must not block the UI isolate. Start on the main isolate, but keep it behind interfaces so it can move to a worker isolate.
@@ -134,7 +134,7 @@ Check on pub.dev for current versions before pinning. Verify which Android contr
 - **iOS**: `NSBluetoothAlwaysUsageDescription` in Info.plist. Target iOS 18.0+ (owner floor, both Android and iOS in v1 scope; `docs/LIBRARY.md` §13). iOS controls connection interval, so measure rather than assume.
 
 ## Milestones
-Milestone planning is governed by  (see [STATUS.md](STATUS.md) and `HANDOFF.md` §7). The initial milestones (M1–M6) established the baseline pipeline, latency probe, and iOS companion kit. Active work is tracked under M10–M15:
+Milestone planning is governed by (see [STATUS.md](STATUS.md) and `HANDOFF.md` §7). The initial milestones (M1–M6) established the baseline pipeline, latency probe, and iOS companion kit. Active work is tracked under M10–M15:
 
 - **M10: Library v1 & API freeze**: Federated tree of twelve Dart packages at `0.3.0` (`wmr_core`, `wmr_companion`, `wmr_ble`, `wmr_ws`, `wmr_fusion`, `wmr_tracking`, `wmr_tracking_dispatch`, `wmr_tracking_android_xr`, `wmr_tracking_viture`, `wmr_tracking_xreal`, `wmr_companion_ui`, `wmr_companion_hid_android`) and Swift `WMRCompanionKit`, FF16 firmware version reporting (#46), pub workspace and publish readiness (`docs/PUBLISHING.md`), and the reference app move to `apps/wmr_companion_app` (#53). Open: owner approval for final pub.dev publishing (M10.6).
 - **M11: Two bridges as a product**: Multi-bridge connection support in `ControllerService` (#34), per-bridge attribution across records/stats/links/latency export (#51). Complete as engineering: firmware flasher variants and browser installer merged (`WMR_Bridge` #40) and hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`), per-bridge auto-reconnect and HID resume merged (#60). Open: hardware bench verification (Sitting B′ / Sitting B).

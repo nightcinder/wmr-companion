@@ -51,7 +51,7 @@ VITURE's SDK License Agreement (effective September 2025, ships as
   under **About → Licences**.
 - **2.1.7** forbids disclosing SDK performance benchmarks without VITURE's
   written consent. Gate measurements such as the Gate 9 pose rate are
-  benchmark results; check before publishing the  scorecard.
+  benchmark results; check before publishing the scorecard.
 - **9** forbids using "VITURE" in the application name. The app is
   "WMR Companion"; VITURE appears only in the licence and notice text.
 

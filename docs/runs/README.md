@@ -14,4 +14,4 @@ The `sheets/` directory contains five active run sheets:
 
 ## Closed Sheets
 
-- `latency-2.md`: Removed. The Flutter against native GATT probe comparison closed under  with the verdict to stay on Flutter. No more runs are required. The decision rule and thresholds are preserved at git commit `4c6e6ac` and summarised in `docs/LATENCY.md`.
+- `latency-2.md`: Removed. The Flutter against native GATT probe comparison closed with the verdict to stay on Flutter. No more runs are required. The decision rule and thresholds are preserved at git commit `4c6e6ac` and summarised in `docs/LATENCY.md`.

@@ -58,8 +58,8 @@
   the Debug and Latency screens record the composite active leg and stick
   settings.
 - Diagnostic bundles include a USB, display and XR device environment snapshot
-- CI adds Kotlin unit tests for the HID plugin  and makes the
-  gitleaks, Semgrep and OSV scans blocking ; the release dex check
+- CI adds Kotlin unit tests for the HID plugin and makes the
+  gitleaks, Semgrep and OSV scans blocking. The release dex check
   runs as its own workflow.
 - Paired with WMR_Bridge `v0.3.17`.
 
@@ -159,7 +159,7 @@
 - VITURE Pro Neckband hand tracking: the Unity source now starts only the hand
   subsystem when the player's graphics API cannot host VITURE's GLES-only
   display provider, and the export configuration pins OpenGL ES 3. The pinned
-  `unity-export-1.2` is built from the  merge commit with that pin, so its
+  `unity-export-1.2` is built from the merge commit with that pin, so its
   player starts the display normally; the hand-only path is the fallback for a
   player that is not GLES3.
 

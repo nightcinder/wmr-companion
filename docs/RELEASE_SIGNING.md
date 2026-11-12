@@ -4,7 +4,7 @@ External-tester APKs are signed with a project-owned key so that every build
 installs over the previous one and `apksigner` reports a single, stable
 certificate instead of `CN=Android Debug`.
 
-The  key was regenerated in  before any tester build was
+The key was regenerated before any tester build was
 distributed: its store and key passwords were not recoverable, so every release
 build failed at signing. The current key uses a random store password and a
 separate key password, both kept in Paperclip secrets. Two release APKs from
@@ -25,8 +25,8 @@ described in [Installing a release APK](#installing-a-release-apk).
 | Certificate SHA-256 | `BD:AA:32:B5:1A:D3:AF:D2:67:D0:F8:0F:28:A4:73:B8:53:19:F8:C3:7E:26:28:9C:F1:DC:1F:F7:CF:AA:E2:56` |
 | Password secrets | store password: Paperclip `wmr-companion/release-store-password`; key password: Paperclip `wmr-companion/release-key-password` |
 
-The keystore file is attached to the  task for the owner's offline
-backup (the  attachment is the superseded first key). It is not part of
+The keystore file is attached to the task for the owner's offline
+backup (the attachment is the superseded first key). It is not part of
 the repository.
 
 ## Configuration
@@ -131,8 +131,8 @@ export, built from merge commit `35d8015` whose `packages/wmr_tracking_unity`
 subtree is identical to `main` at `94573b2`, graphics APIs pinned to
 OpenGL ES 3), runs `tool/check_unity_export.py`
 on the zip to reject a stale export, one that still emits the `mono` stereo
-mode, one built before the  hand-only UaaL gate (`_embeddedUaaL`), or one
-built before the  input start (`VITURE input subsystem did not start`),
+mode, one built before the hand-only UaaL gate (`_embeddedUaaL`), or one
+built before the input start (`VITURE input subsystem did not start`),
 and runs `tool/check_unified_apk.py` on the arm64-v8a APK before
 publishing. The Monado config key fetch is not optional: the job fails unless
 the key is exactly 1024 bytes and is packaged in the APK. Re-publishing that
@@ -206,7 +206,7 @@ git push origin :refs/tags/v0.3.7-dryrun
 
 Do this once now, then after any re-export of the keystore (key rotation).
 
-1. Download `wmr-release.keystore` from the  task attachment — the
+1. Download `wmr-release.keystore` from the task attachment — the
     attachment is the superseded key — or copy it from
    `apps/wmr_companion_app/android/wmr-release.keystore`.
 2. Copy it to **two** offline media in separate physical locations (for example

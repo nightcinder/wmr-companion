@@ -34,7 +34,7 @@ measurements do not exist.
 Related: [PLAN.md](PLAN.md) (current architecture), [STATUS.md](STATUS.md)
 (current state), [GAMEPAD.md](GAMEPAD.md) (mapping and output options),
 [PROTOCOL.md](PROTOCOL.md) (wire format, app-side decisions), and
-[IOS.md](IOS.md) with the native `WMRCompanionKit` from  (PR #37).
+[IOS.md](IOS.md) with the native `WMRCompanionKit` from (PR #37).
 
 ## 1. Decision in one page
 
@@ -328,7 +328,7 @@ CoreBluetooth; the open questions are latency and jitter, MTU visibility, and
 background behavior. This is the cheapest way to get a real iOS library build
 and measure it.
 
-**Phase 2 (when measurements justify it): native iOS transport.**  (PR
+**Phase 2 (when measurements justify it): native iOS transport.** (PR
 #37) already built `packages/WMRCompanionKit`: CoreBluetooth central,
 FF11–FF17 parsing, fusion, multi-bridge and a Combine/async facade, with a
 SwiftUI probe. `WMRCompanionClient` publishes `firmwareVersionPublisher` and

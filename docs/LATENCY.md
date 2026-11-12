@@ -172,7 +172,7 @@ No incomplete frames, reassembly errors or parse errors; no rows dropped and no 
 
 **What this does not show:**
 - Where the 40 ms is spent. The run says nothing new about the app/plugin/radio split; the no-stream, FF11 and FF12 runs are in the ladder section below, and only the two repeats remain unrun.
-- Whether the two 10 ms-plus ESP32 turnarounds are new. One run, two pings, no firmware hash; the `v0.1.1` image adds HCI logging and the  reconnect changes, but this run did not exercise them and cannot attribute the tail to them.
+- Whether the two 10 ms-plus ESP32 turnarounds are new. One run, two pings, no firmware hash; the `v0.1.1` image adds HCI logging and the reconnect changes, but this run did not exercise them and cannot attribute the tail to them.
 - Anything about the `v0.1.1` packaging or the FF17/status-v2 additions; the export does not record which image ran or its hash, and the run used one bridge and one phone at an unrecorded position.
 
 ## Run sheet: no stream, FF11, FF12, FF14 at a fixed position (**one pass run 2026-10-24**)
@@ -229,14 +229,14 @@ For each run: wait for the mode switch to finish before Start; at the end use **
 
 Six runs is one position, one phone, one session; the 2026-10-24 pass covers the first four, so the repeats remain the gap. Nothing here is "verified" until Nick reports it.
 
-**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data (`d <= 5 ms` and `abs(a - p) <= 0.25 * p` to stay on Flutter, `d >= 10 ms` or `p < 0.5 * a` to move native).  is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions; the second is In between on the stall clause, and both sessions prescribe staying on Flutter). The standalone probe's retirement is tracked in ; the archived sheet was removed (preserved in git history at `4c6e6ac`).
+**Decided: latency-2, the app against the native probe.** Milestone 5 was decided by comparing this app against a bare-Kotlin GATT client under the rule fixed before the data (`d <= 5 ms` and `abs(a - p) <= 0.25 * p` to stay on Flutter, `d >= 10 ms` or `p < 0.5 * a` to move native). Milestone 5 is closed: **Stay Flutter** (2026-10-28 and 2026-11-07 sessions; the second is In between on the stall clause, and both sessions prescribe staying on Flutter). The standalone probe's retirement is tracked; the archived sheet was removed (preserved in git history at `4c6e6ac`).
 
 ## Flutter library / iOS v1 run (phase 5)
 
 The library package split is merged through phase 4. Phase 5 is the first real
 iOS evidence and needs a device; it is not a CI-only result.
 
-**Status: not run : waived by the owner on 2026-10-23  for the `0.1.0`
+**Status: not run : waived by the owner on 2026-10-23 for the `0.1.0`
 release line.** The steps below stay the sheet for any release that claims iOS
 support; this release does not have that evidence.
 
