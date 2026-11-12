@@ -12,6 +12,7 @@ import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
+import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/ui/debug/debug_providers.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
@@ -564,6 +565,7 @@ void main() {
       DebugPoses? poses,
       bool simulated = false,
       Quaternion? orientation,
+      HandTrackingDiagnostics? diagnostics,
     }) async {
       tall(tester);
       await tester.pumpWidget(
@@ -582,6 +584,10 @@ void main() {
             if (poses != null)
               debugPosesProvider(DebugSource.fake)
                   .overrideWith((ref) => Stream.value(poses)),
+            if (diagnostics != null)
+              handTrackingDiagnosticsProvider.overrideWith(
+                () => _FixedDiagnostics(diagnostics),
+              ),
           ],
           child: const MaterialApp(home: DebugScreen(source: DebugSource.fake)),
         ),
@@ -652,6 +658,34 @@ void main() {
       expect(
         find.textContaining('fallback: orientation only, no position'),
         findsNothing,
+      );
+    });
+
+    testWidgets('shows live relay rate and per-hand presence', (tester) async {
+      await open(
+        tester,
+        poses: _poses(ControllerPoseSource.handAnchor),
+        diagnostics: const HandTrackingDiagnostics(
+          frameCount: 240,
+          effectiveHz: 59.8,
+          maxGapMs: 41.3,
+          leftHandPresenceRatio: 0.97,
+          rightHandPresenceRatio: 0.5,
+          poseSourceCounts: {
+            ControllerPoseSource.handAnchor: 180,
+            ControllerPoseSource.runtimeController: 60,
+          },
+        ),
+      );
+
+      expect(find.textContaining('relay 59.8 Hz'), findsOneWidget);
+      expect(find.textContaining('frames 240'), findsOneWidget);
+      expect(find.textContaining('gap 41.3 ms'), findsOneWidget);
+      expect(find.textContaining('LEFT present 97%'), findsOneWidget);
+      expect(find.textContaining('RIGHT present 50%'), findsOneWidget);
+      expect(
+        find.textContaining('sources runtimeController 60, handAnchor 180'),
+        findsOneWidget,
       );
     });
   });
@@ -794,4 +828,13 @@ void main() {
       );
     });
   });
+}
+
+class _FixedDiagnostics extends HandTrackingDiagnosticsNotifier {
+  _FixedDiagnostics(this.value);
+
+  final HandTrackingDiagnostics value;
+
+  @override
+  HandTrackingDiagnostics build() => value;
 }

@@ -12,6 +12,7 @@ import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
 
 import '../ui/capture/capture_providers.dart';
 import '../ui/connect/connect_providers.dart';
+import '../ui/debug/debug_providers.dart';
 import '../ui/debug/stream_settings.dart';
 import '../ui/latency/latency_providers.dart';
 import 'firmware_identity.dart';
@@ -199,6 +200,7 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       wifiFallback: device.wifiFallback,
       activeLeg: device.wifiLeg?.label,
       stickSettings: stickSettings,
+      handTrackingDiagnostics: ref.read(handTrackingDiagnosticsProvider),
     );
   };
 });
