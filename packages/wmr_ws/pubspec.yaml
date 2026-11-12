@@ -13,4 +13,4 @@ dependencies:
   wmr_core: ^0.3.0
 
 dev_dependencies:
-  test: ^1.25.0
+  test: ^1.32.0
