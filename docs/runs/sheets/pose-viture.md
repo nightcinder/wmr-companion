@@ -1,15 +1,15 @@
 # Run sheet: pose validation - VITURE (Pro Neckband + Luma Ultra)
 Status: proposed, not run. The Unity-in-Flutter relay is implemented and host-tested; no Neckband run has happened. Result tables are empty. Code targets VITURE XR SDK 0.9.0 (`Viture.XR.VitureXR`) on Unity 6000.0.27f1.
 
-Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.19 runs these gates.
+Gates: 1, 3, 4, 7, 8, 9. See [GATES.md](../../tracking/GATES.md). The guided bench in v0.3.24 runs these gates.
 
-**The Pro Neckband has no D-pad.** Controls are Power, Volume Up/Down, Settings, the pointer/air-mouse, hand gestures, the Neckband Remote app, or a paired Bluetooth controller.
+The VITURE Pro Neckband has no physical D-pad. Valid controls are Power, Volume Up and Down, Settings, the air-mouse pointer, hand gestures, the Neckband Remote app, or a paired Bluetooth controller.
 ## 1. Prerequisites
 | Item | Required |
 |---|---|
 | Glasses | VITURE Luma Ultra (6DoF + stereo cameras) for gates 1/4/9. 3DoF models (One, OneLite, Pro, Pro2, Luma, LumaPro, LumaCyber, Beast) are rejected for hand tracking. |
 | Host | VITURE Pro Neckband (Android, wireless ADB) for gates 3/4/7/8. Gate 9 needs an Android phone with USB host. |
-| App | Signed v0.3.19 unified APK (versionCode 2024). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1); no export or debug flags are needed. Record version, export SHA and firmware SHA. |
+| App | Signed v0.3.24 unified APK (versionCode 2029, with v0.3.21 or newer required). It carries VITURE and XREAL, `WMR_VITURE_CARINA_DIAG=true`, and `libglasses.so` (SDK 2.4.1). No export or debug flags are needed. Record version, export SHA and firmware SHA. |
 | Bridge | One board on `main`, both controllers paired and awake. |
 | Tooling | `adb` (wireless for the Neckband), terminal, logcat, screenshots. |
 | Checkerboard | Gate 1: flat, rigid, at least 8x6 inner corners, known square size. |
@@ -78,6 +78,46 @@ The bench runs `handEmpty` and `handGrip`, 60 s each. Grip dropout is the share 
 | Errors / exceptions | |
 
 Pass: dropout under 5%. Marginal: 5-15%. Fail: over 15%. Joints must arrive for an empty hand.
+
+### Pro Neckband hand-tracking disambiguation
+
+The Pro Neckband uses three distinct hand-tracking layers:
+- SpaceWalker OS hand pointer: SpaceWalker displays an optical hand pointer. The pointer disappears when `VitureHandTracking.Start` runs, because the camera enters exclusive mode. In release 0.3.21 and later, the app starts Unity only after you open the Bench screen or the Debug screen.
+- In-app optical hand skeleton: Unity runs the 26-joint optical hand skeleton in the app. The bare hand skeleton appears in the HUD on the Bench screen during the `handEmpty` step.
+- SixDofFuser controller anchor: `SixDofFuser` fuses controller IMU orientation with optical hand anchor pose data. When a controller covers fingers during `handGrip`, optical tracking drops out. The pose then falls back to head-relative tracking.
+
+The VITURE Pro Neckband has no physical D-pad. Use only these valid controls:
+- Physical Volume Up and Volume Down buttons. Short press moves focus. Long press Volume Down selects. Long press Volume Up navigates back.
+- Settings button together with Power button to turn on headgaze navigation.
+- Phone Neckband Remote application.
+- Paired Bluetooth controller or mouse.
+
+Follow this disambiguation checklist when hand-tracking issues occur:
+1. Connect screen test: on release 0.3.21 and later, make sure that the SpaceWalker OS hand pointer works before you open Bench or Debug.
+2. Empty hand test: during `handEmpty` on the Bench screen, make sure that the 26-joint skeleton appears in the HUD.
+3. Controller grip test: during `handGrip` on the Bench screen, observe whether tracking drops out when you hold a controller.
+
+Capture diagnostic logs and display layers over wireless ADB:
+1. Connect to the Neckband:
+   ```bash
+   adb connect <neckband-ip>:5555
+   ```
+2. Clear the logcat buffer and start capture:
+   ```bash
+   adb logcat -c && adb logcat -v threadtime > pose-viture-hand-diag-<timestamp>.log
+   ```
+3. Filter hand tracking and relay log messages:
+   ```bash
+   grep -E "WmrTrackingUnitySmoke|VitureXR|WmrTrackingUnity|WmrTrackingViture" pose-viture-hand-diag-<timestamp>.log
+   ```
+   `WmrTrackingUnitySmoke` reports frame count, payload size, and whether `hasHands` is true. In release 0.3.24 and later, the exported test bundle records frame rate and gap metrics in `hand_tracking_diagnostics.effective_hz` and `hand_tracking_diagnostics.max_gap_ms`.
+4. Capture SurfaceFlinger and display layers while the Bench screen is visible:
+   ```bash
+   adb shell dumpsys SurfaceFlinger > pose-viture-surfaceflinger.txt
+   adb shell dumpsys display > pose-viture-display.txt
+   ```
+   Make sure that `MainActivity` appears on `layerStack=3` with `coveredRegion=[0, 0, 0, 0]`.
+
 ## 6. Gate 7 - clock test
 Same procedure as [pose-androidxr.md](pose-androidxr.md) section 6, with the VITURE source.
 
@@ -103,7 +143,7 @@ Pass: the test is run and the failure of `headRelative` as positional tracking i
 
 Pass: at least 30 Hz sustained for 60 s with a valid pose. Fail: no pose or no USB.
 ## 9. Send
-Capture per gate: logcat `pose-viture-<gate>-<timestamp>.log` (wireless ADB for the Neckband); the debug overlay screenshot showing `playerHosted`, `stereoMode` and `stage`; exported JSON/CSV; bridge serial; Unity logs; photos. Zip as `pose-viture-<YYYYMMDD>.zip`, record its SHA-256, and attach it with the filled tables. If a file is missing, say which; do not reconstruct numbers.
+Capture per gate: logcat `pose-viture-<gate>-<timestamp>.log` using wireless ADB for the Neckband. Include the debug overlay screenshot showing `playerHosted`, `stereoMode` and `stage`. Include exported JSON and CSV files, bridge serial logs, Unity logs, and setup photos. Include `pose-viture-surfaceflinger.txt` and `pose-viture-display.txt` for Neckband runs. Zip all files as `pose-viture-<YYYYMMDD>.zip`. Record the SHA-256 checksum and attach the archive with the completed tables. If a file is missing, state the missing file name. Do not reconstruct numbers from memory.
 ## 10. Pass/fail for 1.0
 - Gate 1 recorded.
 - Gate 3 pass, or blocked on the SDK gate and recorded.
