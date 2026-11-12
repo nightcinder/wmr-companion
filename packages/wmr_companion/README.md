@@ -26,6 +26,17 @@ The facade re-exports its types. Vendor adapters ship in their own packages
 are off by default; no headset has been tested; see
 [`docs/TRACKING.md`](../../docs/TRACKING.md).
 
+## Wi-Fi token persistence
+
+`CompositeBleTransport` takes an optional `onTokenLearned` callback. It fires
+once when the Pi's FF13 encrypted characteristic supplies the token for an
+authenticated endpoint, with the stable `bridge_id`, the LAN hosts and the
+port from the FF16 endpoint document. A host app can save the token in
+platform secure storage and the endpoint in its launch memory, so a later
+start reconnects over Wi-Fi by default and authenticates while Bluetooth is
+off. The callback is never given a token that is logged; an exception it
+throws is swallowed so the dial and the BLE-to-TCP upgrade continue.
+
 ## Why in-process input
 
 iOS gives third-party apps no public virtual-gamepad or Bluetooth HID API. The

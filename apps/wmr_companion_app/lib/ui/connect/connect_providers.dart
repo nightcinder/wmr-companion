@@ -14,6 +14,7 @@ import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import '../../services/bridge_token_store.dart';
 import '../../services/known_bridge_store.dart';
 import '../debug/stream_settings.dart';
 
@@ -41,6 +42,14 @@ final bleHandoffTransportFactoryProvider =
             // The shared BLE transport outlives the composite and is disposed
             // by [realTransportProvider].
             disposeBle: false,
+            onTokenLearned: (bridgeId, hosts, port, token) {
+              unawaited(
+                ref
+                    .read(bridgeTokenStoreProvider)
+                    .save(bridgeId: bridgeId, hosts: hosts, token: token),
+              );
+              unawaited(_rememberLearnedBridge(ref, bridgeId, hosts, port));
+            },
           ),
     );
 
@@ -148,6 +157,14 @@ final compositeWifiTransportFactoryProvider =
         final composite = CompositeBleTransport(
           tcp: WmrWsTransport(endpoints: [endpoint]),
           ble: UniversalBleTransport(adapter: UniversalBleAdapter()),
+          onTokenLearned: (bridgeId, hosts, port, token) {
+            unawaited(
+              ref
+                  .read(bridgeTokenStoreProvider)
+                  .save(bridgeId: bridgeId, hosts: hosts, token: token),
+            );
+            unawaited(_rememberLearnedBridge(ref, bridgeId, hosts, port));
+          },
         );
         return WifiLink(
           composite,
@@ -161,12 +178,50 @@ final compositeWifiTransportFactoryProvider =
       };
     });
 
+/// Saves the endpoint a BLE FF13/FF16 exchange discovered, so the next launch
+/// reconnects to that bridge by default instead of waiting for a scan.
+///
+/// The token is stored separately in secure storage; this only remembers the
+/// address. Losing the memory costs one discovery pass, not the connection.
+Future<void> _rememberLearnedBridge(
+  Ref ref,
+  String bridgeId,
+  List<String> hosts,
+  int port,
+) async {
+  if (bridgeId.trim().isEmpty || hosts.isEmpty) return;
+  try {
+    await ref
+        .read(knownBridgeStoreProvider)
+        .save(KnownBridge(bridgeId: bridgeId, hosts: hosts, port: port));
+  } catch (_) {
+    // Nothing saved, or no storage on this platform.
+  }
+}
+
 /// The latest WMR_Bridge release can be installed from the Pi itself when its
 /// daemon advertises `upgradeCapable`. Older daemons need this one-liner.
 const String bridgeManualUpgradeCommand =
     'curl -fsSL '
     'https://github.com/nightcinder/WMR_Bridge/releases/latest/download/install.sh'
     ' | sudo bash';
+
+/// Human-readable reason for a failed Wi-Fi dial.
+///
+/// A token failure names the file on the Pi and the Bluetooth path that can
+/// learn it. The token itself is never included in the message.
+String wifiFailureMessage(Object error) => switch (error) {
+  WmrWsAuthException(failure: WmrWsAuthFailure.noToken) =>
+    'This bridge requires a token. Type the one from '
+        '/etc/wmr-bridge/token on the Pi, or connect once over Bluetooth '
+        'so the app can read and save it.',
+  WmrWsAuthException(failure: WmrWsAuthFailure.rejected) =>
+    'The bridge rejected the token. Compare it with '
+        '/etc/wmr-bridge/token on the Pi.',
+  WmrWsAuthException(failure: WmrWsAuthFailure.timeout) =>
+    'The bridge did not answer authentication. Check the token and retry.',
+  _ => '$error',
+};
 
 /// What the Connect screen shows for an in-app bridge upgrade.
 enum BridgeUpgradePhase { idle, sending, restarting, busy, failed }
@@ -954,7 +1009,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       BleLinkStatus(
         BleLinkPhase.connectFailed,
         deviceId: deviceId,
-        message: '$error',
+        message: wifiFailureMessage(error),
       ),
     );
   }
@@ -1177,7 +1232,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       // No storage, no remembered bridge: the sole discovered one still works.
     }
     if (!ref.mounted || _autoConnectSuppressed) return;
-    await _discoverLan(remembered: remembered);
+    final attempted = await _discoverLan(remembered: remembered);
+    // A blocked or failing scan must not keep a saved bridge off the wire: the
+    // remembered address is the fallback, with `hello` still verifying its id.
+    if (!attempted &&
+        remembered != null &&
+        ref.mounted &&
+        !_autoConnectSuppressed) {
+      await _autoConnect(const [], remembered);
+    }
   }
 
   /// Gives a dropped link a fresh attempt when the app returns to the
@@ -1236,23 +1299,41 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       // No storage, no remembered bridge: the sole discovered one still works.
     }
     if (!ref.mounted || _autoConnectSuppressed) return;
-    await _discoverLan(remembered: remembered);
+    final attempted = await _discoverLan(remembered: remembered);
+    if (!attempted &&
+        remembered != null &&
+        ref.mounted &&
+        !_autoConnectSuppressed) {
+      await _autoConnect(const [], remembered);
+    }
   }
 
-  Future<void> _discoverLan({KnownBridge? remembered}) async {
-    if (state.discoveringLan) return;
+  /// Runs one discovery pass and dials the remembered or sole bridge.
+  ///
+  /// Returns true when discovery handed the dial to [_autoConnect] or a pass
+  /// is already running, so a caller does not start a second dial against the
+  /// same bridge. A failed pass still lets the caller fall back to the
+  /// remembered address.
+  Future<bool> _discoverLan({KnownBridge? remembered}) async {
+    // A resume can land in the middle of the launch pass. Report it as
+    // attempted: the running pass owns the dial, and a second `connectWifi`
+    // would dispose the transport the first dial is still using.
+    if (state.discoveringLan) return true;
     _update(discoveringLan: true, clearLanError: true);
     try {
       final found = _deduplicateLanEndpoints(
         await ref.read(lanDiscoveryProvider)(),
       );
-      if (!ref.mounted) return;
+      if (!ref.mounted) return false;
       _update(lanEndpoints: found);
       if (remembered != null || found.length == 1) {
         await _autoConnect(found, remembered);
+        return true;
       }
+      return false;
     } catch (error) {
       if (ref.mounted) _update(lanError: '$error');
+      return false;
     } finally {
       if (ref.mounted) _update(discoveringLan: false);
     }
@@ -1331,8 +1412,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   /// Connects to a Pi Wi-Fi bridge by host:port, with the optional shared
-  /// token. The token is only handed to the transport; it is never logged or
-  /// kept in app state.
+  /// token. The token is never logged or kept in app state.
+  ///
+  /// When [token] is empty, the token saved for [bridgeId] or [host] in the
+  /// platform secure storage is used. That is how a bridge the app learned
+  /// over BLE FF13 still authenticates after a restart with Bluetooth off.
+  /// Pass [rememberToken] to save a hand-typed token for next time; it is
+  /// written only after the connect succeeds, so a mistyped token is not kept.
   ///
   /// [bridgeId] and [name] come from LAN discovery and let the transport
   /// verify the WebSocket `hello` before sending a token. [candidateHosts]
@@ -1351,8 +1437,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     String? name,
     Iterable<String> candidateHosts = const <String>[],
     bool bleFallback = true,
+    bool rememberToken = false,
   }) async {
     final trimmedToken = token?.trim();
+    final tokenStore = ref.read(bridgeTokenStoreProvider);
+    final savedToken = trimmedToken == null || trimmedToken.isEmpty
+        ? await tokenStore.load(bridgeId: bridgeId, host: host.trim())
+        : null;
+    final effectiveToken = trimmedToken != null && trimmedToken.isNotEmpty
+        ? trimmedToken
+        : savedToken;
     final endpoint = WmrWsEndpoint(
       host: host.trim(),
       candidateHosts: candidateHosts,
@@ -1361,7 +1455,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       secure: secure,
       bridgeId: bridgeId,
       name: name,
-      token: trimmedToken == null || trimmedToken.isEmpty ? null : trimmedToken,
+      token: effectiveToken == null || effectiveToken.isEmpty
+          ? null
+          : effectiveToken,
     );
     final id = endpoint.resolvedDeviceId;
 
@@ -1387,6 +1483,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     if (bleFallback) _startFallbackScan(transport);
     await connect(id);
     if (state.connectedDeviceIds.contains(id)) {
+      if (rememberToken && trimmedToken != null && trimmedToken.isNotEmpty) {
+        await tokenStore.save(
+          bridgeId: bridgeId,
+          hosts: endpoint.hosts,
+          token: trimmedToken,
+        );
+      }
       await _rememberBridge(
         bridgeId: bridgeId,
         hosts: endpoint.hosts,

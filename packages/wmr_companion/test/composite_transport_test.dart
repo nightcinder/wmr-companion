@@ -483,10 +483,20 @@ void main() {
         throw StateError('unexpected read $characteristicUuid');
       };
 
+      String? learnedToken;
+      String? learnedBridgeId;
+      List<String>? learnedHosts;
+      int? learnedPort;
       final transport = CompositeBleTransport(
         tcp: tcp,
         ble: ble,
         upgradeInterval: const Duration(hours: 1),
+        onTokenLearned: (bridgeId, hosts, port, token) {
+          learnedBridgeId = bridgeId;
+          learnedHosts = hosts;
+          learnedPort = port;
+          learnedToken = token;
+        },
       );
       addTearDown(transport.dispose);
 
@@ -497,6 +507,10 @@ void main() {
       );
 
       expect(tcp.endpoints[_lanDeviceId]?.token, 'secret');
+      expect(learnedBridgeId, _bridgeId);
+      expect(learnedHosts, ['127.0.0.1']);
+      expect(learnedPort, 8765);
+      expect(learnedToken, 'secret');
     },
   );
 

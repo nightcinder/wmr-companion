@@ -45,6 +45,7 @@ class CompositeBleTransport implements BleTransport {
     this.upgradeInterval = const Duration(seconds: 2),
     this.bleScanWait = const Duration(seconds: 5),
     this.disposeBle = true,
+    this.onTokenLearned,
   }) : clock = tcp.clock;
 
   /// Primary WebSocket transport.
@@ -75,6 +76,23 @@ class CompositeBleTransport implements BleTransport {
   /// transport between several composites (the Bluetooth tab and an opt-in
   /// Wi-Fi fallback) sets this to false and owns the transport itself.
   final bool disposeBle;
+
+  /// Called when the FF13 encrypted read supplies the bridge token, with the
+  /// stable `bridge_id`, the LAN hosts and the port the FF16 document
+  /// reported.
+  ///
+  /// The composite keeps the token only for the current dial. A host that
+  /// wants it after an app restart, so Wi-Fi can authenticate while Bluetooth
+  /// is off, saves it here together with the endpoint (hosts and port). The
+  /// callback must not log the token; an exception it throws is swallowed so
+  /// the dial still proceeds.
+  final void Function(
+    String bridgeId,
+    List<String> hosts,
+    int port,
+    String token,
+  )?
+  onTokenLearned;
 
   final Map<String, _Route> _routes = {};
   final Map<String, String> _bridgeIds = {};
@@ -790,6 +808,14 @@ class CompositeBleTransport implements BleTransport {
     if (endpoint.authRequired) {
       token = await _readBleToken(bleId);
       if (token == null) return;
+      final learned = onTokenLearned;
+      if (learned != null && endpoint.bridgeId.trim().isNotEmpty) {
+        try {
+          learned(endpoint.bridgeId, endpoint.hosts, endpoint.port, token);
+        } catch (_) {
+          // Saving the token is best-effort; the dial still proceeds.
+        }
+      }
     }
     for (final host in endpoint.hosts) {
       final candidate = WmrWsEndpoint(

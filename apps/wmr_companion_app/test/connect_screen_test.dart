@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
+import 'package:wmr_companion_app/services/bridge_token_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
@@ -10,6 +11,7 @@ import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import 'services/memory_secure_token_backend.dart';
 import 'ui/raw_mode_notifier.dart';
 
 void main() {
@@ -52,6 +54,9 @@ void main() {
             }),
             wifiTransportFactoryProvider.overrideWithValue(
               (_) => throw StateError('the direct Wi-Fi factory must not run'),
+            ),
+            bridgeTokenStoreProvider.overrideWithValue(
+              BridgeTokenStore(MemorySecureTokenBackend()),
             ),
           ],
           child: const MaterialApp(home: ConnectScreen()),
