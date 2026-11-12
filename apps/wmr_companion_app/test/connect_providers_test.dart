@@ -233,6 +233,48 @@ void main() {
     expect(state.lanError, isNull);
   });
 
+  test('mobile data and tunnels do not count as a LAN interface', () async {
+    expect(isLanInterfaceName('wlan0'), isTrue);
+    expect(isLanInterfaceName('en0'), isTrue);
+    expect(isLanInterfaceName('eth0'), isTrue);
+    expect(isLanInterfaceName('rmnet_data0'), isFalse);
+    expect(isLanInterfaceName('pdp_ip0'), isFalse);
+    expect(isLanInterfaceName('utun3'), isFalse);
+    expect(isLanInterfaceName('ppp0'), isFalse);
+
+    expect(await hasLanInterface(), isA<bool>());
+  });
+
+  test('the Wi-Fi fallback composite consults the LAN probe', () async {
+    var probes = 0;
+    final container = ProviderContainer(
+      overrides: [
+        realTransportProvider.overrideWithValue(
+          UniversalBleTransport(adapter: FakeBleAdapter()),
+        ),
+        lanInterfaceProbeProvider.overrideWithValue(() async {
+          probes++;
+          return false;
+        }),
+        streamModeProvider.overrideWith(RawModeNotifier.new),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final link = container.read(compositeWifiTransportFactoryProvider)(
+      WmrWsEndpoint(host: '192.168.1.42', port: 8765, bridgeId: 'pi-1'),
+    );
+    addTearDown(link.transport.dispose);
+
+    final composite = link.transport as CompositeBleTransport;
+    expect(await composite.lanAvailable!(), isFalse);
+    expect(probes, 1);
+    expect(
+      composite.tcpProbeBudget,
+      lessThanOrEqualTo(const Duration(seconds: 3)),
+    );
+  });
+
   test(
     'fallback connects through the composite and reports its active leg',
     () async {

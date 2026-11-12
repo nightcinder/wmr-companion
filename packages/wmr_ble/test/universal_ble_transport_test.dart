@@ -293,6 +293,117 @@ void main() {
     });
   });
 
+  group('busy CCCD writes', () {
+    UniversalBleTransport fastRetry() {
+      final transport = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        enableRetryDelay: const Duration(milliseconds: 5),
+      );
+      addTearDown(transport.dispose);
+      return transport;
+    }
+
+    Future<void> settleUntil(bool Function() condition) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (!condition()) {
+        if (DateTime.now().isAfter(deadline)) fail('condition not met');
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    test('retries after the stack settles', () async {
+      final t2 = fastRetry();
+      await t2.connect(id);
+      adapter.enableBusyCount = 1;
+
+      final stream = t2.subscribe(
+        id,
+        wmrBridgeServiceUuid,
+        wmrBridgeStreamCharUuid,
+      );
+      await settleUntil(() => adapter.ccc.contains('on ff11'));
+
+      expect(
+        adapter.calls.where((c) => c == 'enableNotifications'),
+        hasLength(2),
+      );
+      expect(adapter.ccc, ['BUSY on ff11', 'on ff11']);
+      expect(t2.status.phase, BleLinkPhase.ready);
+      expect(stream, isNotNull);
+    });
+
+    test('drops the link when the write never settles', () async {
+      final t2 = fastRetry();
+      await t2.connect(id);
+      adapter.enableBusyCount = 5;
+
+      final errors = <Object>[];
+      t2
+          .subscribe(id, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid)
+          .listen((_) {}, onError: errors.add);
+      await settleUntil(() => adapter.calls.contains('disconnect'));
+
+      expect(errors.single, isA<BleStreamException>());
+      expect(
+        adapter.calls.where((c) => c == 'enableNotifications'),
+        hasLength(3),
+      );
+      expect(
+        await t2.connectionState(id).first,
+        BleConnectionState.disconnected,
+      );
+      expect(t2.status.phase, BleLinkPhase.disconnected);
+    });
+
+    test('shares one CCCD write between duplicate subscribers', () async {
+      await t.connect(id);
+      t.subscribe(id, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid);
+      await pump();
+      final again = t.subscribe(
+        id,
+        wmrBridgeServiceUuid,
+        wmrBridgeStreamCharUuid,
+      );
+      await pump();
+
+      expect(
+        adapter.calls.where((c) => c == 'enableNotifications'),
+        hasLength(1),
+      );
+      expect(adapter.ccc, ['on ff11']);
+
+      final got = <BleNotification>[];
+      again.listen(got.add);
+      adapter.emitNotification(wmrBridgeStreamCharUuid, [7]);
+      await pump();
+      expect(got.single.value, [7]);
+    });
+
+    test('queues a write behind an in-flight CCCD write', () async {
+      await t.connect(id);
+      adapter.enableGate = Completer<void>();
+      t.subscribe(id, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid);
+      await pump();
+
+      var wrote = false;
+      final write = t
+          .write(
+            id,
+            wmrBridgeServiceUuid,
+            wmrBridgeStreamCharUuid,
+            Uint8List.fromList([1]),
+          )
+          .then((_) => wrote = true);
+      await pump();
+      expect(wrote, isFalse);
+
+      adapter.enableGate!.complete();
+      await write;
+      expect(wrote, isTrue);
+    });
+  });
+
   group('failures', () {
     test('permission denied stops before any GATT call', () async {
       adapter
