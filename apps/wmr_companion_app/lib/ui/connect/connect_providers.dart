@@ -1310,11 +1310,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// Runs one discovery pass and dials the remembered or sole bridge.
   ///
-  /// Returns true when discovery handed the dial to [_autoConnect], so a
-  /// caller does not repeat the same attempt. A failed pass still lets the
-  /// caller fall back to the remembered address.
+  /// Returns true when discovery handed the dial to [_autoConnect] or a pass
+  /// is already running, so a caller does not start a second dial against the
+  /// same bridge. A failed pass still lets the caller fall back to the
+  /// remembered address.
   Future<bool> _discoverLan({KnownBridge? remembered}) async {
-    if (state.discoveringLan) return false;
+    // A resume can land in the middle of the launch pass. Report it as
+    // attempted: the running pass owns the dial, and a second `connectWifi`
+    // would dispose the transport the first dial is still using.
+    if (state.discoveringLan) return true;
     _update(discoveringLan: true, clearLanError: true);
     try {
       final found = _deduplicateLanEndpoints(

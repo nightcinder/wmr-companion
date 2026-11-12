@@ -35,11 +35,13 @@ class PlatformSecureTokenBackend implements SecureTokenBackend {
 
 /// Remembers the Pi bridge bearer token across app runs.
 ///
-/// A bridge is looked up by `bridge_id` first and by host second. The composite
+/// A bridge is looked up by host first and by `bridge_id` second. The composite
 /// transport learns the token from the Pi's FF13 encrypted characteristic and
 /// saves it here, so a later launch can authenticate over Wi-Fi while
 /// Bluetooth is off. A token typed into the Wi-Fi panel is saved only when the
-/// user opts in.
+/// user opts in, and the manual panel has no bridge id, so a typed token that
+/// replaces a rotated one is stored by host and read back before the older
+/// bridge-id entry.
 ///
 /// The value is never logged and never written outside the platform secure
 /// storage. A missing or locked keystore returns null and costs one manual
@@ -51,9 +53,17 @@ class BridgeTokenStore {
 
   static const _namespace = 'wmr.bridge.token.v1';
 
-  /// The saved token for [bridgeId], else for the first matching host.
+  /// The saved token for the first matching host, else for [bridgeId].
+  ///
+  /// Host keys win: the manual Wi-Fi panel saves a typed token without a
+  /// bridge id, and that is how a user repairs a token the Pi rotated after
+  /// BLE learned the old one.
   Future<String?> load({String? bridgeId, String? host}) async {
-    for (final key in _keys(bridgeId: bridgeId, hosts: [?host])) {
+    for (final key in _hostKeys([?host])) {
+      final value = await _read(key);
+      if (value != null && value.isNotEmpty) return value;
+    }
+    for (final key in _bridgeKeys(bridgeId)) {
       final value = await _read(key);
       if (value != null && value.isNotEmpty) return value;
     }
@@ -103,16 +113,21 @@ class BridgeTokenStore {
     String? bridgeId,
     required Iterable<String> hosts,
   }) {
-    final keys = <String>{};
-    final bridge = bridgeId?.trim();
-    if (bridge != null && bridge.isNotEmpty) {
-      keys.add('$_namespace.bridge.$bridge');
-    }
+    return <String>{..._hostKeys(hosts), ..._bridgeKeys(bridgeId)};
+  }
+
+  static Iterable<String> _hostKeys(Iterable<String> hosts) sync* {
     for (final host in hosts) {
       final normalised = host.trim().toLowerCase();
-      if (normalised.isNotEmpty) keys.add('$_namespace.host.$normalised');
+      if (normalised.isNotEmpty) yield '$_namespace.host.$normalised';
     }
-    return keys;
+  }
+
+  static Iterable<String> _bridgeKeys(String? bridgeId) sync* {
+    final bridge = bridgeId?.trim();
+    if (bridge != null && bridge.isNotEmpty) {
+      yield '$_namespace.bridge.$bridge';
+    }
   }
 }
 

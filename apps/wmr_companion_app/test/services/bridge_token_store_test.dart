@@ -64,6 +64,26 @@ void main() {
     expect(await store.load(bridgeId: 'pi-1'), isNull);
   });
 
+  test('a host token replaces a rotated token saved by bridge id', () async {
+    final backend = _MemoryBackend();
+    final store = BridgeTokenStore(backend);
+    await store.save(
+      bridgeId: 'pi-1',
+      hosts: ['172.21.1.28'],
+      token: 'old-ble-token',
+    );
+
+    // The manual Wi-Fi panel has no bridge id, so re-entering the rotated
+    // token writes only the host key.
+    await store.save(hosts: ['172.21.1.28'], token: 'rotated-token');
+
+    expect(
+      await store.load(bridgeId: 'pi-1', host: '172.21.1.28'),
+      'rotated-token',
+    );
+    expect(await store.load(bridgeId: 'pi-1'), 'old-ble-token');
+  });
+
   test('a missing or locked keystore reads null and never throws', () async {
     final store = BridgeTokenStore(_FailingBackend());
 
