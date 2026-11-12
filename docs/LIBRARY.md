@@ -561,7 +561,7 @@ Sequencing notes:
    `apps/wmr_companion_app` in M10.5.**
 4. **Android HID:** keep the HID output as a supported optional package, or
    park it once the in-process API exists? : **settled: kept as the optional
-   `wmr_companion_hid_android` package ( phase 7).**
+   `wmr_companion_hid_android` package (phase 7).**
 5. **Audience:** is the first consumer a Flutter game/emulator/XR app, or do we
    also need a non-Flutter SDK (then the native kits become products too)?
 

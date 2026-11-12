@@ -57,12 +57,12 @@ Style Nick wants: short answers that lead with the result or the command; tables
 - **Anya**: Nick's desktop with the full ESP-IDF setup, the ESP32 on COM5, the controllers and the phone. The old way to direct firmware work there was WMR_Bridge issue #3 ("Director", closed 2026-10-22; reopen it if a session on Anya is needed). Firmware changes are now written in project threads without a build there, so **any firmware PR needs Nick to build and flash it**. On Anya's ESP-IDF terminal never replace PATH; append only.
 - **Cloud container** (where project threads run): GitHub through the `mcp__github__*` tools or `gh` CLI; no Android SDK, so no APK builds there (CI builds them). Flutter for local format/analyze/test: download `flutter_linux_3.47.7-stable.tar.xz` (the CI version) from storage.googleapis.com, then `git config --global --add safe.directory <sdk>/flutter`.
 - PowerShell: a backtick inside a double-quoted string is an escape character; use single-quoted here-strings for text with backticks. Repo files may be CRLF; normalize before multi-line replacements. The `Edit` tool refuses `C:\...` paths. `git worktree remove` can fail with "Filename too long": robocopy /MIR from an empty folder, then delete. Check an agent's log before saying it is running (one died silently on a CLI session limit).
-- **Monado config key (FF13).** The XOR key table that de-obfuscates the controller config blob is Monado's `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0). It is **fetched, never committed**: from `apps/wmr_companion_app`, run `dart run../../tool/fetch_wmr_config_key.dart` (or `--file <downloaded header>`); it writes the gitignored `apps/wmr_companion_app/assets/monado/wmr_config_key.bin`, which the app bundles on the next build; the BSL-1.0 notice ships as `apps/wmr_companion_app/assets/monado/NOTICE.txt`. CI runs the same script before building the debug APK (a failed download does not fail CI), so the CI APK carries the key and decodes real blocks. `loadConfigKey` reports a missing or wrong-size key as a status, never an exception. This is the project's reading of the licence, not legal advice. Details: `docs/PROTOCOL.md` "FF13".
+- **Monado config key (FF13).** The XOR key table that de-obfuscates the controller config blob is Monado's `wmr_config_key.h` (1024 bytes, Copyright 2021 Jan Schmidt, BSL-1.0). It is **fetched, never committed**: from `apps/wmr_companion_app`, run `dart run ../../tool/fetch_wmr_config_key.dart` (or `--file <downloaded header>`); it writes the gitignored `apps/wmr_companion_app/assets/monado/wmr_config_key.bin`, which the app bundles on the next build; the BSL-1.0 notice ships as `apps/wmr_companion_app/assets/monado/NOTICE.txt`. CI runs the same script before building the debug APK (a failed download does not fail CI), so the CI APK carries the key and decodes real blocks. `loadConfigKey` reports a missing or wrong-size key as a status, never an exception. This is the project's reading of the licence, not legal advice. Details: `docs/PROTOCOL.md` "FF13".
 
 ## 4. Build, flash and test commands
 
 App (`apps/wmr_companion_app`; run these from that directory):
-- Format: `dart format --set-exit-if-changed.`
+- Format: `dart format --set-exit-if-changed .`
 - Analyze: `flutter analyze`
 - Test app: `flutter test`
 - Package tests:
@@ -172,7 +172,7 @@ All milestone planning and ordering is governed by [PLAN.md](docs/PLAN.md). Do n
 - **11.1 Flasher variants**: `build.py --variant both|left|right` on firmware, name artifacts/manifests per variant, tests, document in `docs/FLASHING.md` — **merged (`WMR_Bridge` #40)**.
 - **11.2 Browser installer**: offer all three images from one page — **merged, hosted at `https://nightcinder.github.io/WMR_Bridge/` (`v0.1.0-rc1`)**.
 - **11.3 Per-bridge attribution**: end-to-end `bridgeId` on records, stats, link snapshots and latency exports; per-bridge rows in debug and latency screens — **merged (#51)**.
-- **11.4 Auto-reconnect**: per-bridge auto-reconnect, HID output resuming without Stop/Start — **merged (#60 / )**.
+- **11.4 Auto-reconnect**: per-bridge auto-reconnect, HID output resuming without Stop/Start — **merged (#60)**.
 - **11.5 Run sheet update**: `docs/runs/sheets/multi-bridge.md` updated to flasher variants (`WMR_Bridge` #40).
 - **Open**: hardware bench verification (Sitting B′ / Sitting B).
 

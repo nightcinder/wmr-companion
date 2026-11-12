@@ -8,7 +8,7 @@ stay in place and remain the source of truth for their scripts; their Runtime
 folders are copied into this project and kept byte-identical by a sync check.
 
 The `v0.2.1` release shipped a real export from this project and the `unified`
-Android APK built from it ( owner export build); there has still
+Android APK built from it (owner export build); there has still
 been no device run. The per-vendor flavors were retired;
 `base` is the no-Unity fallback.
 

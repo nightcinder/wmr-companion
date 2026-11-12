@@ -117,7 +117,7 @@ pose rate.
 `android/unity/unified/unityLibrary/src/main/jniLibs/arm64-v8a/` (or any path
 in `WMR_CARINA_LIBGLASSES`). Without it the capture returns a typed
 `sdkUnavailable` error and never dereferences a missing symbol. Shipping the
-SDK still needs written VITURE permission ( audit).
+SDK still needs written VITURE permission (audit).
 
 The Kotlin side only requests USB permission and returns
 `UsbDeviceConnection.fileDescriptor`. `flutter test` covers the ladder and
