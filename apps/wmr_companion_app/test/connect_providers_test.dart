@@ -706,50 +706,204 @@ void main() {
   });
 
   group('BridgeReleaseChecker', () {
+    test('prefers a newer pre-release when the opt-in is on', () async {
+      final urls = <Uri>[];
+      final now = DateTime(2026, 11, 10, 12);
+      final checker = BridgeReleaseChecker(
+        fetch: (uri) async {
+          urls.add(uri);
+          return jsonEncode([
+            {'tag_name': 'v0.3.26', 'draft': false, 'prerelease': false},
+            {'tag_name': 'v0.3.27-rc.2', 'draft': false, 'prerelease': true},
+            {'tag_name': 'v0.3.27-rc.1', 'draft': false, 'prerelease': true},
+          ]);
+        },
+        clock: () => now,
+      );
+
+      final release = await checker.lookup(includePreReleases: true);
+      expect(release.version?.toString(), '0.3.27-rc.2');
+      expect(release.isPreRelease, isTrue);
+      expect(release.error, isNull);
+      expect(release.checkedAt, now);
+      expect(urls, [Uri.parse(bridgeReleasesUrl)]);
+    });
+
     test(
-      'parses the latest release tag and caches it for the session',
+      'asks releases/latest and stays stable when the opt-in is off',
       () async {
-        var fetches = 0;
-        var now = DateTime(2026, 11, 10, 12);
+        final urls = <Uri>[];
         final checker = BridgeReleaseChecker(
-          fetch: (_) async {
-            fetches++;
-            return '{"tag_name":"v0.3.20"}';
+          fetch: (uri) async {
+            urls.add(uri);
+            return '{"tag_name":"v0.3.26"}';
           },
-          clock: () => now,
         );
 
-        expect((await checker.latest())!.toString(), '0.3.20');
-        expect((await checker.latest())!.toString(), '0.3.20');
-        expect(fetches, 1, reason: 'the second read is served from the cache');
-
-        now = now.add(const Duration(hours: 2));
-        expect((await checker.latest())!.toString(), '0.3.20');
-        expect(fetches, 2, reason: 'the cache expires after an hour');
+        final release = await checker.lookup();
+        expect(release.version?.toString(), '0.3.26');
+        expect(release.isPreRelease, isFalse);
+        expect(release.error, isNull);
+        expect(urls, [Uri.parse(bridgeLatestReleaseUrl)]);
       },
     );
 
-    test(
-      'degrades silently when offline or the response is unusable',
-      () async {
-        final offline = BridgeReleaseChecker(
-          fetch: (_) async => throw StateError('offline'),
-        );
-        expect(await offline.latest(), isNull);
+    test('skips drafts and tags that are not versions', () async {
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async => jsonEncode([
+          {'tag_name': 'v0.4.0', 'draft': true},
+          {'tag_name': 'nightly', 'draft': false},
+          {'tag_name': 'v0.3.25', 'draft': false},
+          {'tag_name': 'v0.3.26', 'draft': false},
+        ]),
+      );
 
-        final malformed = BridgeReleaseChecker(
-          fetch: (_) async => '{"tag_name":24}',
-        );
-        expect(await malformed.latest(), isNull);
-        expect(BridgeReleaseChecker.parseLatestRelease('not json'), isNull);
-        expect(BridgeReleaseChecker.parseLatestRelease('[]'), isNull);
-        expect(
-          BridgeReleaseChecker.parseLatestRelease('{"tag_name":"v0.3.21"}')
-              ?.toString(),
-          '0.3.21',
-        );
-      },
-    );
+      final release = await checker.lookup(includePreReleases: true);
+      expect(release.version?.toString(), '0.3.26');
+      expect(release.isPreRelease, isFalse);
+    });
+
+    test('caches a successful lookup for the session', () async {
+      var fetches = 0;
+      var now = DateTime(2026, 11, 10, 12);
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async {
+          fetches++;
+          return '{"tag_name":"v0.3.20"}';
+        },
+        clock: () => now,
+      );
+
+      expect((await checker.lookup()).version!.toString(), '0.3.20');
+      expect((await checker.lookup()).version!.toString(), '0.3.20');
+      expect(fetches, 1, reason: 'the second read is served from the cache');
+
+      now = now.add(const Duration(hours: 2));
+      expect((await checker.lookup()).version!.toString(), '0.3.20');
+      expect(fetches, 2, reason: 'the cache expires after an hour');
+    });
+
+    test('reports a failure in error instead of a null version', () async {
+      final now = DateTime(2026, 11, 10, 12);
+
+      final offline = BridgeReleaseChecker(
+        fetch: (_) async => throw StateError('offline'),
+        clock: () => now,
+      );
+      final offlineResult = await offline.lookup();
+      expect(offlineResult.version, isNull);
+      expect(offlineResult.error, BridgeReleaseChecker.unreachableError);
+      expect(offlineResult.checkedAt, now);
+
+      final refused = BridgeReleaseChecker(fetch: (_) async => null);
+      expect(
+        (await refused.lookup()).error,
+        BridgeReleaseChecker.unreachableError,
+      );
+
+      final malformed = BridgeReleaseChecker(
+        fetch: (_) async => '{"tag_name":24}',
+      );
+      expect(
+        (await malformed.lookup()).error,
+        BridgeReleaseChecker.unexpectedResponseError,
+      );
+
+      final timedOut = BridgeReleaseChecker(
+        fetch: (_) => Completer<String?>().future,
+        requestTimeout: const Duration(milliseconds: 20),
+      );
+      expect(
+        (await timedOut.lookup()).error,
+        BridgeReleaseChecker.unreachableError,
+      );
+
+      expect(BridgeReleaseChecker.parseLatestRelease('not json'), isNull);
+      expect(BridgeReleaseChecker.parseLatestRelease('[]'), isNull);
+      expect(
+        BridgeReleaseChecker.parseLatestRelease('{"tag_name":"v0.3.21"}')
+            ?.toString(),
+        '0.3.21',
+      );
+      expect(BridgeReleaseChecker.parseReleaseList('not json'), isNull);
+      expect(BridgeReleaseChecker.parseReleaseList('{}'), isNull);
+    });
+
+    test('checkNow bypasses the cache, at most once per 30 seconds', () async {
+      var fetches = 0;
+      var now = DateTime(2026, 11, 10, 12);
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async {
+          fetches++;
+          return '{"tag_name":"v0.3.20"}';
+        },
+        clock: () => now,
+      );
+
+      await checker.lookup();
+      expect(fetches, 1);
+
+      await checker.checkNow();
+      expect(fetches, 2, reason: 'a forced check skips the cache');
+
+      await checker.checkNow();
+      expect(fetches, 2, reason: 'forced checks are debounced for 30 seconds');
+
+      now = now.add(const Duration(seconds: 31));
+      await checker.checkNow();
+      expect(fetches, 3);
+      await checker.lookup();
+      expect(fetches, 3, reason: 'the forced result refreshed the cache');
+    });
+
+    test('a failed forced check is also debounced for 30 seconds', () async {
+      var fetches = 0;
+      var now = DateTime(2026, 11, 10, 12);
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async {
+          fetches++;
+          throw StateError('offline');
+        },
+        clock: () => now,
+      );
+
+      final first = await checker.checkNow();
+      expect(first.error, BridgeReleaseChecker.unreachableError);
+      expect(fetches, 1);
+
+      final retry = await checker.checkNow();
+      expect(retry.error, BridgeReleaseChecker.unreachableError);
+      expect(retry.checkedAt, first.checkedAt);
+      expect(
+        fetches,
+        1,
+        reason: 'a retry inside the floor reuses the failed forced result',
+      );
+
+      now = now.add(const Duration(seconds: 31));
+      await checker.checkNow();
+      expect(fetches, 2, reason: 'after the floor a new request is allowed');
+    });
+
+    test('concurrent forced checks share one in-flight request', () async {
+      var fetches = 0;
+      final gate = Completer<void>();
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async {
+          fetches++;
+          await gate.future;
+          return '{"tag_name":"v0.3.20"}';
+        },
+      );
+
+      final first = checker.checkNow();
+      final second = checker.checkNow();
+      gate.complete();
+
+      expect((await first).version?.toString(), '0.3.20');
+      expect((await second).version?.toString(), '0.3.20');
+      expect(fetches, 1, reason: 'the second tap joins the first request');
+    });
   });
 
   group('BridgeUpdateSettings', () {

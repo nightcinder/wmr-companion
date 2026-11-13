@@ -1776,43 +1776,143 @@ final appVersionProvider = FutureProvider<String>((ref) async {
 const String bridgeLatestReleaseUrl =
     'https://api.github.com/repos/nightcinder/WMR_Bridge/releases/latest';
 
-/// Reads the latest WMR_Bridge release tag and caches it for the session.
+/// The GitHub Releases list endpoint used when pre-releases are opted in.
 ///
-/// The Connect screen needs a yes/no answer ("is there a newer release?"), so
-/// a failed request, an offline device, or a malformed response all degrade
-/// to null instead of surfacing an error. [fetch] and [clock] are injectable
-/// for tests; [cacheFor] keeps repeat screen builds from re-querying GitHub.
+/// One page is enough: only the highest published tag matters, and 20 entries
+/// cover the stable tail plus the release-candidate series in flight.
+const String bridgeReleasesUrl =
+    'https://api.github.com/repos/nightcinder/WMR_Bridge/releases?per_page=20';
+
+/// What one bridge release lookup found: the chosen release, whether it is a
+/// pre-release, the failure when there was one, and when GitHub was asked.
+class BridgeReleaseLookup {
+  const BridgeReleaseLookup({
+    this.version,
+    this.isPreRelease = false,
+    this.error,
+    this.checkedAt,
+  });
+
+  /// The newest published release, or null when the lookup failed.
+  final WmrSemanticVersion? version;
+
+  /// Whether [version] is a pre-release such as `0.3.27-rc.2`.
+  final bool isPreRelease;
+
+  /// Why the lookup failed, or null when [version] is known.
+  final String? error;
+
+  /// When the answer was fetched from GitHub; null before the first lookup.
+  final DateTime? checkedAt;
+}
+
+/// Reads the newest WMR_Bridge release and caches it for the session.
+///
+/// A stable-only lookup asks `releases/latest`, which GitHub keeps free of
+/// drafts and pre-releases. With pre-releases opted in it asks the release
+/// list and picks the highest published tag, so `0.3.27-rc.2` wins over
+/// `0.3.26`. Failures land in [BridgeReleaseLookup.error] instead of a null
+/// version, so the screen can tell "offline" from "no update".
+///
+/// [fetch], [clock] and the durations are injectable for tests. [cacheFor]
+/// keeps repeat screen builds from re-querying GitHub; [checkNow] bypasses it
+/// no more than once per [forcedCheckFloor], so a manual check cannot burn
+/// through GitHub's unauthenticated request limit.
 class BridgeReleaseChecker {
   BridgeReleaseChecker({
     Future<String?> Function(Uri uri)? fetch,
     DateTime Function()? clock,
     this.cacheFor = const Duration(hours: 1),
+    this.forcedCheckFloor = const Duration(seconds: 30),
+    this.requestTimeout = const Duration(seconds: 8),
   }) : _fetch = fetch ?? _fetchLatestReleaseDocument,
        _clock = clock ?? DateTime.now;
+
+  /// Shown when the request fails, times out or GitHub refuses it.
+  static const String unreachableError = 'Could not reach GitHub.';
+
+  /// Shown when GitHub answers with something that is not a release.
+  static const String unexpectedResponseError =
+      'GitHub returned an unexpected response.';
 
   final Future<String?> Function(Uri uri) _fetch;
   final DateTime Function() _clock;
   final Duration cacheFor;
+  final Duration forcedCheckFloor;
+  final Duration requestTimeout;
 
-  ({DateTime at, WmrSemanticVersion version})? _cached;
+  ({DateTime at, BridgeReleaseLookup lookup, bool includePreReleases})? _cached;
+  ({DateTime at, Future<BridgeReleaseLookup> lookup, bool includePreReleases})?
+  _lastForced;
 
-  /// The latest release tag, or null when it could not be read.
-  Future<WmrSemanticVersion?> latest() async {
+  /// The newest release, served from the 1 h cache when one matches
+  /// [includePreReleases].
+  Future<BridgeReleaseLookup> lookup({bool includePreReleases = false}) async {
     final cached = _cached;
-    if (cached != null && _clock().difference(cached.at) < cacheFor) {
-      return cached.version;
+    if (cached != null &&
+        cached.includePreReleases == includePreReleases &&
+        _clock().difference(cached.at) < cacheFor) {
+      return cached.lookup;
     }
+    return _query(includePreReleases: includePreReleases);
+  }
+
+  /// Asks GitHub again, bypassing the cache.
+  ///
+  /// Inside [forcedCheckFloor] of the previous forced check the last matching
+  /// result is returned instead, so repeated taps cost no request. That holds
+  /// for failures and for a check still in flight too: a double-tap or a retry
+  /// after an error is served from the previous forced request instead of
+  /// hitting GitHub again.
+  Future<BridgeReleaseLookup> checkNow({bool includePreReleases = false}) {
+    final now = _clock();
+    final last = _lastForced;
+    if (last != null &&
+        last.includePreReleases == includePreReleases &&
+        now.difference(last.at) < forcedCheckFloor) {
+      return last.lookup;
+    }
+    final lookup = _query(includePreReleases: includePreReleases);
+    _lastForced = (
+      at: now,
+      lookup: lookup,
+      includePreReleases: includePreReleases,
+    );
+    return lookup;
+  }
+
+  Future<BridgeReleaseLookup> _query({required bool includePreReleases}) async {
+    final uri = Uri.parse(
+      includePreReleases ? bridgeReleasesUrl : bridgeLatestReleaseUrl,
+    );
     try {
-      final body = await _fetch(Uri.parse(bridgeLatestReleaseUrl));
-      if (body == null) return null;
-      final version = parseLatestRelease(body);
-      if (version != null) _cached = (at: _clock(), version: version);
-      return version;
+      final body = await _fetch(uri).timeout(requestTimeout);
+      if (body == null) return _failure(unreachableError);
+      final version = includePreReleases
+          ? parseReleaseList(body)
+          : parseLatestRelease(body);
+      if (version == null) return _failure(unexpectedResponseError);
+      final checkedAt = _clock();
+      final lookup = BridgeReleaseLookup(
+        version: version,
+        isPreRelease: version.isPreRelease,
+        checkedAt: checkedAt,
+      );
+      _cached = (
+        at: checkedAt,
+        lookup: lookup,
+        includePreReleases: includePreReleases,
+      );
+      return lookup;
     } catch (_) {
-      // Offline, DNS failure or a timeout: no banner rather than an error.
-      return null;
+      // Offline, DNS failure or a timeout: an error the screen can show and
+      // retry, not a silent "no update".
+      return _failure(unreachableError);
     }
   }
+
+  BridgeReleaseLookup _failure(String message) =>
+      BridgeReleaseLookup(error: message, checkedAt: _clock());
 
   /// Parses the `tag_name` of a GitHub `releases/latest` response.
   static WmrSemanticVersion? parseLatestRelease(String body) {
@@ -1825,6 +1925,30 @@ class BridgeReleaseChecker {
     if (decoded is! Map) return null;
     final tag = decoded['tag_name'];
     return tag is String ? WmrSemanticVersion.tryParse(tag) : null;
+  }
+
+  /// Picks the highest published tag from a `releases?per_page=20` response.
+  ///
+  /// Drafts and tags that do not parse as a version are skipped rather than
+  /// failing the whole list; GitHub orders the list by creation date, not
+  /// version, so the comparison is explicit.
+  static WmrSemanticVersion? parseReleaseList(String body) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! List) return null;
+    WmrSemanticVersion? highest;
+    for (final entry in decoded) {
+      if (entry is! Map || entry['draft'] == true) continue;
+      final tag = entry['tag_name'];
+      final version = tag is String ? WmrSemanticVersion.tryParse(tag) : null;
+      if (version == null) continue;
+      if (highest == null || version.compareTo(highest) > 0) highest = version;
+    }
+    return highest;
   }
 
   static Future<String?> _fetchLatestReleaseDocument(Uri uri) async {
@@ -1847,9 +1971,16 @@ final bridgeReleaseCheckerProvider = Provider<BridgeReleaseChecker>(
   (ref) => BridgeReleaseChecker(),
 );
 
-/// The latest WMR_Bridge release, null while unknown or offline.
+/// The newest stable WMR_Bridge release, null while unknown or after a failed
+/// lookup.
+///
+/// The update banner only needs a version, so this view stays stable-only and
+/// silent on failure. The manual check reads [BridgeReleaseChecker.lookup] and
+/// [BridgeReleaseChecker.checkNow] directly for the pre-release and error
+/// states.
 final latestBridgeReleaseProvider = FutureProvider<WmrSemanticVersion?>(
-  (ref) => ref.watch(bridgeReleaseCheckerProvider).latest(),
+  (ref) async =>
+      (await ref.watch(bridgeReleaseCheckerProvider).lookup()).version,
 );
 
 /// Whether bridge update checks may offer pre-release builds.
