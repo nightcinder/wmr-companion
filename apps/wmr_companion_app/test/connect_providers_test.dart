@@ -11,6 +11,7 @@ import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_companion_app/services/app_installer.dart';
 import 'package:wmr_companion_app/services/app_release_checker.dart';
+import 'package:wmr_companion_app/services/bridge_update_settings_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
@@ -751,6 +752,49 @@ void main() {
     );
   });
 
+  group('BridgeUpdateSettings', () {
+    test('defaults to stable-only and restores the saved opt-in', () async {
+      final dir = await Directory.systemTemp.createTemp('bridge-update');
+      addTearDown(() => dir.delete(recursive: true));
+
+      ProviderContainer container() => ProviderContainer(
+        overrides: [
+          bridgeUpdateSettingsStoreProvider.overrideWithValue(
+            FileBridgeUpdateSettingsStore(dir),
+          ),
+        ],
+      );
+
+      final first = container();
+      addTearDown(first.dispose);
+      final settings = first.read(bridgeUpdateSettingsProvider.notifier);
+      await settings.ready;
+      expect(first.read(bridgeUpdateSettingsProvider), isFalse);
+
+      await settings.setIncludePreReleases(true);
+      expect(first.read(bridgeUpdateSettingsProvider), isTrue);
+
+      final second = container();
+      addTearDown(second.dispose);
+      await second.read(bridgeUpdateSettingsProvider.notifier).ready;
+      expect(second.read(bridgeUpdateSettingsProvider), isTrue);
+    });
+
+    test('stays stable-only when the store cannot be read', () async {
+      final container = ProviderContainer(
+        overrides: [
+          bridgeUpdateSettingsStoreProvider.overrideWithValue(
+            _ThrowingSettingsStore(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(bridgeUpdateSettingsProvider.notifier).ready;
+      expect(container.read(bridgeUpdateSettingsProvider), isFalse);
+    });
+  });
+
   group('AppUpdateController', () {
     const apkName = 'wmr-companion-0.3.26-unified-arm64-v8a.apk';
     const tag = 'v0.3.26';
@@ -1130,4 +1174,12 @@ class _ScriptedTcp extends WmrWsTransport {
       fragmentCapacity: 244,
     );
   }
+}
+
+class _ThrowingSettingsStore implements BridgeUpdateSettingsStore {
+  @override
+  Future<bool> load() async => throw const FileSystemException('no storage');
+
+  @override
+  Future<void> save(bool includePreReleases) async {}
 }
