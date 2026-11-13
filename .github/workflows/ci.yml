@@ -456,13 +456,13 @@ jobs:
           fi
           echo "No entry for $CACHE_KEY under refs/heads/main yet: this run seeds it."
 
-      # `gradle-home-cache-cleanup` drops entries this run did not touch before
-      # saving, which bounds the build-cache entry: setup-gradle saves
-      # `caches/build-cache-*` whole, so without it every main run would add
-      # whatever accumulated on top of the last generation.
+      # `cache-cleanup: always` rather than the default `on-success`: the wiring
+      # script ends with a Gradle invocation that must fail (the retired
+      # per-vendor guard), so `on-success` would never prune in this job. Pruning
+      # bounds the `gradle-build-cache-*` entry, which setup-gradle saves whole.
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-home-cache-cleanup: true
+          cache-cleanup: always
 
       - uses: ./.github/actions/flutter-setup
 
