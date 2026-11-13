@@ -38,7 +38,7 @@ mirror `main` at `8f5921a`; see the FF14 section.
 | `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`packages/wmr_core/lib/protocol/decoded_batch.dart`) |
 | `tests/test_batch.c` golden bytes and MTU table | `packages/wmr_core/test/protocol/decoded_batch_test.dart` |
 | `samples/controller_frames.txt` | `apps/wmr_companion_app/test/fixtures/controller_frames.txt` (copy) |
-| `tests/vectors/wmr_golden_v1.json` (shared golden vectors) | `packages/wmr_core/test/fixtures/wmr_golden_v1.json` (identical copy), read by `packages/wmr_core/test/golden_vectors_test.dart`; fields in `packages/wmr_core/test/fixtures/README_golden.md` |
+| `tests/vectors/wmr_golden_v1.json` (shared golden vectors; WMR_Bridge PR #238, branch `docs/spec-patches`, not yet merged) | `packages/wmr_core/test/fixtures/wmr_golden_v1.json` (identical copy), read by `packages/wmr_core/test/golden_vectors_test.dart`; fields in `packages/wmr_core/test/fixtures/README_golden.md` |
 | FF16 firmware version, Pi endpoint document | `packages/wmr_core/lib/protocol/firmware_version.dart` |
 | FF15 echo | `packages/wmr_core/lib/protocol/echo.dart` |
 | FF17 control and status v2 | `packages/wmr_core/lib/protocol/controller_control.dart` |

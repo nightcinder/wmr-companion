@@ -4,7 +4,7 @@ One JSON file, committed byte-identically in two repositories:
 
 | Repository | Path | Read by |
 | --- | --- | --- |
-| WMR_Bridge | `tests/vectors/wmr_golden_v1.json` | `pi/tests/test_golden_vectors.py` (Python, standard library only) |
+| WMR_Bridge (PR #238, branch `docs/spec-patches`, not yet merged) | `tests/vectors/wmr_golden_v1.json` | `pi/tests/test_golden_vectors.py` (Python, standard library only) |
 | wmr-companion | `packages/wmr_core/test/fixtures/wmr_golden_v1.json` | `packages/wmr_core/test/golden_vectors_test.dart` |
 
 This README is also the same text in both places (`tests/vectors/README.md`
@@ -82,7 +82,7 @@ sample.
 
 ## What each side checks
 
-- Python (`cd pi && python3 -m pytest tests/test_golden_vectors.py -q`, or
+- Python, WMR_Bridge PR #238 (branch `docs/spec-patches`, not yet merged) (`cd pi && python3 -m pytest tests/test_golden_vectors.py -q`, or
   `./run_tests.sh`): `decode_frame` against `state`, `record_from_state` +
   `pack_record` against `record_hex`, `unpack_record` against `record`,
   fragments, the batch, the echo layout and the Pi echo handler, the step
