@@ -240,6 +240,10 @@ class CompositeBleTransport implements BleTransport {
     if (route.state == BleConnectionState.connected) return;
     route.intentional = false;
     route.switching = true;
+    // Publish the completer like the failover and recovery paths do, so an
+    // upgrade probe that finishes mid-connect can wait for this switch to
+    // release the route before it decides who owns its socket.
+    final switchingDone = route.switchingDone = Completer<void>();
     _setState(route, BleConnectionState.connecting);
     Object? tcpError;
     Object? bleError;
@@ -291,6 +295,10 @@ class CompositeBleTransport implements BleTransport {
     } finally {
       route.switching = false;
       _kickUpgrade(route);
+      if (identical(route.switchingDone, switchingDone)) {
+        route.switchingDone = null;
+      }
+      if (!switchingDone.isCompleted) switchingDone.complete();
     }
 
     _setState(route, BleConnectionState.disconnected);
@@ -878,12 +886,17 @@ class CompositeBleTransport implements BleTransport {
     try {
       final id = await _tryTcp(route, route.tcpCandidates.toList());
       if (id == null) return;
+      // A drop, failover or connect may own the route right now, and it can
+      // adopt this same socket (the transport hands out in-flight dials to
+      // every joiner). Decide only once that switch has released the route:
+      // whoever adopted the socket keeps it, and nobody else may close it.
+      await _awaitSwitchRelease(route);
       if (_disposed ||
           route.intentional ||
           route.switching ||
           route.active != _Lane.ble) {
-        // A drop or failover took the route while this probe was dialling.
-        // Close the probe rather than revive a route that has moved on.
+        // The route moved on while this probe was dialling. Close the probe
+        // unless the route is now using it over TCP.
         await _discardTcpProbe(route, id);
         return;
       }
@@ -892,6 +905,17 @@ class CompositeBleTransport implements BleTransport {
       // Stay on BLE; the next tick retries.
     } finally {
       route.upgrading = false;
+    }
+  }
+
+  /// Waits until no switch holds the route. A switch that started while a
+  /// probe was dialling may adopt the probe's socket, so the probe must not
+  /// judge it until that switch has finished.
+  Future<void> _awaitSwitchRelease(_Route route) async {
+    while (route.switching && !_disposed) {
+      final done = route.switchingDone;
+      if (done == null) return;
+      await done.future;
     }
   }
 

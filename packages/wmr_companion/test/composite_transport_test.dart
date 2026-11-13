@@ -1108,6 +1108,60 @@ void main() {
     );
   });
 
+  test('a probe that finishes while a BLE-drop recovery adopts its socket keeps it open', () async {
+    await tcp.dispose();
+    final held = _HeldDialTcp()
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = held;
+
+    final transport = CompositeBleTransport(
+      tcp: held,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 500),
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    // The upgrade probe joins the held dial. Then the BLE drop starts a
+    // recovery that joins the same dial, so both are still in flight when it
+    // lands. The recovery adopts the socket; the probe must not close it.
+    await _waitFor(
+      () => held.dialAttempts >= 2,
+      reason: 'the upgrade probe never joined the held dial',
+    );
+    final attemptsBeforeDrop = held.dialAttempts;
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => held.dialAttempts > attemptsBeforeDrop,
+      reason: 'the BLE drop never started a recovery dial',
+    );
+    held.release.complete();
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the recovery did not adopt the held dial',
+    );
+    await _settle(50);
+
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    expect(
+      held.disconnectCalls,
+      isEmpty,
+      reason: 'the probe closed the socket that the recovery adopted',
+    );
+  });
+
   test('kicks the FF16 upgrade once a TCP-to-BLE failover lands on BLE', () async {
     ble.dispose();
     ble = newBle(ff16: _endpointDocument());
