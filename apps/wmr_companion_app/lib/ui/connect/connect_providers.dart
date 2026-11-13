@@ -216,6 +216,16 @@ const String bridgeManualUpgradeCommand =
     'https://github.com/nightcinder/WMR_Bridge/releases/latest/download/install.sh'
     ' | sudo bash';
 
+/// The installer for one exact bridge release.
+///
+/// A pre-release target cannot use `releases/latest`, which GitHub keeps on
+/// the newest stable release. Pinning the tag installs the version the screen
+/// offered instead of silently installing a different build.
+String bridgeTaggedUpgradeCommand(WmrSemanticVersion version) =>
+    'curl -fsSL '
+    'https://github.com/nightcinder/WMR_Bridge/releases/download/v$version/install.sh'
+    ' | sudo bash';
+
 /// Human-readable reason for a failed Wi-Fi dial.
 ///
 /// A token failure names the file on the Pi and the Bluetooth path that can
@@ -1971,17 +1981,29 @@ final bridgeReleaseCheckerProvider = Provider<BridgeReleaseChecker>(
   (ref) => BridgeReleaseChecker(),
 );
 
-/// The newest stable WMR_Bridge release, null while unknown or after a failed
-/// lookup.
+/// The newest WMR_Bridge release for the saved opt-in, with its pre-release
+/// flag, failure and check time.
 ///
-/// The update banner only needs a version, so this view stays stable-only and
-/// silent on failure. The manual check reads [BridgeReleaseChecker.lookup] and
-/// [BridgeReleaseChecker.checkNow] directly for the pre-release and error
-/// states.
-final latestBridgeReleaseProvider = FutureProvider<WmrSemanticVersion?>(
-  (ref) async =>
-      (await ref.watch(bridgeReleaseCheckerProvider).lookup()).version,
-);
+/// The update banner reads the version; the manual check below keeps its own
+/// result so its feedback can say whether the check is still running and when
+/// it last ran. Watching the opt-in re-queries the other channel, so turning
+/// pre-releases on replaces a stable banner with the release candidate.
+final bridgeReleaseLookupProvider = FutureProvider<BridgeReleaseLookup>((
+  ref,
+) async {
+  // A manual check owns the answer until the opt-in changes, so the banner
+  // shows exactly the release the row just reported, including a failure.
+  final manual = ref.watch(bridgeUpdateCheckProvider).lookup;
+  if (manual != null) return manual;
+  // The saved opt-in is restored asynchronously in build(); wait for it so an
+  // opted-in launch asks GitHub once, not once per channel.
+  ref.watch(bridgeUpdateSettingsProvider);
+  await ref.read(bridgeUpdateSettingsProvider.notifier).ready;
+  if (!ref.mounted) return const BridgeReleaseLookup();
+  return ref
+      .watch(bridgeReleaseCheckerProvider)
+      .lookup(includePreReleases: ref.read(bridgeUpdateSettingsProvider));
+});
 
 /// Whether bridge update checks may offer pre-release builds.
 ///
@@ -2024,6 +2046,50 @@ class BridgeUpdateSettings extends Notifier<bool> {
     } catch (_) {
       // The choice still applies to this run.
     }
+  }
+}
+
+/// The last manual bridge update check and whether one is in flight.
+class BridgeUpdateCheck {
+  const BridgeUpdateCheck({this.checking = false, this.lookup});
+
+  const BridgeUpdateCheck.idle() : checking = false, lookup = null;
+
+  /// True while the forced GitHub request is running.
+  final bool checking;
+
+  /// The result of the last manual check, null before the first one.
+  final BridgeReleaseLookup? lookup;
+}
+
+final bridgeUpdateCheckProvider =
+    NotifierProvider<BridgeUpdateCheckController, BridgeUpdateCheck>(
+      BridgeUpdateCheckController.new,
+    );
+
+/// Runs the Connect screen's manual check.
+///
+/// It always bypasses the session cache so the timestamp is fresh, and the
+/// checker's floor still debounces a double tap. The refreshed result is fed
+/// back into [bridgeReleaseLookupProvider] so the banner and the row agree.
+class BridgeUpdateCheckController extends Notifier<BridgeUpdateCheck> {
+  @override
+  BridgeUpdateCheck build() => const BridgeUpdateCheck.idle();
+
+  Future<void> check() async {
+    if (state.checking) return;
+    state = BridgeUpdateCheck(checking: true, lookup: state.lookup);
+    final lookup = await ref
+        .read(bridgeReleaseCheckerProvider)
+        .checkNow(includePreReleases: ref.read(bridgeUpdateSettingsProvider));
+    if (!ref.mounted) return;
+    state = BridgeUpdateCheck(lookup: lookup);
+  }
+
+  /// Drops the previous result when the opt-in changes, so the row does not
+  /// describe a release channel the user just left.
+  void clear() {
+    if (!state.checking) state = const BridgeUpdateCheck.idle();
   }
 }
 

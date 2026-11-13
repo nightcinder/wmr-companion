@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +9,7 @@ import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_companion_app/services/app_release_checker.dart';
 import 'package:wmr_companion_app/services/bridge_token_store.dart';
+import 'package:wmr_companion_app/services/bridge_update_settings_store.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/connect/connect_screen.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
@@ -149,8 +153,8 @@ void main() {
         overrides: [
           streamModeProvider.overrideWith(RawModeNotifier.new),
           realDeviceProvider.overrideWith(_ConnectedBridge.new),
-          latestBridgeReleaseProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.20'),
           ),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -180,8 +184,8 @@ void main() {
         overrides: [
           streamModeProvider.overrideWith(RawModeNotifier.new),
           realDeviceProvider.overrideWith(() => bridge),
-          latestBridgeReleaseProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.20'),
           ),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -219,8 +223,8 @@ void main() {
         overrides: [
           streamModeProvider.overrideWith(RawModeNotifier.new),
           realDeviceProvider.overrideWith(() => bridge),
-          latestBridgeReleaseProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.20'),
           ),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -258,8 +262,8 @@ void main() {
         overrides: [
           streamModeProvider.overrideWith(RawModeNotifier.new),
           realDeviceProvider.overrideWith(() => bridge),
-          latestBridgeReleaseProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 20),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.20'),
           ),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -290,8 +294,8 @@ void main() {
         overrides: [
           streamModeProvider.overrideWith(RawModeNotifier.new),
           realDeviceProvider.overrideWith(_ConnectedBridge.new),
-          latestBridgeReleaseProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 19),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.19'),
           ),
         ],
         child: const MaterialApp(home: ConnectScreen()),
@@ -535,6 +539,231 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+
+  testWidgets('manual bridge check shows a spinner then the update', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final gate = Completer<String?>();
+    var fetches = 0;
+    final checker = BridgeReleaseChecker(
+      fetch: (_) async {
+        fetches++;
+        return gate.future;
+      },
+      clock: () => DateTime(2026, 11, 13, 14, 32),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(_ConnectedBridge.new),
+          bridgeReleaseCheckerProvider.overrideWithValue(checker),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.19'),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final button = find.byKey(const Key('bridge-check-updates'));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pump();
+
+    expect(fetches, 1);
+    expect(find.text('Checking…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    gate.complete('{"tag_name":"v0.3.20"}');
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byKey(const Key('bridge-check-update-available')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('0.3.19 → 0.3.20'), findsOneWidget);
+    expect(find.textContaining('Checked at 14:32'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('manual bridge check reports the bridge is current', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final checker = BridgeReleaseChecker(
+      fetch: (_) async => '{"tag_name":"v0.3.19"}',
+      clock: () => DateTime(2026, 11, 13, 14, 32),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(_ConnectedBridge.new),
+          bridgeReleaseCheckerProvider.overrideWithValue(checker),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.19'),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final button = find.byKey(const Key('bridge-check-updates'));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('bridge-check-up-to-date')), findsOneWidget);
+    expect(find.textContaining('newest stable build'), findsOneWidget);
+    expect(find.textContaining('Checked at 14:32'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('manual bridge check reports a timestamped failure', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final checker = BridgeReleaseChecker(
+      fetch: (_) async => throw StateError('offline'),
+      clock: () => DateTime(2026, 11, 13, 14, 32),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(_ConnectedBridge.new),
+          bridgeReleaseCheckerProvider.overrideWithValue(checker),
+          bridgeReleaseLookupProvider.overrideWith(
+            (ref) async => _bridgeLookup('0.3.19'),
+          ),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final button = find.byKey(const Key('bridge-check-updates'));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('bridge-check-error')), findsOneWidget);
+    expect(
+      find.textContaining(
+        '${BridgeReleaseChecker.unreachableError} Checked at 14:32.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('pre-release opt-in persists and pins the banner command', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _MemoryUpdateSettingsStore();
+    final checker = BridgeReleaseChecker(
+      fetch: (uri) async => uri.path.endsWith('/latest')
+          ? '{"tag_name":"v0.3.19"}'
+          : jsonEncode([
+              {'tag_name': 'v0.3.19', 'draft': false, 'prerelease': false},
+              {'tag_name': 'v0.3.27-rc.2', 'draft': false, 'prerelease': true},
+            ]),
+    );
+
+    Future<void> pumpScreen() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(_UpgradeableBridge.new),
+            bridgeUpdateSettingsStoreProvider.overrideWithValue(store),
+            bridgeReleaseCheckerProvider.overrideWithValue(checker),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+    }
+
+    await pumpScreen();
+    final optIn = find.byKey(const Key('bridge-prerelease-opt-in'));
+    expect(tester.widget<CheckboxListTile>(optIn).value, isFalse);
+    expect(find.byKey(const Key('bridge-update-banner')), findsNothing);
+
+    await tester.ensureVisible(optIn);
+    await tester.tap(optIn);
+    await tester.pump();
+    await tester.pump();
+
+    expect(store.value, isTrue);
+    expect(find.byKey(const Key('bridge-update-banner')), findsOneWidget);
+    expect(find.textContaining('pre-release available'), findsOneWidget);
+    expect(find.textContaining('0.3.27-rc.2'), findsWidgets);
+    expect(find.byKey(const Key('bridge-upgrade')), findsNothing);
+    final command = tester.widget<SelectableText>(
+      find.byKey(const Key('bridge-upgrade-command')),
+    );
+    expect(command.data, contains('/download/v0.3.27-rc.2/install.sh'));
+
+    // A fresh screen restores the saved opt-in.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    await pumpScreen();
+    expect(tester.widget<CheckboxListTile>(optIn).value, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+}
+
+/// A release lookup for widget tests, with the pre-release flag derived the
+/// same way the checker derives it.
+BridgeReleaseLookup _bridgeLookup(String version, {DateTime? checkedAt}) {
+  final parsed = WmrSemanticVersion.tryParse(version)!;
+  return BridgeReleaseLookup(
+    version: parsed,
+    isPreRelease: parsed.isPreRelease,
+    checkedAt: checkedAt,
+  );
+}
+
+/// Keeps the opt-in in memory so a widget test can check it persists.
+class _MemoryUpdateSettingsStore implements BridgeUpdateSettingsStore {
+  bool value = false;
+
+  @override
+  Future<bool> load() async => value;
+
+  @override
+  Future<void> save(bool includePreReleases) async {
+    value = includePreReleases;
+  }
 }
 
 /// A connected bridge whose protocol read has not landed, or never will.
