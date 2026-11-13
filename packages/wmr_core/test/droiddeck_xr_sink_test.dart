@@ -310,6 +310,70 @@ void main() {
     expect(peripheral.calls, ['disable', 'restore']);
   });
 
+  test('the sample time is the send time minus the sample age, clamped', () {
+    expect(
+      droidDeckSampleTimeNs(
+        nowNs: _timeNs,
+        transportNowUs: 1000,
+        receivedAtUs: 1000,
+      ),
+      _timeNs,
+    );
+    expect(
+      droidDeckSampleTimeNs(
+        nowNs: _timeNs,
+        transportNowUs: 11000,
+        receivedAtUs: 1000,
+      ),
+      _timeNs - 10000000,
+    );
+    expect(
+      droidDeckSampleTimeNs(
+        nowNs: _timeNs,
+        transportNowUs: 1000,
+        receivedAtUs: 1500,
+      ),
+      _timeNs,
+      reason: 'a sample from the future is not moved forward',
+    );
+    expect(
+      droidDeckSampleTimeNs(
+        nowNs: _timeNs,
+        transportNowUs: 9000000,
+        receivedAtUs: 0,
+      ),
+      _timeNs - droidDeckMaxSampleAgeNs,
+      reason: 'an idle hand stays inside the host staleness window',
+    );
+  });
+
+  test('submit stamps the left hand with its clamped sample time', () async {
+    final transport = FakeTransport();
+    final sink = DroidDeckXrSink(
+      transport: transport,
+      clockNs: () => _timeNs,
+      claimInterval: Duration.zero,
+    );
+    await sink.start();
+
+    Future<int> sendAndRead({int? transportNowUs}) async {
+      await sink.submit(
+        left: sample(hand: 0),
+        right: null,
+        gamepad: const GamepadState(),
+        transportNowUs: transportNowUs,
+      );
+      final packet = transport.sent.last;
+      return ByteData.sublistView(packet)
+          .getInt64(DroidDeckXrProtocol.headerBytes + 96, Endian.little);
+    }
+
+    expect(await sendAndRead(transportNowUs: 250000), _timeNs - 250000000);
+    expect(await sendAndRead(transportNowUs: 10000000), _timeNs - 250000000);
+    expect(await sendAndRead(), _timeNs, reason: 'no transport clock');
+    await sink.stop();
+  });
+
   test('a claim must name at least one matcher', () {
     expect(
       () => encodeDroidDeckXrClaim(

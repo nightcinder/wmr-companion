@@ -115,6 +115,7 @@ class DroidDeckXrHand {
     DecodedSample sample,
     GamepadState gamepad, {
     List<double>? position,
+    int sampleTimeNs = 0,
   }) {
     final side = sample.record.hand == 0 ? 0 : 1;
     final q = sample.orientation;
@@ -203,6 +204,7 @@ class DroidDeckXrHand {
       touches: touches,
       battery: _unit(raw.battery / 255),
       usesTrackpad: usesTrackpad,
+      sampleTimeNs: sampleTimeNs,
     );
   }
 
@@ -313,9 +315,17 @@ class DroidDeckXrSink {
     required GamepadState gamepad,
     List<double> leftPosition = const [0, 0, 0],
     List<double> rightPosition = const [0, 0, 0],
+    int? transportNowUs,
   }) async {
     if (!_active || !_ready) return;
     final now = clockNs();
+    int sampleTime(DecodedSample sample) => transportNowUs == null
+        ? 0
+        : droidDeckSampleTimeNs(
+            nowNs: now,
+            transportNowUs: transportNowUs,
+            receivedAtUs: sample.receivedAtUs,
+          );
     await transport.send(
       encodeDroidDeckXrInput(
         sequence: _nextSequence(),
@@ -326,6 +336,7 @@ class DroidDeckXrSink {
                 left,
                 gamepad,
                 position: leftPosition,
+                sampleTimeNs: sampleTime(left),
               ),
         right: right == null
             ? const DroidDeckXrHand()
@@ -333,6 +344,7 @@ class DroidDeckXrSink {
                 right,
                 gamepad,
                 position: rightPosition,
+                sampleTimeNs: sampleTime(right),
               ),
         sourceId: sourceId,
         focused: focused,
@@ -378,6 +390,24 @@ class DroidDeckXrSink {
   }
 
   int _nextSequence() => _sequence++;
+}
+
+/// Longest age, in ns, that a sample's DroidDeck timestamp may lag the send
+/// time. Half of the host's 500 ms staleness bound, so a quiet hand is not
+/// dropped.
+const int droidDeckMaxSampleAgeNs = 250000000;
+
+/// The CLOCK_MONOTONIC time at which a pipeline sample was received. It is
+/// derived from the sample's age on the transport clock, and the age is
+/// clamped to [0, droidDeckMaxSampleAgeNs] so the result is never in the
+/// future and never older than the host accepts.
+int droidDeckSampleTimeNs({
+  required int nowNs,
+  required int transportNowUs,
+  required int receivedAtUs,
+}) {
+  final ageNs = (transportNowUs - receivedAtUs) * 1000;
+  return nowNs - ageNs.clamp(0, droidDeckMaxSampleAgeNs).toInt();
 }
 
 /// Encodes one fixed-size input packet.
