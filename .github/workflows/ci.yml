@@ -31,6 +31,7 @@ jobs:
     outputs:
       android_flavors: ${{ steps.filter.outputs.android_flavors }}
       app_code: ${{ steps.filter.outputs.app_code }}
+      swift_code: ${{ steps.filter.outputs.swift_code }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -61,22 +62,63 @@ jobs:
               - 'tool/**'
               - '.github/actions/**'
               - '.github/workflows/ci.yml'
+            # The Swift packages are built on a macOS runner, which is the most
+            # contended one available, and a Dart-only change cannot alter
+            # them. A pull request that touches no Swift source skips that
+            # shard; main always runs it.
+            swift_code:
+              - 'packages/WMRCompanionKit/**'
+              - 'tool/ios_probe/**'
+              - 'apps/wmr_visionos_app/**'
+              - '.github/workflows/ci.yml'
 
   build:
+    # Required context, kept as a gate so the ruleset contract does not change.
+    # The checks behind it used to be one job, so a pull request paid their
+    # sum (~5 min: `flutter test` 82 s plus twelve package suites run back to
+    # back at ~145 s). The shards below do the same work concurrently and this
+    # gate names the shard that failed.
+    needs: [changes, build-static, build-app-tests, build-package-tests]
+    if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate on the path filter and the build shards
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          STATIC: ${{ needs.build-static.result }}
+          APP: ${{ needs.build-app-tests.result }}
+          PACKAGES: ${{ needs.build-package-tests.result }}
+        run: |
+          set -eu
+          echo "changes: $CHANGES"
+          for pair in "build-static:$STATIC" "build-app-tests:$APP" "build-package-tests:$PACKAGES"; do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            echo "$name: $result"
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "::error::$name did not succeed ($result)."
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::changes did not succeed ($CHANGES); refusing to report build green."
+            exit 1
+          fi
+
+  build-static:
     # Tag pushes build only the release job; these gates run on branches/PRs.
-    # A push to main always builds, whatever the filter says: the app_code list
-    # is hand-maintained, and main has no review to catch a path it misses.
+    # A push to main always runs them, whatever the filter says: the app_code
+    # list is hand-maintained, and main has no review to catch a path it misses.
     needs: changes
     if: ${{ (needs.changes.outputs.app_code == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
 
       - uses: ./.github/actions/flutter-setup
         id: flutter
@@ -86,8 +128,6 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed apps/wmr_companion_app/lib apps/wmr_companion_app/test packages/wmr_fusion packages/wmr_tracking packages/wmr_tracking_dispatch packages/wmr_tracking_android_xr packages/wmr_tracking_viture packages/wmr_tracking_xreal packages/wmr_core packages/wmr_companion packages/wmr_ble packages/wmr_ws packages/wmr_companion_ui packages/wmr_companion_hid_android example/lib example/test tool
       - working-directory: apps/wmr_companion_app
         run: flutter analyze
-      - working-directory: apps/wmr_companion_app
-        run: flutter test
       # Pure-stdlib tests for the APK pre-flight checker: build synthetic binary
       # Android XML and APKs, so no SDK or large artifact is needed.
       - name: APK checker tests
@@ -106,74 +146,6 @@ jobs:
       # APK zips, no MobSF, no network.
       - name: MobSF inventory tests
         run: python3 -m unittest -v tool/test_mobsf_scan.py
-      # Each package's own test suite includes export_boundary_test.dart, which
-      # asserts that its lib/ imports no Riverpod, file plugin or higher layer.
-      - name: wmr_core package
-        working-directory: packages/wmr_core
-        run: |
-          dart analyze
-          dart test
-      - name: wmr_companion package
-        working-directory: packages/wmr_companion
-        run: |
-          dart analyze
-          dart test
-      - name: wmr_companion_hid_android package
-        working-directory: packages/wmr_companion_hid_android
-        run: |
-          flutter analyze
-          flutter test
-      - name: wmr_companion_ui package
-        working-directory: packages/wmr_companion_ui
-        run: |
-          flutter analyze
-          flutter test
-      - name: wmr_ble package
-        working-directory: packages/wmr_ble
-        run: |
-          flutter analyze
-          flutter test
-      - name: wmr_ws package
-        working-directory: packages/wmr_ws
-        run: |
-          dart analyze
-          dart test
-      - name: wmr_fusion package
-        working-directory: packages/wmr_fusion
-        run: |
-          dart analyze
-          dart test
-      - name: wmr_tracking package
-        working-directory: packages/wmr_tracking
-        run: |
-          dart analyze
-          dart test
-
-      - name: XR adapter contract harness
-        working-directory: packages/wmr_tracking
-        run: dart run tool/xr_contract_harness.dart
-
-      - name: wmr_tracking_dispatch package
-        working-directory: packages/wmr_tracking_dispatch
-        run: |
-          flutter analyze
-          flutter test
-
-      - name: wmr_tracking_android_xr package
-        working-directory: packages/wmr_tracking_android_xr
-        run: |
-          flutter analyze
-          flutter test
-      - name: wmr_tracking_viture package
-        working-directory: packages/wmr_tracking_viture
-        run: |
-          flutter analyze
-          flutter test
-      - name: wmr_tracking_xreal package
-        working-directory: packages/wmr_tracking_xreal
-        run: |
-          flutter analyze
-          flutter test
       - name: pub.dev publish dry-run (every package in the publish set)
         run: |
           # A clean dry-run for all twelve published packages. The root pub
@@ -206,7 +178,7 @@ jobs:
           (cd packages/wmr_companion && dart pub publish --dry-run)
 
           echo "=== Publish dry-run: wmr_ble ==="
-          (cd packages/wmr_ble && flutter pub publish --dry-run)
+          (cd packages/wmr_ble && dart pub publish --dry-run)
 
           echo "=== Publish dry-run: wmr_ws ==="
           (cd packages/wmr_ws && dart pub publish --dry-run)
@@ -226,12 +198,103 @@ jobs:
           flutter analyze
           flutter test
 
+      # The only writer of the Ubuntu Flutter caches: the other shards skip the
+      # save, so a pubspec.lock change cannot have three jobs racing for one
+      # key. (`ios` writes the macOS keys, which only it reads.)
       - name: Save the Flutter caches
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: ./.github/actions/flutter-cache-save
         with:
           save-sdk: ${{ steps.flutter.outputs.sdk-cache-hit != 'true' }}
           save-pub: ${{ steps.flutter.outputs.pub-cache-hit != 'true' }}
+
+  build-app-tests:
+    # The app's own widget/unit suite. It is the longest single step in the old
+    # `build` job (82 s) and shares nothing with the package suites, so it gets
+    # its own runner instead of queueing behind them.
+    needs: changes
+    if: ${{ (needs.changes.outputs.app_code == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/flutter-setup
+
+      - run: flutter pub get
+
+      - working-directory: apps/wmr_companion_app
+        run: flutter test
+
+  build-package-tests:
+    # Every package's own test suite includes export_boundary_test.dart, which
+    # asserts that its lib/ imports no Riverpod, file plugin or higher layer.
+    # The suites are independent, so they run concurrently here instead of as
+    # twelve sequential steps: on a four-core runner the wall clock is roughly
+    # the longest suite plus a little contention, not their sum.
+    needs: changes
+    if: ${{ (needs.changes.outputs.app_code == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # "<package dir>:<tool>". A Flutter member needs `flutter test` for its
+      # flutter_test-based suites; a pure Dart member uses `dart` end to end.
+      SUITES: >-
+        wmr_core:dart wmr_companion:dart wmr_ws:dart wmr_fusion:dart
+        wmr_tracking:dart wmr_ble:flutter wmr_companion_ui:flutter
+        wmr_companion_hid_android:flutter wmr_tracking_dispatch:flutter
+        wmr_tracking_android_xr:flutter wmr_tracking_viture:flutter
+        wmr_tracking_xreal:flutter
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/flutter-setup
+
+      - run: flutter pub get
+
+      - name: Run every package suite concurrently
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/package-suites"
+          mkdir -p "$out"
+          helper="$RUNNER_TEMP/run-suite.sh"
+          cat >"$helper" <<'HELPER'
+          #!/usr/bin/env bash
+          # One suite: "<package dir>:<tool>" from SUITES.
+          set -uo pipefail
+          suite="$1"
+          dir="${suite%%:*}"
+          tool="${suite##*:}"
+          exec >"$PACKAGE_SUITES_OUT/$dir.log" 2>&1
+          cd "packages/$dir" || exit 1
+          if [ "$tool" = "dart" ]; then
+            dart analyze && dart test
+          else
+            flutter analyze && flutter test
+          fi
+          HELPER
+          chmod +x "$helper"
+          export PACKAGE_SUITES_OUT="$out"
+          # Four at a time: the hosted runner has four cores, and twelve
+          # simultaneous `flutter test` kernels would only thrash memory.
+          if ! printf '%s\n' $SUITES | tr ' ' '\n' | xargs -P 4 -n 1 "$helper"; then
+            failed=1
+          else
+            failed=0
+          fi
+          for log in "$out"/*.log; do
+            echo "::group::$(basename "$log" .log)"
+            cat "$log"
+            echo "::endgroup::"
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::at least one package suite failed; see the groups above."
+            exit 1
+          fi
+
+      - name: XR adapter contract harness
+        working-directory: packages/wmr_tracking
+        run: dart run tool/xr_contract_harness.dart
 
   gate7-clock-replay:
     # Tag pushes build only the release job; these gates run on branches/PRs.
@@ -287,35 +350,45 @@ jobs:
           retention-days: 14
 
   android-flavors:
-    # Required context. Reports green only when the path filter ran and the
-    # build succeeded or was skipped by that filter; it never reports green
-    # while `changes` failed or was cancelled.
-    needs: [changes, android-flavors-build]
+    # Required context. Reports green only when the path filter ran and every
+    # Android shard succeeded or was skipped by that filter; it never reports
+    # green while `changes` failed or was cancelled.
+    needs: [changes, android-flavors-build, android-flavors-kotlin, android-flavors-example]
     if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Gate on the path filter and the Android build
+      - name: Gate on the path filter and the Android shards
         env:
           CHANGES: ${{ needs.changes.result }}
           BUILD: ${{ needs.android-flavors-build.result }}
+          KOTLIN: ${{ needs.android-flavors-kotlin.result }}
+          EXAMPLE: ${{ needs.android-flavors-example.result }}
         run: |
           set -eu
           echo "changes: $CHANGES"
-          echo "android-flavors-build: $BUILD"
+          for pair in "android-flavors-build:$BUILD" "android-flavors-kotlin:$KOTLIN" "android-flavors-example:$EXAMPLE"; do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            echo "$name: $result"
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "::error::$name did not succeed ($result)."
+                exit 1
+                ;;
+            esac
+          done
           if [ "$CHANGES" != "success" ]; then
             echo "::error::changes did not succeed ($CHANGES); refusing to report android-flavors green."
             exit 1
           fi
-          case "$BUILD" in
-            success|skipped) ;;
-            *)
-              echo "::error::android-flavors-build did not succeed ($BUILD)."
-              exit 1
-              ;;
-          esac
 
   android-flavors-build:
+    # The wiring proof is the expensive half: it assembles a debug APK from a
+    # cold Gradle. The Kotlin unit tests and the example APK used to queue
+    # behind it, which is why the job took ~5 min; both now run on their own
+    # runners in parallel with this one.
     needs: changes
     # A push to main always builds, whatever the path filter says; PRs build
     # only when Android-relevant paths changed.
@@ -405,34 +478,24 @@ jobs:
         working-directory: apps/wmr_companion_app
         run: tool/test_unity_export_install.sh
 
+      # This script builds the unified flavor twice (with a stub export, then
+      # with none) and proves the retired per-vendor guard fails configuration,
+      # so the standalone "build without Unity" step that used to follow it
+      # proved nothing new: Gradle reported it up to date in 7 s.
       - name: Unity flavor wiring
         working-directory: apps/wmr_companion_app
         run: tool/test_flavor_wiring.sh
 
-      - name: Kotlin plugin unit tests
-        working-directory: apps/wmr_companion_app/android
-        run: |
-          ./gradlew --stacktrace \
-            :wmr_tracking_dispatch:testDebugUnitTest \
-            :wmr_tracking_viture:testDebugUnitTest \
-            :wmr_tracking_xreal:testDebugUnitTest \
-            :wmr_tracking_android_xr:testDebugUnitTest \
-            :wmr_companion_hid_android:testDebugUnitTest
-
-      - name: Build unified without Unity
-        working-directory: apps/wmr_companion_app
-        run: tool/build_flavor.sh unified
-
-      # Moved out of `build`: the example APK needs the Android SDK and Gradle,
-      # which only this job pays for.
-      - name: Example app APK
-        working-directory: example
-        run: flutter build apk --debug
-
+      # The APK left behind is the no-export build the wiring script finishes
+      # with, which is the same artifact this job uploaded before the shards
+      # were split.
       - uses: actions/upload-artifact@v7
         with:
           name: wmr-companion-debug-apks
           path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-*-debug.apk
+          # The wiring script either leaves an APK or fails, so an empty glob
+          # here means the proof above did not run against what was uploaded.
+          if-no-files-found: error
           retention-days: 14
 
       # Written only from main, after the build proved the download works.
@@ -445,10 +508,93 @@ jobs:
             /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
           key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
 
+  android-flavors-kotlin:
+    # The Kotlin plugin unit tests only need Gradle and a JDK, but Gradle
+    # configures the whole project, including the app's pinned NDK, so the
+    # pinned NDK is restored here too. No save and no miss check: this job is
+    # not the writer of that cache entry.
+    needs: changes
+    if: ${{ (needs.changes.outputs.android_flavors == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANDROID_NDK_VERSION: 28.2.13676358
+      ANDROID_CMAKE_VERSION: 3.22.1
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore the Android NDK and CMake
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+            /usr/local/lib/android/sdk/cmake/${{ env.ANDROID_CMAKE_VERSION }}
+          key: android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}
+          restore-keys: |
+            android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: ./.github/actions/flutter-setup
+
+      - run: flutter pub get
+
+      # `gradlew` is gitignored and generated by the Flutter tool, which the
+      # wiring job used to do as a side effect of its build. `--config-only`
+      # injects the wrapper and writes android/local.properties (the Gradle
+      # build reads flutter.sdk from it), then returns before building
+      # anything.
+      - name: Generate the Gradle wrapper
+        working-directory: apps/wmr_companion_app
+        run: flutter build apk --config-only --debug --flavor unified
+
+      - name: Kotlin plugin unit tests
+        working-directory: apps/wmr_companion_app/android
+        run: |
+          ./gradlew --stacktrace \
+            :wmr_tracking_dispatch:testDebugUnitTest \
+            :wmr_tracking_viture:testDebugUnitTest \
+            :wmr_tracking_xreal:testDebugUnitTest \
+            :wmr_tracking_android_xr:testDebugUnitTest \
+            :wmr_companion_hid_android:testDebugUnitTest
+
+  android-flavors-example:
+    # Moved out of `build`: the example APK needs the Android SDK and Gradle,
+    # which only the Android shards pay for. It needs no NDK: the example app
+    # depends on wmr_companion, wmr_companion_ui and wmr_ble only.
+    needs: changes
+    if: ${{ (needs.changes.outputs.android_flavors == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: ./.github/actions/flutter-setup
+
+      - run: flutter pub get
+
+      - name: Example app APK
+        working-directory: example
+        run: flutter build apk --debug
+
   ios:
     # Tag pushes build only the release job; these gates run on branches/PRs.
     # A push to main always builds, whatever the filter says: the app_code list
     # is hand-maintained, and main has no review to catch a path it misses.
+    #
+    # This job stays one macOS job on purpose. When the Swift packages ran as a
+    # separate `ios-swift` job (2026-11-13, run 43488056650) it sat queued for
+    # the whole run while `ios-flutter` held the only macOS slot, and only
+    # started minutes after the other job ended: there is effectively one
+    # macOS runner available here, so a second job buys no parallelism. The
+    # Swift checks are skipped by path instead, inside this job.
     needs: changes
     if: ${{ (needs.changes.outputs.app_code == 'true' || github.ref == 'refs/heads/main') && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: macos-latest
@@ -456,30 +602,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # A Dart-only edit cannot change these packages, and main always runs
+      # them because it has no review to catch a path the filter misses.
       - name: Test WMRCompanionKit Swift Package
+        if: ${{ needs.changes.outputs.swift_code == 'true' || github.ref == 'refs/heads/main' }}
         working-directory: packages/WMRCompanionKit
         run: swift test
 
       - name: Build WMRCompanionProbe
+        if: ${{ needs.changes.outputs.swift_code == 'true' || github.ref == 'refs/heads/main' }}
         working-directory: tool/ios_probe
         run: swift build
 
-      - name: Build WMRVisionOS Swift Package
-        working-directory: apps/wmr_visionos_app
-        run: swift build
-
+      # `swift test` builds every target the test targets depend on, including
+      # WMRVisionOSApp, so the separate `swift build` that used to run first
+      # compiled the same sources twice (24 s).
       - name: Test WMRVisionOS Swift Package
+        if: ${{ needs.changes.outputs.swift_code == 'true' || github.ref == 'refs/heads/main' }}
         working-directory: apps/wmr_visionos_app
         run: swift test
 
-      # The macOS SDK entry is 2.2 GB and only this job reads it; keeping it
-      # would leave less than a gigabyte of the 7 GB target for the NDK entry,
-      # so the iOS job downloads the SDK instead. The pub cache is tiny and
-      # still restored.
+      # The macOS SDK entry is 2.2 GB and only this job reads it. It is cached
+      # now that the stale `setup-gradle` generations are pruned out of the
+      # 10 GB budget: the restore is a fraction of the download plus precache
+      # this job used to pay on every run (~110 s).
       - uses: ./.github/actions/flutter-setup
         id: flutter
-        with:
-          sdk-cache: 'false'
 
       - name: Validate Flutter iOS config
         working-directory: apps/wmr_companion_app
@@ -493,15 +641,14 @@ jobs:
           flutter pub get
           flutter build ios --config-only --no-codesign
 
-      # This job is the only reader of the macOS pub key, so it is also the
-      # only writer: without this step a `pubspec.lock` change left the key
-      # missing on every run and the restore never converged. Only the pub
-      # cache is written; the 2.2 GB SDK entry stays uncached.
-      - name: Save the macOS pub cache
+      # This job is the only reader of the macOS cache keys, so it is also the
+      # only writer: without this step a `pubspec.lock` change left the SDK or
+      # pub key missing on every run and the restore never converged.
+      - name: Save the macOS caches
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: ./.github/actions/flutter-cache-save
         with:
-          save-sdk: 'false'
+          save-sdk: ${{ steps.flutter.outputs.sdk-cache-hit != 'true' }}
           save-pub: ${{ steps.flutter.outputs.pub-cache-hit != 'true' }}
 
   release-notes-dryrun:
