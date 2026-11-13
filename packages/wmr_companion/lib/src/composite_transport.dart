@@ -345,6 +345,43 @@ class CompositeBleTransport implements BleTransport {
     }
   }
 
+  /// Turns this client's BLE stream notifications off and keeps the link.
+  ///
+  /// A host moving a bridge to Wi-Fi calls this instead of [disconnect]: this
+  /// client's FF11/FF12/FF14 CCCD notifications are turned off (0x0000), the
+  /// open streams are detached and the TCP leg is closed, but [ble] is never
+  /// told to disconnect. The bonded GATT link therefore survives a Wi-Fi
+  /// connect or a tab switch; a later [connect] re-subscribes over it, and
+  /// only an explicit [disconnect] or [dispose] drops it.
+  Future<void> suspendBleStreams(String deviceId) async {
+    final route = _routes[deviceId];
+    if (route == null) return;
+    _stopUpgrade(route);
+    final tcpSub = route.tcpStateSub;
+    route.tcpStateSub = null;
+    route.tcpStateId = null;
+    unawaited(tcpSub?.cancel());
+    await _disableBleNotifications(route);
+
+    final channels = List<_Channel>.of(route.channels);
+    for (final channel in channels) {
+      await channel.detach();
+    }
+
+    final tcpId = route.tcpDeviceId;
+    route.tcpDeviceId = null;
+    if (tcpId != null) {
+      try {
+        await tcp.disconnect(tcpId);
+      } catch (_) {
+        // A link that already dropped needs no further teardown.
+      }
+    }
+    // Deliberately no `ble.disconnect`: the bonded link stays up so the
+    // bridge keeps seeing the phone.
+    if (route.bleDeviceId != null) route.active = _Lane.ble;
+  }
+
   @override
   Stream<BleConnectionState> connectionState(String deviceId) async* {
     if (_disposed) {

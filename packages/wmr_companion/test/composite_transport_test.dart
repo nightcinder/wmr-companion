@@ -475,6 +475,42 @@ void main() {
     },
   );
 
+  test(
+    'switching to Wi-Fi turns the stream CCCD off and keeps the BLE link',
+    () async {
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      await transport.connect(_bleDeviceId);
+      expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _bleDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeStreamCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+      expect(ble.cccLog, contains('on $wmrBridgeStreamCharUuid'));
+
+      await transport.suspendBleStreams(_bleDeviceId);
+
+      expect(ble.cccLog, contains('off $wmrBridgeStreamCharUuid'));
+      expect(
+        await ble.connectionState(_bleDeviceId).first,
+        BleConnectionState.connected,
+        reason: 'the switch must not drop the bonded BLE link',
+      );
+      expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+    },
+  );
+
   test('a BLE-only connect learns FF16 and upgrades to TCP', () async {
     ble.dispose();
     ble = newBle(ff16: _endpointDocument());
