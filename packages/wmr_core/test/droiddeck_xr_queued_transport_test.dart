@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
@@ -182,4 +183,93 @@ void main() {
       throwsA(isA<DroidDeckXrTransportException>()),
     );
   });
+
+  test('overlapping flushes during a reconnect open one socket', () async {
+    final gate = _GatedReopen();
+    var now = 0;
+    final first = FakeNonBlockingTransport(accept: false);
+    final wrapper = DroidDeckXrQueuedTransport(
+      transport: first,
+      reopen: gate.call,
+      nowUs: () => now,
+    );
+
+    await wrapper.send(_packet(1));
+    now = 500 * _ms;
+    final s2 = wrapper.send(_packet(2)); // reconnect #1 starts and waits
+    await _settle();
+    expect(gate.pending, hasLength(1));
+
+    now = 1000 * _ms; // the failure window allows another reopen
+    final s3 = wrapper.send(_packet(3)); // overlapping flush
+    await _settle();
+    expect(gate.pending, hasLength(1), reason: 'no second reconnect');
+
+    gate.complete(0);
+    await Future.wait([s2, s3]);
+    expect(gate.opened, hasLength(1));
+    expect(gate.opened.single.closed, isFalse);
+    expect(gate.opened.single.sent, [1, 2, 3]);
+    expect(first.closed, isTrue);
+    expect(wrapper.queuedPackets, 0);
+  });
+
+  test(
+    'close during a reconnect closes the new socket and installs nothing',
+    () async {
+      final gate = _GatedReopen();
+      var now = 0;
+      final first = FakeNonBlockingTransport(accept: false);
+      final wrapper = DroidDeckXrQueuedTransport(
+        transport: first,
+        reopen: gate.call,
+        nowUs: () => now,
+      );
+
+      await wrapper.send(_packet(1));
+      now = 500 * _ms;
+      final s2 = wrapper.send(_packet(2)); // reconnect in flight
+      await _settle();
+      expect(gate.pending, hasLength(1));
+
+      final closing = wrapper.close();
+      gate.complete(0);
+      await closing;
+      await s2;
+
+      expect(gate.opened, hasLength(1));
+      expect(gate.opened.single.closed, isTrue, reason: 'new socket closed');
+      expect(gate.opened.single.sent, isEmpty, reason: 'nothing installed');
+      expect(wrapper.queuedPackets, 0);
+      await expectLater(
+        wrapper.send(_packet(3)),
+        throwsA(isA<DroidDeckXrTransportException>()),
+      );
+      expect(gate.pending, hasLength(1), reason: 'no reopen after close');
+    },
+  );
+}
+
+/// Reopen that stays pending until the test completes it.
+class _GatedReopen {
+  final List<Completer<DroidDeckXrNonBlockingTransport>> pending = [];
+  final List<FakeNonBlockingTransport> opened = [];
+
+  Future<DroidDeckXrNonBlockingTransport> call() {
+    final completer = Completer<DroidDeckXrNonBlockingTransport>();
+    pending.add(completer);
+    return completer.future;
+  }
+
+  void complete(int index) {
+    final fake = FakeNonBlockingTransport();
+    opened.add(fake);
+    pending[index].complete(fake);
+  }
+}
+
+Future<void> _settle() async {
+  for (var i = 0; i < 10; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
 }

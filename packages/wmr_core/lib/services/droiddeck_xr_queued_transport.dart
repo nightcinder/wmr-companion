@@ -25,6 +25,11 @@ final Stopwatch _clock = Stopwatch()..start();
 /// and continues with the new transport. It does this at most [maxReopens]
 /// times in one failure episode. After that the failure is thrown from [send],
 /// which is the same error path the sink already uses.
+///
+/// Only one flush runs at a time. A send that arrives during a reconnect only
+/// queues its packet; the flush in progress writes it afterwards. [close] is
+/// final: a socket that finishes opening after [close] is closed at once and
+/// never installed, and [close] completes only after that has happened.
 class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
   DroidDeckXrQueuedTransport({
     required DroidDeckXrNonBlockingTransport transport,
@@ -50,6 +55,8 @@ class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
   int? _failingSinceUs;
   int _reopensInEpisode = 0;
   bool _closed = false;
+  bool _flushing = false;
+  Future<void>? _replacing;
 
   /// Packets discarded because the queue was full.
   int get droppedPackets => _droppedPackets;
@@ -69,39 +76,68 @@ class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
   }
 
   Future<void> _flush() async {
-    while (_queue.isNotEmpty) {
-      if (_transport.trySend(_queue.first)) {
-        _queue.removeFirst();
-        _failingSinceUs = null;
-        _reopensInEpisode = 0;
-        continue;
+    // One flush at a time. If one is already running (possibly waiting for a
+    // reconnect), it drains this packet too, so there is nothing to do here.
+    if (_flushing) return;
+    _flushing = true;
+    try {
+      while (!_closed && _queue.isNotEmpty) {
+        if (_transport.trySend(_queue.first)) {
+          _queue.removeFirst();
+          _failingSinceUs = null;
+          _reopensInEpisode = 0;
+          continue;
+        }
+        final now = nowUs();
+        final since = _failingSinceUs ??= now;
+        if (now - since < reopenAfter.inMicroseconds) return;
+        if (_reopensInEpisode >= maxReopens) {
+          await _giveUp();
+          throw const DroidDeckXrTransportException(
+            'DroidDeck ext-xr socket still failing after reopening',
+          );
+        }
+        _reopensInEpisode++;
+        _failingSinceUs = now;
+        await _replaceTransport();
       }
-      final now = nowUs();
-      final since = _failingSinceUs ??= now;
-      if (now - since < reopenAfter.inMicroseconds) return;
-      if (_reopensInEpisode >= maxReopens) {
-        await _giveUp();
-        throw const DroidDeckXrTransportException(
-          'DroidDeck ext-xr socket still failing after reopening',
-        );
-      }
-      _reopensInEpisode++;
-      _failingSinceUs = now;
-      await _replaceTransport();
+    } finally {
+      _flushing = false;
     }
   }
 
-  Future<void> _replaceTransport() async {
-    final old = _transport;
+  /// Closes the failing socket and opens a replacement. [close] waits for it.
+  Future<void> _replaceTransport() {
+    final replacing = _swapTransport();
+    _replacing = replacing;
+    return replacing;
+  }
+
+  Future<void> _swapTransport() async {
     try {
-      await old.close();
-    } on Object {
-      // The old transport is already failing; closing it is best effort.
-    }
-    try {
-      _transport = await reopen();
-    } on DroidDeckXrTransportException {
-      // The next attempt waits another reopenAfter, counted in this episode.
+      final old = _transport;
+      try {
+        await old.close();
+      } on Object {
+        // The old transport is already failing; closing it is best effort.
+      }
+      if (_closed) return;
+      try {
+        final next = await reopen();
+        if (_closed) {
+          // close() ran while this socket was opening. Own it here and close
+          // it; nothing is installed after close.
+          await _closeQuietly(next);
+        } else {
+          _transport = next;
+        }
+      } on DroidDeckXrTransportException {
+        // The next attempt waits another reopenAfter, counted in this episode.
+      }
+    } finally {
+      // Cleared in the same synchronous step that installed (or dropped) the
+      // new transport, so close() never sees a finished swap as in flight.
+      _replacing = null;
     }
   }
 
@@ -117,9 +153,28 @@ class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
 
   @override
   Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
-    _queue.clear();
-    await _transport.close();
+    if (!_closed) {
+      _closed = true;
+      _queue.clear();
+      // While a replacement is in flight it owns the socket it is opening, and
+      // the old socket is already closed. Closing _transport here would race it.
+      if (_replacing == null) await _transport.close();
+    }
+    final replacing = _replacing;
+    if (replacing != null) {
+      try {
+        await replacing;
+      } on Object {
+        // The replacement reports its own failure to the flush, not to close.
+      }
+    }
+  }
+
+  Future<void> _closeQuietly(DroidDeckXrNonBlockingTransport transport) async {
+    try {
+      await transport.close();
+    } on Object {
+      // Best effort: the socket is being abandoned.
+    }
   }
 }
