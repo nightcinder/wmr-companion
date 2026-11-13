@@ -68,6 +68,41 @@ void main() {
       );
       expect(s.angularVelocity, isNull);
     });
+
+    test('a discontinuity sample gives zero angular velocity', () {
+      final p = HandPipeline();
+      p.add(record(ticks: 0, rxTimeUs: 0), 0);
+      // One nominal period on the device clock, but 200 ms on the receive
+      // clock: the timer reports a discontinuity.
+      final s = p.add(
+        record(
+          ticks: nominalPeriodTicks,
+          rxTimeUs: 200000,
+          gyro: const [0.1, 0.2, 0.3],
+        ),
+        0,
+      );
+      expect(s.step.kind, TickStepKind.discontinuity);
+      expect(s.angularVelocity, isNull);
+      final hand = DroidDeckXrHand.fromPipeline(s, _noInput());
+      expect(hand.angularVelocity, [0, 0, 0]);
+    });
+
+    test('a large-gap sample gives zero angular velocity', () {
+      final p = HandPipeline();
+      p.add(record(ticks: 0, rxTimeUs: 0), 0);
+      // 0.5 s on both clocks: consistent, so it is a step, but above maxDt
+      // (0.1 s) the filter step is skipped.
+      final s = p.add(
+        record(ticks: 5000000, rxTimeUs: 500000, gyro: const [0.1, 0.2, 0.3]),
+        0,
+      );
+      expect(s.step.kind, TickStepKind.step);
+      expect(s.step.dtSeconds, greaterThan(0.1));
+      expect(s.angularVelocity, isNull);
+      final hand = DroidDeckXrHand.fromPipeline(s, _noInput());
+      expect(hand.angularVelocity, [0, 0, 0]);
+    });
   });
 
   group('DroidDeck hand mapping', () {

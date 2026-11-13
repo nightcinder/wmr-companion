@@ -106,11 +106,14 @@ class DroidDeckXrHand {
 
   /// Maps one pipeline sample to the host's hand layout.
   ///
-  /// The pipeline has orientation only: [position] and the velocities stay
-  /// zero unless a caller supplies a tracked position (the host accepts a
-  /// rotation-only pose). The gamepad state supplies the analog values after
-  /// the user's mapping, so stick inversion and trigger thresholds match the
-  /// rest of the app.
+  /// The pipeline supplies orientation and angular velocity. Angular velocity
+  /// is the bias-corrected view-frame rate, body-local and unrotated, and is
+  /// zero when the sample has none (baseline, discontinuity, large gap, or
+  /// non-finite input). [position] and linear velocity stay zero unless a
+  /// caller supplies a tracked position (the host accepts a rotation-only
+  /// pose). The gamepad state supplies the analog values after the user's
+  /// mapping, so stick inversion and trigger thresholds match the rest of the
+  /// app.
   factory DroidDeckXrHand.fromPipeline(
     DecodedSample sample,
     GamepadState gamepad, {
