@@ -529,6 +529,10 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   bool _manualBrowseSuppressed = false;
   bool _disconnectedByUser = false;
   final Set<String> _userDisconnectedDeviceIds = {};
+
+  /// Bridges whose streams were parked for Wi-Fi but whose bonded BLE link is
+  /// still up. An explicit Disconnect or Forget drops these too.
+  final Set<String> _parkedBleDeviceIds = {};
   final Set<String> _droppedDeviceIds = {};
 
   final Map<String, int> _reconnectAttempts = {};
@@ -975,6 +979,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _connectingDeviceIds.contains(deviceId)) {
       return;
     }
+    _parkedBleDeviceIds.remove(deviceId);
     // A Wi-Fi composite may be scanning to learn its BLE fallback candidate;
     // that scan must outlive the dial. BLE mode still stops its scan here.
     if (state.activeTransport != BridgeTransportKind.wifi) {
@@ -1131,13 +1136,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     }
   }
 
-  /// Chooses the link the connect screen shows. Only one link is active at a
-  /// time; switching disconnects what the other one had.
+  /// Chooses the link the connect screen shows. Switching away from
+  /// Bluetooth leaves the bonded BLE link up (only the stream CCCDs are
+  /// turned off); switching away from Wi-Fi ends its session.
   Future<void> selectTransport(BridgeTransportKind kind) async {
     _autoConnectSuppressed = true;
     if (state.activeTransport == kind) return;
     await stopScan();
-    await _disconnect(forget: false);
+    if (state.activeTransport == BridgeTransportKind.ble) {
+      await _releaseBleLink();
+    } else {
+      await _disconnect(forget: false);
+    }
     if (kind == BridgeTransportKind.ble) {
       await _disposeWifiTransport();
     }
@@ -1520,7 +1530,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     );
     final id = endpoint.resolvedDeviceId;
 
-    await _disconnect(forget: false);
+    if (state.activeTransport == BridgeTransportKind.ble) {
+      // A Wi-Fi connect must not drop the bonded BLE link: turn the stream
+      // CCCDs off and leave the bridge reachable over Bluetooth.
+      await _releaseBleLink();
+    } else {
+      await _disconnect(forget: false);
+    }
     await _disposeWifiTransport();
     _lastStatus = const BleLinkStatus(BleLinkPhase.connecting);
     _wifiDeviceId = id;
@@ -1603,6 +1619,48 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   Future<void> disconnect([String? deviceId]) =>
       _disconnect(deviceId: deviceId);
 
+  /// Ends the Bluetooth session's streams without dropping the BLE link.
+  ///
+  /// A tab switch or a Wi-Fi connect only turns this client's FF11/FF12/FF14
+  /// CCCDs off (through [CompositeBleTransport.suspendBleStreams]) and
+  /// stops the controller; the bonded GATT link stays up so the Pi keeps
+  /// seeing the phone and a later Bluetooth connect reuses it. Only an
+  /// explicit Disconnect or Forget calls [disconnect] and drops the link.
+  Future<void> _releaseBleLink() async {
+    _finishUpgrade(const BridgeUpgradeState.idle());
+    _disconnectedByUser = true;
+    _userDisconnectedDeviceIds.clear();
+    _droppedDeviceIds.clear();
+    _cancelBleCompositeState();
+    _globalDisconnectGeneration++;
+    for (final t in _reconnectTimers.values) {
+      t.cancel();
+    }
+    _reconnectTimers.clear();
+    _reconnectAttempts.clear();
+    _reconnecting.clear();
+    _disconnectEpoch++;
+
+    final transport = _bleHandoffTransport;
+    final ids = {..._connectedDeviceIds, ..._connectingDeviceIds};
+    if (transport is CompositeBleTransport) {
+      for (final id in ids) {
+        // Before the service cancels its listeners: afterwards the composite
+        // has forgotten which CCCDs this client had enabled.
+        await transport.suspendBleStreams(id);
+      }
+    }
+    _parkedBleDeviceIds.addAll(ids);
+
+    _statsTimer?.cancel();
+    await _service?.dispose();
+    _service = null;
+    _connectingDeviceIds.clear();
+    _connectedDeviceIds.clear();
+    _deviceStatuses.clear();
+    _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
+  }
+
   Future<void> _disconnect({String? deviceId, bool forget = true}) async {
     _autoConnectSuppressed = true;
     _finishUpgrade(const BridgeUpgradeState.idle());
@@ -1631,6 +1689,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       try {
         await _transport.disconnect(deviceId);
       } catch (_) {}
+      if (_parkedBleDeviceIds.remove(deviceId)) {
+        // A Wi-Fi switch parked this bridge's stream but left the bond up;
+        // an explicit Disconnect is the one place that must drop it.
+        try {
+          await _bleHandoffTransport.disconnect(deviceId);
+        } catch (_) {}
+      }
       _update();
       return;
     }
@@ -1663,7 +1728,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           await _transport.disconnect(id);
         } catch (_) {}
       }
-      if (forget) await _forgetBridge();
+      if (forget) {
+        final parked = _parkedBleDeviceIds.toList();
+        _parkedBleDeviceIds.clear();
+        for (final id in parked) {
+          // The explicit Disconnect or Forget is the one action that drops a
+          // link parked for Wi-Fi; a transport switch leaves it up.
+          try {
+            await _bleHandoffTransport.disconnect(id);
+          } catch (_) {}
+        }
+        await _forgetBridge();
+      }
       _update();
     } finally {
       _intentionalDisconnect = false;

@@ -137,6 +137,135 @@ void main() {
     },
   );
 
+  test(
+    'switching to the Wi-Fi tab turns BLE streams off but keeps the link',
+    () async {
+      const bleDeviceId = 'ble-pi-1';
+      final adapter = FakeBleAdapter();
+      final container = makeContainer(adapter: adapter);
+      final controller = container.read(realDeviceProvider.notifier);
+
+      await controller.connect(bleDeviceId);
+      await _waitFor(
+        () => adapter.ccc.contains('on ff11'),
+        reason: 'the raw stream CCCD was never enabled',
+      );
+
+      await controller.selectTransport(BridgeTransportKind.wifi);
+
+      expect(adapter.ccc, ['on ff11', 'off ff11']);
+      expect(
+        adapter.calls,
+        isNot(contains('disconnect')),
+        reason: 'the bonded BLE link must survive the tab switch',
+      );
+      expect(
+        await container
+            .read(realTransportProvider)
+            .connectionState(bleDeviceId)
+            .first,
+        BleConnectionState.connected,
+      );
+      final state = container.read(realDeviceProvider);
+      expect(state.activeTransport, BridgeTransportKind.wifi);
+      expect(state.connected, isFalse);
+      expect(state.status.phase, BleLinkPhase.idle);
+    },
+  );
+
+  test('connecting Wi-Fi turns BLE streams off but keeps the link', () async {
+    const bleDeviceId = 'ble-pi-1';
+    final adapter = FakeBleAdapter();
+    final container = makeContainer(
+      adapter: adapter,
+      compositeFactory: (_) => WifiLink(
+        wifiWithDevice('pi.local:8765'),
+        activeLeg: () => WifiLinkLeg.tcp,
+      ),
+    );
+    final controller = container.read(realDeviceProvider.notifier);
+
+    await controller.connect(bleDeviceId);
+    await _waitFor(
+      () => adapter.ccc.contains('on ff11'),
+      reason: 'the raw stream CCCD was never enabled',
+    );
+
+    await controller.connectWifi(host: 'pi.local', port: 8765);
+
+    expect(adapter.ccc, ['on ff11', 'off ff11']);
+    expect(
+      adapter.calls,
+      isNot(contains('disconnect')),
+      reason: 'the bonded BLE link must survive the Wi-Fi connect',
+    );
+    expect(
+      await container
+          .read(realTransportProvider)
+          .connectionState(bleDeviceId)
+          .first,
+      BleConnectionState.connected,
+    );
+    final state = container.read(realDeviceProvider);
+    expect(state.activeTransport, BridgeTransportKind.wifi);
+    expect(state.connected, isTrue);
+  });
+
+  test('switching back to Bluetooth resumes the same BLE link', () async {
+    const bleDeviceId = 'ble-pi-1';
+    final adapter = FakeBleAdapter();
+    final container = makeContainer(adapter: adapter);
+    final controller = container.read(realDeviceProvider.notifier);
+
+    await controller.connect(bleDeviceId);
+    await _waitFor(() => adapter.ccc.contains('on ff11'));
+    await controller.selectTransport(BridgeTransportKind.wifi);
+    expect(adapter.ccc.last, 'off ff11');
+
+    await controller.selectTransport(BridgeTransportKind.ble);
+    await controller.connect(bleDeviceId);
+    await _waitFor(
+      () => adapter.ccc.where((c) => c == 'on ff11').length == 2,
+      reason: 'the stream was not re-enabled on the kept link',
+    );
+
+    expect(
+      adapter.calls.where((c) => c == 'connect'),
+      hasLength(1),
+      reason: 'resuming must reuse the bonded link, not dial it again',
+    );
+    expect(container.read(realDeviceProvider).connected, isTrue);
+  });
+
+  test('an explicit disconnect drops the link parked for Wi-Fi', () async {
+    const bleDeviceId = 'ble-pi-1';
+    final adapter = FakeBleAdapter();
+    final container = makeContainer(
+      adapter: adapter,
+      compositeFactory: (_) => WifiLink(
+        wifiWithDevice('pi.local:8765'),
+        activeLeg: () => WifiLinkLeg.tcp,
+      ),
+    );
+    final controller = container.read(realDeviceProvider.notifier);
+
+    await controller.connect(bleDeviceId);
+    await _waitFor(() => adapter.ccc.contains('on ff11'));
+    await controller.connectWifi(host: 'pi.local', port: 8765);
+    expect(adapter.calls, isNot(contains('disconnect')));
+
+    await controller.disconnect();
+
+    expect(adapter.calls, contains('disconnect'));
+    expect(
+      await container
+          .read(realTransportProvider)
+          .connectionState(bleDeviceId)
+          .first,
+      BleConnectionState.disconnected,
+    );
+  });
+
   test('a raw BLE drop after the handoff keeps the TCP session', () async {
     const bridgeId = 'pi-1';
     const bleDeviceId = 'ble-pi-1';
