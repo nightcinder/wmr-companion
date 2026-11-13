@@ -348,6 +348,7 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
         gamepad: mapped,
         leftPosition: left ?? const [0, 0, 0],
         rightPosition: right ?? const [0, 0, 0],
+        transportNowUs: _service?.transport.clock.nowUs,
       );
       if (!identical(sink, _sink)) return;
       state = state.copyWith(
