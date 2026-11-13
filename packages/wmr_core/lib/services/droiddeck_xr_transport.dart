@@ -108,6 +108,7 @@ class DroidDeckXrUnixTransport implements DroidDeckXrTransport {
     final address = libc.malloc(sizeOf<_SockAddrUn>()).cast<_SockAddrUn>();
     try {
       address.ref.sunFamily = _afUnix;
+      address.ref.sunPath[0] = 0;
       for (var i = 0; i < nameBytes.length; i++) {
         address.ref.sunPath[1 + i] = nameBytes[i];
       }
