@@ -9,6 +9,8 @@ import android.content.pm.PackageInstaller
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
 import io.flutter.embedding.android.FlutterActivity
@@ -31,6 +33,7 @@ import java.util.UUID
 class MainActivity : FlutterActivity() {
     private var installResult: MethodChannel.Result? = null
     private var installReceiver: BroadcastReceiver? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -110,6 +113,15 @@ class MainActivity : FlutterActivity() {
         installReceiver = receiver
         installResult = result
 
+        // The unified APK is ~431 MB (docs/STATUS.md), so the session write
+        // must not run on the platform main thread: it would freeze the UI and
+        // risk an ANR on every self-update. The status receiver was registered
+        // on the main thread above and the broadcast arrives there too.
+        Thread({ writeSession(apk, action) }, "app-updater-install").start()
+    }
+
+    /** Copies [apk] into a `PackageInstaller` session and commits it. */
+    private fun writeSession(apk: File, action: String) {
         var sessionId = -1
         try {
             val params = PackageInstaller.SessionParams(
@@ -191,6 +203,10 @@ class MainActivity : FlutterActivity() {
         intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
 
     private fun finishInstall(code: String? = null, message: String? = null) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { finishInstall(code, message) }
+            return
+        }
         val result = installResult ?: return
         installResult = null
         unregisterInstallReceiver()
