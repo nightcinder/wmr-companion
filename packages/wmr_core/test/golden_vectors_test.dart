@@ -41,9 +41,9 @@ List<String> strings(Object? list) =>
     (list as List<dynamic>).map((e) => e as String).toList();
 
 void main() {
-  final golden =
-      jsonDecode(File('test/fixtures/wmr_golden_v1.json').readAsStringSync())
-          as Json;
+  final golden = jsonDecode(
+    File('test/fixtures/wmr_golden_v1.json').readAsStringSync(),
+  ) as Json;
   final frames = objects(golden['ff11_frames']);
 
   test('file header and coverage', () {
