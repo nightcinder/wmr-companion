@@ -1,91 +1,197 @@
 # Gamepad mapping
 
-Status: in-app mapping layer, debug screen and a Bluetooth HID output (option A below, chosen by the project owner) are built; **none of it has been run on hardware or on a phone**. CI only builds and unit-tests it.
+This document describes the gamepad mapping layer, Bluetooth output modes, and external XR input integration.
 
-## Where it sits
+## Architecture
+
+The gamepad mapping sits after packet decoding and hand pipeline fusion.
 
 ```
-FF12/FF14 record -> HandPipeline (timing, fusion, stick centre + dead zone)
+FF12/FF14 record -> HandPipeline (timing, fusion, stick center, dead zone)
                  -> HandInput (latest per hand)
                  -> mapGamepad(left, right, GamepadConfig) -> GamepadState
 ```
 
-- `packages/wmr_core/lib/domain/gamepad.dart`: pure Dart, stateless (`mapGamepad`, `triggerValue`, `trackpadButtons`, `tiltStick`). The same inputs and config always give the same state, so it can move to an isolate or a native hot path later.
-- `apps/wmr_companion_app/lib/ui/gamepad/`: providers (latest input per hand from `ControllerService.decodedSamples`, about 30 Hz) and the Gamepad screen, opened from the debug screen's app bar (gamepad icon). Needs FF12 or FF14 mode; FF11 carries no decoded inputs.
-- The parser, the subscription code and `ControllerService` are unchanged.
+The mapping layer uses these components:
 
-## Model and default mapping
+- `packages/wmr_core/lib/domain/gamepad.dart`: pure Dart functions that map hand inputs to a gamepad state. The same inputs and configuration always produce the same state.
+- `apps/wmr_companion_app/lib/ui/gamepad/`: state providers and the Gamepad screen. The providers sample controller state at approximately 30 Hz.
+- The Gamepad screen requires FF12 or FF14 mode. Mode FF11 carries no decoded inputs.
 
-One two-stick gamepad from both controllers. Sticks and triggers are analog; y is positive up.
+## Default mapping
 
-| Controller input | LEFT | RIGHT |
+The default configuration combines two controllers into one two-stick gamepad. Sticks and triggers provide analog values. Positive Y points up.
+
+| Controller input | Left controller | Right controller |
 |---|---|---|
-| Thumbstick | Left stick | Right stick |
+| Thumbstick | Left thumbstick | Right thumbstick |
 | Trigger (analog) | Left trigger, L2 past the press threshold | Right trigger, R2 past the press threshold |
-| Squeeze (grip) | L1 | R1 |
-| Thumbstick click | L3 | R3 |
-| Menu | Select | Start |
-| Home (Windows) | Guide | Guide |
-| Trackpad click | D-pad, 8 sectors | A/B/X/Y: up Y, right B, down A, left X |
-| Trackpad touch alone | nothing | nothing |
-| BT pairing | not mapped | not mapped |
-| Tilt (optional, off by default) | roll to x, pitch to y of a chosen stick; yaw is not used because it drifts | same |
+| Squeeze (grip) | L1 button | R1 button |
+| Thumbstick click | L3 button | R3 button |
+| Menu | Select button | Start button |
+| Home (Windows) | Guide button | Guide button |
+| Trackpad click | D-pad in eight sectors | A, B, X, Y buttons (Up Y, Right B, Down A, Left X) |
+| Trackpad touch alone | Not mapped | Not mapped |
+| Bluetooth pairing button | Not mapped | Not mapped |
+| Tilt (optional, off by default) | Roll to X, pitch to Y on selected stick | Same |
 
-Where tilt and the physical stick both move an axis, the larger magnitude wins.
+If tilt and the physical stick both move an axis, the larger magnitude wins.
 
-## Settings (all live on the Gamepad screen)
+## Settings
 
-Every number is a guess. The trigger and trackpad ranges have not been measured (WMR_Bridge `docs/DECODING.md`, "Unknown"), and the y directions of the stick and trackpad on the wire have not been checked.
+You can adjust mapping settings on the Gamepad screen.
 
-| Setting | Default | Notes |
+| Setting | Default | Description |
 |---|---|---|
-| Stick dead zone, learned rest centre | 0.05, on | Existing `StickConfig` on the debug screen, applied before the mapper |
-| Trigger full scale (raw) | 255 | Lower it if a trigger never reaches 255 |
-| Trigger dead zone | 0.05 | Fraction of full scale, output rescaled to 0..1 |
-| Trigger press (L2/R2) | 0.55 | Analog value after the dead zone: at or above this L2/R2 press |
-| Trigger release (L2/R2) | 0.45 | At or below this they release; the band between the two is the hysteresis that stops a resting finger from flickering L2/R2 |
-| Trackpad centre radius | 0.3 | A click nearer the centre presses nothing |
-| Trackpad role per hand | LEFT d-pad, RIGHT ABXY | Or off |
-| Invert stick Y, invert trackpad Y | off | For when the wire's y grows downwards |
-| Tilt target, hand, full deflection, dead zone, invert X/Y | off, RIGHT, 35°, 3°, off | Signs follow the view frame; the vertical-axis sign of the axis table is itself unverified |
+| Stick dead zone, learned rest center | 0.05, on | Applied by `StickConfig` before mapping |
+| Trigger full scale (raw) | 255 | Lower this value if a trigger never reaches 255 |
+| Trigger dead zone | 0.05 | Fraction of full scale rescaled to 0.0 through 1.0 |
+| Trigger press (L2/R2) | 0.55 | Value at or above which L2 or R2 activates |
+| Trigger release (L2/R2) | 0.45 | Value at or below which L2 or R2 releases |
+| Trackpad center radius | 0.3 | Clicks inside this radius trigger no button |
+| Trackpad role per hand | Left D-pad, Right ABXY | Button assignment or off |
+| Invert stick Y, invert trackpad Y | Off | Inverts the vertical axis |
+| Tilt configuration | Off, Right, 35 deg, 3 deg, off | Target stick, hand, full deflection, dead zone, inversion |
 
-The mapping settings are saved to `gamepad_settings.json` in the app documents directory (about 0.4 s after the last change) and loaded at startup; values outside the slider ranges are clamped and unknown ones fall back to the defaults. The stick dead zone, learn toggle and learned rest centre of each hand are saved the same way to `stick_settings.json`, so a calibration survives an app restart; a corrupt or missing file falls back to the defaults. The HID output state is not saved.
+The application saves mapping configuration to `gamepad_settings.json` in the app documents directory. The application saves stick settings to `stick_settings.json`. If a configuration file is missing or corrupt, settings return to defaults.
 
-## To check on hardware (not yet run)
+## Hardware test steps
 
-1. FF12 mode, open the Gamepad screen, press each button on each hand: the matching lamp lights and nothing else.
-2. Push each stick up: y goes positive. If not, toggle "Invert stick Y" and report it.
-3. Pull each trigger slowly: note the highest "trigger" value at full pull (sets the full scale) and where L2/R2 light.
-4. Click the trackpad top, bottom, left, right: Up/Down/Left/Right on LEFT, Y/A/X/B on RIGHT. If up and down swap, toggle "Invert trackpad Y".
-5. Tilt to the right stick: lean the ring top right gives +x, tip it away gives +y.
+To verify controller mapping on hardware:
 
-## Bluetooth HID output (option A, built, untested)
+1. Connect controllers in FF12 mode.
+2. Open the Gamepad screen.
+3. Press each button on each controller and confirm that the matching indicator lights.
+4. Push each stick forward and make sure that Y moves positive.
+5. If Y moves negative, turn on Invert stick Y.
+6. Pull each trigger slowly to confirm full scale and threshold activation.
+7. Click each trackpad quadrant and make sure that correct buttons trigger.
 
-The phone registers as a Bluetooth HID gamepad with Android's `BluetoothHidDevice` (Android 9+) and sends one input report whenever the mapped state changes.
+## Bluetooth HID output mode
 
-- `lib/hid/hid_report.dart` (pure Dart): report descriptor and `encodeHidReport`. Report ID 1, 9 bytes: 16 button bits in Android/Linux HID slot order (`hidButtonOrder`: A, B, C, X, Y, Z, L1, R1, L2, R2, Select, Start, Mode, L3, R3; C and Z are reserved and stay clear), hat switch from the d-pad (0..7 clockwise from up, 15 centred), left stick X/Y and right stick X/Y as signed -127..127 (HID Y is positive down, so the model's y is negated), left/right trigger as Brake/Accelerator 0..255.
-- `lib/hid/hid_gamepad_transport.dart`: `HidGamepadTransport` interface and the method/event-channel implementation. Without the Android plugin it reports `unsupported`.
-- `lib/hid/hid_output.dart`: `HidOutput` subscribes to the service's decoded samples (not the 30 Hz screen provider), maps both hands with the live settings and sends when the encoded bytes change. A new host gets the current state on connect.
-- `android/.../HidGamepadPlugin.kt`: permission request (BLUETOOTH_CONNECT), profile proxy, `registerApp`, connection state, `sendReport`, paired devices, discoverable request. `MainActivity` wires it up.
-- UI: "Bluetooth HID output" section on the Gamepad screen: Start/Stop, Make discoverable, paired devices with Connect, Disconnect, reports sent / errors.
+The phone can act as a Bluetooth HID gamepad peripheral for a remote host.
 
-Limits: reports go out only while the app is open and started (no background service); after reconnecting to the bridge, Stop and Start again; one host at a time; button naming depends on the host.
+- `lib/hid/hid_report.dart`: encodes the 9-byte HID gamepad report.
+- `lib/hid/hid_gamepad_transport.dart`: platform channel interface for `BluetoothHidDevice`.
+- `lib/hid/hid_output.dart`: listens to decoded samples and sends HID reports when state changes.
+- `android/.../HidGamepadPlugin.kt`: registers the Android Bluetooth HID peripheral profile.
 
-To check on a phone and host (not yet run):
-1. Start; Android asks for the Bluetooth permission. If it says the HID profile is unavailable, that phone does not support it (some vendors do not).
-2. Make discoverable, pair from the host's Bluetooth settings, or tap Connect on an already paired host. The status line shows "Connected to <host>".
-3. On the host open a gamepad tester: press each controller button, move sticks, pull triggers, click the trackpad. Note which host button each one lands on, and report stick directions that are inverted.
-4. Check the latency by feel and report whether input stalls while the app is in the foreground.
+To test Bluetooth HID output:
 
-## Options considered
+1. Start HID output on the Gamepad screen.
+2. Make the phone discoverable.
+3. Pair the remote host to the phone.
+4. Verify input responses on the host gamepad tester.
 
-All options share the in-app layer; each only adds an output stage that sends `GamepadState` somewhere. Option A was built for the Companion app (`BluetoothHidDevice`). Option D (ESP32 BLE HOGP) was built in WMR_Bridge firmware v0.3.0+ (`docs/HID_GAMEPAD.md`); options B and C are not built.
+## Output options and coexistence
 
-| Option | What it is | Reaches | Needs | Main risks |
-|---|---|---|---|---|
-| A. Phone as Bluetooth HID gamepad | Android `BluetoothHidDevice` API (Android 9+): the phone registers as a Classic Bluetooth HID device with a gamepad report descriptor and pairs with a host | PC (Windows, Linux, macOS), Android TV, other phones/tablets: anything that takes a generic HID gamepad. Not PlayStation/Switch/Xbox consoles | A small Kotlin plugin (platform channel), Bluetooth connect/advertise permissions, a report descriptor | Not every phone vendor enables the profile; the phone runs a Classic link to the host and a BLE link to the bridge at once (shared radio on the phone side, not on the ESP32); one host at a time |
-| B. Wi-Fi to a PC companion | The phone sends state over UDP; on the PC either a virtual controller driver (Windows: ViGEm-style virtual Xbox pad; Linux: `uinput`) or the DSU ("cemuhook") protocol | PC games through the virtual pad; DSU also carries gyro/accel, which emulators (Dolphin, Cemu and others) use for motion | A PC-side program or driver (DSU needs only the emulator) | Extra hop and Wi-Fi jitter; PC software to install and maintain; ViGEmBus is no longer developed |
-| C. Games on the phone itself | Inject a virtual gamepad into Android with `/dev/uinput` | Android games on the same phone | Root, or a shell-level helper such as Shizuku; normal apps cannot inject input (`INJECT_EVENTS` is a system permission) | Not possible on a stock unrooted phone without the helper; fragile across Android versions |
-| D. ESP32 as the gamepad | The bridge itself presents a BLE HID (HOGP) gamepad to the host; the phone is not needed | Any BLE HID host | Implemented in WMR_Bridge v0.3.0+ (service `0x1812` concurrent with `FF10`); mapping on ESP32 | BLE and Classic radio contention on the ESP32; disables Android HID Host if phone also enables Option A |
+The project supports multiple output destinations.
 
-Recommendation: **A** when using the phone as a Bluetooth gamepad peripheral for an external PC or console without bridge firmware HID. If using firmware BLE HOGP (**D**), keep Option A disabled to avoid disabling Android's HID Host service. **B with DSU** remains the better pick if the main use is emulators that want motion. C is not recommended for now.
+| Option | Transport | Target | Notes |
+|---|---|---|---|
+| A. Phone Bluetooth HID | Classic Bluetooth peripheral (`BluetoothHidDevice`) | Remote PC or console | Phone presents a gamepad peripheral to a remote device |
+| B. Wi-Fi companion | UDP to PC driver or DSU protocol | PC games or emulators | Sends gamepad and motion data over local Wi-Fi |
+| C. Android uinput | Local `/dev/uinput` injection | Local Android games | Requires root or system permissions |
+| D. Bridge BLE HOGP | Direct BLE HID (`0x1812`) from bridge | Any Bluetooth host | ESP32 or Raspberry Pi presents standard gamepad |
+| E. DroidDeck External XR | Local Unix socket or loopback UDP | Local DroidDeck SteamVR | Streams 6DoF poses, analog controls, and haptics |
+
+Output modes require specific coexistence rules:
+
+- If you use Option E (DroidDeck External XR), turn off Option A (Phone Bluetooth HID). Android Bluetooth HID peripheral mode disrupts local Bluetooth host connections.
+- If you use Option D (Bridge BLE HOGP), keep Option A turned off to avoid conflicts in the Android Bluetooth stack.
+- When Option D connects to the phone, Android binds the bridge as an `InputDevice`. To stop duplicate gamepad events in DroidDeck, Option E sends a claim packet.
+
+## DroidDeck External 6DoF input API
+
+DroidDeck provides an experimental v0 interface for external 6DoF controller input. External producers send controller poses, buttons, and axes to DroidDeck. DroidDeck forwards controller data to SteamVR and returns haptic pulses.
+
+The binary interface freezes only when contributors submit the feature to upstream DroidDeck.
+
+### Transports
+
+The API supports two local transports:
+
+1. Primary transport: abstract Unix domain sequential packet socket (`SOCK_SEQPACKET`) at `droiddeck-ext-xr`. Peer authentication uses `SO_PEERCRED`. The host approves `com.onyxlens.wmr_companion` and `com.onyxlens.wmr_companion.debug` by default. Other apps require explicit approval.
+2. Fallback transport: localhost UDP on `127.0.0.1:29842`. Every datagram requires the 32-bit session pairing token at byte offset 32. DroidDeck writes the token to `droiddeck-ext-xr.token` in its runtime directory.
+
+### Header layout
+
+Every packet begins with a 40-byte header.
+
+| Offset | Type | Field | Description |
+|---|---|---|---|
+| 0 | uint32 | magic | Magic number `0x52584544` (ASCII `DEXR`) |
+| 4 | uint32 | version | Protocol version (`0` for experimental v0) |
+| 8 | uint32 | sequence | Packet sequence counter on wire, seqlock in shared memory |
+| 12 | uint32 | header_size | Header size in bytes (`40`) |
+| 16 | uint32 | flags | Bit 0: focused, Bit 1: claim packet |
+| 20 | uint32 | source_id | Producer source identifier |
+| 24 | int64 | time_ns | Sample timestamp in nanoseconds (`CLOCK_MONOTONIC`) |
+| 32 | uint32 | token | Pairing token for UDP, zero on Unix socket |
+| 36 | uint32 | reserved | Reserved padding, set to zero |
+
+The producer must set `DROIDDECK_EXT_XR_FOCUSED` (`1 << 0`). If this flag is clear, DroidDeck drops the packet. The timestamp must use `CLOCK_MONOTONIC`. If the sample timestamp differs from host time by more than 500,000,000 nanoseconds, DroidDeck drops the packet.
+
+### 6DoF input packet
+
+An input packet contains 264 bytes. The packet holds the 40-byte header and two 112-byte hand structures.
+
+Left hand data starts at offset 40. Right hand data starts at offset 152.
+
+| Hand offset | Packet offset (Left) | Packet offset (Right) | Type | Field | Description |
+|---|---|---|---|---|---|
+| 0 | 40 | 152 | uint32 | flags | Hand state flags |
+| 4 | 44 | 156 | uint32 | buttons | Button click bitmask |
+| 8 | 48 | 160 | uint32 | touches | Button touch bitmask |
+| 12 | 52 | 164 | uint32 | reserved | Reserved padding |
+| 16 | 56 | 168 | float[3] | position | Position in meters (X, Y, Z) |
+| 28 | 68 | 180 | float[4] | orientation | Unit quaternion (X, Y, Z, W) |
+| 44 | 84 | 196 | float[3] | linear_velocity | Linear velocity in meters per second |
+| 56 | 96 | 208 | float[3] | angular_velocity | Angular velocity in radians per second |
+| 68 | 108 | 220 | float | trigger | Analog trigger (0.0 to 1.0) |
+| 72 | 112 | 224 | float | squeeze | Analog grip squeeze (0.0 to 1.0) |
+| 76 | 116 | 228 | float[2] | stick | Analog thumbstick (X, Y in -1.0 to 1.0) |
+| 84 | 124 | 236 | float[2] | trackpad | Analog trackpad (X, Y in -1.0 to 1.0) |
+| 92 | 132 | 244 | float | battery | Battery level (0.0 to 1.0, negative if unknown) |
+| 96 | 136 | 248 | int64 | sample_time_ns | Sample timestamp in nanoseconds |
+| 104 | 144 | 256 | uint32 | recenter | Recenter counter |
+| 108 | 148 | 260 | uint32 | reserved2 | Reserved padding |
+
+Position uses the right-handed OpenXR coordinate system: positive X points right, positive Y points up, and negative Z points forward.
+
+### PadBridge claim packet and timeout rules
+
+A producer sends a 184-byte claim packet to exclude its devices from PadBridge. The header flags must include `DROIDDECK_EXT_XR_PACKET_CLAIM` (`1 << 1`).
+
+| Offset | Type | Field | Description |
+|---|---|---|---|
+| 0 | uint8[40] | header | Header with `DROIDDECK_EXT_XR_PACKET_CLAIM` set |
+| 40 | uint32 | vendor_id | USB or Bluetooth vendor identifier |
+| 44 | uint32 | product_id | USB or Bluetooth product identifier |
+| 48 | uint32 | flags | Claim flags |
+| 52 | uint32 | reserved | Reserved padding |
+| 56 | char[64] | descriptor | Android device descriptor string |
+| 120 | char[64] | name | Fallback device name string |
+
+The server matches the vendor identifier and product identifier. If provided, the server matches the device descriptor string. The server checks the device name as a fallback.
+
+A claim packet refreshes the producer session timer. If no packet arrives for 1000 milliseconds, the session times out. When a session times out, DroidDeck releases the claim and returns the device to PadBridge.
+
+### Haptic reply packet
+
+DroidDeck sends 64-byte haptic feedback replies to active producers.
+
+| Offset | Type | Field | Description |
+|---|---|---|---|
+| 0 | uint32 | magic | Magic number `0x52584544` |
+| 4 | uint32 | version | Protocol version (`0`) |
+| 8 | uint32 | header_size | Packet size in bytes (`64`) |
+| 12 | uint32 | hand | Target hand (`0` for left, `1` for right) |
+| 16 | float | amplitude | Vibration intensity (0.0 to 1.0) |
+| 20 | float | frequency | Vibration frequency in Hertz |
+| 24 | uint32 | duration_ms | Pulse duration in milliseconds |
+| 28 | uint32 | reserved | Reserved padding |
+| 32 | int64 | time_ns | Timestamp in nanoseconds (`CLOCK_MONOTONIC`) |
+| 40 | uint64[3] | reserved2 | Reserved padding |
+
+The host polls for haptic events every 8 milliseconds. DroidDeck sends replies through the connected Unix socket or back to the UDP sender address.
