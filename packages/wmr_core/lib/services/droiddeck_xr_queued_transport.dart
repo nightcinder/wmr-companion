@@ -2,7 +2,11 @@ import 'dart:collection';
 import 'dart:typed_data';
 
 import '../domain/droiddeck_xr_sink.dart';
-import 'droiddeck_xr_transport.dart' show DroidDeckXrTransportException;
+import 'droiddeck_xr_transport.dart'
+    show
+        DroidDeckXrPacketStats,
+        DroidDeckXrPacketStatsSource,
+        DroidDeckXrTransportException;
 
 /// A transport that can attempt one send without blocking.
 ///
@@ -30,7 +34,8 @@ final Stopwatch _clock = Stopwatch()..start();
 /// queues its packet; the flush in progress writes it afterwards. [close] is
 /// final: a socket that finishes opening after [close] is closed at once and
 /// never installed, and [close] completes only after that has happened.
-class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
+class DroidDeckXrQueuedTransport
+    implements DroidDeckXrTransport, DroidDeckXrPacketStatsSource {
   DroidDeckXrQueuedTransport({
     required DroidDeckXrNonBlockingTransport transport,
     required this.reopen,
@@ -51,6 +56,7 @@ class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
 
   DroidDeckXrNonBlockingTransport _transport;
   final Queue<Uint8List> _queue = Queue<Uint8List>();
+  int _acceptedPackets = 0;
   int _droppedPackets = 0;
   int? _failingSinceUs;
   int _reopensInEpisode = 0;
@@ -61,8 +67,19 @@ class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
   /// Packets discarded because the queue was full.
   int get droppedPackets => _droppedPackets;
 
+  /// Packets written to the socket since it opened.
+  int get acceptedPackets => _acceptedPackets;
+
   /// Packets waiting for the socket to accept them.
   int get queuedPackets => _queue.length;
+
+  /// A snapshot of the counters, for the app's debug surface.
+  @override
+  DroidDeckXrPacketStats get packetStats => DroidDeckXrPacketStats(
+    accepted: _acceptedPackets,
+    dropped: _droppedPackets,
+    queued: _queue.length,
+  );
 
   @override
   Future<void> send(Uint8List packet) async {
@@ -84,6 +101,7 @@ class DroidDeckXrQueuedTransport implements DroidDeckXrTransport {
       while (!_closed && _queue.isNotEmpty) {
         if (_transport.trySend(_queue.first)) {
           _queue.removeFirst();
+          _acceptedPackets++;
           _failingSinceUs = null;
           _reopensInEpisode = 0;
           continue;

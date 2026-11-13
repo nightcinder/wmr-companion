@@ -50,7 +50,8 @@ class DroidDeckOutputState {
   const DroidDeckOutputState({
     this.status = DroidDeckStatus.idle,
     this.message,
-    this.packetsSent = 0,
+    this.packetsAccepted = 0,
+    this.packetsDropped = 0,
     this.sendErrors = 0,
     this.leftPosition = false,
     this.rightPosition = false,
@@ -60,7 +61,13 @@ class DroidDeckOutputState {
 
   /// Why the session stopped or failed to start.
   final String? message;
-  final int packetsSent;
+
+  /// Packets the socket accepted, from the transport's snapshot.
+  final int packetsAccepted;
+
+  /// Packets the transport discarded because its queue was full.
+  final int packetsDropped;
+
   final int sendErrors;
 
   /// Whether the last packet carried a tracked position for that hand. False
@@ -75,14 +82,16 @@ class DroidDeckOutputState {
   DroidDeckOutputState copyWith({
     DroidDeckStatus? status,
     String? message,
-    int? packetsSent,
+    int? packetsAccepted,
+    int? packetsDropped,
     int? sendErrors,
     bool? leftPosition,
     bool? rightPosition,
   }) => DroidDeckOutputState(
     status: status ?? this.status,
     message: message,
-    packetsSent: packetsSent ?? this.packetsSent,
+    packetsAccepted: packetsAccepted ?? this.packetsAccepted,
+    packetsDropped: packetsDropped ?? this.packetsDropped,
     sendErrors: sendErrors ?? this.sendErrors,
     leftPosition: leftPosition ?? this.leftPosition,
     rightPosition: rightPosition ?? this.rightPosition,
@@ -133,6 +142,7 @@ class DroidDeckHidPeripheral implements DroidDeckXrHidPeripheral {
 /// link the stream needs. Nothing runs in the background.
 class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
   DroidDeckXrSink? _sink;
+  DroidDeckXrPacketStatsSource? _stats;
   StreamSubscription<DecodedSample>? _sampleSub;
   ProviderSubscription<AsyncValue<DebugPoses>>? _poseSub;
   StreamSubscription<String>? _removalSub;
@@ -178,10 +188,14 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
         return;
       }
       _sink = sink;
+      _stats = transport is DroidDeckXrPacketStatsSource
+          ? transport as DroidDeckXrPacketStatsSource
+          : null;
       await _bindSource(source);
       if (generation != _generation) return;
       state = state.copyWith(status: DroidDeckStatus.streaming, message: null);
     } on Object catch (error) {
+      _stats = null;
       await transport?.close();
       if (generation != _generation) return;
       state = DroidDeckOutputState(
@@ -198,6 +212,7 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
     _generation++;
     _unbindSource();
     _sink = null;
+    _stats = null;
     _clearHands();
     state = const DroidDeckOutputState();
     await sink?.stop();
@@ -351,15 +366,19 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
         transportNowUs: _service?.transport.clock.nowUs,
       );
       if (!identical(sink, _sink)) return;
+      final stats = _stats?.packetStats;
       state = state.copyWith(
-        packetsSent: state.packetsSent + 1,
+        packetsAccepted: stats?.accepted,
+        packetsDropped: stats?.dropped,
         leftPosition: left != null,
         rightPosition: right != null,
       );
     } on Object catch (error) {
       if (!identical(sink, _sink)) return;
       final message = _describe(error);
-      final sent = state.packetsSent;
+      final stats = _stats?.packetStats;
+      final accepted = stats?.accepted ?? state.packetsAccepted;
+      final dropped = stats?.dropped ?? state.packetsDropped;
       final errors = state.sendErrors + 1;
       final leftPose = state.leftPosition;
       final rightPose = state.rightPosition;
@@ -369,7 +388,8 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
       state = DroidDeckOutputState(
         status: DroidDeckStatus.error,
         message: message,
-        packetsSent: sent,
+        packetsAccepted: accepted,
+        packetsDropped: dropped,
         sendErrors: errors,
         leftPosition: leftPose,
         rightPosition: rightPose,

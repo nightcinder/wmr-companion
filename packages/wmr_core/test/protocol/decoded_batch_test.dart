@@ -132,6 +132,17 @@ void main() {
         errorOf(Uint8List.fromList(b)..[1] = 5),
         BatchParseError.wrongLength,
       );
+      // Nine is the maximum; ten is refused even with a matching length.
+      final ten = Uint8List(wmrBatchHeaderSize + 10 * wmrDecodedSize)
+        ..[0] = wmrBatchVersion
+        ..[1] = 10;
+      expect(errorOf(ten), BatchParseError.tooManyRecords);
+      expect(
+        errorOf(Uint8List.fromList(ten)..[1] = 9),
+        BatchParseError.wrongLength,
+      );
+      final nine = encodeDecodedBatch(recs);
+      expect(parseDecodedBatch(nine).records, hasLength(wmrBatchMaxCount));
     });
 
     test('an FF12 record is not a batch and a batch is not a record', () {

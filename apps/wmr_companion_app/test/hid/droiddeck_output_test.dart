@@ -30,10 +30,19 @@ DecodedRecord record(int seq, {int hand = 0, int buttons = 0}) => DecodedRecord(
   buttons: buttons,
 );
 
-class FakeDroidDeckTransport implements DroidDeckXrTransport {
+class FakeDroidDeckTransport
+    implements DroidDeckXrTransport, DroidDeckXrPacketStatsSource {
   final sent = <Uint8List>[];
   bool closed = false;
   bool failSend = false;
+  int dropped = 0;
+
+  @override
+  DroidDeckXrPacketStats get packetStats => DroidDeckXrPacketStats(
+    accepted: sent.length,
+    dropped: dropped,
+    queued: 0,
+  );
 
   @override
   Future<void> send(Uint8List packet) async {
@@ -110,7 +119,8 @@ void main() {
 
     feed(record(1, buttons: wmrBtnSqueeze));
     await pump();
-    expect(state().packetsSent, 1);
+    expect(state().packetsAccepted, 1);
+    expect(state().packetsDropped, 0);
     expect(droidDeck.sent, hasLength(1));
     expect(droidDeck.sent.single, hasLength(DroidDeckXrProtocol.packetBytes));
 
