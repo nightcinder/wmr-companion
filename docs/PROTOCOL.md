@@ -293,6 +293,10 @@ Not done, deliberately:
   download does not fail CI), so the CI APK carries the key and decodes a
   block; the key is in that build artifact only, never in git. The BSL-1.0
   notice ships with it as `apps/wmr_companion_app/assets/monado/NOTICE.txt`.
+  The key is not needed for orientation: the 3DoF pipeline fuses the
+  FF12/FF14 IMU stream and never decodes FF13, so a build without the key
+  still tracks orientation and only the controller config block stays
+  undecoded.
   This is the project's reading of the licence, not legal advice.
 - **The debug screen now applies the calibration behind a switch** (default
   off), described in "Applying the calibration" below. It was not applied

@@ -15,10 +15,19 @@
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
+    <!-- No backup and no device-to-device transfer (CodeQL
+         java/android/backup-enabled). What the app stores is bound to this
+         phone: the bridge pairing, connection settings and secure-storage
+         tokens. Restoring them onto another phone points at a stale bridge,
+         and a backed-up token is a secret outside the app. The Android 12+
+         rules file excludes every domain; devices below Android 12 honour
+         allowBackup="false" alone. -->
     <application
         android:label="WMR Companion"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"
