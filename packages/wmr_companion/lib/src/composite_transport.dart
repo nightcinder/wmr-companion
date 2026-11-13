@@ -1253,6 +1253,11 @@ class _Channel {
   /// The FF15 echo characteristic, whose replies may land after a switch.
   bool get isEcho => characteristicUuid == wmrBridgeEchoCharUuid;
 
+  /// Generation of the latest BLE subscription. A handed-off BLE listener can
+  /// still be alive when the route re-attaches on BLE, and both would receive
+  /// the same broadcast; only the newest forwards and counts an answer.
+  int _bleListenerSeq = 0;
+
   /// The key used by [_Route.bleRefs] for this channel's CCCD.
   String get refKey => '$serviceUuid|$characteristicUuid';
 
@@ -1262,11 +1267,16 @@ class _Channel {
     final transport = route.transportFor(lane);
     final deviceId = route.deviceIdFor(lane);
     if (lane == null || transport == null || deviceId == null) return;
+    final seq = lane == _Lane.ble ? ++_bleListenerSeq : 0;
     try {
       _subscription = transport
           .subscribe(deviceId, serviceUuid, characteristicUuid)
           .listen(
             (notification) {
+              // A kept drain may still be listening next to the BLE
+              // subscription that replaced it. Forward and count the answer
+              // once, from the newest BLE listener only.
+              if (lane == _Lane.ble && seq != _bleListenerSeq) return;
               // Only a BLE-lane answer proves the kept BLE subscription has
               // drained; a TCP answer must not cancel it early.
               if (isEcho && lane == _Lane.ble) route.echoAnswerReceived();

@@ -1704,9 +1704,10 @@ void main() {
     await transport.connect(_tcpDeviceId);
     expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
 
+    final received = <BleNotification>[];
     final sub = transport
         .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
-        .listen((_) {});
+        .listen(received.add);
     addTearDown(sub.cancel);
     await transport.write(
       _tcpDeviceId,
@@ -1754,6 +1755,13 @@ void main() {
       reason: 'a handed-off FF15 subscription leaked after the second switch',
     );
     expect(ble.cccLog, contains('off $wmrBridgeEchoCharUuid'));
+    expect(
+      received,
+      hasLength(1),
+      reason:
+          'the kept drain and the re-attached subscription both forwarded '
+          'the same FF15 answer',
+    );
   });
 
   test(
