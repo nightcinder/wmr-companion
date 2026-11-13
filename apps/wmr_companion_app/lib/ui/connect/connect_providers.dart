@@ -2079,11 +2079,22 @@ class BridgeUpdateCheckController extends Notifier<BridgeUpdateCheck> {
   Future<void> check() async {
     if (state.checking) return;
     state = BridgeUpdateCheck(checking: true, lookup: state.lookup);
-    final lookup = await ref
-        .read(bridgeReleaseCheckerProvider)
-        .checkNow(includePreReleases: ref.read(bridgeUpdateSettingsProvider));
-    if (!ref.mounted) return;
-    state = BridgeUpdateCheck(lookup: lookup);
+    final checker = ref.read(bridgeReleaseCheckerProvider);
+    var includePreReleases = ref.read(bridgeUpdateSettingsProvider);
+    // A toggle mid-check makes the answer describe the channel the user just
+    // left, so ask again for the one they chose instead of storing it.
+    while (true) {
+      final lookup = await checker.checkNow(
+        includePreReleases: includePreReleases,
+      );
+      if (!ref.mounted) return;
+      final channel = ref.read(bridgeUpdateSettingsProvider);
+      if (channel == includePreReleases) {
+        state = BridgeUpdateCheck(lookup: lookup);
+        return;
+      }
+      includePreReleases = channel;
+    }
   }
 
   /// Drops the previous result when the opt-in changes, so the row does not

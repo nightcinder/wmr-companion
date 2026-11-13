@@ -672,9 +672,18 @@ class _BridgeVersionRow extends ConsumerWidget {
         style: theme.textTheme.bodySmall,
       );
     }
+    final channel = latest.isPreRelease ? 'pre-release' : 'stable';
+    if (latest.compareTo(connected) == 0) {
+      return Text(
+        'Bridge is up to date: $connected is the newest $channel build.$stamp',
+        key: const Key('bridge-check-up-to-date'),
+        style: theme.textTheme.bodySmall,
+      );
+    }
+    // A dev or local bridge build can be newer than anything published, so
+    // the row must not call the connected version the newest build.
     return Text(
-      'Bridge is up to date: $connected is the newest '
-      '${latest.isPreRelease ? 'pre-release' : 'stable'} build.$stamp',
+      'No $channel bridge release newer than $connected.$stamp',
       key: const Key('bridge-check-up-to-date'),
       style: theme.textTheme.bodySmall,
     );

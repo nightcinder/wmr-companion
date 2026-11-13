@@ -635,6 +635,118 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets(
+    'manual bridge check reports a bridge ahead of the newest release',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async => '{"tag_name":"v0.3.18"}',
+        clock: () => DateTime(2026, 11, 13, 14, 32),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(_ConnectedBridge.new),
+            bridgeReleaseCheckerProvider.overrideWithValue(checker),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final button = find.byKey(const Key('bridge-check-updates'));
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const Key('bridge-check-up-to-date')), findsOneWidget);
+      expect(
+        find.textContaining('No stable bridge release newer than 0.3.19'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('newest stable build'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('opting out mid-check drops the pre-release answer', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = _MemoryUpdateSettingsStore(value: true);
+    final gate = Completer<String?>();
+    var releaseListFetches = 0;
+    const releases = [
+      {'tag_name': 'v0.3.19', 'draft': false, 'prerelease': false},
+      {'tag_name': 'v0.3.27-rc.2', 'draft': false, 'prerelease': true},
+    ];
+    final checker = BridgeReleaseChecker(
+      fetch: (uri) async {
+        if (uri.path.endsWith('/latest')) return '{"tag_name":"v0.3.19"}';
+        releaseListFetches++;
+        if (releaseListFetches == 1) return jsonEncode(releases);
+        return gate.future;
+      },
+      clock: () => DateTime(2026, 11, 13, 14, 32),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          realDeviceProvider.overrideWith(_UpgradeableBridge.new),
+          bridgeUpdateSettingsStoreProvider.overrideWithValue(store),
+          bridgeReleaseCheckerProvider.overrideWithValue(checker),
+        ],
+        child: const MaterialApp(home: ConnectScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Bridge pre-release available'), findsOneWidget);
+
+    final button = find.byKey(const Key('bridge-check-updates'));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pump();
+
+    final optIn = find.byKey(const Key('bridge-prerelease-opt-in'));
+    await tester.ensureVisible(optIn);
+    await tester.tap(optIn);
+    await tester.pump();
+    await tester.pump();
+    expect(store.value, isFalse);
+
+    // The request that started before the toggle answers with the channel the
+    // user just left; the screen must not show it.
+    gate.complete(jsonEncode(releases));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('Bridge pre-release available'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('bridge-update-banner')),
+        matching: find.textContaining('0.3.27-rc.2'),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('bridge-upgrade-command')), findsNothing);
+    expect(find.textContaining('Bridge is up to date: 0.3.19'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
   testWidgets('manual bridge check reports a timestamped failure', (
     tester,
   ) async {
@@ -755,7 +867,9 @@ BridgeReleaseLookup _bridgeLookup(String version, {DateTime? checkedAt}) {
 
 /// Keeps the opt-in in memory so a widget test can check it persists.
 class _MemoryUpdateSettingsStore implements BridgeUpdateSettingsStore {
-  bool value = false;
+  _MemoryUpdateSettingsStore({this.value = false});
+
+  bool value;
 
   @override
   Future<bool> load() async => value;
