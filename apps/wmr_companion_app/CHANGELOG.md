@@ -3,7 +3,8 @@
 ## 0.3.25+31
 
 Release candidate 2 for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
-(ONY-1322). It carries the changes merged since v0.3.25-rc.1 (#300-#317).
+(ONY-1322). It carries the changes merged since v0.3.25-rc.1 (#295, #297,
+#300-#317).
 
 - The Gamepad screen streams the mapped controllers to DroidDeck as
   experimental `v0` external 6DoF input (ONY-1351).
