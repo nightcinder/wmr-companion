@@ -12,10 +12,15 @@
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
+    <!-- The sample host stores nothing worth restoring and shares the app's
+         secure storage code, so backup and Android 12+ device transfer are
+         both off (CodeQL java/android/backup-enabled). -->
     <application
         android:label="wmr_companion_example"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

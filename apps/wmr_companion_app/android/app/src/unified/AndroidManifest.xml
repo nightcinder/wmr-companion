@@ -10,7 +10,9 @@
          the Neckband launcher can start a package activity that is not the
          launcher icon, and an exported UnityPlayerActivity opens the bare Unity
          scene with no Flutter UI and no loader command (ONY-842). -->
-    <application>
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name="ai.nreal.activitylife.NRXRActivity"
             android:exported="false"

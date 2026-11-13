@@ -3,6 +3,15 @@ src/xrt/drivers/wmr/wmr_config_key.h, fetched at build time by
 tool/fetch_wmr_config_key.dart. It is not part of this repository's MIT-licensed
 source.
 
+Provenance: the table is not vendored. CI fetches it from the pinned Monado
+revision
+https://gitlab.freedesktop.org/monado/monado/-/raw/01c6e4ed28dc6e85b84d4683831947862a64844c/src/xrt/drivers/wmr/wmr_config_key.h
+with tool/fetch_wmr_config_key.dart, then checks the extracted 1024 bytes hash
+to f0fbc70a916dbe0b87e9162ddee6b9fd768696354d9cd3cd0e7f9ddd90f6f1dc
+(`sha256sum --check` in .github/workflows/ci.yml). The script's default URL
+tracks Monado `main`; either way the only copy in a build is the one the build
+wrote into its own APK.
+
 Copyright 2021 Jan Schmidt
 SPDX-License-Identifier: BSL-1.0
 
