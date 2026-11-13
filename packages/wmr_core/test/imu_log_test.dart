@@ -148,13 +148,14 @@ void main() {
       }
       rec.onStreamValue(_record(hand: wmrHandRight, sequence: 1), 2000, 'b');
       rec.onStreamValue(_record(hand: wmrHandRight, sequence: 4), 2100, 'b');
-      final written = rec.recordsWritten;
       final closing = rec.close(receivedAtUs: 3000);
 
       return closing.then((_) {
         final reader = WmrImuReader.open(sink.bytes);
         final stats = reader.entries.whereType<ImuLogStats>().last;
-        expect(stats.recordsWritten, written);
+        // Six records came before the STATS record in the file.
+        expect(stats.recordsWritten, 6);
+        expect(rec.recordsWritten, 7);
         expect(stats.gapsLeft, 2); // 11 -> 14 skipped 12 and 13
         expect(stats.outOfOrderLeft, 1); // repeated 14
         expect(stats.gapsRight, 2); // 1 -> 4 skipped 2 and 3
@@ -244,6 +245,35 @@ void main() {
       expect(rec.chunksRefused, 1);
       expect(() => rec.close(receivedAtUs: 200), returnsNormally);
     });
+
+    test('empty staging is not handed to the sink', () {
+      final sink = _MemorySink();
+      final rec = _recorder(sink, stream: 12);
+      rec.flush();
+      rec.flush();
+      expect(sink.chunks, isEmpty);
+      expect(rec.chunksRefused, 0);
+    });
+
+    test('STATS counts only records in chunks the sink accepted', () async {
+      final sink = _MemorySink()..accept = false;
+      final rec = _recorder(sink, stream: 12);
+      rec.onStreamValue(golden, 100, 'b');
+      rec.flush(); // refused
+      expect(rec.recordsDropped, 1);
+      expect(rec.recordsWritten, 0);
+
+      sink.accept = true;
+      rec.onStreamValue(golden, 200, 'b');
+      await rec.close(receivedAtUs: 300);
+
+      expect(rec.chunksRefused, 1);
+      final reader = WmrImuReader.open(sink.bytes);
+      expect(reader.corrupt, isFalse);
+      expect(reader.entries.whereType<ImuLogSample>().length, 1);
+      final stats = reader.entries.whereType<ImuLogStats>().last;
+      expect(stats.recordsWritten, 1);
+    });
   });
 
   group('file sink', () {
@@ -260,6 +290,26 @@ void main() {
       final reader = WmrImuReader.open(file.readAsBytesSync());
       expect(reader.entries.whereType<ImuLogSample>().length, 2);
       expect(reader.truncatedTail, isFalse);
+    });
+
+    test('overlapping flushes never make outstandingBytes negative', () async {
+      final dir = Directory.systemTemp.createTempSync('imu_log_test');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/overlap.wmrimu');
+      final sink = ImuLogFileSink(file, flushBytes: 4);
+      for (var i = 0; i < 10; i++) {
+        expect(sink.add(Uint8List(4)), isTrue);
+      }
+      expect(sink.outstandingBytes, 40);
+      var polls = 0;
+      while (sink.outstandingBytes > 0 && polls++ < 5000) {
+        expect(sink.outstandingBytes, greaterThanOrEqualTo(0));
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(sink.outstandingBytes, 0);
+      await sink.close();
+      expect(sink.error, isNull);
+      expect(file.lengthSync(), 40);
     });
 
     test('refuses writes past the outstanding limit', () async {

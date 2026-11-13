@@ -29,11 +29,12 @@ class ImuLogRecorder {
     this.handoffBytes = 16 * 1024,
     this.handoffUs = 50000,
     this.statsIntervalUs = 5000000,
-  }) : assert(stream == 12 || stream == 14) {
-    _staging.add(
-      encodeImuLogHeader(stream: stream, mtu: mtu, startUs: startUs),
-    );
-    _stagedBytes += imuLogHeaderSize;
+  }) : assert(stream == 12 || stream == 14),
+       _header = encodeImuLogHeader(
+         stream: stream,
+         mtu: mtu,
+         startUs: startUs,
+       ) {
     _lastStatsUs = startUs;
   }
 
@@ -42,7 +43,9 @@ class ImuLogRecorder {
   final int handoffUs;
   final int statsIntervalUs;
 
-  final List<Uint8List> _staging = [];
+  final Uint8List _header;
+  bool _headerWritten = false;
+  final List<Object> _staging = [];
   int _stagedBytes = 0;
   int? _stagedSinceUs;
   int _lastStatsUs = 0;
@@ -51,8 +54,12 @@ class ImuLogRecorder {
   final Map<String, int> _bridgeIndex = {};
   final Map<int, int> _lastSeq = {};
 
-  /// Records staged so far, all types. Used as STATS records_written.
+  /// Records the sink has accepted, all types. A STATS record reports the
+  /// records that come before it in the file.
   int recordsWritten = 0;
+
+  /// Records in chunks the sink refused. They are missing from the file.
+  int recordsDropped = 0;
 
   /// Chunks the sink refused. Their records are missing from the file.
   int chunksRefused = 0;
@@ -179,25 +186,28 @@ class ImuLogRecorder {
 
   void _writeStats(int receivedAtUs) {
     _lastStatsUs = receivedAtUs;
-    // The counter covers every record staged before this one.
-    _stage(
-      encodeImuStats(
-        bridge: imuLogBridgeAll,
+    // Encoded at hand-off, when it is known how many records precede it in
+    // the chunk that the sink accepts.
+    _append(
+      _StatsSlot(
         receivedAtUs: receivedAtUs,
-        recordsWritten: recordsWritten,
         gapsLeft: _gapsLeft,
         gapsRight: _gapsRight,
         outOfOrderLeft: _outOfOrderLeft,
         outOfOrderRight: _outOfOrderRight,
       ),
+      imuLogStatsLength,
       receivedAtUs,
     );
   }
 
   void _stage(Uint8List bytes, int receivedAtUs) {
-    _staging.add(bytes);
-    _stagedBytes += bytes.length;
-    recordsWritten++;
+    _append(bytes, bytes.length, receivedAtUs);
+  }
+
+  void _append(Object item, int size, int receivedAtUs) {
+    _staging.add(item);
+    _stagedBytes += size;
     _stagedSinceUs ??= receivedAtUs;
     final since = _stagedSinceUs!;
     if (_stagedBytes >= handoffBytes || receivedAtUs - since >= handoffUs) {
@@ -206,15 +216,65 @@ class ImuLogRecorder {
   }
 
   void _handOff() {
-    final out = Uint8List(_stagedBytes);
+    if (_staging.isEmpty) return;
+    // The header travels with the first chunk the sink accepts, so a refused
+    // first chunk does not leave a file without a header.
+    final headerSize = _headerWritten ? 0 : imuLogHeaderSize;
+    final out = Uint8List(headerSize + _stagedBytes);
     var offset = 0;
-    for (final part in _staging) {
+    if (headerSize > 0) {
+      out.setRange(0, headerSize, _header);
+      offset = headerSize;
+    }
+    var inChunk = 0;
+    for (final item in _staging) {
+      final Uint8List part;
+      if (item is _StatsSlot) {
+        part = item.encode(recordsWritten + inChunk);
+      } else {
+        part = item as Uint8List;
+      }
       out.setRange(offset, offset + part.length, part);
       offset += part.length;
+      inChunk++;
     }
     _staging.clear();
     _stagedBytes = 0;
     _stagedSinceUs = null;
-    if (!sink.add(out)) chunksRefused++;
+    if (sink.add(out)) {
+      _headerWritten = true;
+      recordsWritten += inChunk;
+    } else {
+      chunksRefused++;
+      recordsDropped += inChunk;
+    }
   }
+}
+
+/// A STATS record whose records_written is filled in when its chunk is
+/// handed off, so the count only includes records the sink accepted.
+class _StatsSlot {
+  _StatsSlot({
+    required this.receivedAtUs,
+    required this.gapsLeft,
+    required this.gapsRight,
+    required this.outOfOrderLeft,
+    required this.outOfOrderRight,
+  });
+
+  final int receivedAtUs;
+  final int gapsLeft;
+  final int gapsRight;
+  final int outOfOrderLeft;
+  final int outOfOrderRight;
+
+  Uint8List encode(int recordsWritten) => encodeImuStats(
+    bridge: imuLogBridgeAll,
+    receivedAtUs: receivedAtUs,
+    recordsWritten: recordsWritten,
+    gapsLeft: gapsLeft,
+    gapsRight: gapsRight,
+    outOfOrderLeft: outOfOrderLeft,
+    outOfOrderRight: outOfOrderRight,
+  );
 }
