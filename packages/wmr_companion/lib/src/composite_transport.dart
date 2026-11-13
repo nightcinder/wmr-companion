@@ -769,19 +769,24 @@ class CompositeBleTransport implements BleTransport {
         keep: draining.map((channel) => channel.refKey).toSet(),
       );
     }
+    final handedOff = <_Channel, StreamSubscription<BleNotification>>{};
     for (final channel in live) {
-      if (draining.contains(channel)) {
-        channel.handOffBleToDrain();
-      } else {
+      if (!draining.contains(channel)) {
         await channel.detach();
+        continue;
       }
+      // Every handoff drains on its own subscription. A route that returns to
+      // BLE and leaves again before the answers land must not lose the first
+      // handoff to the second: each one cancels only what it owns.
+      final subscription = channel.handOffBleToDrain();
+      if (subscription != null) handedOff[channel] = subscription;
     }
     route.active = to;
     for (final channel in live) {
       channel.attach();
     }
-    for (final channel in draining) {
-      unawaited(channel.drainBle(route, echoDrainTimeout));
+    for (final entry in handedOff.entries) {
+      unawaited(entry.key.drainBle(route, entry.value, echoDrainTimeout));
     }
   }
 
@@ -1220,10 +1225,13 @@ class _Channel {
   final String serviceUuid;
   final String characteristicUuid;
   StreamSubscription<BleNotification>? _subscription;
+  _Lane? _subscriptionLane;
 
-  /// The BLE subscription kept open across a switch to TCP until the FF15
-  /// answers already in flight have landed.
-  StreamSubscription<BleNotification>? _bleDrain;
+  /// The BLE subscriptions kept open across a switch to TCP until the FF15
+  /// answers already in flight have landed. One per handoff: a route that goes
+  /// back to BLE and leaves again gets a second entry instead of overwriting
+  /// the first.
+  final Set<StreamSubscription<BleNotification>> _bleDrains = {};
 
   late final StreamController<BleNotification> _controller =
       StreamController<BleNotification>.broadcast(
@@ -1255,7 +1263,9 @@ class _Channel {
           .subscribe(deviceId, serviceUuid, characteristicUuid)
           .listen(
             (notification) {
-              if (isEcho) route.echoAnswerReceived();
+              // Only a BLE-lane answer proves the kept BLE subscription has
+              // drained; a TCP answer must not cancel it early.
+              if (isEcho && lane == _Lane.ble) route.echoAnswerReceived();
               if (_controller.isClosed) return;
               _controller.add(
                 lane == _Lane.ble
@@ -1272,6 +1282,7 @@ class _Channel {
               }
             },
           );
+      _subscriptionLane = lane;
       if (lane == _Lane.ble) {
         route.addBleRef(serviceUuid, characteristicUuid);
       }
@@ -1282,35 +1293,47 @@ class _Channel {
 
   Future<void> detach() async {
     final subscription = _subscription;
+    final lane = _subscriptionLane;
     _subscription = null;
-    if (route.active == _Lane.ble) {
+    _subscriptionLane = null;
+    if (subscription != null && lane == _Lane.ble) {
       route.removeBleRef(serviceUuid, characteristicUuid);
     }
     await subscription?.cancel();
   }
 
   /// Moves the live BLE subscription out of the active slot so [attach] can
-  /// subscribe on the new lane while the old link stays open.
-  void handOffBleToDrain() {
+  /// subscribe on the new lane while the old link stays open. The caller owns
+  /// the returned subscription and passes it to [drainBle].
+  StreamSubscription<BleNotification>? handOffBleToDrain() {
     final subscription = _subscription;
-    if (subscription == null) return;
+    if (subscription == null) return null;
     _subscription = null;
-    _bleDrain = subscription;
+    _subscriptionLane = null;
+    _bleDrains.add(subscription);
+    return subscription;
   }
 
-  /// Cancels a handed-off BLE subscription once its echo answers have drained,
-  /// then releases the CCCD that was kept on for it.
-  Future<void> drainBle(_Route route, Duration timeout) async {
-    if (_bleDrain == null) return;
-    await route.waitForEchoDrain(timeout);
-    final subscription = _bleDrain;
-    if (subscription == null) return;
-    _bleDrain = null;
-    await subscription.cancel();
-    // A fast switch back to BLE re-attached this channel on the same CCCD, so
-    // that subscription now owns the ref and the unsubscribe.
-    if (route.active == _Lane.ble && _subscription != null) return;
-    route.removeBleRef(serviceUuid, characteristicUuid);
+  /// Cancels one handed-off BLE subscription once its echo answers have
+  /// drained, then releases the CCCD that was kept on for it.
+  Future<void> drainBle(
+    _Route route,
+    StreamSubscription<BleNotification> subscription,
+    Duration timeout,
+  ) async {
+    try {
+      await route.waitForEchoDrain(timeout);
+    } finally {
+      // Claim and cancel only this handoff: a second handoff owns its own
+      // subscription and must survive this drain finishing.
+      _bleDrains.remove(subscription);
+      await subscription.cancel();
+      route.removeBleRef(serviceUuid, characteristicUuid);
+    }
+    // A fast switch back to BLE may have re-attached this channel on the same
+    // CCCD, and another handoff may still be draining: either still needs the
+    // CCCD on.
+    if (_subscriptionLane == _Lane.ble || _bleDrains.isNotEmpty) return;
     final bleId = route.bleDeviceId;
     if (bleId == null) return;
     try {
@@ -1320,18 +1343,18 @@ class _Channel {
     }
   }
 
-  /// Cancels a handed-off BLE subscription without the CCCD handshake; the
-  /// link that carried it is gone.
+  /// Cancels handed-off BLE subscriptions without the CCCD handshake; the
+  /// link that carried them is gone.
   Future<void> dropBleDrain() async {
-    final drain = _bleDrain;
-    _bleDrain = null;
-    await drain?.cancel();
+    final drains = _bleDrains.toList();
+    _bleDrains.clear();
+    for (final drain in drains) {
+      await drain.cancel();
+    }
   }
 
   Future<void> close() async {
-    final drain = _bleDrain;
-    _bleDrain = null;
-    await drain?.cancel();
+    await dropBleDrain();
     await detach();
     if (!_controller.isClosed) await _controller.close();
   }

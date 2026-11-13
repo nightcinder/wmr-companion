@@ -365,6 +365,47 @@ class _RecordingBle extends FakeTransport {
   }
 }
 
+/// A TCP fake that holds every dial on its own completer, so a test can land
+/// one dial while another (started later on the same candidate) keeps running
+/// into its own budget.
+class _SplitDialTcp extends _FakeTcp {
+  bool holdDials = false;
+  final List<Completer<void>> holds = [];
+  final List<String> disconnectCalls = [];
+
+  @override
+  Future<void> connect(String deviceId) async {
+    if (holdDials) {
+      final hold = Completer<void>();
+      holds.add(hold);
+      await hold.future;
+    }
+    await super.connect(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) {
+    disconnectCalls.add(deviceId);
+    return super.disconnect(deviceId);
+  }
+}
+
+/// A BLE fake whose [unsubscribe] logs the CCCD off but leaves the open
+/// subscriptions alone, like a transport that stops notifications without
+/// tearing down the stream a caller still holds.
+class _CccdBle extends FakeTransport {
+  _CccdBle({required super.devices});
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    cccLog.add('off ${characteristicUuid.toLowerCase()}');
+  }
+}
+
 void main() {
   late _FakeTcp tcp;
   late FakeTransport ble;
@@ -1434,6 +1475,333 @@ void main() {
         reason: 'the kept FF15 BLE subscription never drained',
       );
       expect(ble.cccLog, contains('off $wmrBridgeEchoCharUuid'));
+    },
+  );
+
+  test(
+    'cancels the kept FF15 BLE subscription when the answer never lands',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument());
+      tcp.scanResults
+        ..clear()
+        ..add(tcpScanResult());
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+        echoDrainTimeout: const Duration(milliseconds: 80),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      final sub = transport
+          .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+          .listen((_) {});
+      addTearDown(sub.cancel);
+      await transport.write(
+        _tcpDeviceId,
+        wmrBridgeServiceUuid,
+        wmrBridgeEchoCharUuid,
+        Uint8List.fromList([1, 39, 0, 0, 0, 0]),
+        withoutResponse: true,
+      );
+
+      tcp.failConnect = false;
+      tcp.endpoints.remove(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the BLE-to-TCP upgrade did not happen',
+      );
+      expect(ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid), isTrue);
+      // The bridge never answers, so the drain window must release FF15.
+      await _waitFor(
+        () => !ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+        reason: 'the drain timeout left the FF15 BLE subscription on',
+      );
+      expect(ble.cccLog, contains('off $wmrBridgeEchoCharUuid'));
+    },
+  );
+
+  test('a TCP-lane FF15 answer does not end the kept BLE drain', () async {
+    tcp.failConnect = true;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+    tcp.scanResults
+      ..clear()
+      ..add(tcpScanResult());
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+      echoDrainTimeout: const Duration(seconds: 5),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+    await transport.write(
+      _tcpDeviceId,
+      wmrBridgeServiceUuid,
+      wmrBridgeEchoCharUuid,
+      Uint8List.fromList([1, 39, 0, 0, 0, 0]),
+      withoutResponse: true,
+    );
+
+    tcp.failConnect = false;
+    tcp.endpoints.remove(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the BLE-to-TCP upgrade did not happen',
+    );
+
+    // An answer that arrived over TCP says nothing about the BLE reply still
+    // in flight, so the kept BLE subscription must survive it.
+    expect(
+      tcp.emit(
+        _lanDeviceId,
+        wmrBridgeEchoCharUuid,
+        Uint8List.fromList([1, 39, 0, 1, 2, 3]),
+      ),
+      isTrue,
+    );
+    await _settle();
+    expect(
+      ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+      isTrue,
+      reason: 'a TCP-lane answer drained the kept BLE subscription',
+    );
+
+    expect(
+      ble.emit(
+        _bleDeviceId,
+        wmrBridgeEchoCharUuid,
+        Uint8List.fromList([1, 39, 0, 1, 2, 3]),
+      ),
+      isTrue,
+    );
+    await _waitFor(
+      () => !ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+      reason: 'the BLE-lane answer did not drain the kept subscription',
+    );
+  });
+
+  test('drains both FF15 handoffs when the route leaves BLE twice before the answer lands', () async {
+    tcp.failConnect = true;
+    ble.dispose();
+    final cccdBle = _CccdBle(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+    );
+    cccdBle.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _endpointDocument();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = cccdBle;
+    tcp.scanResults
+      ..clear()
+      ..add(tcpScanResult());
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: cccdBle,
+      upgradeInterval: const Duration(milliseconds: 10),
+      echoDrainTimeout: const Duration(seconds: 5),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+    await transport.write(
+      _tcpDeviceId,
+      wmrBridgeServiceUuid,
+      wmrBridgeEchoCharUuid,
+      Uint8List.fromList([1, 39, 0, 0, 0, 0]),
+      withoutResponse: true,
+    );
+
+    tcp.failConnect = false;
+    tcp.endpoints.remove(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the BLE-to-TCP upgrade did not happen',
+    );
+
+    // The TCP leg drops before the answer lands. The route fails over to BLE
+    // and the FF16 kick upgrades it again, so a second FF15 handoff starts
+    // while the first drain is still waiting.
+    final ons = cccdBle.cccLog
+        .where((entry) => entry == 'on $wmrBridgeEchoCharUuid')
+        .length;
+    final tcpEchoKey = '$_lanDeviceId|$wmrBridgeEchoCharUuid';
+    tcp.drop(_lanDeviceId);
+    await _waitFor(
+      () =>
+          cccdBle.cccLog
+                  .where((entry) => entry == 'on $wmrBridgeEchoCharUuid')
+                  .length >
+              ons &&
+          (tcp.streams[tcpEchoKey]?.hasListener ?? false),
+      reason: 'the route did not fail over to BLE and upgrade again',
+    );
+
+    expect(
+      ble.emit(
+        _bleDeviceId,
+        wmrBridgeEchoCharUuid,
+        Uint8List.fromList([1, 39, 0, 1, 2, 3]),
+      ),
+      isTrue,
+    );
+    await _waitFor(
+      () => !ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+      reason: 'a handed-off FF15 subscription leaked after the second switch',
+    );
+    expect(ble.cccLog, contains('off $wmrBridgeEchoCharUuid'));
+  });
+
+  test(
+    'leaves a socket alone while a newer dial still owns the candidate',
+    () async {
+      await tcp.dispose();
+      final split = _SplitDialTcp()
+        ..failConnect = true
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..endpoints.remove(_tcpDeviceId)
+        ..scanResults.add(tcpScanResult());
+      tcp = split;
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument());
+
+      final transport = CompositeBleTransport(
+        tcp: split,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+        tcpProbeBudget: const Duration(milliseconds: 400),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+      // The upgrade probe's dial hangs. A BLE drop then starts a recovery dial
+      // on the same candidate: that newer dial owns the socket now.
+      split
+        ..failConnect = false
+        ..holdDials = true;
+      await _waitFor(
+        () => split.holds.isNotEmpty,
+        reason: 'the upgrade probe never dialled',
+      );
+      final probeDial = split.holds.single;
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => split.holds.length > 1,
+        reason: 'the recovery never dialled',
+      );
+      probeDial.complete();
+
+      // The recovery runs into its own budget and the route is lost. The probe
+      // landed while the recovery dial still owned the candidate, so it must
+      // leave that socket alone.
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == null,
+        reason: 'the failed recovery did not release the route',
+      );
+      await _settle(50);
+      expect(
+        split.disconnectCalls,
+        isEmpty,
+        reason: 'the probe closed a socket a newer dial still owns',
+      );
+    },
+  );
+
+  test(
+    'leaves its socket to a switch that still holds the route after dispose',
+    () async {
+      await tcp.dispose();
+      final split = _SplitDialTcp()
+        ..failConnect = true
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..endpoints.remove(_tcpDeviceId)
+        ..scanResults.add(tcpScanResult());
+      tcp = split;
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument());
+
+      final transport = CompositeBleTransport(
+        tcp: split,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+        tcpProbeBudget: const Duration(milliseconds: 400),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+      split
+        ..failConnect = false
+        ..holdDials = true;
+      await _waitFor(
+        () => split.holds.isNotEmpty,
+        reason: 'the upgrade probe never dialled',
+      );
+      final probeDial = split.holds.single;
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => split.holds.length > 1,
+        reason: 'the recovery never dialled',
+      );
+
+      // Disposing mid-switch leaves the route unsettled; the probe that lands
+      // afterwards must not judge a socket the switch may still adopt.
+      await transport.dispose();
+      probeDial.complete();
+      await _settle(50);
+      expect(
+        split.disconnectCalls,
+        isEmpty,
+        reason: 'the probe closed its socket after a dispose during a switch',
+      );
     },
   );
 }
