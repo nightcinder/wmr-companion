@@ -271,6 +271,8 @@ class DroidDeckXrSink {
   final bool focused;
 
   bool _active = false;
+  bool _ready = false;
+  int _generation = 0;
   int _sequence = 0;
   Timer? _claimTimer;
 
@@ -279,9 +281,13 @@ class DroidDeckXrSink {
   Future<void> start() async {
     if (_active) return;
     _active = true;
+    final generation = ++_generation;
     try {
       await hidPeripheral?.disable();
+      if (generation != _generation) return;
       await _sendClaim();
+      if (generation != _generation) return;
+      _ready = true;
       if (claimInterval > Duration.zero) {
         _claimTimer = Timer.periodic(
           claimInterval,
@@ -289,15 +295,18 @@ class DroidDeckXrSink {
         );
       }
     } catch (_) {
-      _active = false;
-      _claimTimer?.cancel();
-      _claimTimer = null;
-      await hidPeripheral?.restore();
+      if (generation == _generation) {
+        _active = false;
+        _ready = false;
+        _claimTimer?.cancel();
+        _claimTimer = null;
+        await hidPeripheral?.restore();
+      }
       rethrow;
     }
   }
 
-  /// Sends one frame. Does nothing while [start] has not been called.
+  /// Sends one frame. Does nothing before [start] has sent the claim.
   Future<void> submit({
     required DecodedSample? left,
     required DecodedSample? right,
@@ -305,7 +314,7 @@ class DroidDeckXrSink {
     List<double> leftPosition = const [0, 0, 0],
     List<double> rightPosition = const [0, 0, 0],
   }) async {
-    if (!_active) return;
+    if (!_active || !_ready) return;
     final now = clockNs();
     await transport.send(
       encodeDroidDeckXrInput(
@@ -334,12 +343,14 @@ class DroidDeckXrSink {
   Future<void> stop() async {
     if (!_active) return;
     _active = false;
+    _ready = false;
+    final generation = ++_generation;
     _claimTimer?.cancel();
     _claimTimer = null;
     try {
       await transport.close();
     } finally {
-      await hidPeripheral?.restore();
+      if (generation == _generation) await hidPeripheral?.restore();
     }
   }
 

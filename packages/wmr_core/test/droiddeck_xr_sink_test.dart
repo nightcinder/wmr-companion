@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -60,6 +61,24 @@ class FakePeripheral implements DroidDeckXrHidPeripheral {
 
   @override
   Future<void> restore() async => calls.add('restore');
+}
+
+/// Holds the first send open so a test can interleave [DroidDeckXrSink.stop].
+class GatedTransport implements DroidDeckXrTransport {
+  final sent = <Uint8List>[];
+  final sendStarted = Completer<void>();
+  final gate = Completer<void>();
+  bool closed = false;
+
+  @override
+  Future<void> send(Uint8List packet) async {
+    if (!sendStarted.isCompleted) sendStarted.complete();
+    await gate.future;
+    sent.add(packet);
+  }
+
+  @override
+  Future<void> close() async => closed = true;
 }
 
 double _f32(Uint8List bytes, int offset) =>
@@ -259,6 +278,36 @@ void main() {
     expect(transport.closed, isTrue);
     expect(peripheral.calls, ['disable', 'restore']);
     expect(sink.active, isFalse);
+  });
+
+  test('stop during start leaves no periodic claim timer', () async {
+    final transport = GatedTransport();
+    final peripheral = FakePeripheral();
+    final sink = DroidDeckXrSink(
+      transport: transport,
+      claim: const DroidDeckXrClaim(vendorId: 1, productId: 2),
+      clockNs: () => _timeNs,
+      hidPeripheral: peripheral,
+      claimInterval: const Duration(milliseconds: 10),
+    );
+
+    final starting = sink.start();
+    await transport.sendStarted.future;
+    await sink.submit(
+      left: sample(hand: 0),
+      right: null,
+      gamepad: const GamepadState(),
+    );
+    expect(transport.sent, isEmpty, reason: 'no frame before the claim');
+
+    await sink.stop();
+    transport.gate.complete();
+    await starting;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(sink.active, isFalse);
+    expect(transport.sent, hasLength(1), reason: 'only the in-flight claim');
+    expect(peripheral.calls, ['disable', 'restore']);
   });
 
   test('a claim must name at least one matcher', () {
