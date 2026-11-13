@@ -1024,7 +1024,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           _connectedDeviceIds.remove(deviceId);
           _service?.dispose();
           _service = null;
-          _reportWifiFailure(deviceId, error);
+          _reportConnectFailure(deviceId, error);
           _update();
           return;
         }
@@ -1037,7 +1037,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           return;
         } catch (error) {
           _connectedDeviceIds.remove(deviceId);
-          _reportWifiFailure(deviceId, error);
+          _reportConnectFailure(deviceId, error);
           _update();
           return;
         }
@@ -1070,13 +1070,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     );
   }
 
-  void _reportWifiFailure(String deviceId, Object error) {
-    if (state.activeTransport != BridgeTransportKind.wifi) return;
+  /// Reports a failed dial on whichever transport carries it.
+  ///
+  /// A failure reaching one of these generic catches used to go through the
+  /// Wi-Fi reporter only, which returns early on Bluetooth. The device then
+  /// stayed "connecting" with no failure status, so an automatic re-dial was
+  /// never scheduled and the retry campaign stalled silently.
+  void _reportConnectFailure(String deviceId, Object error) {
     _handleLinkStatus(
       BleLinkStatus(
         BleLinkPhase.connectFailed,
         deviceId: deviceId,
-        message: wifiFailureMessage(error),
+        message: state.activeTransport == BridgeTransportKind.wifi
+            ? wifiFailureMessage(error)
+            : '$error',
       ),
     );
   }

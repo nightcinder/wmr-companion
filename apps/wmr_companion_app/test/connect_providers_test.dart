@@ -141,6 +141,19 @@ void main() {
     },
   );
 
+  test('a generic BLE connect failure is reported, not swallowed', () async {
+    final container = makeContainer(bleHandoffFactory: (_) => _RefusingBle());
+    final controller = container.read(realDeviceProvider.notifier);
+
+    await controller.connect('ble-pi-1');
+
+    final state = container.read(realDeviceProvider);
+    expect(state.status.phase, BleLinkPhase.connectFailed);
+    expect(state.status.deviceId, 'ble-pi-1');
+    expect(state.status.message, contains('the link went away'));
+    expect(state.connectingDeviceIds, isEmpty);
+  });
+
   test(
     'switching to the Wi-Fi tab turns BLE streams off but keeps the link',
     () async {
@@ -950,6 +963,16 @@ class _FakeAppInstaller extends AppInstaller {
   Future<void> installApk(String path) async {
     installed.add(path);
   }
+}
+
+/// A BLE leg whose dial fails with a plain error, not a
+/// [BleTransportException], like the composite when both of its legs refuse.
+class _RefusingBle extends FakeTransport {
+  _RefusingBle() : super(devices: const [FakeDevice(id: 'ble-pi-1')]);
+
+  @override
+  Future<void> connect(String deviceId) async =>
+      throw StateError('the link went away');
 }
 
 /// A Wi-Fi leg that is reachable but refuses every dial, so the composite has
