@@ -17,9 +17,10 @@ inputs:
     default: 3.47.7
   sdk-cache:
     description: >-
-      Restore the SDK from the cache. 'false' for macOS: that SDK entry is
-      2.2 GB and only the one iOS job reads it, so caching it would leave no
-      headroom for the 2.8 GB Android NDK entry under the 7 GB target.
+      Restore the SDK from the cache. The macOS entry is 2.2 GB and only the
+      one `ios` job reads it; it is cached as well, now that the stale
+      `setup-gradle` generations have been pruned out of the 10 GB repository
+      cache budget. Pass 'false' only if that budget has no room for it.
     required: false
     default: 'true'
 

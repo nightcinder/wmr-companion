@@ -198,8 +198,9 @@ jobs:
           flutter analyze
           flutter test
 
-      # The only writer of the Flutter caches: the other shards skip the save,
-      # so a pubspec.lock change cannot have three jobs racing for one key.
+      # The only writer of the Ubuntu Flutter caches: the other shards skip the
+      # save, so a pubspec.lock change cannot have three jobs racing for one
+      # key. (`ios` writes the macOS keys, which only it reads.)
       - name: Save the Flutter caches
         if: ${{ github.ref == 'refs/heads/main' }}
         uses: ./.github/actions/flutter-cache-save
@@ -492,6 +493,9 @@ jobs:
         with:
           name: wmr-companion-debug-apks
           path: apps/wmr_companion_app/build/app/outputs/flutter-apk/app-*-debug.apk
+          # The wiring script either leaves an APK or fails, so an empty glob
+          # here means the proof above did not run against what was uploaded.
+          if-no-files-found: error
           retention-days: 14
 
       # Written only from main, after the build proved the download works.
