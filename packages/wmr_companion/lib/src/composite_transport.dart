@@ -387,6 +387,10 @@ class CompositeBleTransport implements BleTransport {
 
     final channels = List<_Channel>.of(route.channels);
     for (final channel in channels) {
+      // An upgrade's FF15 drain can outlive the switch to Wi-Fi; cancel it
+      // with the channel teardown so it cannot release a ref a later
+      // re-attached subscription owns.
+      await channel.dropBleDrain();
       await channel.detach();
     }
 
@@ -1321,15 +1325,21 @@ class _Channel {
     StreamSubscription<BleNotification> subscription,
     Duration timeout,
   ) async {
+    var owned = false;
     try {
       await route.waitForEchoDrain(timeout);
     } finally {
       // Claim and cancel only this handoff: a second handoff owns its own
-      // subscription and must survive this drain finishing.
-      _bleDrains.remove(subscription);
-      await subscription.cancel();
-      route.removeBleRef(serviceUuid, characteristicUuid);
+      // subscription and must survive this drain finishing. A drop or a
+      // suspend has already removed every pending drain; those subscriptions
+      // and their refs are not ours to release.
+      owned = _bleDrains.remove(subscription);
+      if (owned) {
+        await subscription.cancel();
+        route.removeBleRef(serviceUuid, characteristicUuid);
+      }
     }
+    if (!owned) return;
     // A fast switch back to BLE may have re-attached this channel on the same
     // CCCD, and another handoff may still be draining: either still needs the
     // CCCD on.
@@ -1344,12 +1354,13 @@ class _Channel {
   }
 
   /// Cancels handed-off BLE subscriptions without the CCCD handshake; the
-  /// link that carried them is gone.
+  /// link that carried them is gone, and each one releases the ref it kept.
   Future<void> dropBleDrain() async {
     final drains = _bleDrains.toList();
     _bleDrains.clear();
     for (final drain in drains) {
       await drain.cancel();
+      route.removeBleRef(serviceUuid, characteristicUuid);
     }
   }
 

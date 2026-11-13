@@ -1526,6 +1526,81 @@ void main() {
     },
   );
 
+  test(
+    'suspending the streams drops an FF15 drain without a second CCCD off',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      ble = _CccdBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+      );
+      ble.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _endpointDocument();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      tcp.scanResults
+        ..clear()
+        ..add(tcpScanResult());
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+        echoDrainTimeout: const Duration(milliseconds: 150),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      final first = transport
+          .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+          .listen((_) {});
+      addTearDown(first.cancel);
+      await transport.write(
+        _tcpDeviceId,
+        wmrBridgeServiceUuid,
+        wmrBridgeEchoCharUuid,
+        Uint8List.fromList([1, 39, 0, 0, 0, 0]),
+        withoutResponse: true,
+      );
+
+      tcp.failConnect = false;
+      tcp.endpoints.remove(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the BLE-to-TCP upgrade did not happen',
+      );
+      // The FF15 drain is still inside its window when the host moves the
+      // bridge to Wi-Fi.
+      expect(ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid), isTrue);
+
+      await transport.suspendBleStreams(_tcpDeviceId);
+      expect(
+        ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+        isFalse,
+        reason: 'suspend left the pending FF15 drain subscribed',
+      );
+
+      // The drain was dropped with the streams; its window expiring must not
+      // turn the CCCD off a second time.
+      ble.cccLog.clear();
+      await _settle(250);
+      expect(
+        ble.cccLog,
+        isNot(contains('off $wmrBridgeEchoCharUuid')),
+        reason: 'the dropped drain turned the FF15 CCCD off a second time',
+      );
+    },
+  );
+
   test('a TCP-lane FF15 answer does not end the kept BLE drain', () async {
     tcp.failConnect = true;
     ble.dispose();
