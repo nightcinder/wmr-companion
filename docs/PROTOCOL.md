@@ -5,9 +5,21 @@ The wire format is defined in the firmware repo, not here:
 [docs/ANDROID.md](https://github.com/nightcinder/WMR_Bridge/blob/main/docs/ANDROID.md),
 `wmr_bridge.gatt`, `src/wmr_protocol.c`, `tests/test_protocol.c`.
 
-This file records only what the app does with it.
+This file records only what the app does with it. Where the two files
+disagree, the firmware file is the wire contract and this one is wrong.
+
+Last reconciled with WMR_Bridge `c7fa4ce` (v0.3.27-rc.1, 2026-11-12) on
+2026-11-13. That pass changed documentation only; the statements about what
+the app code does were checked against the Dart sources, not run. Statements
+that were stale at that point (the stream carrying no bridge time, FF12 never
+run on hardware, `CALIBRATED` always 0, no pairing, no FF16) are corrected
+below. Hardware results are user-reported unless marked otherwise; the list is
+in [STATUS.md](STATUS.md), "What has been checked on hardware".
 
 ## Mirrored firmware revision
+
+The commit ids in this section say when each Dart file was first ported. They
+are not the revision the app is in step with today; that is the line above.
 
 `packages/wmr_core/lib/protocol/` mirrors WMR_Bridge commit `62b5177` (2026-10-21). When the
 firmware protocol changes, update `packages/wmr_core/lib/protocol/`, the tests and this line
@@ -26,15 +38,31 @@ mirror `main` at `8f5921a`; see the FF14 section.
 | `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`packages/wmr_core/lib/protocol/decoded_batch.dart`) |
 | `tests/test_batch.c` golden bytes and MTU table | `packages/wmr_core/test/protocol/decoded_batch_test.dart` |
 | `samples/controller_frames.txt` | `apps/wmr_companion_app/test/fixtures/controller_frames.txt` (copy) |
+| `tests/vectors/wmr_golden_v1.json` (shared golden vectors) | `packages/wmr_core/test/fixtures/wmr_golden_v1.json` (identical copy), read by `packages/wmr_core/test/golden_vectors_test.dart`; fields in `packages/wmr_core/test/fixtures/README_golden.md` |
+| FF16 firmware version, Pi endpoint document | `packages/wmr_core/lib/protocol/firmware_version.dart` |
+| FF15 echo | `packages/wmr_core/lib/protocol/echo.dart` |
+| FF17 control and status v2 | `packages/wmr_core/lib/protocol/controller_control.dart` |
 
 The encoder is in the app only so `FakeWmrBridge` and the tests can produce
 the exact notifications the ESP32 sends.
 
 ## App-side decisions
 
-- **Timestamps.** The stream carries no ESP32 time. Each notification is
+- **Timestamps.** The raw FF11 stream carries no bridge time: a 46-byte frame
+  has the controller's tick counter inside it but no receive stamp. The
+  decoded streams do carry bridge time: every FF12/FF14 record has
+  `rx_time_us` (bridge receive clock) and `device_ticks` (controller clock).
+  Independently of that, each notification is
   stamped by the transport with a monotonic clock (`BleNotification.receivedAtUs`);
-  a reassembled frame carries the stamp of its last fragment.
+  a reassembled frame carries the stamp of its last fragment, and every
+  record of one FF14 batch shares the batch's stamp. How the three clocks are
+  combined is specified in [TIMELINE.md](TIMELINE.md) (specified, not
+  implemented).
+- **Maximum frame.** The spec value is 80 bytes (`0 < total_len <= 80`,
+  `WMR_CFG_MAX_FRAME`). The app's reassembler uses `wmrMaxFrame = 64`
+  (`wmr_fragment.dart`), which accepts WMR (46) and Switch (50) frames and
+  rejects a PSVR2 frame (79) as malformed. That is an app deviation to fix,
+  not a second spec value.
 - **Sequence accounting** (`ControllerService`), per hand, using modular
   `sequenceDelta`: delta > 1 adds `delta - 1` to `gaps`; delta <= 0 counts as
   `outOfOrder` (duplicate, reorder, or ESP32 reboot). The first frame after
@@ -47,6 +75,43 @@ the exact notifications the ESP32 sends.
 - **Frame payload.** FF11 frames stay undecoded and feed the Capture screen
   and the raw debug view. Orientation comes from FF12 (see "FF12 decoded
   stream" below); the fake bridge in raw mode still runs on `SyntheticMotion`.
+
+## Access: encrypted and bonded (firmware 0.3.0 and later)
+
+Wire contract: WMR_Bridge docs/PROTOCOL.md, "Security and pairing". Since
+firmware 0.3.0 the bridge serves only a central that is encrypted and bonded
+(LE Secure Connections, Just Works, no MITM protection).
+
+| Value | Without a bond |
+| --- | --- |
+| FF16 (firmware version; on a Pi the endpoint document) | readable |
+| FF11 status read, FF13, FF17, and the CCC descriptor of FF11, FF12, FF13, FF14, FF15 and FF17 | refused with ATT `Insufficient Encryption` (`0x0F`) or `Insufficient Authentication` (`0x05`), which starts the OS pairing flow |
+
+The bridge sends a Security Request on connect, disconnects a central that
+has no bonded link within 30 s, and serves one phone at a time. A client
+waits for pairing and retries the refused operation once. The Pi host bridge
+keeps the same posture and accepts a new bond only while its pairing window
+is open (WMR_Bridge docs/PI_BRIDGE.md).
+
+## FF16: firmware version and the Pi endpoint document
+
+Code: `packages/wmr_core/lib/protocol/firmware_version.dart`. Not part of the
+stream exclusion and readable before pairing.
+
+- **ESP32.** A UTF-8 version string of at most 31 bytes, no terminator
+  (`0.3.19`, or a git-describe string from a local build).
+- **Raspberry Pi.** A JSON object, `"type":"wmr_ble_endpoint"`, with
+  `protocol`, `bridge_id`, `name`, `version`, `hosts`, `port`, `path` and
+  `authRequired`: what a client needs to reach the bridge's WebSocket. It
+  never contains the token. The 31-byte limit applies to its `version` value
+  only.
+- **FF13 on a Pi** returns, until a calibration cursor is written, a JSON
+  session document (`"type":"wmr_ble_session"`) that can carry the WebSocket
+  token; `CompositeBleTransport` reads it over the bonded link
+  (`_readBleToken`). It must never be logged or shown.
+
+Field tables: WMR_Bridge docs/PROTOCOL.md, "Linux/Pi host bridge
+differences".
 
 ## universal_ble 3.2.0 coverage
 
@@ -69,10 +134,12 @@ value updates without subscribers are no longer errors.
 
 ## Real transport (`UniversalBleTransport`)
 
-**Not tested on hardware.** It was written against the package source and
-exercised only with a fake adapter (`test/ble/`). Nothing here has been seen
-working with a phone or an ESP32, including the connection sequence, the
-scan filter, permission prompts, reconnects and the interval callback.
+Written against the package source and exercised in tests with a fake
+adapter (`test/ble/`). It has since been used on a phone with an ESP32
+bridge (user-reported, [STATUS.md](STATUS.md): MTU 517 with high priority, no
+fragment errors, no sequence gaps on the phone in captures). The individual
+steps listed here (scan filter, permission prompts, reconnects, the interval
+callback) have no separate hardware record.
 
 - `BleAdapter` (`lib/ble/ble_adapter.dart`) is the thin interface over the
   package; `UniversalBleAdapter` is the only file that imports
@@ -105,7 +172,10 @@ scan filter, permission prompts, reconnects and the interval callback.
 
 ## FF12 decoded stream
 
-**Firmware status: not verified on hardware.** Read (read-only) from WMR_Bridge
+**Firmware status: run on hardware, user-reported** ([STATUS.md](STATUS.md):
+tick unit, gyro scale, FF11/FF12 exclusion and MTU behaviour). The rest of
+this paragraph is the history of the port and predates those runs. Read
+(read-only) from WMR_Bridge
 PR 5, branch `ff12-decoded-stream`, head `8fcb6a1`: `docs/PROTOCOL.md`,
 `docs/DECODING.md`, `src/wmr_decoded.{h,c}`, `src/wmr_decode.c`,
 `src/wmr_stream_mode.h`, `tests/test_protocol.c`. While this app was being
@@ -129,10 +199,10 @@ fragmentation. Little-endian; floats are IEEE 754 binary32.
 | --- | --- | --- | --- |
 | 0 | u8 | `version` | `1`; ignore records with another version |
 | 1 | u8 | `hand` | 0 LEFT, 1 RIGHT |
-| 2 | u8 | `flags` | bit0 `CALIBRATED`, always 0 in version 1 |
+| 2 | u8 | `flags` | bit0 `CALIBRATED`: 0 for WMR and PSVR2 records; set by the ESP32 for a Switch record decoded with a valid factory calibration. Bits 1-3 are proposed (see "Protocol proposals") and 0 today |
 | 3 | u8 | `buttons` | bit0 stick click, 1 home, 2 menu, 3 squeeze, 4 trackpad click, 5 BT pairing, 6 trackpad touch |
 | 4 | u32 | `sequence` | same per-hand number as the raw FF11 frame it came from |
-| 8 | u64 | `rx_time_us` | ESP32 `esp_timer_get_time()` at receipt; diagnostics only |
+| 8 | u64 | `rx_time_us` | Bridge receive clock in microseconds: ESP32 `esp_timer_get_time()` at receipt; on a Pi a user-space stamp taken when the daemon reads the report. Diagnostics and clock alignment only, never the sample time |
 | 16 | u32 | `device_ticks` | controller timer, 100 ns/tick, wraps at 2^32; the sensor clock |
 | 20 | 3 x f32 | `gyro` | rad/s, uncalibrated, raw sensor axes |
 | 32 | 3 x f32 | `accel` | m/s^2 (about 10.0-10.1 at rest, not 9.81), uncalibrated, raw sensor axes |
@@ -167,7 +237,9 @@ a hand above 1.
   valid while consecutive samples of one hand are less than 429.5 s apart.
   Ticks keep counting through lost reports, so a sequence gap is not a
   discontinuity and a larger `dt` is the true elapsed time.
-- The 100 ns unit is from Monado's code only, **not measured**.
+- The 100 ns unit is from Monado's code and matches the hardware runs
+  (user-reported: ticks over wall-clock about 1.0016 and 1.0083, records about
+  4.99 ms apart).
 - The two hands have unrelated tick origins; never subtract across hands.
 - Discontinuity rule from the spec: compare `dt_ticks * 100 ns` with
   `delta(rx_time_us) * 1000 ns`; if they differ by more than about 100 ms,
@@ -277,10 +349,27 @@ about-10 vs 9.81 accel scale (WMR_Bridge #19).
 
 ## Switch calibration and burst timing
 
-**Not verified on hardware, and the bridge driver is not merged yet.** These
+**Not verified on hardware.** The bridge driver is merged (WMR_Bridge
+v0.3.11) but has never run on a Switch controller. These
 are the `wmr_core` side of the Switch Joy-Con/Pro support
 (`packages/wmr_core/lib/protocol/switch_calibration.dart` and
 `switch_burst.dart`); the firmware half is WMR_Bridge.
+
+Two known mismatches with the merged firmware, both to be closed by the
+spec in WMR_Bridge docs/SWITCH.md ("Timing contract" and "Calibration blob
+version 1, 44 bytes"; specified, not implemented; secondary priority):
+
+- The firmware publishes a 42-byte blob (24 IMU + 18 stick bytes, no version
+  or device-type byte). `SwitchCalibration.parse` accepts only the 44-byte
+  layout below, so a Switch hand's calibration does not parse today.
+- The firmware sends `device_ticks` = 0 in every Switch record.
+  `SwitchBurstTimestamps` spaces the three records of one report but starts
+  each report again from the bridge's tick value, so with a constant 0 the
+  tick clock steps backwards once per report (read from the code, not run).
+  The contract makes the bridge send advancing synthetic ticks.
+
+The calibrated gyro factor also differs (936 here, 816 in the firmware's
+`wmr_switch.c`); which is right has not been checked.
 
 FF17 reports a Switch hand as model `2` (`ControllerModel.nintendoSwitch`).
 For that hand only:
@@ -434,8 +523,9 @@ for the hardware in general.
 
 ## FF14 batched stream in the app
 
-**Not verified on hardware; the firmware side has not been run on hardware
-either.** Spec: WMR_Bridge docs/PROTOCOL.md, "Batched decoded stream, FF14".
+**Run on hardware, user-reported:** FF14 at MTU 517 is the stream of the
+recorded round-trip runs ([STATUS.md](STATUS.md), [LATENCY.md](LATENCY.md)).
+Spec: WMR_Bridge docs/PROTOCOL.md, "Batched decoded stream, FF14".
 One notification is `version` = 2, `count`, then `count` unchanged FF12
 version 1 records (oldest first, both hands mixed), length exactly
 `2 + 56 x count`.
@@ -445,7 +535,9 @@ version 1 records (oldest first, both hands mixed), length exactly
   parses each record with `parseDecodedRecord`. A rejected batch counts in
   `DecodedStats.batchErrors` and nothing from it is fused. A bad record inside
   a good batch counts as a record error (length / version / hand) and the
-  other records of that batch are still used.
+  other records of that batch are still used. One difference from the
+  reference: `wmr_batch_parse` and the Pi's `parse_batch` also refuse a
+  `count` above 9; `parseDecodedBatch` has no upper bound.
 - **Same pipeline.** Each record goes through exactly the FF12 path: per-hand
   sequence gaps, tick timing, fusion. Every record of a batch carries the
   batch's phone arrival time; `dt` comes from `device_ticks` and the jitter
@@ -504,17 +596,19 @@ The filter works in a z-up frame; `viewToFilter` maps view (X, Y, Z) to
 
 1. **Axis directions and signs** of the FF12 sensor axes, and the vertical
    sign in particular: unverified (see above and the firmware's DECODING.md).
-2. **Tick unit** (100 ns) is from Monado's code only; `tick/clock` on the
-   debug screen is the first thing to read once hardware is available.
+2. **Tick unit** (100 ns): confirmed on two WMR controllers, user-reported
+   (STATUS). `tick/clock` on the debug screen shows it per hand. On a Pi
+   bridge the ratio compares against a user-space clock and is noisier.
 3. **Does `device_ticks` restart when a controller reconnects?** Unknown. The
    app uses the spec's `rx_time_us` comparison to catch it; whether 100 ms is
    the right tolerance on a link that loses half the reports is untested.
 4. **Gyro scale** (`1e-5` rad/s per count) is unconfirmed in a real rotation.
 5. **How `universal_ble` reports ATT `0x80`** (see above).
-6. **The `CALIBRATED` flag.** Always 0 in version 1. If a later version sets
-   it the values can be in a different frame; the app only counts such
-   records (`calibratedFlagged`) and still applies the axis table, which will
-   be wrong then.
+6. **The `CALIBRATED` flag.** 0 for WMR and PSVR2; the ESP32 sets it for a
+   Switch record decoded with factory calibration. The app counts such
+   records (`calibratedFlagged`), skips its own FF13 calibration for them
+   (`HandPipeline.add`) and still applies the axis table, which is unverified
+   for a Switch controller.
 7. **Bandwidth.** Both hands at about 360 notifications/s on one connection is
    a firmware bench item; the app will show whatever arrives (`rate`).
 8. **Period regularity** for the missing-report count (see "Timing").
@@ -524,8 +618,9 @@ The filter works in a z-up frame; `viewToFilter` maps view (X, Y, Z) to
 
 ## FF15 echo in the app
 
-**Not verified on hardware; the firmware side has not been run on hardware
-either.** Spec: WMR_Bridge docs/PROTOCOL.md, "Echo, FF15" (merged in #13).
+**Run on hardware, user-reported:** two 120 s runs and a stream ladder
+([STATUS.md](STATUS.md), [LATENCY.md](LATENCY.md)).
+Spec: WMR_Bridge docs/PROTOCOL.md, "Echo, FF15" (merged in #13).
 Code: `packages/wmr_core/lib/protocol/echo.dart` (pure Dart, golden bytes from the spec),
 `packages/wmr_core/lib/services/echo_client.dart`.
 
@@ -550,6 +645,12 @@ Code: `packages/wmr_core/lib/protocol/echo.dart` (pure Dart, golden bytes from t
   exported, never applied.
 - **Fake bridge.** `FakeWmrBridge` answers valid pings while FF15 is
   subscribed (`echoDelay`, `echoTurnaround`, `echoEnabled` to ignore them).
+- **Pi bridge.** The Pi answers with the same 20 bytes but `turnaround_us`
+  and `queue_depth` are always 0 and `rx_time_us` is a user-space stamp
+  (WMR_Bridge docs/PROTOCOL.md, "Echo answer: zero fields"). On a Pi the
+  app's `rtt` is therefore `t4 - t1`, a zero turnaround means "not measured",
+  and `max_queue_depth` says nothing. Golden bytes for both bridges:
+  `packages/wmr_core/test/fixtures/wmr_golden_v1.json`, `ff15_echo`.
 
 
 ## FF17 controller control in the app
@@ -583,3 +684,39 @@ and the debug screen's "Controller control" panel.
 - **Fake bridge.** `FakeWmrBridge` serves FF17, simulates discovery
   (`discoveryDuration`), connect/disconnect and the forget guards, and emits a
   status notification on every change.
+
+## Protocol proposals (specified, not implemented)
+
+Status: **specified, not implemented**, on both sides. The wire text is in
+WMR_Bridge docs/PROTOCOL.md, "Proposals"; this is the app's side of each
+item. None of it is in the Dart code today.
+
+| Item | Wire change | What the app will do |
+| --- | --- | --- |
+| P1 record flags | `flags` bit1 `TICKS_SYNTHETIC`, bit2 `RX_TIME_SYNTHETIC`, bit3 `TICK_RESET`; record stays version 1, 56 bytes | Add the three masks next to `wmrDecodedFlagCalibrated`. `TICK_RESET` starts a new timeline epoch at once; `RX_TIME_SYNTHETIC` records are left out of delay and offset estimation; `TICKS_SYNTHETIC` marks the hand's tick clock as bridge-derived ([TIMELINE.md](TIMELINE.md)). Today the parser keeps the bits and nothing reads them |
+| P2 status | FF11 status version 2 (24 bytes) with `boot_id`, per-hand `controller_epoch` and `features`; the epochs mirrored in FF17 bytes 7 and 14; `bootId`/`controllerEpoch`/`features` on the WebSocket | `BridgeStatus.parse` and `ControllerStatusV2.parse` already accept longer values and ignore the reserved bytes. Read the new fields, re-baseline on a `boot_id` change, start a tick epoch on a `controller_epoch` change, and record both as events ([IMU_LOG.md](IMU_LOG.md)) |
+| P3 echo version 2 | 28-byte answer with `tx_time_us`, validity flags and `boot_id`, requested with `version` 2 and only when `features` has `ECHO_V2` | Second parser beside `parseEchoAnswer`; `EchoClient` falls back to version 1 on a timeout. `t3 = tx_time_us` when `TX_TIME_VALID` |
+| P4 Switch timing | Advancing synthetic `device_ticks` from the bridge, `interval = clamp((rx - prev_rx) / 3, 1 ms, 5 ms)` | `SwitchBurstTimestamps` keeps a supplied spacing already; no change needed for a bridge with `SWITCH_SYNTHETIC_TICKS` |
+| P5 Switch blob | 44-byte FF13 blob (version, device type, 24 + 9 + 9 bytes) | Already what `SwitchCalibration.parse` expects; the firmware changes |
+
+Rule for all of them: the spec text lands first, then the bridge, then the
+app, and each side keeps working against the other's previous version.
+
+## Pi host bridge: what differs for the app
+
+Wire text: WMR_Bridge docs/PROTOCOL.md, "Linux/Pi host bridge differences",
+and docs/PI_BRIDGE.md. Summary of what the app must not assume:
+
+- FF16 is a JSON endpoint document, FF13 serves a session document until a
+  cursor is written (see "FF16" above).
+- `rx_time_us` is a user-space read stamp from Linux `CLOCK_MONOTONIC`.
+  Reports read in one burst have almost the same stamp. Sample timing comes
+  from `device_ticks`; `rx_time_us` is only a noisy anchor.
+- FF15 answers carry zero `turnaround_us` and `queue_depth`.
+- Records never have `CALIBRATED` set (the Pi decodes WMR only), and the Pi
+  does not read the FF13 calibration block from the controller yet, so a
+  calibration read returns `NOT_READ`.
+- On the WebSocket the same FF11/FF12/FF14 values arrive as binary messages,
+  and `ping`/`pong` replaces FF15.
+
+Test plan for this target: [TEST_PLAN_PI_WMR.md](TEST_PLAN_PI_WMR.md).
