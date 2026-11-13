@@ -16,6 +16,29 @@ class DroidDeckXrTransportException implements Exception {
   String toString() => 'DroidDeckXrTransportException: $message';
 }
 
+/// Read-only packet counters kept by a transport.
+///
+/// A packet is [accepted] once the socket takes it, [dropped] when the queue
+/// was full, and [queued] while it waits for the socket. Counts are since the
+/// transport opened.
+class DroidDeckXrPacketStats {
+  const DroidDeckXrPacketStats({
+    this.accepted = 0,
+    this.dropped = 0,
+    this.queued = 0,
+  });
+
+  final int accepted;
+  final int dropped;
+  final int queued;
+}
+
+/// A transport that exposes its packet counters. The counters are owned by
+/// the transport; readers get a snapshot and never reset them.
+abstract interface class DroidDeckXrPacketStatsSource {
+  DroidDeckXrPacketStats get packetStats;
+}
+
 typedef _SocketNative = Int32 Function(Int32, Int32, Int32);
 typedef _SocketDart = int Function(int, int, int);
 typedef _ConnectNative = Int32 Function(Int32, Pointer<_SockAddrUn>, Int32);

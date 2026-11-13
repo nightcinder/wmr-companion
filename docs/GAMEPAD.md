@@ -135,7 +135,7 @@ The stream is live in the reference app, not only in the packages:
 
 1. Connect to a bridge and switch the stream to FF12 or FF14 on the debug screen. Raw (FF11) mode carries no samples, so nothing is sent.
 2. Open the Gamepad screen and expand **DroidDeck 6DoF streaming**, then press **Start streaming**.
-3. Start DroidDeck on the same device. The panel shows the packet and error counts and, per hand, whether the last packet carried a position (`6DoF`) or not (`3DoF`).
+3. Start DroidDeck on the same device. The panel shows the packet counters and, per hand, whether the last packet carried a position (`6DoF`) or not (`3DoF`). The counters are a read-only snapshot from the transport: `accepted` is packets the socket took, `dropped` is packets discarded because the four-slot queue was full, and `errors` is submits that failed. The snapshot is read when a packet is submitted, so `accepted` can lag the socket by one frame; `dropped` is the loss signal.
 
 Starting the stream disables the phone's Bluetooth HID peripheral role (Option A), and stopping it restores the role only if this session turned it off. While the stream runs, the Bluetooth HID panel's **Start** button is disabled because Android's HID peripheral mode breaks the local Bluetooth host link DroidDeck needs (ONY-1235); stop the stream to use it. A HID start from any other route ends the stream instead.
 

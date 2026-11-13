@@ -39,6 +39,9 @@ enum BatchParseError {
   /// `count` is 0.
   emptyBatch,
 
+  /// `count` is above [wmrBatchMaxCount], the most one notification can carry.
+  tooManyRecords,
+
   /// The value is not exactly `2 + 56 x count` bytes.
   wrongLength,
 }
@@ -67,6 +70,9 @@ BatchParseResult parseDecodedBatch(Uint8List value) {
   final count = value[1];
   if (count < 1) {
     return const BatchParseResult.error(BatchParseError.emptyBatch);
+  }
+  if (count > wmrBatchMaxCount) {
+    return const BatchParseResult.error(BatchParseError.tooManyRecords);
   }
   if (value.length != wmrBatchHeaderSize + count * wmrDecodedSize) {
     return const BatchParseResult.error(BatchParseError.wrongLength);

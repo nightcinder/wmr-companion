@@ -96,8 +96,5 @@ sample.
 
 ## Known differences the file does not paper over
 
-- The Pi and firmware parsers refuse an FF14 `count` above 9;
-  `parseDecodedBatch` has no upper bound. No vector covers it, so that the
-  file stays valid for both until the app is changed.
 - The app's raw reassembler caps a frame at 64 bytes (`wmrMaxFrame`) while
   the spec value is 80. The vectors use 46-byte frames only.

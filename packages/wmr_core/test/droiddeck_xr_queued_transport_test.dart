@@ -73,6 +73,28 @@ void main() {
     expect(h.wrapper.droppedPackets, 0);
   });
 
+  test('packet stats snapshot counts accepted, dropped and queued', () async {
+    final h = Harness(first: FakeNonBlockingTransport(accept: false));
+    await h.wrapper.send(_packet(1));
+    await h.wrapper.send(_packet(2));
+    expect(h.wrapper.packetStats.accepted, 0);
+    expect(h.wrapper.packetStats.dropped, 0);
+    expect(h.wrapper.packetStats.queued, 2);
+
+    h.first.accept = true;
+    await h.wrapper.send(_packet(3));
+    expect(h.wrapper.packetStats.accepted, 3);
+    expect(h.wrapper.packetStats.dropped, 0);
+    expect(h.wrapper.packetStats.queued, 0);
+
+    h.first.accept = false;
+    for (var i = 0; i < 6; i++) {
+      await h.wrapper.send(_packet(10 + i));
+    }
+    expect(h.wrapper.packetStats.queued, 4);
+    expect(h.wrapper.packetStats.dropped, 2);
+  });
+
   test('a full queue drops the oldest packet, keeping the newest', () async {
     final h = Harness(first: FakeNonBlockingTransport(accept: false));
     for (var i = 1; i <= 6; i++) {

@@ -531,13 +531,11 @@ version 1 records (oldest first, both hands mixed), length exactly
 `2 + 56 x count`.
 
 - **Parsing.** `parseDecodedBatch` checks the header like `wmr_batch_parse`
-  (too short, version not 2, count 0, length not `2 + 56 x count`) and then
-  parses each record with `parseDecodedRecord`. A rejected batch counts in
-  `DecodedStats.batchErrors` and nothing from it is fused. A bad record inside
-  a good batch counts as a record error (length / version / hand) and the
-  other records of that batch are still used. One difference from the
-  reference: `wmr_batch_parse` and the Pi's `parse_batch` also refuse a
-  `count` above 9; `parseDecodedBatch` has no upper bound.
+  (too short, version not 2, count 0 or above 9, length not `2 + 56 x count`)
+  and then parses each record with `parseDecodedRecord`. A rejected batch
+  counts in `DecodedStats.batchErrors` and nothing from it is fused. A bad
+  record inside a good batch counts as a record error (length / version /
+  hand) and the other records of that batch are still used.
 - **Same pipeline.** Each record goes through exactly the FF12 path: per-hand
   sequence gaps, tick timing, fusion. Every record of a batch carries the
   batch's phone arrival time; `dt` comes from `device_ticks` and the jitter

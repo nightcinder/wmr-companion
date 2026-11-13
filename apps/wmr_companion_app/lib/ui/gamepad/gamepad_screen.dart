@@ -570,10 +570,13 @@ class DroidDeckPanel extends ConsumerWidget {
             style: small?.copyWith(color: Theme.of(context).colorScheme.error),
           ),
         ],
-        if (out.running || out.packetsSent > 0) ...[
+        if (out.running ||
+            out.packetsAccepted > 0 ||
+            out.packetsDropped > 0) ...[
           const SizedBox(height: 8),
           Text(
-            'packets sent ${out.packetsSent}  errors ${out.sendErrors}',
+            'packets accepted ${out.packetsAccepted}  '
+            'dropped ${out.packetsDropped}  errors ${out.sendErrors}',
             style: small?.copyWith(fontFamily: 'monospace'),
           ),
           Text(
