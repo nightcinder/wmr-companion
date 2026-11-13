@@ -197,6 +197,16 @@ Left hand data starts at offset 40. Right hand data starts at offset 152.
 
 Position uses the right-handed OpenXR coordinate system: positive X points right, positive Y points up, and negative Z points forward.
 
+#### Angular velocity frame
+
+`angular_velocity` (hand offset 56, `float[3]`, X, Y, Z) is the controller's angular velocity in radians per second. It is body-local: the rate is measured about the controller's own axes, expressed in the same pose axes as `orientation`. Under the same handedness, +X points right, +Y points up and +Z points toward the viewer, and the sign follows the right-hand rule (a positive value is a counter-clockwise rotation when viewed from the positive end of that axis).
+
+The producer (the wmr-companion app) sends this vector UNROTATED. It does not multiply it by `orientation`. The host rotates it into the driver frame itself, so the producer must not rotate it, or the rotation is applied twice.
+
+The app takes the rate from the fused hand pipeline, after the gyro bias is removed. It is zero when the sample did not advance the filter (for example a baseline, a tick discontinuity, a large time gap, or a non-finite reading). Non-finite components are sent as zero.
+
+Verification status: the frame and axis mapping are not verified on hardware. The sign of the view Y axis in particular was left unverified and needs a hardware check (a controller rotated about its vertical axis). Treat the sign as provisional until that check is recorded as user-reported.
+
 ### PadBridge claim packet and timeout rules
 
 A producer sends a 184-byte claim packet to exclude its devices from PadBridge. The header flags must include `DROIDDECK_EXT_XR_PACKET_CLAIM` (`1 << 1`).

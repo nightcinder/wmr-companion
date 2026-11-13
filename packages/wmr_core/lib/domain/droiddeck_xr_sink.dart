@@ -106,11 +106,14 @@ class DroidDeckXrHand {
 
   /// Maps one pipeline sample to the host's hand layout.
   ///
-  /// The pipeline has orientation only: [position] and the velocities stay
-  /// zero unless a caller supplies a tracked position (the host accepts a
-  /// rotation-only pose). The gamepad state supplies the analog values after
-  /// the user's mapping, so stick inversion and trigger thresholds match the
-  /// rest of the app.
+  /// The pipeline supplies orientation and angular velocity. Angular velocity
+  /// is the bias-corrected view-frame rate, body-local and unrotated, and is
+  /// zero when the sample has none (baseline, discontinuity, large gap, or
+  /// non-finite input). [position] and linear velocity stay zero unless a
+  /// caller supplies a tracked position (the host accepts a rotation-only
+  /// pose). The gamepad state supplies the analog values after the user's
+  /// mapping, so stick inversion and trigger thresholds match the rest of the
+  /// app.
   factory DroidDeckXrHand.fromPipeline(
     DecodedSample sample,
     GamepadState gamepad, {
@@ -195,6 +198,7 @@ class DroidDeckXrHand {
     return DroidDeckXrHand(
       connected: true,
       position: _triple(position ?? const [0, 0, 0]),
+      angularVelocity: _angularVelocity(sample),
       orientation: rigid ? [q.x, q.y, q.z, q.w] : const [0, 0, 0, 1],
       trigger: _unit(side == 0 ? gamepad.leftTrigger : gamepad.rightTrigger),
       squeeze: squeeze ? 1 : 0,
@@ -560,6 +564,13 @@ bool _validPose(List<double> q) {
 bool _isFinite(double v) => v.isFinite;
 
 double _unit(double v) => _isFinite(v) ? v.clamp(0.0, 1.0).toDouble() : 0;
+
+/// View-frame angular velocity (rad/s) of a fused sample; zeros when there is
+/// none. Non-finite components become zero in [_triple].
+List<double> _angularVelocity(DecodedSample sample) {
+  final w = sample.angularVelocity;
+  return _triple(w == null ? const [0, 0, 0] : [w.x, w.y, w.z]);
+}
 
 List<double> _triple(List<double> v) => [
   for (var i = 0; i < 3; i++) i < v.length && _isFinite(v[i]) ? v[i] : 0.0,

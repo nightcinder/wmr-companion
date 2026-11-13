@@ -64,6 +64,7 @@ class DecodedSample {
     required this.fused,
     this.stick = const [0, 0],
     this.bridgeId = '',
+    this.angularVelocity,
   });
 
   final DecodedRecord record;
@@ -85,6 +86,11 @@ class DecodedSample {
 
   /// Thumbstick after centre removal and dead zone, -1..1 (x, y).
   final List<double> stick;
+
+  /// Body-local angular velocity in the view frame (X right, Y up, Z toward
+  /// the viewer), rad/s, gyro bias removed. Not rotated by [orientation].
+  /// Null when this sample did not advance the filter.
+  final vm.Vector3? angularVelocity;
 }
 
 /// Timing, FF13 calibration, gyro bias, axis mapping and the orientation
@@ -255,6 +261,7 @@ class HandPipeline {
     if (r.calibrated) calibratedFlagged++;
     final step = timer.advance(r.deviceTicks, r.rxTimeUs);
     var fused = false;
+    vm.Vector3? angularView;
 
     // CALIBRATED-flagged records are already calibrated by the firmware.
     final cal = r.calibrated ? null : _calibration;
@@ -312,6 +319,7 @@ class HandPipeline {
               gyroView.z - b[2],
             );
           }
+          angularView = gyro;
           final accel = mapping.accelToView(accelSensor);
           _filter.update(
             gyro: viewToFilter(gyro),
@@ -329,6 +337,7 @@ class HandPipeline {
       fused: fused,
       stick: _stick(r, step),
       bridgeId: bridgeId,
+      angularVelocity: angularView,
     );
   }
 
