@@ -13,8 +13,25 @@ Current full release: v0.3.24 (signed unified Android APK). Pre-release: v0.3.25
 - **Latency:** inter-arrival, sequence gaps, tick-based loss, and the FF15 echo round trip, with CSV and JSON export.
 - **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, optional Bluetooth HID output, and experimental DroidDeck `v0` 6DoF streaming over a local socket. Not run on hardware.
 - **Capture:** guided raw capture from FF11 in the same file format as the firmware tool, shareable from the phone. The diagnostic bundle includes a device environment snapshot for URXR One day-one checks.
+- **Updates:** in-app self-updates for Android release builds. The Connect screen displays an update banner for new releases. You can also select **Check for updates** in the menu. Select **Update App** to download and install. The app makes sure that `SHA256SUMS` matches, and Android makes sure that the OS signing key matches. Grant the one-time **Install unknown apps** permission on phone, or on the VITURE Pro Neckband using headgaze, pointer, or Volume buttons (no D-pad).
 
 A fake bridge (raw and decoded) drives tests without hardware. The app only connects to real devices.
+
+## In-app updates
+
+The Android app includes a self-update flow for GitHub releases.
+
+When a newer release exists, the Connect screen displays an update banner. You can also select **Check for updates** in the top menu. Select **Update App** to start the download.
+
+The client downloads `SHA256SUMS` and the APK to temporary storage. It makes sure that the file digest matches the checksum file. Android then makes sure that the release signing certificate matches the installed application.
+
+Android requires the one-time **Install unknown apps** permission before the first in-app install. On a phone, toggle the permission in Android Settings and return to the app. On the VITURE Pro Neckband, the device has no physical D-pad:
+
+- Use Volume Up and Volume Down to move focus.
+- Hold Volume Down to select the toggle.
+- Hold Volume Up to navigate back.
+- Turn on headgaze with `Settings + Power`. Point at the toggle, press Volume Down to select, and press Volume Up to go back.
+- You can also navigate with the phone Neckband Remote application.
 
 ## Repo layout
 

@@ -89,10 +89,10 @@ INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package
 com.onyxlens.wmr_companion signatures do not match newer version; ignoring!
 ```
 
-That is not a broken download: `SHA256SUMS` still matches. A phone that ever
-installed a debug build (`flutter run`, a CI `wmr-companion-debug-apks`
-artifact, or a locally signed release) holds the other key, so uninstall it
-once and install the release:
+That is not a broken download because `SHA256SUMS` matches. If a phone has a
+debug build, uninstall the app once before you install the release build.
+Debug builds come from `flutter run`, CI debug artifacts, or locally signed builds.
+Debug and release builds use different keys:
 
 ```sh
 adb uninstall com.onyxlens.wmr_companion
@@ -100,10 +100,49 @@ adb uninstall --user 10 com.onyxlens.wmr_companion   # work profile, if present
 adb install wmr-companion-X.Y.Z-unified-arm64-v8a.apk
 ```
 
-Since 0.3.3 debug builds use the `com.onyxlens.wmr_companion.debug` package
-(`applicationIdSuffix` in `android/app/build.gradle.kts`), so a debug build no
-longer has to be removed before the release APK installs, and both can stay
-installed side by side. Release APKs share one key and update in place.
+Debug builds after 0.3.3 use the `com.onyxlens.wmr_companion.debug` package
+identifier. You can keep debug and release builds installed on the same device.
+Release APKs share one signing key and update in place.
+
+## In-app updates and package verification
+
+The Android app can update itself when GitHub publishes a new release.
+
+The Connect screen shows an update banner when a newer version exists. You can also
+select **Check for updates** in the application menu. Select **Update App** to
+download and install the update.
+
+In-app self-updates use two verification steps:
+
+1. The client downloads `SHA256SUMS` and the release APK over HTTPS. It makes sure that
+   the SHA-256 digest of the downloaded file matches the value in `SHA256SUMS`.
+   If the digest does not match, the app deletes the file and cancels the install.
+2. The app passes the verified APK to Android `PackageInstaller`. The operating system
+   makes sure that the signing certificate of the APK matches the installed app.
+   If the certificates do not match, Android blocks the update with
+   `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+Android requires the one-time **Install unknown apps** permission before an app can
+install packages.
+
+If the permission is not granted, selecting **Update App** opens the Android system
+permission screen.
+
+On a phone, tap the switch to allow installs from WMR Companion. Tap Back to return
+to the application.
+
+The VITURE Pro Neckband has no touchscreen and no physical D-pad:
+
+1. Press Volume Up or Volume Down to move focus to the toggle.
+2. Hold Volume Down to turn on the toggle.
+3. Hold Volume Up to return to WMR Companion.
+
+You can also use headgaze. Press `Settings + Power` to turn on headgaze. Look at the
+toggle and press Volume Down to select. Press Volume Up to go back. You can also use
+the phone Neckband Remote application.
+
+After you grant the permission, select **Update App** again. Android shows the
+system install dialog. Select Update to finish the installation.
 
 ## CI release: tag to downloadable APK 
 
