@@ -5,7 +5,7 @@ keeps its own changelog. This file records the release as a whole.
 
 ## Unreleased
 
-- Add experimental DroidDeck v0 6DoF UDS/UDP transport sink and input API (#300, #301). The sink connects to DroidDeck over a local abstract Unix domain socket to stream controller poses, buttons, and axes to SteamVR.
+- Add experimental DroidDeck v0 6DoF Unix domain socket transport sink and input API in `wmr_core` and `wmr_companion` (#300, #301). The sink connects to DroidDeck over an abstract Unix domain socket to stream controller poses, buttons, and axes to SteamVR.
 
 ## 0.3.25+30
 
