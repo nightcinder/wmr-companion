@@ -109,8 +109,8 @@ Release APKs share one signing key and update in place.
 The Android app can update itself when GitHub publishes a new release.
 
 The Connect screen shows an update banner when a newer version exists. You can also
-select **Check for updates** in the application menu. Select **Update App** to
-download and install the update.
+select **Check for updates** in the application menu. Select **Update app** (or
+**Install update** after a manual check) to start the update process.
 
 In-app self-updates use two verification steps:
 
@@ -125,8 +125,8 @@ In-app self-updates use two verification steps:
 Android requires the one-time **Install unknown apps** permission before an app can
 install packages.
 
-If the permission is not granted, selecting **Update App** opens the Android system
-permission screen.
+If the permission is not granted, selecting the update button opens the Android system
+permission screen. The button on the banner then changes to **Allow installs**.
 
 On a phone, tap the switch to allow installs from WMR Companion. Tap Back to return
 to the application.
@@ -141,7 +141,7 @@ You can also use headgaze. Press `Settings + Power` to turn on headgaze. Look at
 toggle and press Volume Down to select. Press Volume Up to go back. You can also use
 the phone Neckband Remote application.
 
-After you grant the permission, select **Update App** again. Android shows the
+After you grant the permission, select **Allow installs** to start the download. Android shows the
 system install dialog. Select Update to finish the installation.
 
 ## CI release: tag to downloadable APK 
