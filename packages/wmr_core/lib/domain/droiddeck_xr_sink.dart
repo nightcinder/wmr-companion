@@ -22,8 +22,6 @@ abstract final class DroidDeckXrProtocol {
 
   /// Abstract `SOCK_SEQPACKET` name, without the leading NUL.
   static const String socketName = 'droiddeck-ext-xr';
-  static const int udpPort = 29842;
-  static const String tokenFile = 'droiddeck-ext-xr.token';
 
   /// The host drops a session after this long without a packet.
   static const int sessionTimeoutMs = 1000;
@@ -227,9 +225,9 @@ class DroidDeckXrHand {
   final bool usesTrackpad;
 }
 
-/// A framed `v0` transport. DroidDeck has one abstract `SOCK_SEQPACKET` UDS by
-/// default and a token-paired loopback UDP fallback; both carry the same
-/// fixed-size packets.
+/// A framed `v0` transport. DroidDeck exposes one abstract `SOCK_SEQPACKET`
+/// UDS; the companion uses that path only, so every packet is a single
+/// fixed-size record.
 abstract interface class DroidDeckXrTransport {
   Future<void> send(Uint8List packet);
   Future<void> close();
@@ -252,7 +250,6 @@ class DroidDeckXrSink {
     required this.transport,
     this.claim,
     this.sourceId = 0,
-    this.token = 0,
     this.clockNs = droidDeckMonotonicNs,
     this.hidPeripheral,
     this.claimInterval = const Duration(milliseconds: 250),
@@ -265,9 +262,6 @@ class DroidDeckXrSink {
   /// input without claiming a flat gamepad.
   final DroidDeckXrClaim? claim;
   final int sourceId;
-
-  /// The UDP pairing token; zero on the socket transport.
-  final int token;
   final int Function() clockNs;
   final DroidDeckXrHidPeripheral? hidPeripheral;
 
@@ -332,7 +326,6 @@ class DroidDeckXrSink {
                 position: rightPosition,
               ),
         sourceId: sourceId,
-        token: token,
         focused: focused,
       ),
     );
@@ -359,7 +352,6 @@ class DroidDeckXrSink {
         sequence: _nextSequence(),
         timeNs: clockNs(),
         sourceId: sourceId,
-        token: token,
         focused: focused,
       ),
     );
@@ -384,7 +376,6 @@ Uint8List encodeDroidDeckXrInput({
   DroidDeckXrHand left = const DroidDeckXrHand(),
   DroidDeckXrHand right = const DroidDeckXrHand(),
   int sourceId = 0,
-  int token = 0,
   bool focused = true,
 }) {
   final out = Uint8List(DroidDeckXrProtocol.packetBytes);
@@ -395,7 +386,6 @@ Uint8List encodeDroidDeckXrInput({
     flags: focused ? DroidDeckXrProtocol.flagFocused : 0,
     sourceId: sourceId,
     timeNs: timeNs,
-    token: token,
   );
   _writeHand(d, DroidDeckXrProtocol.headerBytes, left, timeNs);
   _writeHand(
@@ -413,7 +403,6 @@ Uint8List encodeDroidDeckXrClaim({
   required int sequence,
   required int timeNs,
   int sourceId = 0,
-  int token = 0,
   bool focused = true,
 }) {
   if (claim.isEmpty) {
@@ -433,7 +422,6 @@ Uint8List encodeDroidDeckXrClaim({
         (focused ? DroidDeckXrProtocol.flagFocused : 0),
     sourceId: sourceId,
     timeNs: timeNs,
-    token: token,
   );
   const e = Endian.little;
   d
@@ -452,7 +440,6 @@ void _writeHeader(
   required int flags,
   required int sourceId,
   required int timeNs,
-  required int token,
 }) {
   const e = Endian.little;
   d
@@ -463,7 +450,7 @@ void _writeHeader(
     ..setUint32(16, flags, e)
     ..setUint32(20, sourceId, e)
     ..setInt64(24, timeNs, e)
-    ..setUint32(32, token, e)
+    ..setUint32(32, 0, e)
     ..setUint32(36, 0, e);
 }
 

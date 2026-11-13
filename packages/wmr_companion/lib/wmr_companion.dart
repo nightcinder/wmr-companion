@@ -66,10 +66,8 @@ export 'package:wmr_core/services/controller_service.dart'
 export 'package:wmr_core/services/droiddeck_xr_transport.dart'
     show
         DroidDeckXrTransportException,
-        DroidDeckXrUdpTransport,
         DroidDeckXrUnixTransport,
-        openDroidDeckXrTransport,
-        readDroidDeckXrToken;
+        openDroidDeckXrTransport;
 export 'package:wmr_core/services/echo_client.dart'
     show EchoFailure, EchoResult, EchoSample;
 export 'package:wmr_tracking/wmr_tracking.dart';

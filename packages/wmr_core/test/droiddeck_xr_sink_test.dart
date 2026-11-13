@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -89,7 +87,7 @@ void main() {
     expect(d.getUint32(40 + DroidDeckXrProtocol.handBytes, Endian.little), 0);
   });
 
-  test('a claim carries the device matcher and the token', () {
+  test('a claim carries the device matcher', () {
     final packet = encodeDroidDeckXrClaim(
       claim: const DroidDeckXrClaim(
         vendorId: 0x045e,
@@ -99,7 +97,6 @@ void main() {
       ),
       sequence: 2,
       timeNs: _timeNs,
-      token: 0x1234,
     );
     final d = ByteData.sublistView(packet);
 
@@ -108,7 +105,7 @@ void main() {
       d.getUint32(16, Endian.little),
       DroidDeckXrProtocol.flagPacketClaim | DroidDeckXrProtocol.flagFocused,
     );
-    expect(d.getUint32(32, Endian.little), 0x1234);
+    expect(d.getUint32(32, Endian.little), 0);
     expect(d.getUint32(40, Endian.little), 0x045e);
     expect(d.getUint32(44, Endian.little), 0x02ea);
     expect(packet.sublist(56, 60), [0x61, 0x62, 0x63, 0]);
@@ -218,7 +215,6 @@ void main() {
         descriptor: 'abc',
       ),
       sourceId: 4,
-      token: 0x1234,
       clockNs: () => _timeNs,
       hidPeripheral: peripheral,
       claimInterval: Duration.zero,
@@ -251,7 +247,7 @@ void main() {
     expect(input.getUint32(8, Endian.little), 1);
     expect(input.getUint32(20, Endian.little), 4);
     expect(input.getInt64(24, Endian.little), _timeNs);
-    expect(input.getUint32(32, Endian.little), 0x1234);
+    expect(input.getUint32(32, Endian.little), 0);
     expect(
       input.getUint32(40, Endian.little),
       DroidDeckXrProtocol.handConnected |
@@ -276,44 +272,17 @@ void main() {
     );
   });
 
-  test('the UDP fallback sends the same packet to loopback', () async {
-    final server = await RawDatagramSocket.bind(
-      InternetAddress.loopbackIPv4,
-      0,
-    );
-    addTearDown(server.close);
-    final received = Completer<Uint8List>();
-    final subscription = server.listen((event) {
-      if (event != RawSocketEvent.read || received.isCompleted) return;
-      final datagram = server.receive();
-      if (datagram != null) received.complete(datagram.data);
-    });
-    addTearDown(subscription.cancel);
-
-    final transport = DroidDeckXrUdpTransport(token: 0x1234, port: server.port);
-    addTearDown(transport.close);
-    final packet = encodeDroidDeckXrInput(
-      sequence: 1,
-      timeNs: _timeNs,
-      token: 0x1234,
-    );
-
-    await transport.send(packet);
-    final datagram = await received.future.timeout(const Duration(seconds: 2));
-    expect(datagram, packet);
-  });
-
-  test('the opener falls back to UDP only with a token', () async {
+  test('the opener names the socket when DroidDeck is not listening', () async {
     const name = 'ony-1336-no-such-droiddeck-socket';
     await expectLater(
       openDroidDeckXrTransport(unixSocketName: name),
-      throwsA(isA<DroidDeckXrTransportException>()),
+      throwsA(
+        isA<DroidDeckXrTransportException>().having(
+          (error) => error.message,
+          'message',
+          allOf(contains(name), contains('com.onyxlens.wmr_companion')),
+        ),
+      ),
     );
-    final transport = await openDroidDeckXrTransport(
-      udpToken: 0x1234,
-      unixSocketName: name,
-    );
-    expect(transport, isA<DroidDeckXrUdpTransport>());
-    await transport.close();
   });
 }

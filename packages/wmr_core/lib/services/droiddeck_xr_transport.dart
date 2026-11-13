@@ -15,46 +15,6 @@ class DroidDeckXrTransportException implements Exception {
   String toString() => 'DroidDeckXrTransportException: $message';
 }
 
-/// Loopback UDP fallback on [DroidDeckXrProtocol.udpPort].
-///
-/// DroidDeck rejects a packet whose header token does not match its per-session
-/// pairing token, so [token] is required and non-zero.
-class DroidDeckXrUdpTransport implements DroidDeckXrTransport {
-  DroidDeckXrUdpTransport({
-    required this.token,
-    InternetAddress? address,
-    this.port = DroidDeckXrProtocol.udpPort,
-  }) : address = address ?? InternetAddress.loopbackIPv4 {
-    if (token == 0) {
-      throw const DroidDeckXrTransportException(
-        'the UDP fallback needs the host pairing token',
-      );
-    }
-  }
-
-  final int token;
-  final InternetAddress address;
-  final int port;
-
-  RawDatagramSocket? _socket;
-
-  Future<void> start() async {
-    _socket ??= await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
-  }
-
-  @override
-  Future<void> send(Uint8List packet) async {
-    await start();
-    _socket!.send(packet, address, port);
-  }
-
-  @override
-  Future<void> close() async {
-    _socket?.close();
-    _socket = null;
-  }
-}
-
 typedef _SocketNative = Int32 Function(Int32, Int32, Int32);
 typedef _SocketDart = int Function(int, int, int);
 typedef _ConnectNative = Int32 Function(Int32, Pointer<_SockAddrUn>, Int32);
@@ -76,11 +36,12 @@ final class _SockAddrUn extends Struct {
   external Array<Uint8> sunPath;
 }
 
-/// Default transport: an abstract `SOCK_SEQPACKET` Unix socket.
+/// Default and only transport: an abstract `SOCK_SEQPACKET` Unix socket.
 ///
 /// Dart's `dart:io` sockets are `SOCK_STREAM`, so this binding calls libc
-/// directly. DroidDeck authenticates the peer with `SO_PEERCRED`; the app must
-/// be on the host's allowed-UID list.
+/// directly. DroidDeck authenticates the peer with `SO_PEERCRED` and approves
+/// the companion's UID by package; the app must use
+/// `com.onyxlens.wmr_companion` or `.debug` as its `applicationId`.
 class DroidDeckXrUnixTransport implements DroidDeckXrTransport {
   DroidDeckXrUnixTransport._(this._fd, this._libc);
 
@@ -149,42 +110,25 @@ class DroidDeckXrUnixTransport implements DroidDeckXrTransport {
   }
 }
 
-/// Opens the default abstract socket and falls back to token-paired UDP.
+/// Opens the abstract socket DroidDeck listens on.
 ///
-/// [udpToken] is the DroidDeck pairing token, for example read from
-/// `droiddeck-ext-xr.token`. Without it the UDP fallback cannot be used, so a
-/// failed socket stays a failure.
+/// The companion uses this path only. DroidDeck's loopback UDP fallback needs a
+/// pairing token that lives in DroidDeck's private `filesDir`, which this app's
+/// UID cannot read, so a failed connect is an error rather than a fallback.
+/// The exception names the socket so a missing host or an unapproved
+/// `applicationId` is visible in the log instead of looking like dropped
+/// packets.
 Future<DroidDeckXrTransport> openDroidDeckXrTransport({
-  int? udpToken,
   String unixSocketName = DroidDeckXrProtocol.socketName,
 }) async {
   try {
     return await DroidDeckXrUnixTransport.connect(name: unixSocketName);
-  } on Object catch (socketError) {
-    if (udpToken == null || udpToken == 0) rethrow;
-    try {
-      final transport = DroidDeckXrUdpTransport(token: udpToken);
-      await transport.start();
-      return transport;
-    } on Object catch (udpError) {
-      throw DroidDeckXrTransportException(
-        'no transport: socket failed ($socketError), UDP failed ($udpError)',
-      );
-    }
-  }
-}
-
-/// Reads the token DroidDeck writes next to its runtime shared-memory file.
-Future<int?> readDroidDeckXrToken(Directory runtimeDir) async {
-  final file = File(
-    '${runtimeDir.path}${Platform.pathSeparator}'
-    '${DroidDeckXrProtocol.tokenFile}',
-  );
-  try {
-    final text = (await file.readAsString()).trim();
-    return int.tryParse(text, radix: 16);
-  } on FileSystemException {
-    return null;
+  } on Object catch (error) {
+    throw DroidDeckXrTransportException(
+      'cannot open DroidDeck ext-xr socket "$unixSocketName": $error. '
+      'Check that DroidDeck is running and this app is installed as '
+      'com.onyxlens.wmr_companion (or .debug).',
+    );
   }
 }
 
