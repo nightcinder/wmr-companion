@@ -26,7 +26,7 @@ Reference documents: WMR_Bridge `docs/PI_BRIDGE.md` (checklist P1-P14 and the
 run sheet `docs/runs/sheets/bench.md`), [PROTOCOL.md](PROTOCOL.md),
 [IMU_LOG.md](IMU_LOG.md), [TIMELINE.md](TIMELINE.md), [GAMEPAD.md](GAMEPAD.md).
 Shared vectors: `packages/wmr_core/test/fixtures/wmr_golden_v1.json`
-(identical to WMR_Bridge `tests/vectors/wmr_golden_v1.json`).
+(identical to WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged) `tests/vectors/wmr_golden_v1.json`).
 
 Record for every hardware sitting: Pi model, OS image and kernel, BlueZ
 version, bridge package version, Wi-Fi band and channel, phone model and OS,
@@ -62,8 +62,8 @@ WebSocket at the expected rate with no bridge-side errors.
 | Test | Where | State | Pass |
 | --- | --- | --- | --- |
 | Pi host suite | WMR_Bridge `pi/run_tests.sh` | exists | all tests pass |
-| Golden vectors, Pi side | WMR_Bridge `pi/tests/test_golden_vectors.py` | exists | passes: decoder state, 56-byte records, fragments, batch, echo, timing rules |
-| Golden vectors, app side | `packages/wmr_core/test/golden_vectors_test.dart` | written, not yet run | passes in `dart test` |
+| Golden vectors, Pi side | WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged) `pi/tests/test_golden_vectors.py` | exists | passes: decoder state, 56-byte records, fragments, batch, echo, timing rules |
+| Golden vectors, app side | `packages/wmr_core/test/golden_vectors_test.dart` | run: dart format and dart analyze clean; dart test passes (51 tests in packages/wmr_core, run on ixhel; CI build job passed on this head) | passes in `dart test` |
 | The two copies of the vector file are identical | CI step comparing SHA-256 across the repositories | to write | equal |
 | Replay smoke | `python3 -m wmr_bridge --replay ../samples/controller_frames.txt` with `tools/wifi_probe.py --stream batched --duration 10` | exists | about 160 rec/s, `sequenceGaps` 0, `dropped` 0 |
 
@@ -87,7 +87,7 @@ streaming to one batched client.
 | Test | Where | State | Pass |
 | --- | --- | --- | --- |
 | Fast decoder equals the reference bit for bit | WMR_Bridge `pi/tests/test_decode.py` (`FastDecodeParityTests`: all 4096 stick values, random reports, IMU edges) | in review | passes |
-| Golden vectors unchanged by the fast decoder | `pi/tests/test_golden_vectors.py` | exists | passes before and after the patch with the same vector file |
+| Golden vectors unchanged by the fast decoder | `pi/tests/test_golden_vectors.py` (WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged)) | exists | passes before and after the patch with the same vector file |
 | Decode micro-benchmark | WMR_Bridge `pi/tools/bench_decode.py` | in review | prints microseconds per report for the reference and the fast path; no fixed bar on a developer machine |
 
 ### Owner-run hardware tests
@@ -143,7 +143,7 @@ the daemon's.
 | Upgrade attempt cannot run while a route switch or a BLE recovery is in progress (no second TCP connection, no stale route) | same file | to write | passes |
 | WebSocket transport: handshake, auth, subscribe, queue accounting | `packages/wmr_ws/test/` | exists | passes |
 | Records dropped by the app's own receive queue are counted in the loss figures | `packages/wmr_ws/test/`, `packages/wmr_core/test/controller_service_test.dart` | to write | a forced queue drop appears in the per-hand loss |
-| Sequence and tick accounting on golden timing sequences | `golden_vectors_test.dart` | written, not yet run | passes |
+| Sequence and tick accounting on golden timing sequences | `golden_vectors_test.dart` | run; passes (dart test in packages/wmr_core: 51 tests, run on ixhel) | passes |
 | Loopback end to end: Pi daemon in `--replay` on the developer machine, app test client subscribed over `ws://127.0.0.1` | integration test | to write | records received equal the daemon's `delivered` for the session |
 
 ### Owner-run hardware tests

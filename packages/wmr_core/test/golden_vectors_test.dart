@@ -1,7 +1,7 @@
 // Shared golden vectors: the app's parsers and TickTimer against
 // test/fixtures/wmr_golden_v1.json.
 //
-// The same file is committed in WMR_Bridge as tests/vectors/wmr_golden_v1.json
+// The same file is committed in WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged) as tests/vectors/wmr_golden_v1.json
 // and checked there by pi/tests/test_golden_vectors.py against the Pi decoder,
 // so bridge and app are pinned to identical bytes. Field reference:
 // test/fixtures/README_golden.md.

@@ -110,7 +110,7 @@ stream exclusion and readable before pairing.
   token; `CompositeBleTransport` reads it over the bonded link
   (`_readBleToken`). It must never be logged or shown.
 
-Field tables: WMR_Bridge docs/PROTOCOL.md, "Linux/Pi host bridge
+Field tables: WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/PROTOCOL.md, "Linux/Pi host bridge
 differences".
 
 ## universal_ble 3.2.0 coverage
@@ -173,7 +173,7 @@ callback) have no separate hardware record.
 ## FF12 decoded stream
 
 **Firmware status: run on hardware, user-reported** ([STATUS.md](STATUS.md):
-tick unit, gyro scale, FF11/FF12 exclusion and MTU behaviour). The rest of
+tick unit, FF11/FF12 exclusion and MTU behaviour). Gyro scale is not yet confirmed in a real rotation (see Open question 4). The rest of
 this paragraph is the history of the port and predates those runs. Read
 (read-only) from WMR_Bridge
 PR 5, branch `ff12-decoded-stream`, head `8fcb6a1`: `docs/PROTOCOL.md`,
@@ -356,7 +356,7 @@ are the `wmr_core` side of the Switch Joy-Con/Pro support
 `switch_burst.dart`); the firmware half is WMR_Bridge.
 
 Two known mismatches with the merged firmware, both to be closed by the
-spec in WMR_Bridge docs/SWITCH.md ("Timing contract" and "Calibration blob
+spec in WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/SWITCH.md ("Timing contract" and "Calibration blob
 version 1, 44 bytes"; specified, not implemented; secondary priority):
 
 - The firmware publishes a 42-byte blob (24 IMU + 18 stick bytes, no version
@@ -688,7 +688,7 @@ and the debug screen's "Controller control" panel.
 ## Protocol proposals (specified, not implemented)
 
 Status: **specified, not implemented**, on both sides. The wire text is in
-WMR_Bridge docs/PROTOCOL.md, "Proposals"; this is the app's side of each
+WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/PROTOCOL.md, "Proposals"; this is the app's side of each
 item. None of it is in the Dart code today.
 
 | Item | Wire change | What the app will do |
@@ -704,7 +704,7 @@ app, and each side keeps working against the other's previous version.
 
 ## Pi host bridge: what differs for the app
 
-Wire text: WMR_Bridge docs/PROTOCOL.md, "Linux/Pi host bridge differences",
+Wire text: WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/PROTOCOL.md, "Linux/Pi host bridge differences",
 and docs/PI_BRIDGE.md. Summary of what the app must not assume:
 
 - FF16 is a JSON endpoint document, FF13 serves a session document until a
