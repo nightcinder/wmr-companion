@@ -461,6 +461,7 @@ class ControllerService {
     this._filterTuning = const FilterTuning(),
     StickConfig stickConfig = const StickConfig(),
     this.onStickCentre,
+    this.onStreamValue,
   }) : _deviceIds = {
          if (deviceIdOrIds is Iterable<String>)
            ...deviceIdOrIds
@@ -489,6 +490,11 @@ class ControllerService {
   /// Called when a hand learns a new rest centre or the user re-centres it,
   /// so the app can save it. Restoring a saved centre does not call it.
   final void Function(int hand, List<double> centre)? onStickCentre;
+
+  /// Raw FF12 or FF14 notification bytes, called before any parsing with the
+  /// bridge's device id. Used by the raw IMU log; no effect when null.
+  final void Function(Uint8List value, int receivedAtUs, String sourceDeviceId)?
+  onStreamValue;
 
   final BleTransport transport;
   final List<String> _deviceIds;
@@ -959,12 +965,15 @@ class ControllerService {
     _frames.add(ReceivedFrame(frame, n.receivedAtUs, bridgeId: sourceDeviceId));
   }
 
-  void _onDecoded(BleNotification n, String sourceDeviceId) =>
-      _onRecord(parseDecodedRecord(n.value), n.receivedAtUs, sourceDeviceId);
+  void _onDecoded(BleNotification n, String sourceDeviceId) {
+    onStreamValue?.call(n.value, n.receivedAtUs, sourceDeviceId);
+    _onRecord(parseDecodedRecord(n.value), n.receivedAtUs, sourceDeviceId);
+  }
 
   /// Every record of a batch gets the batch's arrival time. Timing and
   /// fusion use `device_ticks`, so that does not change the time step.
   void _onBatched(BleNotification n, String sourceDeviceId) {
+    onStreamValue?.call(n.value, n.receivedAtUs, sourceDeviceId);
     final parsed = parseDecodedBatch(n.value);
     final bridge = _decodedBridge(sourceDeviceId);
     final records = parsed.records;
