@@ -24,12 +24,19 @@ class ImuLogFileSink implements ImuLogSink {
   final Duration flushDelay;
   final int maxOutstandingBytes;
 
+  /// Accepted bytes not yet confirmed flushed.
   int _outstanding = 0;
+
+  /// Accepted bytes not yet claimed by a flush. Each flush claims these
+  /// once, so the flushes together subtract exactly what was accepted.
+  int _unclaimed = 0;
   int _sinceFlush = 0;
   Timer? _timer;
   Object? _error;
   bool _closed = false;
-  Future<void> _pendingFlush = Future<void>.value();
+
+  /// Flushes run one after another, so each completes in order.
+  Future<void> _flushChain = Future<void>.value();
 
   /// The first write or flush error, or null.
   Object? get error => _error;
@@ -48,6 +55,7 @@ class ImuLogFileSink implements ImuLogSink {
       return false;
     }
     _outstanding += chunk.length;
+    _unclaimed += chunk.length;
     _sinceFlush += chunk.length;
     if (_sinceFlush >= flushBytes) {
       _flushNow();
@@ -61,15 +69,16 @@ class ImuLogFileSink implements ImuLogSink {
     _timer?.cancel();
     _timer = null;
     _sinceFlush = 0;
-    final confirmed = _outstanding;
-    _pendingFlush = _sink.flush().then<void>(
-      (_) {
-        _outstanding -= confirmed;
-      },
-      onError: (Object e, StackTrace _) {
+    final claimed = _unclaimed;
+    _unclaimed = 0;
+    _flushChain = _flushChain.then<void>((_) async {
+      try {
+        await _sink.flush();
+        _outstanding -= claimed;
+      } on Object catch (e) {
         _error ??= e;
-      },
-    );
+      }
+    });
   }
 
   /// Flushes everything, then closes the file.
@@ -79,13 +88,8 @@ class ImuLogFileSink implements ImuLogSink {
     _closed = true;
     _timer?.cancel();
     _timer = null;
-    try {
-      await _sink.flush();
-      _outstanding = 0;
-    } on Object catch (e) {
-      _error ??= e;
-    }
-    await _pendingFlush;
+    _flushNow();
+    await _flushChain;
     try {
       await _sink.close();
     } on Object catch (e) {
