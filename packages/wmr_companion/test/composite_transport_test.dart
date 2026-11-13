@@ -318,6 +318,36 @@ class _HeldDialTcp extends _FakeTcp {
   }
 }
 
+/// A TCP fake that joins each candidate's in-flight dial and holds it until the
+/// test releases that candidate, so two candidates can be in flight at once.
+class _JoiningTcp extends _FakeTcp {
+  final Map<String, Completer<void>> holds = {};
+  final Map<String, Future<void>> _pending = {};
+  final List<String> dials = [];
+  final List<String> disconnectCalls = [];
+
+  /// Holds every dial for [id] until the returned completer completes.
+  Completer<void> hold(String id) => holds.putIfAbsent(id, Completer.new);
+
+  @override
+  Future<void> connect(String deviceId) {
+    dials.add(deviceId);
+    return _pending[deviceId] ??= _dial(deviceId);
+  }
+
+  Future<void> _dial(String deviceId) async {
+    final hold = holds[deviceId];
+    if (hold != null) await hold.future;
+    await super.connect(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) {
+    disconnectCalls.add(deviceId);
+    return super.disconnect(deviceId);
+  }
+}
+
 /// A TCP fake whose dials can be held open, so a test can land a probe after
 /// the route has moved on.
 class _HoldableTcp extends _FakeTcp {
@@ -1200,6 +1230,165 @@ void main() {
       held.disconnectCalls,
       isEmpty,
       reason: 'the probe closed the socket that the recovery adopted',
+    );
+  });
+
+  test('closes the probe socket for a second candidate when another one is adopted', () async {
+    const hostA = '192.168.1.50';
+    const hostB = '127.0.0.1';
+    const idA = '$hostA:$wmrWsDefaultPort';
+    const idB = '$hostB:$wmrWsDefaultPort';
+    await tcp.dispose();
+    final joining = _JoiningTcp()..scanResults.add(tcpScanResult());
+    tcp = joining;
+    joining.hold(idA);
+    joining.hold(idB);
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument(hosts: const [hostA, hostB]));
+
+    final transport = CompositeBleTransport(
+      tcp: joining,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 400),
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+    // The probe spends its first slice on the first candidate and times out;
+    // its second dial is the one held here.
+    await _waitFor(
+      () => joining.dials.contains(idB),
+      reason: 'the probe never dialled the second candidate',
+    );
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => joining.dials.where((id) => id == idA).length >= 2,
+      reason: 'the BLE-drop recovery never joined the dial for the first one',
+    );
+
+    // Land the probe's own candidate while the recovery still holds the
+    // route, then let the recovery adopt the other candidate.
+    joining.holds[idB]!.complete();
+    await _settle(10);
+    joining.holds[idA]!.complete();
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the recovery did not adopt the first candidate',
+    );
+    await _waitFor(
+      () => joining.disconnectCalls.contains(idB),
+      reason: 'the probe left its unused socket open',
+    );
+    await _settle(30);
+
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.tcp);
+    expect(
+      joining.disconnectCalls.where((id) => id == idB).length,
+      1,
+      reason: 'the unused probe socket must be closed exactly once',
+    );
+    expect(
+      joining.disconnectCalls,
+      isNot(contains(idA)),
+      reason: 'the adopted socket was closed',
+    );
+  });
+
+  test('closes a never-adopted probe socket exactly once', () async {
+    const hostA = '127.0.0.1';
+    const idA = '$hostA:$wmrWsDefaultPort';
+    await tcp.dispose();
+    final joining = _JoiningTcp()..scanResults.add(tcpScanResult());
+    tcp = joining;
+    joining.hold(idA);
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument(hosts: const [hostA]));
+
+    final transport = CompositeBleTransport(
+      tcp: joining,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+    await _waitFor(
+      () => joining.dials.contains(idA),
+      reason: 'the upgrade probe never dialled',
+    );
+
+    // The route is torn down while the probe is in flight, so neither a
+    // switch nor the route ever adopts the socket.
+    await transport.dispose();
+    joining.holds[idA]!.complete();
+    await _waitFor(
+      () => joining.disconnectCalls.contains(idA),
+      reason: 'the never-adopted socket was left open',
+    );
+    await _settle(30);
+
+    expect(
+      joining.disconnectCalls.where((id) => id == idA).length,
+      1,
+      reason: 'the socket must be closed once, not again by the dial cleanup',
+    );
+  });
+
+  test('a concurrent connect adopts the probe socket', () async {
+    const hostA = '127.0.0.1';
+    const idA = '$hostA:$wmrWsDefaultPort';
+    await tcp.dispose();
+    final joining = _JoiningTcp()..scanResults.add(tcpScanResult());
+    tcp = joining;
+    joining.hold(idA);
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument(hosts: const [hostA]));
+
+    final transport = CompositeBleTransport(
+      tcp: joining,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 40),
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+    await _waitFor(
+      () => joining.dials.isNotEmpty,
+      reason: 'the upgrade probe never dialled',
+    );
+
+    // The BLE drop starts a recovery that joins the same held dial and also
+    // times out, so the route loses both legs with the socket still in flight.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == null,
+      reason: 'the route never lost both legs',
+    );
+
+    final dialsBefore = joining.dials.length;
+    final reconnect = transport.connect(_bleDeviceId);
+    await _waitFor(
+      () => joining.dials.length > dialsBefore,
+      reason: 'the connect did not join the in-flight dial',
+    );
+    joining.holds[idA]!.complete();
+    await reconnect;
+    await _settle(30);
+
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.tcp);
+    expect(
+      joining.disconnectCalls,
+      isEmpty,
+      reason: 'the probe or the dial cleanup closed the adopted socket',
     );
   });
 
