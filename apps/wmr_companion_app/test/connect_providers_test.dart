@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
@@ -845,6 +845,54 @@ void main() {
       expect(installer.installed, isEmpty);
     });
 
+    test(
+      'a settings screen that will not open is not an unhandled error',
+      () async {
+        final container = makeUpdateContainer(allowed: false);
+        addTearDown(container.dispose);
+        installer.settingsError = PlatformException(
+          code: 'settings_unavailable',
+        );
+
+        await container.read(appUpdateProvider.notifier).installLatest();
+
+        final state = container.read(appUpdateProvider);
+        expect(state.phase, AppUpdatePhase.permissionRequired);
+        expect(state.release?.version.toString(), '0.3.26');
+        expect(installer.settingsOpened, isTrue);
+        expect(installer.installed, isEmpty);
+      },
+    );
+
+    test('a platform without an installer refuses the install', () async {
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+      installer.selfInstallSupported = false;
+
+      await container.read(appUpdateProvider.notifier).installLatest();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.failed);
+      expect(state.message, contains('Android'));
+      expect(installer.settingsOpened, isFalse);
+      expect(installer.installed, isEmpty);
+    });
+
+    test('a double tap starts one install', () async {
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+      installer.canInstallGate = Completer<void>();
+      final controller = container.read(appUpdateProvider.notifier);
+
+      final first = controller.installLatest();
+      final second = controller.installLatest();
+      installer.canInstallGate!.complete();
+      await Future.wait([first, second]);
+
+      expect(installer.installed, hasLength(1));
+      expect(container.read(appUpdateProvider).phase, AppUpdatePhase.installed);
+    });
+
     test('a verified APK is handed to the system installer', () async {
       final container = makeUpdateContainer();
       addTearDown(container.dispose);
@@ -875,15 +923,27 @@ void main() {
 /// Records what the platform installer was asked to do.
 class _FakeAppInstaller extends AppInstaller {
   bool allowed = true;
+  bool selfInstallSupported = true;
   bool settingsOpened = false;
+  PlatformException? settingsError;
+  Completer<void>? canInstallGate;
   final List<String> installed = [];
 
   @override
-  Future<bool> canRequestPackageInstalls() async => allowed;
+  bool get supportsSelfInstall => selfInstallSupported;
+
+  @override
+  Future<bool> canRequestPackageInstalls() async {
+    final gate = canInstallGate;
+    if (gate != null) await gate.future;
+    return allowed;
+  }
 
   @override
   Future<void> openUnknownSourcesSettings() async {
     settingsOpened = true;
+    final error = settingsError;
+    if (error != null) throw error;
   }
 
   @override

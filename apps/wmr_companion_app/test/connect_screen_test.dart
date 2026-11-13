@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -308,33 +309,38 @@ void main() {
   testWidgets('shows the app update banner for a newer release', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(900, 1600);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          streamModeProvider.overrideWith(RawModeNotifier.new),
-          realDeviceProvider.overrideWith(_DisconnectedFallback.new),
-          runningAppVersionProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 25),
-          ),
-          latestAppReleaseProvider.overrideWith(
-            (ref) async => _appRelease('0.3.26'),
-          ),
-        ],
-        child: const MaterialApp(home: ConnectScreen()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(_DisconnectedFallback.new),
+            runningAppVersionProvider.overrideWith(
+              (ref) async => const WmrSemanticVersion(0, 3, 25),
+            ),
+            latestAppReleaseProvider.overrideWith(
+              (ref) async => _appRelease('0.3.26'),
+            ),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
 
-    expect(find.byKey(const Key('app-update-banner')), findsOneWidget);
-    expect(find.textContaining('0.3.26'), findsOneWidget);
-    expect(find.byKey(const Key('app-upgrade')), findsOneWidget);
+      expect(find.byKey(const Key('app-update-banner')), findsOneWidget);
+      expect(find.textContaining('0.3.26'), findsOneWidget);
+      expect(find.byKey(const Key('app-upgrade')), findsOneWidget);
 
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('hides the app update banner when the app is current', (
@@ -366,6 +372,43 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
+  });
+
+  testWidgets('offers no Android-only install on other platforms', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(_DisconnectedFallback.new),
+            runningAppVersionProvider.overrideWith(
+              (ref) async => const WmrSemanticVersion(0, 3, 25),
+            ),
+            latestAppReleaseProvider.overrideWith(
+              (ref) async => _appRelease('0.3.26'),
+            ),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const Key('app-update-banner')), findsOneWidget);
+      expect(find.byKey(const Key('app-update-platform')), findsOneWidget);
+      expect(find.byKey(const Key('app-upgrade')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('Check for updates in the app bar runs a manual check', (
@@ -408,47 +451,52 @@ void main() {
   testWidgets('shows the unknown-sources fallback and retries the install', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(900, 1600);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final update = _FakeAppUpdate(
-      AppUpdateState(
-        AppUpdatePhase.permissionRequired,
-        release: _appRelease('0.3.26'),
-        message:
-            'Allow installs from WMR Companion in Settings, '
-            'then tap Install again.',
-      ),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          streamModeProvider.overrideWith(RawModeNotifier.new),
-          realDeviceProvider.overrideWith(_DisconnectedFallback.new),
-          appUpdateProvider.overrideWith(() => update),
-          latestAppReleaseProvider.overrideWith((ref) async => null),
-          runningAppVersionProvider.overrideWith(
-            (ref) async => const WmrSemanticVersion(0, 3, 25),
-          ),
-        ],
-        child: const MaterialApp(home: ConnectScreen()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final update = _FakeAppUpdate(
+        AppUpdateState(
+          AppUpdatePhase.permissionRequired,
+          release: _appRelease('0.3.26'),
+          message:
+              'Allow installs from WMR Companion in Settings, '
+              'then tap Install again.',
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(_DisconnectedFallback.new),
+            appUpdateProvider.overrideWith(() => update),
+            latestAppReleaseProvider.overrideWith((ref) async => null),
+            runningAppVersionProvider.overrideWith(
+              (ref) async => const WmrSemanticVersion(0, 3, 25),
+            ),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
 
-    expect(find.byKey(const Key('app-update-banner')), findsOneWidget);
-    expect(find.byKey(const Key('app-update-status')), findsOneWidget);
-    expect(find.text('Allow installs'), findsOneWidget);
+      expect(find.byKey(const Key('app-update-banner')), findsOneWidget);
+      expect(find.byKey(const Key('app-update-status')), findsOneWidget);
+      expect(find.text('Allow installs'), findsOneWidget);
 
-    final upgrade = find.byKey(const Key('app-upgrade'));
-    await tester.ensureVisible(upgrade);
-    await tester.tap(upgrade);
-    await tester.pump();
-    expect(update.installed, isTrue);
+      final upgrade = find.byKey(const Key('app-upgrade'));
+      await tester.ensureVisible(upgrade);
+      await tester.tap(upgrade);
+      await tester.pump();
+      expect(update.installed, isTrue);
 
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('labels a protocol that will never arrive as unavailable', (

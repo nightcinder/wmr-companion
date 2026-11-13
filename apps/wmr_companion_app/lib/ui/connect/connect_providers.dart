@@ -1957,14 +1957,36 @@ class AppUpdateController extends Notifier<AppUpdateState> {
           );
   }
 
+  /// Set across the whole install, including the awaits before
+  /// [AppUpdateState.busy] turns true, so a double tap starts one install.
+  bool _installInFlight = false;
+
   /// Downloads and verifies the newer release, then hands it to the system
   /// installer.
   ///
   /// When Android has not allowed installs from this app, opens that settings
   /// screen instead and keeps the release ready for a retry after the user
-  /// returns.
+  /// returns. Platforms without an installer report that instead of offering
+  /// an install that cannot run.
   Future<void> installLatest() async {
-    if (state.busy) return;
+    if (state.busy || _installInFlight) return;
+    final installer = ref.read(appInstallerProvider);
+    if (!installer.supportsSelfInstall) {
+      state = const AppUpdateState(
+        AppUpdatePhase.failed,
+        message: 'In-app update installs are only available on Android.',
+      );
+      return;
+    }
+    _installInFlight = true;
+    try {
+      await _install(installer);
+    } finally {
+      _installInFlight = false;
+    }
+  }
+
+  Future<void> _install(AppInstaller installer) async {
     var release = state.release;
     if (release == null) {
       final running = await ref.read(runningAppVersionProvider.future);
@@ -1981,7 +2003,6 @@ class AppUpdateController extends Notifier<AppUpdateState> {
       }
       release = latest;
     }
-    final installer = ref.read(appInstallerProvider);
     if (!await installer.canRequestPackageInstalls()) {
       if (!ref.mounted) return;
       state = AppUpdateState(
@@ -1991,7 +2012,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
             'Allow installs from WMR Companion in Settings, '
             'then tap Install again.',
       );
-      await installer.openUnknownSourcesSettings();
+      await _openInstallSettings(installer);
       return;
     }
     state = AppUpdateState(
@@ -2007,7 +2028,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
       state = AppUpdateState(
         AppUpdatePhase.installed,
         release: release,
-        message: 'Update downloaded. Confirm the system install prompt.',
+        message: 'Update installed: WMR Companion ${release.version}.',
       );
     } on AppReleaseException catch (error) {
       if (!ref.mounted) return;
@@ -2026,7 +2047,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
               'Allow installs from WMR Companion in Settings, '
               'then tap Install again.',
         );
-        await installer.openUnknownSourcesSettings();
+        await _openInstallSettings(installer);
         return;
       }
       state = AppUpdateState(
@@ -2041,6 +2062,18 @@ class AppUpdateController extends Notifier<AppUpdateState> {
         release: release,
         message: 'Update failed: $error',
       );
+    }
+  }
+
+  /// Opens the unknown-sources screen, tolerating a host that cannot show it.
+  ///
+  /// The banner already states what to allow, so a `settings_unavailable`
+  /// platform error must not surface as an unhandled async error.
+  Future<void> _openInstallSettings(AppInstaller installer) async {
+    try {
+      await installer.openUnknownSourcesSettings();
+    } on PlatformException {
+      // Nothing else to open; the permission-required message stays.
     }
   }
 }

@@ -590,6 +590,7 @@ class _AppUpdateBanner extends ConsumerWidget {
     final update = ref.watch(appUpdateProvider);
     final latest = ref.watch(latestAppReleaseProvider).value;
     final running = ref.watch(runningAppVersionProvider).value;
+    final canSelfInstall = ref.watch(appInstallerProvider).supportsSelfInstall;
     final newer =
         latest != null &&
         running != null &&
@@ -601,7 +602,9 @@ class _AppUpdateBanner extends ConsumerWidget {
     final active = update.busy;
     final release = update.release ?? (newer ? latest : null);
     final canInstall =
-        release != null && update.phase != AppUpdatePhase.installed;
+        canSelfInstall &&
+        release != null &&
+        update.phase != AppUpdatePhase.installed;
     final label = switch (update.phase) {
       AppUpdatePhase.downloading => 'Downloading…',
       AppUpdatePhase.permissionRequired => 'Allow installs',
@@ -629,6 +632,16 @@ class _AppUpdateBanner extends ConsumerWidget {
               Text(
                 update.message!,
                 key: const Key('app-update-status'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ],
+            if (!canSelfInstall && release != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'In-app install is only available on the Android app.',
+                key: const Key('app-update-platform'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onPrimaryContainer,
                 ),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Installs a downloaded APK through Android's `PackageInstaller`.
@@ -12,6 +13,13 @@ class AppInstaller {
   static const channelName = 'com.onyxlens.wmr_companion/app_updater';
 
   final MethodChannel _methods;
+
+  /// Whether this platform implements the installer channel at all.
+  ///
+  /// Only the Android host does, so other platforms must not offer an install
+  /// that cannot run.
+  bool get supportsSelfInstall =>
+      defaultTargetPlatform == TargetPlatform.android;
 
   /// Whether Android will let this app start an APK install without sending
   /// the user to Settings. Pre-Android 8 has no per-app toggle, so it is true.
