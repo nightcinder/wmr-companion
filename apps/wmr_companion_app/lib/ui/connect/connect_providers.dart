@@ -18,6 +18,7 @@ import 'package:wmr_ws/wmr_ws.dart';
 import '../../services/app_installer.dart';
 import '../../services/app_release_checker.dart';
 import '../../services/bridge_token_store.dart';
+import '../../services/bridge_update_settings_store.dart';
 import '../../services/known_bridge_store.dart';
 import '../debug/stream_settings.dart';
 
@@ -1850,6 +1851,50 @@ final bridgeReleaseCheckerProvider = Provider<BridgeReleaseChecker>(
 final latestBridgeReleaseProvider = FutureProvider<WmrSemanticVersion?>(
   (ref) => ref.watch(bridgeReleaseCheckerProvider).latest(),
 );
+
+/// Whether bridge update checks may offer pre-release builds.
+///
+/// Stable-only until the saved opt-in says otherwise, so a user who never
+/// asked for release candidates is not pushed onto one. The choice is written
+/// back on every change and survives a restart.
+final bridgeUpdateSettingsProvider =
+    NotifierProvider<BridgeUpdateSettings, bool>(BridgeUpdateSettings.new);
+
+class BridgeUpdateSettings extends Notifier<bool> {
+  Future<void>? _loading;
+
+  /// Set once the user changes the opt-in, so a slow load cannot overwrite it.
+  bool _changed = false;
+
+  @override
+  bool build() {
+    _loading = _restore();
+    return false;
+  }
+
+  /// Completes when the saved value has been read and applied.
+  Future<void> get ready => _loading ?? Future<void>.value();
+
+  Future<void> _restore() async {
+    try {
+      final saved = await ref.read(bridgeUpdateSettingsStoreProvider).load();
+      if (ref.mounted && saved && !_changed) state = true;
+    } catch (_) {
+      // No storage, no saved opt-in: stable-only stays.
+    }
+  }
+
+  /// Applies the opt-in now and saves it for the next launch.
+  Future<void> setIncludePreReleases(bool value) async {
+    _changed = true;
+    state = value;
+    try {
+      await ref.read(bridgeUpdateSettingsStoreProvider).save(value);
+    } catch (_) {
+      // The choice still applies to this run.
+    }
+  }
+}
 
 /// The running app's semantic version, parsed from [appVersionProvider].
 ///
