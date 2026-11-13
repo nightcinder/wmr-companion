@@ -1,5 +1,7 @@
 # Gamepad mapping
 
+Status: The mapping layer, debug screen, and Bluetooth HID output are built, but none of this code has run on hardware or on a phone. The trigger ranges, trackpad ranges, and vertical axis directions remain unmeasured. CI only builds and unit-tests this code.
+
 This document describes the gamepad mapping layer, Bluetooth output modes, and external XR input integration.
 
 ## Architecture
@@ -39,7 +41,7 @@ If tilt and the physical stick both move an axis, the larger magnitude wins.
 
 ## Settings
 
-You can adjust mapping settings on the Gamepad screen.
+You can adjust mapping settings on the Gamepad screen. Every number is an estimate. The trigger and trackpad ranges have not been measured on hardware, and vertical axis directions on the wire have not been verified.
 
 | Setting | Default | Description |
 |---|---|---|
@@ -55,33 +57,44 @@ You can adjust mapping settings on the Gamepad screen.
 
 The application saves mapping configuration to `gamepad_settings.json` in the app documents directory. The application saves stick settings to `stick_settings.json`. If a configuration file is missing or corrupt, settings return to defaults.
 
-## Hardware test steps
+## Hardware test steps (not yet run on hardware)
 
-To verify controller mapping on hardware:
+To test controller mapping on hardware:
 
 1. Connect controllers in FF12 mode.
 2. Open the Gamepad screen.
-3. Press each button on each controller and confirm that the matching indicator lights.
+3. Press each button on each controller and make sure that the matching indicator lights.
 4. Push each stick forward and make sure that Y moves positive.
 5. If Y moves negative, turn on Invert stick Y.
-6. Pull each trigger slowly to confirm full scale and threshold activation.
-7. Click each trackpad quadrant and make sure that correct buttons trigger.
+6. Pull each trigger slowly to make sure that full scale and threshold activation work.
+7. Click each trackpad quadrant and make sure that the correct buttons trigger.
 
 ## Bluetooth HID output mode
 
 The phone can act as a Bluetooth HID gamepad peripheral for a remote host.
 
-- `lib/hid/hid_report.dart`: encodes the 9-byte HID gamepad report.
-- `lib/hid/hid_gamepad_transport.dart`: platform channel interface for `BluetoothHidDevice`.
-- `lib/hid/hid_output.dart`: listens to decoded samples and sends HID reports when state changes.
-- `android/.../HidGamepadPlugin.kt`: registers the Android Bluetooth HID peripheral profile.
+- `packages/wmr_companion_hid_android/lib/src/hid_report.dart`: encodes the 9-byte HID gamepad report.
+- `packages/wmr_companion_hid_android/lib/src/hid_gamepad_transport.dart`: platform channel interface for `BluetoothHidDevice`.
+- `apps/wmr_companion_app/lib/hid/hid_output.dart`: listens to decoded samples and sends HID reports when state changes.
+- `packages/wmr_companion_hid_android/android/src/main/kotlin/com/onyxlens/wmr_companion_hid_android/WmrCompanionHidPlugin.kt`: registers the Android Bluetooth HID peripheral profile with `WmrCompanionHidPlugin`.
 
-To test Bluetooth HID output:
+### Operational limits
+
+The Bluetooth HID output mode has four constraints:
+
+1. Reports go out only while the application stays open and active in the foreground because no background service exists.
+2. If you reconnect the controller bridge, you must stop and start HID output again.
+3. The phone connects to only one host at a time.
+4. Button naming and layout depend on the host operating system.
+
+### Hardware test steps (not yet run on hardware)
+
+To test Bluetooth HID output on a phone and host:
 
 1. Start HID output on the Gamepad screen.
 2. Make the phone discoverable.
 3. Pair the remote host to the phone.
-4. Verify input responses on the host gamepad tester.
+4. Make sure that input responses appear on the host gamepad tester.
 
 ## Output options and coexistence
 
@@ -105,7 +118,7 @@ Output modes require specific coexistence rules:
 
 DroidDeck provides an experimental v0 interface for external 6DoF controller input. External producers send controller poses, buttons, and axes to DroidDeck. DroidDeck forwards controller data to SteamVR and returns haptic pulses.
 
-The binary interface freezes only when contributors submit the feature to upstream DroidDeck.
+The binary interface source of truth is `tools/vr/src/ext_xr_input.h` in the [nightcinder/DroidDeck](https://github.com/nightcinder/DroidDeck/tree/eb03e880a06b13b4afaadd1aa87b25537569b559) repository at commit [`eb03e88`](https://github.com/nightcinder/DroidDeck/commit/eb03e880a06b13b4afaadd1aa87b25537569b559). The interface is also documented in [`docs/EXTERNAL_XR_INPUT.md`](https://github.com/nightcinder/DroidDeck/blob/eb03e880a06b13b4afaadd1aa87b25537569b559/docs/EXTERNAL_XR_INPUT.md). The binary interface freezes only when contributors submit the feature to upstream DroidDeck.
 
 ### Transports
 
@@ -122,7 +135,7 @@ Every packet begins with a 40-byte header.
 |---|---|---|---|
 | 0 | uint32 | magic | Magic number `0x52584544` (ASCII `DEXR`) |
 | 4 | uint32 | version | Protocol version (`0` for experimental v0) |
-| 8 | uint32 | sequence | Packet sequence counter on wire, seqlock in shared memory |
+| 8 | uint32 | sequence | Packet sequence counter on wire |
 | 12 | uint32 | header_size | Header size in bytes (`40`) |
 | 16 | uint32 | flags | Bit 0: focused, Bit 1: claim packet |
 | 20 | uint32 | source_id | Producer source identifier |
@@ -185,7 +198,7 @@ DroidDeck sends 64-byte haptic feedback replies to active producers.
 |---|---|---|---|
 | 0 | uint32 | magic | Magic number `0x52584544` |
 | 4 | uint32 | version | Protocol version (`0`) |
-| 8 | uint32 | header_size | Packet size in bytes (`64`) |
+| 8 | uint32 | header_size | Header size in bytes (`64`, reply packet is all header) |
 | 12 | uint32 | hand | Target hand (`0` for left, `1` for right) |
 | 16 | float | amplitude | Vibration intensity (0.0 to 1.0) |
 | 20 | float | frequency | Vibration frequency in Hertz |
