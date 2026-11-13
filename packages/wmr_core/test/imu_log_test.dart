@@ -80,17 +80,17 @@ void main() {
     test('reader rejects bad magic, bad CRC and unknown version', () {
       final good = encodeImuLogHeader(stream: 12, mtu: 59, startUs: 0);
       final badMagic = Uint8List.fromList(good)..[0] = 0x58;
-      expect(() => ImuLogReader.open(badMagic), throwsFormatException);
+      expect(() => WmrImuReader.open(badMagic), throwsFormatException);
 
       final badCrc = Uint8List.fromList(good)..[30] ^= 1;
-      expect(() => ImuLogReader.open(badCrc), throwsFormatException);
+      expect(() => WmrImuReader.open(badCrc), throwsFormatException);
 
       final v2 = Uint8List.fromList(good)..[8] = 2;
       final d = ByteData.sublistView(v2);
       d.setUint32(60, imuLogCrc32(v2, end: 60), Endian.little);
-      expect(() => ImuLogReader.open(v2), throwsFormatException);
+      expect(() => WmrImuReader.open(v2), throwsFormatException);
 
-      expect(() => ImuLogReader.open(Uint8List(10)), throwsFormatException);
+      expect(() => WmrImuReader.open(Uint8List(10)), throwsFormatException);
     });
   });
 
@@ -113,7 +113,7 @@ void main() {
       ); // count mismatch, ignored
       await rec.close(receivedAtUs: 30000);
 
-      final reader = ImuLogReader.open(sink.bytes);
+      final reader = WmrImuReader.open(sink.bytes);
       expect(reader.header.stream, 12);
       expect(reader.header.startUs, 1000);
       expect(reader.truncatedTail, isFalse);
@@ -152,7 +152,7 @@ void main() {
       final closing = rec.close(receivedAtUs: 3000);
 
       return closing.then((_) {
-        final reader = ImuLogReader.open(sink.bytes);
+        final reader = WmrImuReader.open(sink.bytes);
         final stats = reader.entries.whereType<ImuLogStats>().last;
         expect(stats.recordsWritten, written);
         expect(stats.gapsLeft, 2); // 11 -> 14 skipped 12 and 13
@@ -184,7 +184,7 @@ void main() {
           receivedAtUs: 1700,
         );
         bytes.add(event);
-        final reader = ImuLogReader.open(bytes.toBytes());
+        final reader = WmrImuReader.open(bytes.toBytes());
         expect(reader.corrupt, isFalse);
         final ev = reader.entries.whereType<ImuLogEvent>().toList();
         expect(ev.map((e) => e.code), [9, 4]);
@@ -204,7 +204,7 @@ void main() {
       rec.flush();
       final whole = sink.bytes;
       final cut = Uint8List.sublistView(whole, 0, whole.length - 5);
-      final reader = ImuLogReader.open(cut);
+      final reader = WmrImuReader.open(cut);
       expect(reader.truncatedTail, isTrue);
       expect(reader.corrupt, isFalse);
       expect(reader.entries.whereType<ImuLogSample>().length, 1);
@@ -217,7 +217,7 @@ void main() {
       rec.flush();
       final bytes = Uint8List.fromList(sink.bytes);
       bytes[imuLogHeaderSize + 1] = 10; // IMU record claims length 10
-      final reader = ImuLogReader.open(bytes);
+      final reader = WmrImuReader.open(bytes);
       expect(reader.corrupt, isTrue);
       expect(reader.entries, isEmpty);
     });
@@ -257,7 +257,7 @@ void main() {
       rec.onStreamValue(golden, 200, 'b');
       await rec.close(receivedAtUs: 300);
       expect(sink.error, isNull);
-      final reader = ImuLogReader.open(file.readAsBytesSync());
+      final reader = WmrImuReader.open(file.readAsBytesSync());
       expect(reader.entries.whereType<ImuLogSample>().length, 2);
       expect(reader.truncatedTail, isFalse);
     });

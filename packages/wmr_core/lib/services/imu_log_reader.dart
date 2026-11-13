@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import '../protocol/decoded_record.dart' show wmrDecodedSize;
 import 'imu_log_format.dart';
 
-/// Header of a raw IMU log, checked by [ImuLogReader.open].
+/// Header of a raw IMU log, checked by [WmrImuReader.open].
 class ImuLogHeader {
   const ImuLogHeader({
     required this.version,
@@ -88,8 +88,8 @@ class ImuLogUnknown extends ImuLogEntry {
 /// Reads a whole log held in memory. A truncated last record (a crash during
 /// a write) ends the list and sets [truncatedTail]. A known record whose
 /// length byte does not match its type stops the read and sets [corrupt].
-class ImuLogReader {
-  ImuLogReader._(this.header, this.entries, this.truncatedTail, this.corrupt);
+class WmrImuReader {
+  WmrImuReader._(this.header, this.entries, this.truncatedTail, this.corrupt);
 
   final ImuLogHeader header;
   final List<ImuLogEntry> entries;
@@ -97,7 +97,7 @@ class ImuLogReader {
   final bool corrupt;
 
   /// Throws [FormatException] when the magic, version or header CRC is wrong.
-  factory ImuLogReader.open(Uint8List bytes) {
+  factory WmrImuReader.open(Uint8List bytes) {
     if (bytes.length < imuLogHeaderSize) {
       throw const FormatException('IMU log shorter than its header');
     }
@@ -191,6 +191,6 @@ class ImuLogReader {
       }
       pos += length;
     }
-    return ImuLogReader._(header, entries, truncated, corrupt);
+    return WmrImuReader._(header, entries, truncated, corrupt);
   }
 }
