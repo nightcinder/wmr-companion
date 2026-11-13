@@ -318,6 +318,53 @@ class _HeldDialTcp extends _FakeTcp {
   }
 }
 
+/// A TCP fake whose dials can be held open, so a test can land a probe after
+/// the route has moved on.
+class _HoldableTcp extends _FakeTcp {
+  Completer<void>? holdDials;
+  int heldDials = 0;
+  final List<String> disconnectCalls = [];
+
+  @override
+  Future<void> connect(String deviceId) async {
+    final hold = holdDials;
+    if (hold != null) {
+      heldDials++;
+      await hold.future;
+    }
+    await super.connect(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) {
+    disconnectCalls.add(deviceId);
+    return super.disconnect(deviceId);
+  }
+}
+
+/// A BLE fake that can refuse GATT connects for chosen devices and records
+/// every disconnect.
+class _RecordingBle extends FakeTransport {
+  _RecordingBle({required super.devices});
+
+  final Set<String> refusedConnects = {};
+  final List<String> disconnectCalls = [];
+
+  @override
+  Future<void> connect(String deviceId) async {
+    if (refusedConnects.contains(deviceId)) {
+      throw StateError('ble connect refused');
+    }
+    await super.connect(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) {
+    disconnectCalls.add(deviceId);
+    return super.disconnect(deviceId);
+  }
+}
+
 void main() {
   late _FakeTcp tcp;
   late FakeTransport ble;
@@ -1060,4 +1107,205 @@ void main() {
       reason: 'the adopted dial was closed as a stale socket',
     );
   });
+
+  test('kicks the FF16 upgrade once a TCP-to-BLE failover lands on BLE', () async {
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+    final dialsBeforeFailover = tcp.connectCalls.length;
+    // Let the TCP state listener attach before the drop.
+    await _settle();
+    tcp.drop(_tcpDeviceId);
+    // The timer is an hour away, so only the kick after the failover can dial.
+    await _waitFor(
+      () => tcp.connectCalls.length > dialsBeforeFailover,
+      reason: 'the FF16 upgrade was not kicked after the failover',
+    );
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the kicked upgrade did not move the route back to TCP',
+    );
+  });
+
+  test(
+    'does not dial a TCP probe while a BLE-drop failover holds the route',
+    () async {
+      tcp.failConnect = true;
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+        tcpProbeBudget: const Duration(milliseconds: 200),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+      await _settle(30);
+
+      // The next TCP dial hangs, so the failover's recovery dial holds the
+      // route in its switching window while the upgrade timer keeps ticking.
+      tcp.hangConnect = true;
+      final before = tcp.connectCalls.length;
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => tcp.connectCalls.length > before,
+        reason: 'the failover did not dial TCP',
+      );
+      final dialed = tcp.connectCalls.length;
+      await _settle(80);
+      expect(
+        tcp.connectCalls.length,
+        dialed,
+        reason:
+            'an upgrade probe dialled TCP while the failover held the route',
+      );
+    },
+  );
+
+  test('closes a TCP probe that lands after an explicit disconnect', () async {
+    await tcp.dispose();
+    final held = _HoldableTcp()
+      ..failConnect = true
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = held;
+
+    final transport = CompositeBleTransport(
+      tcp: held,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    // Hold the next upgrade dial in flight, then tear the route down under it.
+    held.failConnect = false;
+    held.holdDials = Completer<void>();
+    await _waitFor(
+      () => held.heldDials > 0,
+      reason: 'the upgrade probe never dialled',
+    );
+    await transport.disconnect(_tcpDeviceId);
+
+    held.holdDials!.complete();
+    await _waitFor(
+      () => held.disconnectCalls.contains(_tcpDeviceId),
+      reason: 'the late probe socket was left open',
+    );
+    expect(transport.activeLegFor(_tcpDeviceId), isNull);
+  });
+
+  test(
+    'releases a BLE link whose connect fails in the initial candidate loop',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      final refusing = _RecordingBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+      )..refusedConnects.add(_bleDeviceId);
+      refusing.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = refusing;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+
+      await expectLater(
+        transport.connect(_tcpDeviceId),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            'tcp down',
+          ),
+        ),
+      );
+      expect(refusing.disconnectCalls, [_bleDeviceId]);
+      expect(transport.activeLegFor(_tcpDeviceId), isNull);
+    },
+  );
+
+  test(
+    'releases a BLE link whose connect fails in the failover candidate loop',
+    () async {
+      ble.dispose();
+      final refusing = _RecordingBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+      );
+      refusing.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = refusing;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      refusing.refusedConnects.add(_bleDeviceId);
+      // Let the TCP state listener attach before the drop.
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => refusing.disconnectCalls.contains(_bleDeviceId),
+        reason: 'the refused BLE link was not released',
+      );
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == null,
+        reason: 'the failed failover did not release the route',
+      );
+      expect(refusing.disconnectCalls, [_bleDeviceId]);
+    },
+  );
 }
