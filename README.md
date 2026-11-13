@@ -37,6 +37,12 @@ After you grant the permission, select **Allow installs** to start the download.
 
 The client downloads `SHA256SUMS` and the APK to temporary storage. It makes sure that the file digest matches the checksum file. Android then makes sure that the release signing certificate matches the installed application.
 
+## Bridge updates
+
+The Connect screen also checks for Raspberry Pi bridge updates and pre-release builds.
+
+Select **Check for updates** beside the bridge version row to check GitHub Releases. To evaluate release candidates such as `0.3.27-rc.2`, select the **Include pre-release bridge builds** checkbox. See [docs/BRIDGE_UPDATES.md](docs/BRIDGE_UPDATES.md) for pre-release installation commands and upgrade notes.
+
 ## Repo layout
 
 | Path | Contents |
@@ -44,7 +50,7 @@ The client downloads `SHA256SUMS` and the APK to temporary storage. It makes sur
 | `apps/wmr_companion_app/` | Flutter reference app |
 | `packages/` | Twelve Dart packages plus Swift `WMRCompanionKit` |
 | `example/` | Minimal Flutter host |
-| `docs/` | Status, plan, protocol, capture, latency, gamepad, and tracking notes |
+| `docs/` | Status, plan, protocol, bridge updates, capture, latency, gamepad, and tracking notes |
 | `HANDOFF.md` | Rules, environment, state, and cleanup list |
 
 ## Build and test

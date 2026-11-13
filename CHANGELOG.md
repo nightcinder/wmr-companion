@@ -3,6 +3,17 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog. This file records the release as a whole.
 
+## Unreleased
+
+- The Connect screen provides a manual bridge update check and a pre-release
+  opt-in toggle (ONY-1405).
+- Stable builds remain the default target. Opting in searches release candidate
+  tags such as `0.3.27-rc.2` and surfaces tag-pinned terminal commands for
+  Raspberry Pi bridge updates.
+- `docs/BRIDGE_UPDATES.md` documents manual bridge checks, stable and
+  pre-release channels, the tag-pinned Raspberry Pi install command, and package
+  upgrades from release candidate to stable.
+
 ## 0.3.25+31
 
 Release candidate 2 for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
