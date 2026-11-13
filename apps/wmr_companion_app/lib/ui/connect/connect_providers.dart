@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -14,6 +15,8 @@ import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import '../../services/app_installer.dart';
+import '../../services/app_release_checker.dart';
 import '../../services/bridge_token_store.dart';
 import '../../services/known_bridge_store.dart';
 import '../debug/stream_settings.dart';
@@ -1839,4 +1842,242 @@ final bridgeReleaseCheckerProvider = Provider<BridgeReleaseChecker>(
 /// The latest WMR_Bridge release, null while unknown or offline.
 final latestBridgeReleaseProvider = FutureProvider<WmrSemanticVersion?>(
   (ref) => ref.watch(bridgeReleaseCheckerProvider).latest(),
+);
+
+/// The running app's semantic version, parsed from [appVersionProvider].
+///
+/// Null when the platform version is unknown or not a semantic version, so the
+/// app update banner stays silent rather than guessing.
+final runningAppVersionProvider = FutureProvider<WmrSemanticVersion?>((
+  ref,
+) async {
+  final text = await ref.watch(appVersionProvider.future);
+  return WmrSemanticVersion.tryParse(text);
+});
+
+/// Reads wmr-companion GitHub releases for the in-app updater.
+final appReleaseCheckerProvider = Provider<AppReleaseChecker>(
+  (ref) => AppReleaseChecker(),
+);
+
+/// The platform installer behind the app updater channel.
+final appInstallerProvider = Provider<AppInstaller>((ref) => AppInstaller());
+
+/// The latest wmr-companion release, null while unknown, offline or
+/// unverifiable.
+final latestAppReleaseProvider = FutureProvider<AppRelease?>(
+  (ref) => ref.watch(appReleaseCheckerProvider).latest(),
+);
+
+enum AppUpdatePhase {
+  idle,
+  checking,
+  upToDate,
+  available,
+  downloading,
+  permissionRequired,
+  installed,
+  failed,
+}
+
+/// What the app update banner shows: the result of the automatic or manual
+/// check, and the progress of the verified download and install.
+class AppUpdateState {
+  const AppUpdateState(this.phase, {this.release, this.message});
+
+  const AppUpdateState.idle()
+    : phase = AppUpdatePhase.idle,
+      release = null,
+      message = null;
+
+  final AppUpdatePhase phase;
+
+  /// The release being offered or installed, once one is known.
+  final AppRelease? release;
+
+  /// Human-readable result or progress, or null while idle.
+  final String? message;
+
+  bool get busy =>
+      phase == AppUpdatePhase.checking || phase == AppUpdatePhase.downloading;
+}
+
+/// Drives the manual "Check for updates" and the verified APK install.
+///
+/// The install is fail-closed: [AppReleaseChecker.downloadAndInstall] verifies
+/// the SHA-256 digest before the system installer is asked to run, and Android
+/// refusing installs from this app sends the user to the unknown-sources
+/// settings with the release kept for a retry.
+class AppUpdateController extends Notifier<AppUpdateState> {
+  @override
+  AppUpdateState build() => const AppUpdateState.idle();
+
+  /// Reads the latest release, optionally bypassing this session's cache so a
+  /// manual check means a fresh request to GitHub.
+  Future<AppRelease?> _fetchLatest({bool fresh = false}) {
+    if (fresh) {
+      // A new checker drops its cache with the previous provider value.
+      ref.invalidate(appReleaseCheckerProvider);
+      ref.invalidate(latestAppReleaseProvider);
+    }
+    return ref.read(latestAppReleaseProvider.future);
+  }
+
+  /// Runs one user-requested check and reports the result in [state].
+  Future<void> check() async {
+    if (state.busy) return;
+    final running = await ref.read(runningAppVersionProvider.future);
+    if (!ref.mounted) return;
+    if (running == null) {
+      state = const AppUpdateState(
+        AppUpdatePhase.failed,
+        message: "Could not read this app's version.",
+      );
+      return;
+    }
+    state = const AppUpdateState(AppUpdatePhase.checking);
+    final latest = await _fetchLatest(fresh: true);
+    if (!ref.mounted) return;
+    if (latest == null) {
+      state = const AppUpdateState(
+        AppUpdatePhase.failed,
+        message: 'Could not reach GitHub. Check the network and try again.',
+      );
+      return;
+    }
+    state = latest.version.compareTo(running) > 0
+        ? AppUpdateState(
+            AppUpdatePhase.available,
+            release: latest,
+            message: 'Version ${latest.version} is available.',
+          )
+        : AppUpdateState(
+            AppUpdatePhase.upToDate,
+            message: 'WMR Companion $running is the latest version.',
+          );
+  }
+
+  /// Set across the whole install, including the awaits before
+  /// [AppUpdateState.busy] turns true, so a double tap starts one install.
+  bool _installInFlight = false;
+
+  /// Downloads and verifies the newer release, then hands it to the system
+  /// installer.
+  ///
+  /// When Android has not allowed installs from this app, opens that settings
+  /// screen instead and keeps the release ready for a retry after the user
+  /// returns. Platforms without an installer report that instead of offering
+  /// an install that cannot run.
+  Future<void> installLatest() async {
+    if (state.busy || _installInFlight) return;
+    final installer = ref.read(appInstallerProvider);
+    if (!installer.supportsSelfInstall) {
+      state = const AppUpdateState(
+        AppUpdatePhase.failed,
+        message: 'In-app update installs are only available on Android.',
+      );
+      return;
+    }
+    _installInFlight = true;
+    try {
+      await _install(installer);
+    } finally {
+      _installInFlight = false;
+    }
+  }
+
+  Future<void> _install(AppInstaller installer) async {
+    var release = state.release;
+    if (release == null) {
+      final running = await ref.read(runningAppVersionProvider.future);
+      final latest = await _fetchLatest();
+      if (!ref.mounted) return;
+      if (latest == null ||
+          running == null ||
+          latest.version.compareTo(running) <= 0) {
+        state = const AppUpdateState(
+          AppUpdatePhase.failed,
+          message: 'No newer release was found.',
+        );
+        return;
+      }
+      release = latest;
+    }
+    if (!await installer.canRequestPackageInstalls()) {
+      if (!ref.mounted) return;
+      state = AppUpdateState(
+        AppUpdatePhase.permissionRequired,
+        release: release,
+        message:
+            'Allow installs from WMR Companion in Settings, '
+            'then tap Install again.',
+      );
+      await _openInstallSettings(installer);
+      return;
+    }
+    state = AppUpdateState(
+      AppUpdatePhase.downloading,
+      release: release,
+      message: 'Downloading and verifying the update…',
+    );
+    try {
+      await ref
+          .read(appReleaseCheckerProvider)
+          .downloadAndInstall(release, installer.installApk);
+      if (!ref.mounted) return;
+      state = AppUpdateState(
+        AppUpdatePhase.installed,
+        release: release,
+        message: 'Update installed: WMR Companion ${release.version}.',
+      );
+    } on AppReleaseException catch (error) {
+      if (!ref.mounted) return;
+      state = AppUpdateState(
+        AppUpdatePhase.failed,
+        release: release,
+        message: error.message,
+      );
+    } on PlatformException catch (error) {
+      if (!ref.mounted) return;
+      if (error.code == 'permission_denied') {
+        state = AppUpdateState(
+          AppUpdatePhase.permissionRequired,
+          release: release,
+          message:
+              'Allow installs from WMR Companion in Settings, '
+              'then tap Install again.',
+        );
+        await _openInstallSettings(installer);
+        return;
+      }
+      state = AppUpdateState(
+        AppUpdatePhase.failed,
+        release: release,
+        message: error.message ?? 'The install failed (${error.code}).',
+      );
+    } catch (error) {
+      if (!ref.mounted) return;
+      state = AppUpdateState(
+        AppUpdatePhase.failed,
+        release: release,
+        message: 'Update failed: $error',
+      );
+    }
+  }
+
+  /// Opens the unknown-sources screen, tolerating a host that cannot show it.
+  ///
+  /// The banner already states what to allow, so a `settings_unavailable`
+  /// platform error must not surface as an unhandled async error.
+  Future<void> _openInstallSettings(AppInstaller installer) async {
+    try {
+      await installer.openUnknownSourcesSettings();
+    } on PlatformException {
+      // Nothing else to open; the permission-required message stays.
+    }
+  }
+}
+
+final appUpdateProvider = NotifierProvider<AppUpdateController, AppUpdateState>(
+  AppUpdateController.new,
 );

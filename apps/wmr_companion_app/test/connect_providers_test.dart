@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/testing.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_companion/wmr_companion.dart';
+import 'package:wmr_companion_app/services/app_installer.dart';
+import 'package:wmr_companion_app/services/app_release_checker.dart';
 import 'package:wmr_companion_app/ui/connect/connect_providers.dart';
 import 'package:wmr_companion_app/ui/debug/stream_settings.dart';
 import 'package:wmr_core/ble/ble_transport.dart';
@@ -733,6 +737,219 @@ void main() {
       },
     );
   });
+
+  group('AppUpdateController', () {
+    const apkName = 'wmr-companion-0.3.26-unified-arm64-v8a.apk';
+    const tag = 'v0.3.26';
+    const sumsUrl =
+        'https://github.com/nightcinder/wmr-companion/releases/download/'
+        '$tag/SHA256SUMS';
+    const apkUrl =
+        'https://github.com/nightcinder/wmr-companion/releases/download/'
+        '$tag/$apkName';
+
+    late Directory temp;
+    late Uint8List apkBytes;
+    late Map<String, String?> responses;
+    late _FakeAppInstaller installer;
+
+    String releaseDocument({String tagName = tag}) => jsonEncode({
+      'tag_name': tagName,
+      'assets': [
+        {'name': apkName, 'browser_download_url': apkUrl},
+        {'name': 'SHA256SUMS', 'browser_download_url': sumsUrl},
+      ],
+    });
+
+    ProviderContainer makeUpdateContainer({
+      String running = '0.3.25+30',
+      bool allowed = true,
+    }) {
+      installer = _FakeAppInstaller()..allowed = allowed;
+      return ProviderContainer(
+        overrides: [
+          appVersionProvider.overrideWith((ref) async => running),
+          appReleaseCheckerProvider.overrideWithValue(
+            AppReleaseChecker(
+              fetch: (uri) async => responses[uri.toString()],
+              download: (uri, destination) async =>
+                  destination.writeAsBytes(apkBytes),
+              tempDirectory: () async => temp,
+              clock: () => DateTime.utc(2026, 11, 13, 12),
+            ),
+          ),
+          appInstallerProvider.overrideWithValue(installer),
+        ],
+      );
+    }
+
+    setUp(() async {
+      temp = await Directory.systemTemp.createTemp('app_update_controller');
+      apkBytes = Uint8List.fromList(List.generate(1024, (i) => i % 251));
+      installer = _FakeAppInstaller();
+      responses = {
+        appLatestReleaseUrl: releaseDocument(),
+        sumsUrl: '${sha256.convert(apkBytes)}  $apkName\n',
+      };
+    });
+
+    tearDown(() async {
+      if (await temp.exists()) await temp.delete(recursive: true);
+    });
+
+    test('a manual check offers a newer release', () async {
+      final container = makeUpdateContainer(running: '0.3.24+29');
+      addTearDown(container.dispose);
+
+      await container.read(appUpdateProvider.notifier).check();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.available);
+      expect(state.release?.version.toString(), '0.3.26');
+      expect(state.message, contains('0.3.26'));
+    });
+
+    test('a manual check reports the running release as latest', () async {
+      responses[appLatestReleaseUrl] = releaseDocument(tagName: 'v0.3.25');
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+
+      await container.read(appUpdateProvider.notifier).check();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.upToDate);
+      expect(state.message, contains('0.3.25'));
+    });
+
+    test('a manual check fails loudly when GitHub is unreachable', () async {
+      responses[appLatestReleaseUrl] = null;
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+
+      await container.read(appUpdateProvider.notifier).check();
+
+      expect(container.read(appUpdateProvider).phase, AppUpdatePhase.failed);
+      expect(container.read(appUpdateProvider).message, contains('GitHub'));
+    });
+
+    test('without install permission it opens Settings instead', () async {
+      final container = makeUpdateContainer(allowed: false);
+      addTearDown(container.dispose);
+
+      await container.read(appUpdateProvider.notifier).installLatest();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.permissionRequired);
+      expect(state.release?.version.toString(), '0.3.26');
+      expect(installer.settingsOpened, isTrue);
+      expect(installer.installed, isEmpty);
+    });
+
+    test(
+      'a settings screen that will not open is not an unhandled error',
+      () async {
+        final container = makeUpdateContainer(allowed: false);
+        addTearDown(container.dispose);
+        installer.settingsError = PlatformException(
+          code: 'settings_unavailable',
+        );
+
+        await container.read(appUpdateProvider.notifier).installLatest();
+
+        final state = container.read(appUpdateProvider);
+        expect(state.phase, AppUpdatePhase.permissionRequired);
+        expect(state.release?.version.toString(), '0.3.26');
+        expect(installer.settingsOpened, isTrue);
+        expect(installer.installed, isEmpty);
+      },
+    );
+
+    test('a platform without an installer refuses the install', () async {
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+      installer.selfInstallSupported = false;
+
+      await container.read(appUpdateProvider.notifier).installLatest();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.failed);
+      expect(state.message, contains('Android'));
+      expect(installer.settingsOpened, isFalse);
+      expect(installer.installed, isEmpty);
+    });
+
+    test('a double tap starts one install', () async {
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+      installer.canInstallGate = Completer<void>();
+      final controller = container.read(appUpdateProvider.notifier);
+
+      final first = controller.installLatest();
+      final second = controller.installLatest();
+      installer.canInstallGate!.complete();
+      await Future.wait([first, second]);
+
+      expect(installer.installed, hasLength(1));
+      expect(container.read(appUpdateProvider).phase, AppUpdatePhase.installed);
+    });
+
+    test('a verified APK is handed to the system installer', () async {
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+
+      await container.read(appUpdateProvider.notifier).installLatest();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.installed);
+      expect(installer.installed, hasLength(1));
+      expect(installer.installed.single, endsWith(apkName));
+    });
+
+    test('a digest mismatch never reaches the installer', () async {
+      responses[sumsUrl] = '${'0' * 64}  $apkName\n';
+      final container = makeUpdateContainer();
+      addTearDown(container.dispose);
+
+      await container.read(appUpdateProvider.notifier).installLatest();
+
+      final state = container.read(appUpdateProvider);
+      expect(state.phase, AppUpdatePhase.failed);
+      expect(state.message, contains('SHA-256'));
+      expect(installer.installed, isEmpty);
+    });
+  });
+}
+
+/// Records what the platform installer was asked to do.
+class _FakeAppInstaller extends AppInstaller {
+  bool allowed = true;
+  bool selfInstallSupported = true;
+  bool settingsOpened = false;
+  PlatformException? settingsError;
+  Completer<void>? canInstallGate;
+  final List<String> installed = [];
+
+  @override
+  bool get supportsSelfInstall => selfInstallSupported;
+
+  @override
+  Future<bool> canRequestPackageInstalls() async {
+    final gate = canInstallGate;
+    if (gate != null) await gate.future;
+    return allowed;
+  }
+
+  @override
+  Future<void> openUnknownSourcesSettings() async {
+    settingsOpened = true;
+    final error = settingsError;
+    if (error != null) throw error;
+  }
+
+  @override
+  Future<void> installApk(String path) async {
+    installed.add(path);
+  }
 }
 
 /// A Wi-Fi leg that is reachable but refuses every dial, so the composite has
