@@ -144,6 +144,8 @@ the phone Neckband Remote application.
 After you grant the permission, select **Allow installs** to start the download. Android shows the
 system install dialog. Select Update to finish the installation.
 
+For Raspberry Pi bridge update checks and pre-release installs, read [Bridge update checks and pre-release installs](BRIDGE_UPDATES.md).
+
 ## CI release: tag to downloadable APK 
 
 Pushing a `v*` tag runs one build job in `.github/workflows/ci.yml`; no local
