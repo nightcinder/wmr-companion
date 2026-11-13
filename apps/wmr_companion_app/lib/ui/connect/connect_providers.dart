@@ -1842,7 +1842,8 @@ class BridgeReleaseChecker {
   final Duration requestTimeout;
 
   ({DateTime at, BridgeReleaseLookup lookup, bool includePreReleases})? _cached;
-  DateTime? _lastForcedAt;
+  ({DateTime at, Future<BridgeReleaseLookup> lookup, bool includePreReleases})?
+  _lastForced;
 
   /// The newest release, served from the 1 h cache when one matches
   /// [includePreReleases].
@@ -1859,20 +1860,25 @@ class BridgeReleaseChecker {
   /// Asks GitHub again, bypassing the cache.
   ///
   /// Inside [forcedCheckFloor] of the previous forced check the last matching
-  /// result is returned instead, so repeated taps cost no request.
-  Future<BridgeReleaseLookup> checkNow({
-    bool includePreReleases = false,
-  }) async {
+  /// result is returned instead, so repeated taps cost no request. That holds
+  /// for failures and for a check still in flight too: a double-tap or a retry
+  /// after an error is served from the previous forced request instead of
+  /// hitting GitHub again.
+  Future<BridgeReleaseLookup> checkNow({bool includePreReleases = false}) {
     final now = _clock();
-    final last = _lastForcedAt;
-    if (last != null && now.difference(last) < forcedCheckFloor) {
-      final cached = _cached;
-      if (cached != null && cached.includePreReleases == includePreReleases) {
-        return cached.lookup;
-      }
+    final last = _lastForced;
+    if (last != null &&
+        last.includePreReleases == includePreReleases &&
+        now.difference(last.at) < forcedCheckFloor) {
+      return last.lookup;
     }
-    _lastForcedAt = now;
-    return _query(includePreReleases: includePreReleases);
+    final lookup = _query(includePreReleases: includePreReleases);
+    _lastForced = (
+      at: now,
+      lookup: lookup,
+      includePreReleases: includePreReleases,
+    );
+    return lookup;
   }
 
   Future<BridgeReleaseLookup> _query({required bool includePreReleases}) async {

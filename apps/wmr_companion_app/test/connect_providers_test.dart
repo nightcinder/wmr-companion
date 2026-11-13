@@ -855,6 +855,55 @@ void main() {
       await checker.lookup();
       expect(fetches, 3, reason: 'the forced result refreshed the cache');
     });
+
+    test('a failed forced check is also debounced for 30 seconds', () async {
+      var fetches = 0;
+      var now = DateTime(2026, 11, 10, 12);
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async {
+          fetches++;
+          throw StateError('offline');
+        },
+        clock: () => now,
+      );
+
+      final first = await checker.checkNow();
+      expect(first.error, BridgeReleaseChecker.unreachableError);
+      expect(fetches, 1);
+
+      final retry = await checker.checkNow();
+      expect(retry.error, BridgeReleaseChecker.unreachableError);
+      expect(retry.checkedAt, first.checkedAt);
+      expect(
+        fetches,
+        1,
+        reason: 'a retry inside the floor reuses the failed forced result',
+      );
+
+      now = now.add(const Duration(seconds: 31));
+      await checker.checkNow();
+      expect(fetches, 2, reason: 'after the floor a new request is allowed');
+    });
+
+    test('concurrent forced checks share one in-flight request', () async {
+      var fetches = 0;
+      final gate = Completer<void>();
+      final checker = BridgeReleaseChecker(
+        fetch: (_) async {
+          fetches++;
+          await gate.future;
+          return '{"tag_name":"v0.3.20"}';
+        },
+      );
+
+      final first = checker.checkNow();
+      final second = checker.checkNow();
+      gate.complete();
+
+      expect((await first).version?.toString(), '0.3.20');
+      expect((await second).version?.toString(), '0.3.20');
+      expect(fetches, 1, reason: 'the second tap joins the first request');
+    });
   });
 
   group('BridgeUpdateSettings', () {
