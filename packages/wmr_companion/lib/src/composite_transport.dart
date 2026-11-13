@@ -284,11 +284,13 @@ class CompositeBleTransport implements BleTransport {
           await _activateBle(route);
           return;
         } catch (error) {
+          if (route.bleDeviceId == bleId) await _rejectBle(route);
           bleError = error;
         }
       }
     } finally {
       route.switching = false;
+      _kickUpgrade(route);
     }
 
     _setState(route, BleConnectionState.disconnected);
@@ -705,13 +707,19 @@ class CompositeBleTransport implements BleTransport {
     await _switchChannels(route, _Lane.ble);
     _startUpgrade(route);
     _setState(route, BleConnectionState.connected);
+  }
+
+  /// Runs the FF16-triggered upgrade kick once the switch that activated BLE
+  /// has released `route.switching`. Kicking inside [_activateBle] would hit
+  /// the guard in [_attemptUpgrade] while that switch still holds the route.
+  void _kickUpgrade(_Route route) {
+    if (!route.upgradeNow) return;
+    route.upgradeNow = false;
+    if (route.active != _Lane.ble) return;
     // An FF16 endpoint document names the LAN hosts during the BLE dial, so
     // try them at once instead of waiting for the first periodic tick. A
     // failed attempt leaves the timer to keep retrying.
-    if (route.upgradeNow) {
-      route.upgradeNow = false;
-      unawaited(_attemptUpgrade(route));
-    }
+    unawaited(_attemptUpgrade(route));
   }
 
   Future<void> _switchChannels(_Route route, _Lane to) async {
@@ -798,12 +806,14 @@ class CompositeBleTransport implements BleTransport {
           await _activateBle(route);
           return;
         } catch (_) {
+          if (route.bleDeviceId == bleId) await _rejectBle(route);
           // Try the next scanned bridge before giving up the session.
         }
       }
       await _lose(route);
     } finally {
       route.switching = false;
+      _kickUpgrade(route);
       if (identical(route.switchingDone, switchingDone)) {
         route.switchingDone = null;
       }
@@ -860,15 +870,39 @@ class CompositeBleTransport implements BleTransport {
 
   Future<void> _attemptUpgrade(_Route route) async {
     if (_disposed || route.intentional || route.upgrading) return;
+    // A failover or loss owns the route right now; it will kick again if
+    // BLE is the lane it leaves active.
+    if (route.switching) return;
     if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
     route.upgrading = true;
     try {
       final id = await _tryTcp(route, route.tcpCandidates.toList());
-      if (id != null) await _activateTcp(route, id);
+      if (id == null) return;
+      if (_disposed ||
+          route.intentional ||
+          route.switching ||
+          route.active != _Lane.ble) {
+        // A drop or failover took the route while this probe was dialling.
+        // Close the probe rather than revive a route that has moved on.
+        await _discardTcpProbe(route, id);
+        return;
+      }
+      await _activateTcp(route, id);
     } catch (_) {
       // Stay on BLE; the next tick retries.
     } finally {
       route.upgrading = false;
+    }
+  }
+
+  Future<void> _discardTcpProbe(_Route route, String id) async {
+    // Never close a socket that the route is actively using over TCP.
+    if (route.active == _Lane.tcp) return;
+    if (route.tcpDeviceId == id) route.tcpDeviceId = null;
+    try {
+      await tcp.disconnect(id);
+    } catch (_) {
+      // The probe socket may already be gone.
     }
   }
 
