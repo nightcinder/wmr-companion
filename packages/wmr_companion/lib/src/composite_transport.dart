@@ -920,8 +920,10 @@ class CompositeBleTransport implements BleTransport {
   }
 
   Future<void> _discardTcpProbe(_Route route, String id) async {
-    // Never close a socket that the route is actively using over TCP.
-    if (route.active == _Lane.tcp) return;
+    // Never close the socket the route is actively using over TCP. A TCP
+    // route on a different candidate does not own this probe's socket, so
+    // the probe must still be closed.
+    if (route.active == _Lane.tcp && route.tcpDeviceId == id) return;
     if (route.tcpDeviceId == id) route.tcpDeviceId = null;
     try {
       await tcp.disconnect(id);
