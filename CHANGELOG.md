@@ -3,7 +3,11 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog. This file records the release as a whole.
 
-## Unreleased
+## 0.3.25+31
+
+Release candidate 2 for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
+(ONY-1322). It carries the changes merged since v0.3.25-rc.1 (#295, #297,
+#300-#317).
 
 - The Gamepad screen streams the mapped controllers to DroidDeck as
   experimental `v0` external 6DoF input, over the local `droiddeck-ext-xr`
@@ -18,6 +22,23 @@ keeps its own changelog. This file records the release as a whole.
   buttons, and axes to SteamVR.
 - `docs/GAMEPAD.md` documents enabling the stream, the 3DoF fallback, the
   missing PadBridge claim, and how to build a testable APK (ONY-1351).
+- The app checks GitHub Releases, verifies the unified APK's SHA-256, and
+  installs the verified update through Android PackageInstaller, with a
+  dismissible banner and a manual check (ONY-1364, ONY-1363, ONY-1365).
+- `wmr_core` records the raw FF12/FF14 IMU stream to a CRC-32 binary log and
+  reads it back with `WmrImuReader` (#307).
+- DroidDeck stamps each hand's `sampleTimeNs` from the transport clock, sends
+  the body-local view-frame angular velocity, and sends through a non-blocking
+  four-slot queue that reopens the socket after 500 ms of failures (#309,
+  #310, #311).
+- The BLE transport releases a leaked candidate link, never closes a TCP probe
+  that a switch or a newer dial owns, and keeps the BLE FF15 subscription and
+  its CCCD open until the answers to pings already written on BLE drain
+  (#308, #313). A Bluetooth connect failure now reports on the Bluetooth tab
+  instead of leaving the retry campaign stalled (ONY-1394).
+- `docs/IMU_LOG.md`, `docs/TIMELINE.md`, and `docs/TEST_PLAN_PI_WMR.md`
+  document the IMU log format, the sensor timeline, and the Pi + WMR test
+  plan; the shared golden vector file lands with them (#304).
 
 ## 0.3.25+30
 
