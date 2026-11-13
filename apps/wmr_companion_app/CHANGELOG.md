@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.25+31
+
+Release candidate 2 for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
+(ONY-1322). It carries the changes merged since v0.3.25-rc.1 (#300-#317).
+
+- The Gamepad screen streams the mapped controllers to DroidDeck as
+  experimental `v0` external 6DoF input (ONY-1351).
+- The app checks GitHub Releases, verifies the unified APK's SHA-256, and
+  installs the verified update through Android PackageInstaller, with a
+  dismissible banner and a manual check (ONY-1364, ONY-1363, ONY-1365).
+- The BLE transport releases a leaked candidate link, never closes a TCP probe
+  that a switch or a newer dial owns, and keeps the BLE FF15 subscription and
+  its CCCD open until the answers to pings already written on BLE drain
+  (#308, #313). A Bluetooth connect failure now reports on the Bluetooth tab
+  instead of leaving the retry campaign stalled (ONY-1394).
+
 ## 0.3.25+30
 
 Release candidate for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
