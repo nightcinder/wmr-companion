@@ -5,7 +5,19 @@ keeps its own changelog. This file records the release as a whole.
 
 ## Unreleased
 
-- Add experimental DroidDeck v0 6DoF Unix domain socket transport sink and input API in `wmr_core` and `wmr_companion` (#300, #301). The sink connects to DroidDeck over an abstract Unix domain socket to stream controller poses, buttons, and axes to SteamVR.
+- The Gamepad screen streams the mapped controllers to DroidDeck as
+  experimental `v0` external 6DoF input, over the local `droiddeck-ext-xr`
+  socket. Starting the stream disables the Bluetooth HID peripheral role.
+  Stopping the stream restores the role only if the stream turned it off.
+  Android HID peripheral mode breaks the local Bluetooth link DroidDeck needs.
+  Position comes from the live 6DoF fuser when a tracking source is attached.
+  Hands without a tracked position are sent rotation-only (ONY-1351).
+- Add experimental DroidDeck v0 6DoF Unix domain socket transport sink and input
+  API in `wmr_core` and `wmr_companion` (#300, #301). The sink connects to
+  DroidDeck over an abstract Unix domain socket to stream controller poses,
+  buttons, and axes to SteamVR.
+- `docs/GAMEPAD.md` documents enabling the stream, the 3DoF fallback, the
+  missing PadBridge claim, and how to build a testable APK (ONY-1351).
 
 ## 0.3.25+30
 

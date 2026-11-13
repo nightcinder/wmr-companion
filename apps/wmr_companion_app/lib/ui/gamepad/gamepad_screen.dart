@@ -5,6 +5,7 @@ import 'package:wmr_core/domain/gamepad.dart';
 
 import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 
+import '../../hid/droiddeck_output.dart';
 import '../../hid/hid_output.dart';
 import '../debug/debug_providers.dart';
 import '../debug/stream_settings.dart';
@@ -30,8 +31,8 @@ class GamepadScreen extends ConsumerWidget {
           Text(
             records
                 ? 'Both controllers mapped onto one two-stick gamepad, inside '
-                      'the app only. Thresholds are guesses; not checked on '
-                      'hardware.'
+                      'the app, or streamed out from the panels below. '
+                      'Thresholds are guesses; not checked on hardware.'
                 : 'Needs the decoded stream: switch to FF12 or FF14 on the '
                       'debug screen.',
             style: theme.textTheme.bodySmall,
@@ -40,6 +41,7 @@ class GamepadScreen extends ConsumerWidget {
           GamepadView(state),
           const SizedBox(height: 16),
           HidOutputPanel(source: source),
+          DroidDeckPanel(source: source),
           const GamepadSettingsPanel(),
         ],
       ),
@@ -420,6 +422,7 @@ class HidOutputPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final out = ref.watch(hidOutputProvider);
+    final droidDeck = ref.watch(droidDeckOutputProvider);
     final n = ref.read(hidOutputProvider.notifier);
     final status = out.status;
     final small = Theme.of(context).textTheme.bodySmall;
@@ -444,7 +447,9 @@ class HidOutputPanel extends ConsumerWidget {
           children: [
             if (!out.running)
               FilledButton(
-                onPressed: unsupported ? null : () => n.start(source),
+                onPressed: unsupported || droidDeck.running
+                    ? null
+                    : () => n.start(source),
                 child: const Text('Start'),
               )
             else
@@ -492,6 +497,13 @@ class HidOutputPanel extends ConsumerWidget {
             'reports sent ${out.reportsSent}  errors ${out.sendErrors}',
             style: small?.copyWith(fontFamily: 'monospace'),
           ),
+        if (droidDeck.running)
+          Text(
+            'Off while DroidDeck streaming is on: the Bluetooth HID peripheral '
+            'role breaks the local link that stream needs. It comes back when '
+            'the stream stops, if the stream turned it off.',
+            style: small,
+          ),
       ],
     );
   }
@@ -502,5 +514,102 @@ class HidOutputPanel extends ConsumerWidget {
     HidState.registered => 'Ready, no host connected',
     HidState.connected => 'Connected to ${s.deviceName ?? 'a host'}',
     HidState.error => 'Error: ${s.message ?? 'unknown'}',
+  };
+}
+
+/// Starts and stops the DroidDeck `v0` external 6DoF stream.
+class DroidDeckPanel extends ConsumerWidget {
+  const DroidDeckPanel({super.key, required this.source});
+
+  final DebugSource source;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final out = ref.watch(droidDeckOutputProvider);
+    final n = ref.read(droidDeckOutputProvider.notifier);
+    final small = Theme.of(context).textTheme.bodySmall;
+    final streaming = out.status == DroidDeckStatus.streaming;
+    return ExpansionTile(
+      title: const Text('DroidDeck 6DoF streaming'),
+      subtitle: Text(_describe(out)),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Sends the mapped controllers to DroidDeck over the local '
+          '"droiddeck-ext-xr" socket, as the experimental v0 external XR input '
+          'stream. DroidDeck must be running, and this app must be installed '
+          'as com.onyxlens.wmr_companion (or .debug), or DroidDeck rejects the '
+          'connection. Starting turns the Bluetooth HID gamepad off and '
+          'stopping turns it back on; Android HID peripheral mode breaks the '
+          'local Bluetooth link this stream needs.',
+          style: small,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (!out.running)
+              FilledButton(
+                onPressed: () => n.start(source),
+                child: const Text('Start streaming'),
+              )
+            else
+              FilledButton.tonal(
+                onPressed: n.stop,
+                child: const Text('Stop streaming'),
+              ),
+          ],
+        ),
+        if (out.message != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            out.message!,
+            style: small?.copyWith(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        if (out.running || out.packetsSent > 0) ...[
+          const SizedBox(height: 8),
+          Text(
+            'packets sent ${out.packetsSent}  errors ${out.sendErrors}',
+            style: small?.copyWith(fontFamily: 'monospace'),
+          ),
+          Text(
+            'pose LEFT ${_pose(out.leftPosition)}  '
+            'RIGHT ${_pose(out.rightPosition)}',
+            style: small?.copyWith(fontFamily: 'monospace'),
+          ),
+          if (!out.leftPosition || !out.rightPosition)
+            Text(
+              'A hand without a tracked position is sent rotation-only (3DoF).'
+              ' Pick a tracking source on the debug screen for 6DoF poses.',
+              style: small,
+            ),
+          Text(
+            'Needs the decoded stream: switch to FF12 or FF14 on the debug '
+            'screen.',
+            style: small,
+          ),
+        ],
+        if (streaming) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Streaming while the app is open and this screen stays bound.',
+            style: small,
+          ),
+        ],
+      ],
+    );
+  }
+
+  static String _pose(bool tracked) => tracked ? '6DoF' : '3DoF';
+
+  static String _describe(DroidDeckOutputState s) => switch (s.status) {
+    DroidDeckStatus.idle => 'Off',
+    DroidDeckStatus.connecting => 'Connecting',
+    DroidDeckStatus.streaming => 'Streaming to DroidDeck',
+    DroidDeckStatus.error => 'Error: ${s.message ?? 'unknown'}',
   };
 }

@@ -11,7 +11,7 @@ Current full release: v0.3.24 (signed unified Android APK). Pre-release: v0.3.25
 - **Connect:** scan for `WMR Bridge` over BLE, scan the LAN for a Pi bridge, or connect to a Linux/Pi bridge daemon over Wi-Fi. On BLE, negotiate MTU, request high connection priority, and subscribe to the raw (FF11), decoded (FF12), or batched (FF14) stream. On Wi-Fi, the daemon serves the same streams over WebSocket. Streams are mutually exclusive.
 - **Debug:** per-hand 3D orientation, quaternion and Euler readout, packet rate, sequence gaps, missing-report count, dt statistics, gyro bias, axis-mapping toggles, and "Reset orientation". Yaw drifts without a magnetometer.
 - **Latency:** inter-arrival, sequence gaps, tick-based loss, and the FF15 echo round trip, with CSV and JSON export.
-- **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, and optional Bluetooth HID output. Not run on hardware. At the library layer, `wmr_core` and `wmr_companion` export an experimental DroidDeck v0 6DoF Unix domain socket transport sink (#300, #301), but the app UI does not construct it yet.
+- **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, optional Bluetooth HID output, and experimental DroidDeck `v0` 6DoF streaming over a local socket. Not run on hardware.
 - **Capture:** guided raw capture from FF11 in the same file format as the firmware tool, shareable from the phone. The diagnostic bundle includes a device environment snapshot for URXR One day-one checks.
 
 A fake bridge (raw and decoded) drives tests without hardware. The app only connects to real devices.

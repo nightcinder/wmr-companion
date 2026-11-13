@@ -129,6 +129,29 @@ The API supports two local transports:
 
 The companion uses the abstract socket only. The UDP pairing token sits in DroidDeck's private files directory, which the companion's UID cannot read, and DroidDeck has no UI that displays it. `openDroidDeckXrTransport` therefore has no UDP path: if the abstract socket cannot be opened it throws `DroidDeckXrTransportException` naming the socket and the expected `applicationId`, rather than falling back.
 
+### Enabling it in the companion app
+
+The stream is live in the reference app, not only in the packages:
+
+1. Connect to a bridge and switch the stream to FF12 or FF14 on the debug screen. Raw (FF11) mode carries no samples, so nothing is sent.
+2. Open the Gamepad screen and expand **DroidDeck 6DoF streaming**, then press **Start streaming**.
+3. Start DroidDeck on the same device. The panel shows the packet and error counts and, per hand, whether the last packet carried a position (`6DoF`) or not (`3DoF`).
+
+Starting the stream disables the phone's Bluetooth HID peripheral role (Option A), and stopping it restores the role only if this session turned it off. While the stream runs, the Bluetooth HID panel's **Start** button is disabled because Android's HID peripheral mode breaks the local Bluetooth host link DroidDeck needs (ONY-1235); stop the stream to use it. A HID start from any other route ends the stream instead.
+
+Position comes from the live 6DoF fuser: attach a tracking source on the debug screen and both hands are sent with tracked positions. With no tracking source the pipeline is orientation only, and the packet carries zero positions and a valid rotation; SteamVR still tracks rotation for that hand. The companion sends no PadBridge claim packet: the flat gamepad it would exclude is its own HID role, which is off during the stream. Excluding a bridge that Android binds as an `InputDevice` (Option D) needs that device's vendor and product ids, which the app cannot read without a new platform call, and is still open.
+
+### Building a testable APK
+
+No DroidDeck rebuild is needed for the companion side: the sink speaks the `v0` interface of the `nightcinder/DroidDeck` `android-xr` fork at `eb03e88`, which has to be installed on the same device.
+
+```
+cd apps/wmr_companion_app
+tool/build_flavor.sh unified --debug
+```
+
+The debug APK is `com.onyxlens.wmr_companion.debug`, which DroidDeck approves by default, so it can be installed beside a release build. A release APK (`tool/build_flavor.sh unified --release`) keeps `com.onyxlens.wmr_companion` and needs the signing keys described in `docs/RELEASE_SIGNING.md`. A different `applicationId` is refused by `SO_PEERCRED` and the panel reports the connect failure.
+
 ### Header layout
 
 Every packet begins with a 40-byte header.
