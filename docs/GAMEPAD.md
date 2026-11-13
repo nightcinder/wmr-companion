@@ -127,6 +127,8 @@ The API supports two local transports:
 1. Primary transport: abstract Unix domain sequential packet socket (`SOCK_SEQPACKET`) at `droiddeck-ext-xr`. Peer authentication uses `SO_PEERCRED`. The host approves `com.onyxlens.wmr_companion` and `com.onyxlens.wmr_companion.debug` by default. Other apps require explicit approval.
 2. Fallback transport: localhost UDP on `127.0.0.1:29842`. Every datagram requires the 32-bit session pairing token at byte offset 32. DroidDeck writes the token to `droiddeck-ext-xr.token` in its runtime directory.
 
+The companion uses the abstract socket only. The UDP pairing token sits in DroidDeck's private files directory, which the companion's UID cannot read, and DroidDeck has no UI that displays it. `openDroidDeckXrTransport` therefore has no UDP path: if the abstract socket cannot be opened it throws `DroidDeckXrTransportException` naming the socket and the expected `applicationId`, rather than falling back.
+
 ### Header layout
 
 Every packet begins with a 40-byte header.
