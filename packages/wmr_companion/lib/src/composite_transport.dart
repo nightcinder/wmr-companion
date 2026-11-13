@@ -33,7 +33,8 @@ enum CompositeLeg { tcp, ble }
 /// Following the per-client CCCD rule, the composite turns its own BLE
 /// notifications off when TCP becomes active. It writes 0x0000 only to the
 /// characteristics it had enabled; it never asks the bridge to silence other
-/// clients.
+/// clients. FF15 (echo) is the exception: it stays on until the answers to
+/// pings already written on BLE have landed, then goes off too.
 ///
 /// ## Clock
 ///
@@ -47,6 +48,7 @@ class CompositeBleTransport implements BleTransport {
     this.upgradeInterval = const Duration(seconds: 2),
     this.bleScanWait = const Duration(seconds: 5),
     this.tcpProbeBudget = const Duration(seconds: 3),
+    this.echoDrainTimeout = const Duration(milliseconds: 1200),
     this.lanAvailable,
     this.disposeBle = true,
     this.onTokenLearned,
@@ -84,6 +86,16 @@ class CompositeBleTransport implements BleTransport {
   /// a dead address cannot consume the whole budget before a live one is
   /// tried. A non-positive duration disables the TCP probe entirely.
   final Duration tcpProbeBudget;
+
+  /// How long a BLE FF15 echo subscription is kept open after the route moves
+  /// to TCP, waiting for the answers to pings already written on BLE.
+  ///
+  /// The bridge answers FF15 only while its CCCD is on, so cancelling the
+  /// subscription during the upgrade drops the last ping and the app reports a
+  /// timeout. Once the answers land (or this window closes) the subscription
+  /// is cancelled and the CCCD turned off. A non-positive duration cancels it
+  /// at once.
+  final Duration echoDrainTimeout;
 
   /// Whether a LAN interface is currently up, checked before any TCP probe.
   ///
@@ -465,6 +477,12 @@ class CompositeBleTransport implements BleTransport {
     bool withoutResponse = false,
   }) {
     final active = _requireActive(deviceId);
+    final route = _routes[deviceId];
+    final echo =
+        route != null &&
+        identical(active.transport, ble) &&
+        characteristicUuid.toLowerCase() == wmrBridgeEchoCharUuid;
+    if (echo) route.echoRequestSent();
     return active.transport.write(
       active.deviceId,
       serviceUuid,
@@ -736,24 +754,49 @@ class CompositeBleTransport implements BleTransport {
     if (route.active == to && currentId == nextId) return;
 
     final live = route.channels.where((channel) => channel.isLive).toList();
+    // FF15 echo replies to pings already written on BLE can land after the
+    // route moves to TCP. Keep that subscription (and its CCCD) open until the
+    // answers drain instead of cancelling it here.
+    final draining = <_Channel>[];
+    if (to == _Lane.tcp && route.active == _Lane.ble) {
+      for (final channel in live) {
+        if (channel.isEcho) draining.add(channel);
+      }
+    }
     if (to == _Lane.tcp) {
-      await _disableBleNotifications(route);
+      await _disableBleNotifications(
+        route,
+        keep: draining.map((channel) => channel.refKey).toSet(),
+      );
     }
     for (final channel in live) {
-      await channel.detach();
+      if (draining.contains(channel)) {
+        channel.handOffBleToDrain();
+      } else {
+        await channel.detach();
+      }
     }
     route.active = to;
     for (final channel in live) {
       channel.attach();
     }
+    for (final channel in draining) {
+      unawaited(channel.drainBle(route, echoDrainTimeout));
+    }
   }
 
-  Future<void> _disableBleNotifications(_Route route) async {
+  Future<void> _disableBleNotifications(
+    _Route route, {
+    Set<String> keep = const {},
+  }) async {
     final bleId = route.bleDeviceId;
     final keys = route.bleRefs.keys.toList();
-    route.bleRefs.clear();
+    for (final key in keys) {
+      if (!keep.contains(key)) route.bleRefs.remove(key);
+    }
     if (bleId == null) return;
     for (final key in keys) {
+      if (keep.contains(key)) continue;
       final separator = key.indexOf('|');
       if (separator < 0) continue;
       final service = key.substring(0, separator);
@@ -870,6 +913,7 @@ class CompositeBleTransport implements BleTransport {
     unawaited(bleSub?.cancel());
     final channels = List<_Channel>.of(route.channels);
     for (final channel in channels) {
+      await channel.dropBleDrain();
       await channel.detach();
     }
     route.active = null;
@@ -891,12 +935,13 @@ class CompositeBleTransport implements BleTransport {
       // every joiner). Decide only once that switch has released the route:
       // whoever adopted the socket keeps it, and nobody else may close it.
       await _awaitSwitchRelease(route);
-      if (_disposed ||
-          route.intentional ||
-          route.switching ||
-          route.active != _Lane.ble) {
-        // The route moved on while this probe was dialling. Close the probe
-        // unless the route is now using it over TCP.
+      if (route.switching) {
+        // That switch published no completion, so the route is still not
+        // settled: it may adopt this dial, and the probe must not close it.
+        return;
+      }
+      if (_disposed || route.intentional || route.active != _Lane.ble) {
+        // The route moved on while this probe was dialling.
         await _discardTcpProbe(route, id);
         return;
       }
@@ -920,10 +965,16 @@ class CompositeBleTransport implements BleTransport {
   }
 
   Future<void> _discardTcpProbe(_Route route, String id) async {
+    // A switch owns the route right now and may still adopt this dial, so the
+    // socket is not the probe's to close.
+    if (route.switching) return;
     // Never close the socket the route is actively using over TCP. A TCP
     // route on a different candidate does not own this probe's socket, so
     // the probe must still be closed.
     if (route.active == _Lane.tcp && route.tcpDeviceId == id) return;
+    // A newer probe or recovery dial owns this candidate; closing it here
+    // would tear down the dial that joiner is about to adopt.
+    if (route.tcpDials.containsKey(id)) return;
     if (route.tcpDeviceId == id) route.tcpDeviceId = null;
     try {
       await tcp.disconnect(id);
@@ -1099,6 +1150,41 @@ class _Route {
   String? bleStateId;
   Timer? upgradeTimer;
 
+  /// FF15 pings written on BLE whose answer has not arrived yet.
+  int echoRequestsInFlight = 0;
+
+  /// Completed when [echoRequestsInFlight] reaches zero, so the drain that
+  /// follows a BLE-to-TCP switch can cancel the BLE subscription at the right
+  /// moment instead of dropping the answer.
+  Completer<void>? echoDrained;
+
+  void echoRequestSent() {
+    echoRequestsInFlight++;
+    echoDrained ??= Completer<void>();
+  }
+
+  void echoAnswerReceived() {
+    if (echoRequestsInFlight > 0) echoRequestsInFlight--;
+    if (echoRequestsInFlight > 0) return;
+    final done = echoDrained;
+    echoDrained = null;
+    if (done != null && !done.isCompleted) done.complete();
+  }
+
+  /// Waits for the answers to pings already written on BLE, bounded by
+  /// [timeout] so a bridge that never answers cannot pin the CCCD on forever.
+  Future<void> waitForEchoDrain(Duration timeout) async {
+    if (echoRequestsInFlight == 0) return;
+    final done = echoDrained ??= Completer<void>();
+    final timer = Timer(timeout, () {
+      if (!done.isCompleted) done.complete();
+    });
+    await done.future;
+    timer.cancel();
+    echoRequestsInFlight = 0;
+    if (identical(echoDrained, done)) echoDrained = null;
+  }
+
   BleTransport? transportFor(_Lane? lane) => switch (lane) {
     _Lane.tcp => tcp,
     _Lane.ble => ble,
@@ -1135,6 +1221,10 @@ class _Channel {
   final String characteristicUuid;
   StreamSubscription<BleNotification>? _subscription;
 
+  /// The BLE subscription kept open across a switch to TCP until the FF15
+  /// answers already in flight have landed.
+  StreamSubscription<BleNotification>? _bleDrain;
+
   late final StreamController<BleNotification> _controller =
       StreamController<BleNotification>.broadcast(
         onListen: attach,
@@ -1148,6 +1238,12 @@ class _Channel {
 
   bool get isLive => _controller.hasListener && !_controller.isClosed;
 
+  /// The FF15 echo characteristic, whose replies may land after a switch.
+  bool get isEcho => characteristicUuid == wmrBridgeEchoCharUuid;
+
+  /// The key used by [_Route.bleRefs] for this channel's CCCD.
+  String get refKey => '$serviceUuid|$characteristicUuid';
+
   void attach() {
     if (_subscription != null) return;
     final lane = route.active;
@@ -1159,6 +1255,7 @@ class _Channel {
           .subscribe(deviceId, serviceUuid, characteristicUuid)
           .listen(
             (notification) {
+              if (isEcho) route.echoAnswerReceived();
               if (_controller.isClosed) return;
               _controller.add(
                 lane == _Lane.ble
@@ -1192,7 +1289,49 @@ class _Channel {
     await subscription?.cancel();
   }
 
+  /// Moves the live BLE subscription out of the active slot so [attach] can
+  /// subscribe on the new lane while the old link stays open.
+  void handOffBleToDrain() {
+    final subscription = _subscription;
+    if (subscription == null) return;
+    _subscription = null;
+    _bleDrain = subscription;
+  }
+
+  /// Cancels a handed-off BLE subscription once its echo answers have drained,
+  /// then releases the CCCD that was kept on for it.
+  Future<void> drainBle(_Route route, Duration timeout) async {
+    if (_bleDrain == null) return;
+    await route.waitForEchoDrain(timeout);
+    final subscription = _bleDrain;
+    if (subscription == null) return;
+    _bleDrain = null;
+    await subscription.cancel();
+    // A fast switch back to BLE re-attached this channel on the same CCCD, so
+    // that subscription now owns the ref and the unsubscribe.
+    if (route.active == _Lane.ble && _subscription != null) return;
+    route.removeBleRef(serviceUuid, characteristicUuid);
+    final bleId = route.bleDeviceId;
+    if (bleId == null) return;
+    try {
+      await route.ble.unsubscribe(bleId, serviceUuid, characteristicUuid);
+    } catch (_) {
+      // The link may already be gone; its CCC went with it.
+    }
+  }
+
+  /// Cancels a handed-off BLE subscription without the CCCD handshake; the
+  /// link that carried it is gone.
+  Future<void> dropBleDrain() async {
+    final drain = _bleDrain;
+    _bleDrain = null;
+    await drain?.cancel();
+  }
+
   Future<void> close() async {
+    final drain = _bleDrain;
+    _bleDrain = null;
+    await drain?.cancel();
     await detach();
     if (!_controller.isClosed) await _controller.close();
   }

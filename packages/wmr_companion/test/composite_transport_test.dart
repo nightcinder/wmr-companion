@@ -1362,4 +1362,78 @@ void main() {
       expect(refusing.disconnectCalls, [_bleDeviceId]);
     },
   );
+
+  test(
+    'keeps the FF15 BLE subscription until an in-flight echo answer lands',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument());
+      tcp.scanResults
+        ..clear()
+        ..add(tcpScanResult());
+      tcp.hellos.clear();
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+        echoDrainTimeout: const Duration(seconds: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      // The ping is written on BLE just before the upgrade. Its answer can only
+      // arrive while the bridge's FF15 CCCD is still on.
+      final ping = Uint8List.fromList([1, 39, 0, 0, 0, 0]);
+      await transport.write(
+        _tcpDeviceId,
+        wmrBridgeServiceUuid,
+        wmrBridgeEchoCharUuid,
+        ping,
+        withoutResponse: true,
+      );
+
+      tcp.failConnect = false;
+      tcp.endpoints.remove(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the BLE-to-TCP upgrade did not happen',
+      );
+
+      // The switch has landed, but the in-flight answer keeps FF15 on BLE.
+      expect(
+        ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+        isTrue,
+        reason: 'the BLE FF15 subscription was cancelled during the switch',
+      );
+      expect(
+        ble.cccLog,
+        isNot(contains('off $wmrBridgeEchoCharUuid')),
+        reason: 'the FF15 CCCD was turned off before the answer landed',
+      );
+
+      final answer = Uint8List.fromList([1, 39, 0, 1, 2, 3]);
+      expect(ble.emit(_bleDeviceId, wmrBridgeEchoCharUuid, answer), isTrue);
+      await _settle();
+      expect(received.last.value, orderedEquals(answer));
+      expect(tcp.emit(_lanDeviceId, wmrBridgeEchoCharUuid, answer), isTrue);
+
+      // The answer drained, so the kept BLE subscription and its CCCD go now.
+      await _waitFor(
+        () => !ble.isSubscribed(_bleDeviceId, wmrBridgeEchoCharUuid),
+        reason: 'the kept FF15 BLE subscription never drained',
+      );
+      expect(ble.cccLog, contains('off $wmrBridgeEchoCharUuid'));
+    },
+  );
 }
