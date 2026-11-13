@@ -501,7 +501,7 @@ class HidOutputPanel extends ConsumerWidget {
           Text(
             'Off while DroidDeck streaming is on: the Bluetooth HID peripheral '
             'role breaks the local link that stream needs. It comes back when '
-            'the stream stops.',
+            'the stream stops, if the stream turned it off.',
             style: small,
           ),
       ],

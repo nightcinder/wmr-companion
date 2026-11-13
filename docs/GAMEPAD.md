@@ -137,7 +137,7 @@ The stream is live in the reference app, not only in the packages:
 2. Open the Gamepad screen and expand **DroidDeck 6DoF streaming**, then press **Start streaming**.
 3. Start DroidDeck on the same device. The panel shows the packet and error counts and, per hand, whether the last packet carried a position (`6DoF`) or not (`3DoF`).
 
-Starting the stream disables the phone's Bluetooth HID peripheral role (Option A), and stopping it restores the role only if this session turned it off. Pressing **Start** on the Bluetooth HID panel during a stream stops the stream instead, because Android's HID peripheral mode breaks the local Bluetooth host link DroidDeck needs (ONY-1235).
+Starting the stream disables the phone's Bluetooth HID peripheral role (Option A), and stopping it restores the role only if this session turned it off. While the stream runs, the Bluetooth HID panel's **Start** button is disabled because Android's HID peripheral mode breaks the local Bluetooth host link DroidDeck needs (ONY-1235); stop the stream to use it. A HID start from any other route ends the stream instead.
 
 Position comes from the live 6DoF fuser: attach a tracking source on the debug screen and both hands are sent with tracked positions. With no tracking source the pipeline is orientation only, and the packet carries zero positions and a valid rotation; SteamVR still tracks rotation for that hand. The companion sends no PadBridge claim packet: the flat gamepad it would exclude is its own HID role, which is off during the stream. Excluding a bridge that Android binds as an `InputDevice` (Option D) needs that device's vendor and product ids, which the app cannot read without a new platform call, and is still open.
 
