@@ -4,14 +4,14 @@ Flutter companion app for ESP32 (BTstack) and Linux/Raspberry Pi (Wi-Fi) WMR mot
 
 The pipeline is split into twelve packages that other apps can import on Android and iOS. The app is the reference consumer. A native Swift framework covers iOS 18+, macOS 12+, and visionOS 1+.
 
-Current release: v0.3.23 (signed unified Android APK). The in-app bridge upgrade needs a WMR_Bridge build with `upgradeCapable`. See [docs/STATUS.md](docs/STATUS.md) for state, hardware results, and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
+Current full release: v0.3.24 (signed unified Android APK). Pre-release: v0.3.25-rc.1. The in-app bridge upgrade needs a WMR_Bridge build with `upgradeCapable`. See [docs/STATUS.md](docs/STATUS.md) for state, hardware results, and roadmap, and [docs/PLAN.md](docs/PLAN.md) for architecture.
 
 ## What is in the app
 
 - **Connect:** scan for `WMR Bridge` over BLE, scan the LAN for a Pi bridge, or connect to a Linux/Pi bridge daemon over Wi-Fi. On BLE, negotiate MTU, request high connection priority, and subscribe to the raw (FF11), decoded (FF12), or batched (FF14) stream. On Wi-Fi, the daemon serves the same streams over WebSocket. Streams are mutually exclusive.
 - **Debug:** per-hand 3D orientation, quaternion and Euler readout, packet rate, sequence gaps, missing-report count, dt statistics, gyro bias, axis-mapping toggles, and "Reset orientation". Yaw drifts without a magnetometer.
 - **Latency:** inter-arrival, sequence gaps, tick-based loss, and the FF15 echo round trip, with CSV and JSON export.
-- **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, and optional Bluetooth HID output. Not run on hardware.
+- **Gamepad:** mapping of both controllers to one gamepad, settings saved to the app documents directory, and optional Bluetooth HID output. An experimental DroidDeck v0 6DoF UDS/UDP sink streams controller input to SteamVR over an abstract Unix socket (#300, #301). Not run on hardware.
 - **Capture:** guided raw capture from FF11 in the same file format as the firmware tool, shareable from the phone. The diagnostic bundle includes a device environment snapshot for URXR One day-one checks.
 
 A fake bridge (raw and decoded) drives tests without hardware. The app only connects to real devices.
