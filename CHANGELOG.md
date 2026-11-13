@@ -3,6 +3,18 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## Unreleased
+
+- The Gamepad screen streams the mapped controllers to DroidDeck as
+  experimental `v0` external 6DoF input, over the local `droiddeck-ext-xr`
+  socket. Starting the stream disables the Bluetooth HID peripheral role and
+  stopping it restores the role only if the stream turned it off, because
+  Android HID peripheral mode breaks the local Bluetooth link DroidDeck needs. Position comes from the live 6DoF fuser
+  when a tracking source is attached; hands without a tracked position are sent
+  rotation-only (ONY-1351).
+- `docs/GAMEPAD.md` documents enabling the stream, the 3DoF fallback, the
+  missing PadBridge claim, and how to build a testable APK (ONY-1351).
+
 ## 0.3.25+30
 
 Release candidate for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
