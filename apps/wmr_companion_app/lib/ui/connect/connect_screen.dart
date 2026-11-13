@@ -179,6 +179,8 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
               tooltip: 'About',
               onSelected: (value) {
                 switch (value) {
+                  case 'update':
+                    unawaited(ref.read(appUpdateProvider.notifier).check());
                   case 'terms':
                     Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -193,6 +195,11 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
                 }
               },
               itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'update',
+                  key: Key('app-check-update'),
+                  child: Text('Check for updates'),
+                ),
                 PopupMenuItem(value: 'terms', child: Text('Terms')),
                 PopupMenuItem(value: 'licences', child: Text('Licences')),
               ],
@@ -295,6 +302,7 @@ class RealPanel extends ConsumerWidget {
           'one at a time. FF14 has not been run on hardware.',
           style: theme.textTheme.bodySmall,
         ),
+        const _AppUpdateBanner(),
         const SizedBox(height: 12),
         SegmentedButton<BridgeTransportKind>(
           segments: const [
@@ -563,6 +571,93 @@ class RealPanel extends ConsumerWidget {
     return version == null
         ? 'Bridge version: not reported'
         : 'Bridge version: $version';
+  }
+}
+
+/// Shown when the latest wmr-companion GitHub release is newer than the
+/// running app, or after a manual check found nothing new. A missing version
+/// on either side stays silent; this is a hint, not a connectivity state.
+///
+/// The button downloads the release, verifies its SHA-256 digest against
+/// `SHA256SUMS`, and asks Android to install it. If installs from this app are
+/// not allowed yet, the banner says so and the button opens that settings
+/// screen instead.
+class _AppUpdateBanner extends ConsumerWidget {
+  const _AppUpdateBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final update = ref.watch(appUpdateProvider);
+    final latest = ref.watch(latestAppReleaseProvider).value;
+    final running = ref.watch(runningAppVersionProvider).value;
+    final newer =
+        latest != null &&
+        running != null &&
+        latest.version.compareTo(running) > 0;
+    if (!newer && update.phase == AppUpdatePhase.idle) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final active = update.busy;
+    final release = update.release ?? (newer ? latest : null);
+    final canInstall =
+        release != null && update.phase != AppUpdatePhase.installed;
+    final label = switch (update.phase) {
+      AppUpdatePhase.downloading => 'Downloading…',
+      AppUpdatePhase.permissionRequired => 'Allow installs',
+      AppUpdatePhase.available => 'Install update',
+      _ => 'Update app',
+    };
+    return Card(
+      key: const Key('app-update-banner'),
+      color: theme.colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              newer
+                  ? 'App update available: $running → ${latest.version}'
+                  : 'App update',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
+            ),
+            if (update.message != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                update.message!,
+                key: const Key('app-update-status'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ],
+            if (canInstall) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                key: const Key('app-upgrade'),
+                onPressed: active
+                    ? null
+                    : () {
+                        unawaited(
+                          ref.read(appUpdateProvider.notifier).installLatest(),
+                        );
+                      },
+                icon: active
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.system_update),
+                label: Text(label),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 
