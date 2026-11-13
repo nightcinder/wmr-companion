@@ -949,6 +949,58 @@ void main() {
     });
   });
 
+  group('BridgeUpdateCheckController', () {
+    test('rechecks the channel chosen while a check is in flight', () async {
+      final gate = Completer<String?>();
+      final channels = <bool>[];
+      final checker = BridgeReleaseChecker(
+        fetch: (uri) async {
+          final includePreReleases = !uri.path.endsWith('/latest');
+          channels.add(includePreReleases);
+          if (channels.length == 1) return gate.future;
+          return includePreReleases
+              ? jsonEncode([
+                  {
+                    'tag_name': 'v0.3.27-rc.2',
+                    'draft': false,
+                    'prerelease': true,
+                  },
+                ])
+              : '{"tag_name":"v0.3.19"}';
+        },
+        clock: () => DateTime(2026, 11, 13, 14, 32),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          bridgeUpdateSettingsStoreProvider.overrideWithValue(
+            _MemorySettingsStore(value: true),
+          ),
+          bridgeReleaseCheckerProvider.overrideWithValue(checker),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(bridgeUpdateSettingsProvider.notifier).ready;
+
+      final running = container
+          .read(bridgeUpdateCheckProvider.notifier)
+          .check();
+      await container
+          .read(bridgeUpdateSettingsProvider.notifier)
+          .setIncludePreReleases(false);
+      gate.complete(
+        jsonEncode([
+          {'tag_name': 'v0.3.27-rc.2', 'draft': false, 'prerelease': true},
+        ]),
+      );
+      await running;
+
+      expect(channels, [true, false]);
+      final lookup = container.read(bridgeUpdateCheckProvider).lookup;
+      expect(lookup?.version?.toString(), '0.3.19');
+      expect(lookup?.isPreRelease, isFalse);
+    });
+  });
+
   group('AppUpdateController', () {
     const apkName = 'wmr-companion-0.3.26-unified-arm64-v8a.apk';
     const tag = 'v0.3.26';
@@ -1336,4 +1388,18 @@ class _ThrowingSettingsStore implements BridgeUpdateSettingsStore {
 
   @override
   Future<void> save(bool includePreReleases) async {}
+}
+
+class _MemorySettingsStore implements BridgeUpdateSettingsStore {
+  _MemorySettingsStore({required this.value});
+
+  bool value;
+
+  @override
+  Future<bool> load() async => value;
+
+  @override
+  Future<void> save(bool includePreReleases) async {
+    value = includePreReleases;
+  }
 }

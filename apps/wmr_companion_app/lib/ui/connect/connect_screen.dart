@@ -335,9 +335,9 @@ class RealPanel extends ConsumerWidget {
         ),
         if (status.message != null) Text(status.message!),
         if (s.connected)
-          Text(
-            _bridgeVersionLabel(s.protocol, s.protocolUnavailable),
-            key: const Key('bridge-version'),
+          _BridgeVersionRow(
+            label: _bridgeVersionLabel(s.protocol, s.protocolUnavailable),
+            connectedVersion: s.protocol?.semanticVersion,
             style: mono,
           ),
         if (s.connected ||
@@ -574,6 +574,130 @@ class RealPanel extends ConsumerWidget {
   }
 }
 
+/// The FF16 version row and the manual bridge update check.
+///
+/// The check compares the newest release for the saved channel with the
+/// connected bridge and reports all three outcomes in place: up to date, an
+/// update (which the banner then offers), or a failure with the time GitHub
+/// was asked. The opt-in lives here too, so both choices sit with the version
+/// they apply to.
+class _BridgeVersionRow extends ConsumerWidget {
+  const _BridgeVersionRow({
+    required this.label,
+    required this.connectedVersion,
+    this.style,
+  });
+
+  final String label;
+  final WmrSemanticVersion? connectedVersion;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final check = ref.watch(bridgeUpdateCheckProvider);
+    final includePreReleases = ref.watch(bridgeUpdateSettingsProvider);
+    final lookup = check.lookup;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                key: const Key('bridge-version'),
+                style: style,
+              ),
+            ),
+            TextButton.icon(
+              key: const Key('bridge-check-updates'),
+              onPressed: check.checking || connectedVersion == null
+                  ? null
+                  : () => ref.read(bridgeUpdateCheckProvider.notifier).check(),
+              icon: check.checking
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh, size: 18),
+              label: Text(check.checking ? 'Checking…' : 'Check for updates'),
+            ),
+          ],
+        ),
+        CheckboxListTile(
+          key: const Key('bridge-prerelease-opt-in'),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: includePreReleases,
+          onChanged: (value) {
+            unawaited(
+              ref
+                  .read(bridgeUpdateSettingsProvider.notifier)
+                  .setIncludePreReleases(value ?? false),
+            );
+            ref.read(bridgeUpdateCheckProvider.notifier).clear();
+          },
+          title: const Text('Include pre-release bridge builds'),
+          subtitle: const Text(
+            'Offer release candidates such as 0.3.27-rc.2 alongside stable '
+            'releases.',
+          ),
+        ),
+        if (lookup != null && !check.checking) _checkResult(theme, lookup),
+      ],
+    );
+  }
+
+  Widget _checkResult(ThemeData theme, BridgeReleaseLookup lookup) {
+    final stamp = lookup.checkedAt == null
+        ? ''
+        : ' Checked at ${_formatCheckTime(lookup.checkedAt!)}.';
+    final latest = lookup.version;
+    final connected = connectedVersion;
+    if (lookup.error != null) {
+      return Text(
+        '${lookup.error}$stamp',
+        key: const Key('bridge-check-error'),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.error,
+        ),
+      );
+    }
+    if (latest == null || connected == null) return const SizedBox.shrink();
+    if (latest.compareTo(connected) > 0) {
+      return Text(
+        'Bridge update available: $connected → $latest.$stamp',
+        key: const Key('bridge-check-update-available'),
+        style: theme.textTheme.bodySmall,
+      );
+    }
+    final channel = latest.isPreRelease ? 'pre-release' : 'stable';
+    if (latest.compareTo(connected) == 0) {
+      return Text(
+        'Bridge is up to date: $connected is the newest $channel build.$stamp',
+        key: const Key('bridge-check-up-to-date'),
+        style: theme.textTheme.bodySmall,
+      );
+    }
+    // A dev or local bridge build can be newer than anything published, so
+    // the row must not call the connected version the newest build.
+    return Text(
+      'No $channel bridge release newer than $connected.$stamp',
+      key: const Key('bridge-check-up-to-date'),
+      style: theme.textTheme.bodySmall,
+    );
+  }
+}
+
+/// The wall-clock time a check ran, local to the device. Minutes are enough
+/// to tell a fresh answer from one from earlier in the session.
+String _formatCheckTime(DateTime at) {
+  final local = at.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:'
+      '${local.minute.toString().padLeft(2, '0')}';
+}
+
 /// Shown when the latest wmr-companion GitHub release is newer than the
 /// running app, or after a manual check found nothing new. A missing version
 /// on either side stays silent; this is a hint, not a connectivity state.
@@ -690,7 +814,8 @@ class _BridgeUpdateBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final latest = ref.watch(latestBridgeReleaseProvider).value;
+    final lookup = ref.watch(bridgeReleaseLookupProvider).value;
+    final latest = lookup?.version;
     final upgrade = ref.watch(
       realDeviceProvider.select((s) => s.bridgeUpgrade),
     );
@@ -702,6 +827,7 @@ class _BridgeUpdateBanner extends ConsumerWidget {
         latest != null &&
         connectedVersion != null &&
         latest.compareTo(connectedVersion) > 0;
+    final preReleaseTarget = updateAvailable && latest.isPreRelease;
     if (!updateAvailable && !upgrade.isActive && upgrade.message == null) {
       return const SizedBox.shrink();
     }
@@ -709,7 +835,13 @@ class _BridgeUpdateBanner extends ConsumerWidget {
     final active = upgrade.isActive;
     // A failed upgrade can leave the link down; the message stays visible but
     // the in-app action needs the daemon on the other end of it.
-    final canRequest = upgradeCapable && connected != null;
+    //
+    // A pre-release target cannot use the daemon's upgrade, which follows the
+    // latest stable release, so it always shows the tag-pinned command.
+    final canRequest = upgradeCapable && connected != null && !preReleaseTarget;
+    final command = preReleaseTarget
+        ? bridgeTaggedUpgradeCommand(latest)
+        : bridgeManualUpgradeCommand;
     return Card(
       key: const Key('bridge-update-banner'),
       color: theme.colorScheme.tertiaryContainer,
@@ -720,7 +852,11 @@ class _BridgeUpdateBanner extends ConsumerWidget {
           children: [
             Text(
               updateAvailable
-                  ? 'Bridge update available: $connectedVersion → $latest'
+                  ? (preReleaseTarget
+                        ? 'Bridge pre-release available: '
+                              '$connectedVersion → $latest'
+                        : 'Bridge update available: '
+                              '$connectedVersion → $latest')
                   : 'Bridge upgrade',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onTertiaryContainer,
@@ -759,7 +895,7 @@ class _BridgeUpdateBanner extends ConsumerWidget {
               )
             else
               SelectableText(
-                'Run this on the Pi: $bridgeManualUpgradeCommand',
+                'Run this on the Pi: $command',
                 key: const Key('bridge-upgrade-command'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onTertiaryContainer,
