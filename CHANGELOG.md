@@ -3,6 +3,18 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog; this file records the release as a whole.
 
+## 0.3.25+30
+
+Release candidate for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
+(ONY-1322).
+
+- Connecting Wi-Fi, or switching to the Wi-Fi tab, no longer drops the bonded
+  Bluetooth link. The app turns the FF11/FF12/FF14 notifications off and parks
+  the session instead of calling `disconnect()`, so a later Bluetooth connect
+  re-subscribes over the same link (ONY-1321).
+- The run sheets document the Pro Neckband hand-tracking modes and the paired
+  capture commands (ONY-1317).
+
 ## 0.3.24+29
 
 WMR Companion release.
