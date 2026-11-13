@@ -240,6 +240,10 @@ class CompositeBleTransport implements BleTransport {
     if (route.state == BleConnectionState.connected) return;
     route.intentional = false;
     route.switching = true;
+    // Publish the completer like the failover and recovery paths do, so an
+    // upgrade probe that finishes mid-connect can wait for this switch to
+    // release the route before it decides who owns its socket.
+    final switchingDone = route.switchingDone = Completer<void>();
     _setState(route, BleConnectionState.connecting);
     Object? tcpError;
     Object? bleError;
@@ -284,11 +288,17 @@ class CompositeBleTransport implements BleTransport {
           await _activateBle(route);
           return;
         } catch (error) {
+          if (route.bleDeviceId == bleId) await _rejectBle(route);
           bleError = error;
         }
       }
     } finally {
       route.switching = false;
+      _kickUpgrade(route);
+      if (identical(route.switchingDone, switchingDone)) {
+        route.switchingDone = null;
+      }
+      if (!switchingDone.isCompleted) switchingDone.complete();
     }
 
     _setState(route, BleConnectionState.disconnected);
@@ -705,13 +715,19 @@ class CompositeBleTransport implements BleTransport {
     await _switchChannels(route, _Lane.ble);
     _startUpgrade(route);
     _setState(route, BleConnectionState.connected);
+  }
+
+  /// Runs the FF16-triggered upgrade kick once the switch that activated BLE
+  /// has released `route.switching`. Kicking inside [_activateBle] would hit
+  /// the guard in [_attemptUpgrade] while that switch still holds the route.
+  void _kickUpgrade(_Route route) {
+    if (!route.upgradeNow) return;
+    route.upgradeNow = false;
+    if (route.active != _Lane.ble) return;
     // An FF16 endpoint document names the LAN hosts during the BLE dial, so
     // try them at once instead of waiting for the first periodic tick. A
     // failed attempt leaves the timer to keep retrying.
-    if (route.upgradeNow) {
-      route.upgradeNow = false;
-      unawaited(_attemptUpgrade(route));
-    }
+    unawaited(_attemptUpgrade(route));
   }
 
   Future<void> _switchChannels(_Route route, _Lane to) async {
@@ -798,12 +814,14 @@ class CompositeBleTransport implements BleTransport {
           await _activateBle(route);
           return;
         } catch (_) {
+          if (route.bleDeviceId == bleId) await _rejectBle(route);
           // Try the next scanned bridge before giving up the session.
         }
       }
       await _lose(route);
     } finally {
       route.switching = false;
+      _kickUpgrade(route);
       if (identical(route.switchingDone, switchingDone)) {
         route.switchingDone = null;
       }
@@ -860,15 +878,57 @@ class CompositeBleTransport implements BleTransport {
 
   Future<void> _attemptUpgrade(_Route route) async {
     if (_disposed || route.intentional || route.upgrading) return;
+    // A failover or loss owns the route right now; it will kick again if
+    // BLE is the lane it leaves active.
+    if (route.switching) return;
     if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
     route.upgrading = true;
     try {
       final id = await _tryTcp(route, route.tcpCandidates.toList());
-      if (id != null) await _activateTcp(route, id);
+      if (id == null) return;
+      // A drop, failover or connect may own the route right now, and it can
+      // adopt this same socket (the transport hands out in-flight dials to
+      // every joiner). Decide only once that switch has released the route:
+      // whoever adopted the socket keeps it, and nobody else may close it.
+      await _awaitSwitchRelease(route);
+      if (_disposed ||
+          route.intentional ||
+          route.switching ||
+          route.active != _Lane.ble) {
+        // The route moved on while this probe was dialling. Close the probe
+        // unless the route is now using it over TCP.
+        await _discardTcpProbe(route, id);
+        return;
+      }
+      await _activateTcp(route, id);
     } catch (_) {
       // Stay on BLE; the next tick retries.
     } finally {
       route.upgrading = false;
+    }
+  }
+
+  /// Waits until no switch holds the route. A switch that started while a
+  /// probe was dialling may adopt the probe's socket, so the probe must not
+  /// judge it until that switch has finished.
+  Future<void> _awaitSwitchRelease(_Route route) async {
+    while (route.switching && !_disposed) {
+      final done = route.switchingDone;
+      if (done == null) return;
+      await done.future;
+    }
+  }
+
+  Future<void> _discardTcpProbe(_Route route, String id) async {
+    // Never close the socket the route is actively using over TCP. A TCP
+    // route on a different candidate does not own this probe's socket, so
+    // the probe must still be closed.
+    if (route.active == _Lane.tcp && route.tcpDeviceId == id) return;
+    if (route.tcpDeviceId == id) route.tcpDeviceId = null;
+    try {
+      await tcp.disconnect(id);
+    } catch (_) {
+      // The probe socket may already be gone.
     }
   }
 

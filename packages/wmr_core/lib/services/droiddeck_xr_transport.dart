@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../domain/droiddeck_xr_sink.dart';
+import 'droiddeck_xr_queued_transport.dart';
 
 /// Thrown when a transport cannot be opened or a frame cannot be sent.
 class DroidDeckXrTransportException implements Exception {
@@ -42,7 +43,7 @@ final class _SockAddrUn extends Struct {
 /// directly. DroidDeck authenticates the peer with `SO_PEERCRED` and approves
 /// the companion's UID by package; the app must use
 /// `com.onyxlens.wmr_companion` or `.debug` as its `applicationId`.
-class DroidDeckXrUnixTransport implements DroidDeckXrTransport {
+class DroidDeckXrUnixTransport implements DroidDeckXrNonBlockingTransport {
   DroidDeckXrUnixTransport._(this._fd, this._libc);
 
   final int _fd;
@@ -102,6 +103,26 @@ class DroidDeckXrUnixTransport implements DroidDeckXrTransport {
     }
   }
 
+  /// Writes one packet if the socket accepts it now. Returns false instead of
+  /// waiting when the buffer is full or the write fails; errno is not read.
+  @override
+  bool trySend(Uint8List packet) {
+    if (_closed) return false;
+    final buffer = _libc.malloc(packet.length).cast<Uint8>();
+    try {
+      buffer.asTypedList(packet.length).setAll(0, packet);
+      final sent = _libc.send(
+        _fd,
+        buffer,
+        packet.length,
+        _msgNoSignal | _msgDontWait,
+      );
+      return sent == packet.length;
+    } finally {
+      _libc.free(buffer.cast());
+    }
+  }
+
   @override
   Future<void> close() async {
     if (_closed) return;
@@ -118,11 +139,19 @@ class DroidDeckXrUnixTransport implements DroidDeckXrTransport {
 /// The exception names the socket so a missing host or an unapproved
 /// `applicationId` is visible in the log instead of looking like dropped
 /// packets.
+///
+/// The returned transport never blocks the caller: packets go through a
+/// [DroidDeckXrQueuedTransport] that drops the oldest packet when full and
+/// reopens the socket after a sustained failure.
 Future<DroidDeckXrTransport> openDroidDeckXrTransport({
   String unixSocketName = DroidDeckXrProtocol.socketName,
 }) async {
   try {
-    return await DroidDeckXrUnixTransport.connect(name: unixSocketName);
+    final first = await DroidDeckXrUnixTransport.connect(name: unixSocketName);
+    return DroidDeckXrQueuedTransport(
+      transport: first,
+      reopen: () => DroidDeckXrUnixTransport.connect(name: unixSocketName),
+    );
   } on Object catch (error) {
     throw DroidDeckXrTransportException(
       'cannot open DroidDeck ext-xr socket "$unixSocketName": $error. '
@@ -135,6 +164,7 @@ Future<DroidDeckXrTransport> openDroidDeckXrTransport({
 const int _afUnix = 1;
 const int _sockSeqpacket = 5;
 const int _msgNoSignal = 0x4000;
+const int _msgDontWait = 0x40;
 
 class _Libc {
   _Libc._(DynamicLibrary library)
