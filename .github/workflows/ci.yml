@@ -538,7 +538,11 @@ jobs:
           restore-keys: |
             android-ndk-cmake-${{ runner.os }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
 
+      # Read-only for the same reason as `android-flavors-example`: the
+      # wiring job owns the Gradle cache entries.
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
 
       - uses: ./.github/actions/flutter-setup
 
@@ -574,7 +578,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Read-only: the wiring job is the single writer of the Gradle caches.
+      # Each setup-gradle entry is keyed on the job name, so three writers put
+      # three copies of the same dependency graph into a 10 GB budget that also
+      # holds both Flutter SDKs (2.1 GB macOS, 1.6 GB Linux) and the NDK
+      # (0.7 GB).
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
 
       - uses: ./.github/actions/flutter-setup
 
