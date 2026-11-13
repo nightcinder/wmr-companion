@@ -8,6 +8,17 @@ export 'package:vector_math/vector_math_64.dart' show Quaternion;
 
 export 'package:wmr_core/ble/ble_transport.dart' show BleTransport;
 export 'package:wmr_core/domain/axis_mapping.dart' show AxisMapping;
+export 'package:wmr_core/domain/droiddeck_xr_sink.dart'
+    show
+        DroidDeckXrClaim,
+        DroidDeckXrHand,
+        DroidDeckXrHidPeripheral,
+        DroidDeckXrProtocol,
+        DroidDeckXrSink,
+        DroidDeckXrTransport,
+        droidDeckMonotonicNs,
+        encodeDroidDeckXrClaim,
+        encodeDroidDeckXrInput;
 export 'package:wmr_core/domain/gamepad.dart'
     show
         GamepadButton,
@@ -52,6 +63,13 @@ export 'package:wmr_core/services/controller_control_client.dart'
     show ControllerCommandOutcome;
 export 'package:wmr_core/services/controller_service.dart'
     show DecodedStats, StreamMode;
+export 'package:wmr_core/services/droiddeck_xr_transport.dart'
+    show
+        DroidDeckXrTransportException,
+        DroidDeckXrUdpTransport,
+        DroidDeckXrUnixTransport,
+        openDroidDeckXrTransport,
+        readDroidDeckXrToken;
 export 'package:wmr_core/services/echo_client.dart'
     show EchoFailure, EchoResult, EchoSample;
 export 'package:wmr_tracking/wmr_tracking.dart';
