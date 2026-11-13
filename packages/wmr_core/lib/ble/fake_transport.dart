@@ -240,14 +240,20 @@ class FakeTransport implements BleTransport {
 
   @override
   Future<void> dispose() async {
-    for (final c in _subscriptions.values) {
-      await c.close();
-    }
-    for (final c in _stateControllers.values) {
-      await c.close();
-    }
+    // Snapshot and clear before awaiting: closing a controller can run
+    // listener callbacks that call disconnect(), which removes entries from
+    // these maps. Iterating the live maps across the await would throw
+    // ConcurrentModificationError.
+    final subscriptions = _subscriptions.values.toList();
+    final stateControllers = _stateControllers.values.toList();
     _subscriptions.clear();
     _stateControllers.clear();
+    for (final c in subscriptions) {
+      await c.close();
+    }
+    for (final c in stateControllers) {
+      await c.close();
+    }
   }
 
   FakeDevice _device(String deviceId) {
