@@ -34,13 +34,34 @@ SHA256SUMS: https://github.com/nightcinder/wmr-companion/releases/download/v0.3.
 
 Make sure that the v0.3.24 release exists and the installed APK reports `versionName` 0.3.24 before testing. If it reports 0.3.23, record it and stop.
 
-One APK carries VITURE and XREAL and runs on a Galaxy XR. Uninstall an older WMR Companion first: `adb uninstall com.onyxlens.wmr_companion` or app settings.
+One APK carries VITURE and XREAL and runs on a Galaxy XR. If you have an older incompatible build, uninstall it first: run `adb uninstall com.onyxlens.wmr_companion` or use system settings.
 
-## 2. Install
+## 2. Install and update
 
-1. Download the APK and SHA256SUMS. Verify with `sha256sum -c SHA256SUMS` or compare the APK's SHA-256.
-2. Open the APK on the host device and allow "install unknown apps".
-3. Install. If Android blocks it, record the message and stop.
+### First-time installation
+
+1. Download the APK and `SHA256SUMS`.
+2. Make sure that the digest matches using `sha256sum -c SHA256SUMS`.
+3. Open the APK file on the host device.
+4. Allow the **Install unknown apps** prompt in Android settings.
+5. Finish the installation. If Android blocks it, record the error message and stop.
+
+### In-app update flow
+
+If WMR Companion is already installed on the device, use this flow.
+
+1. Open WMR Companion and go to the **Connect** screen.
+2. If an update is available, the screen shows an update banner. You can also open the top-right menu and select **Check for updates**.
+3. Select **Update app** (or **Install update** if using the menu) on the update banner.
+4. If Android asks for the one-time **Install unknown apps** permission, the app opens system settings. The button on the banner changes to **Allow installs**. Grant the permission:
+   - On a phone: tap the toggle to allow installs from WMR Companion. Tap Back to return to the application.
+   - On a VITURE Pro Neckband: the device has no physical D-pad. Press Volume Up or Volume Down to move focus to the toggle. Hold Volume Down to turn on the toggle. Hold Volume Up to return to WMR Companion.
+   - On a VITURE Pro Neckband with headgaze: press `Settings + Power` to turn on headgaze. Point your gaze at the toggle. Press Volume Down to select. Press Volume Up to go back.
+   - You can also navigate using the phone Neckband Remote application.
+5. Return to WMR Companion. Select **Allow installs** (or **Update app** if already permitted) to start the download.
+6. The application downloads the new APK and makes sure that its digest matches `SHA256SUMS`.
+7. Android verifies that the release signing certificate matches the installed application.
+8. Android shows the package update confirmation dialog. Select Update to complete the installation.
 
 ## 3. Connect the bridge: A and C only
 
