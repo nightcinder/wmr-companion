@@ -26,7 +26,7 @@ You can opt in to test pre-release bridge builds.
 
 Under the bridge version row, select the **Include pre-release bridge builds** checkbox. The application saves this choice in local device storage. When this option is active, the app queries the full GitHub release list. It evaluates the newest release candidate tags, such as `0.3.27-rc.2`.
 
-When a pre-release build is newer than the connected bridge, the update banner shows the pre-release target. In-app automated upgrades over the WebSocket daemon only track stable releases. Because the daemon tracks stable releases, the banner shows the manual terminal command for the pre-release target.
+When a pre-release build is newer than the connected bridge, the update banner shows the pre-release target. In-app automated upgrades over the WebSocket daemon only track stable releases. The banner displays a one-line command to download the installer from the tagged release URL. Without environment variables, that one-liner resolves the latest stable release. If you install the pre-release build, run the command with the pinned environment variables shown below.
 
 ## Installing a pre-release build on Raspberry Pi
 
