@@ -3,7 +3,10 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog. This file records the release as a whole.
 
-## Unreleased
+## 0.3.25+32
+
+Release candidate 3 for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
+(ONY-1322). It carries the changes merged since v0.3.25-rc.2 (#320-#326).
 
 - The Connect screen provides a manual bridge update check and a pre-release
   opt-in toggle (ONY-1405).
@@ -13,6 +16,18 @@ keeps its own changelog. This file records the release as a whole.
 - `docs/BRIDGE_UPDATES.md` documents manual bridge checks, stable and
   pre-release channels, the tag-pinned Raspberry Pi install command, and package
   upgrades from release candidate to stable.
+- The bridge release lookup reports the chosen tag, whether it is a
+  pre-release, and the failure when there was one, instead of collapsing every
+  outcome to "no update". It picks the highest published tag from the release
+  list when pre-releases are opted in, and serves a repeated manual check from
+  the previous request for 30 s (ONY-1404).
+- `wmr_core` rejects a decoded FF14 batch whose record count exceeds the most
+  one notification can carry, and the DroidDeck stream shows the transport's
+  accepted and dropped packet counts instead of a locally incremented sent
+  count (ONY-1396).
+- The Android app disables backup and ships API 31+ data extraction rules that
+  also refuse device-to-device transfer, closing the CodeQL backup alerts
+  (ONY-1395).
 
 ## 0.3.25+31
 
