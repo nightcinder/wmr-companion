@@ -646,17 +646,19 @@ jobs:
       - uses: ./.github/actions/flutter-setup
         id: flutter
 
+      # One resolution for the whole workspace. Both config-only builds below
+      # then pass `--no-pub`: their own `flutter pub get` re-resolved the same
+      # workspace from inside the app/example directory, and that was most of
+      # what the two steps cost.
+      - run: flutter pub get
+
       - name: Validate Flutter iOS config
         working-directory: apps/wmr_companion_app
-        run: |
-          flutter pub get
-          flutter build ios --config-only --no-codesign
+        run: flutter build ios --config-only --no-codesign --no-pub
 
       - name: Validate example iOS config
         working-directory: example
-        run: |
-          flutter pub get
-          flutter build ios --config-only --no-codesign
+        run: flutter build ios --config-only --no-codesign --no-pub
 
       # This job is the only reader of the macOS cache keys, so it is also the
       # only writer: without this step a `pubspec.lock` change left the SDK or
