@@ -1356,7 +1356,10 @@ class _ScriptedTcp extends WmrWsTransport {
   WmrWsHello? helloFor(String deviceId) => hellos[deviceId] ?? hello;
 
   @override
-  Future<WmrWsUpgradeStatus> requestUpgrade(String deviceId) async {
+  Future<WmrWsUpgradeStatus> requestUpgrade(
+    String deviceId, {
+    bool preRelease = false,
+  }) async {
     upgradeRequests.add(deviceId);
     final failure = upgradeError;
     if (failure != null) throw failure;

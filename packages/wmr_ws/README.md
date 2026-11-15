@@ -129,6 +129,17 @@ can still hold already-delivered events in the controller; `ControllerService`
 is synchronous, which is the contract this transport is written for. `WmrWsTransport.status()` exposes the
 daemon's own `dropped`/`delivered` counters.
 
+### Bridge upgrades
+
+`WmrWsTransport.requestUpgrade(deviceId, preRelease: true)` asks the daemon to
+install its latest build and restart. The `channel` field is sent only when the
+`hello` advertised both `upgradeCapable` and `upgradePreReleaseCapable`; a
+bridge that omits either gets a plain `{"type":"upgrade"}` and installs its
+stable release, so a pre-release request never puts an unknown field in front of
+an older daemon. The reply is a `WmrWsUpgradeStatus` (`started`, `busy`, or
+`error` with a code). An accepted request restarts the daemon, so the socket is
+expected to drop and `connect()` must be called again.
+
 ## Tests
 
 ```sh
