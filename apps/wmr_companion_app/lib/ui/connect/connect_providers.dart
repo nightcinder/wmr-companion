@@ -224,7 +224,7 @@ const String bridgeManualUpgradeCommand =
 String bridgeTaggedUpgradeCommand(WmrSemanticVersion version) =>
     'curl -fsSL '
     'https://github.com/nightcinder/WMR_Bridge/releases/download/v$version/install.sh'
-    ' | sudo bash';
+    ' | sudo env WMR_BRIDGE_VERSION=$version WMR_BRIDGE_TAG=v$version bash';
 
 /// Human-readable reason for a failed Wi-Fi dial.
 ///
@@ -365,6 +365,7 @@ class RealDeviceState {
     this.lanError,
     this.bridgeUpgrade = const BridgeUpgradeState.idle(),
     this.bridgeUpgradeCapable = false,
+    this.bridgeUpgradePreReleaseCapable = false,
   }) : _primaryDeviceId = deviceId;
 
   final BleLinkStatus status;
@@ -398,6 +399,10 @@ class RealDeviceState {
   /// Whether the connected Wi-Fi daemon advertised `upgradeCapable` and the
   /// TCP leg is carrying the session. False in BLE mode and on older daemons.
   final bool bridgeUpgradeCapable;
+
+  /// Whether the daemon also advertised `upgradePreReleaseCapable`, so an
+  /// in-app request can install a pre-release instead of the stable channel.
+  final bool bridgeUpgradePreReleaseCapable;
 
   /// Requested stream and its fault, from the service. Null before connect.
   final ModeState? mode;
@@ -519,6 +524,13 @@ class ReconnectPolicy {
 
 final reconnectPolicyProvider = Provider<ReconnectPolicy>(
   (ref) => const ReconnectPolicy(),
+);
+
+/// How long an accepted upgrade may keep the bridge down before the card
+/// reports a failure. Tests shorten it so the watchdog need not wait five
+/// real minutes.
+final bridgeUpgradeTimeoutProvider = Provider<Duration>(
+  (ref) => const Duration(minutes: 5),
 );
 
 /// Drives scan, connect and the [ControllerService] for the real bridge.
@@ -655,16 +667,31 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     return null;
   }
 
-  /// Whether the daemon behind the active Wi-Fi link advertised the root
-  /// upgrade unit, and TCP (not the BLE fallback) is carrying it.
-  bool _upgradeCapableFor(BridgeTransportKind transport) {
-    if (transport != BridgeTransportKind.wifi) return false;
+  /// The `hello` behind the active Wi-Fi link, when TCP (not the BLE
+  /// fallback) carries it. A daemon reachable only over BLE cannot take an
+  /// in-app upgrade.
+  WmrWsHello? _upgradeHelloFor(BridgeTransportKind transport) {
+    if (transport != BridgeTransportKind.wifi) return null;
     final id = _wifiDeviceId;
     final ws = _wsTransport;
-    if (id == null || ws == null) return false;
+    if (id == null || ws == null) return null;
     final leg = _wifiLink?.activeLeg;
-    if (leg != null && leg() != WifiLinkLeg.tcp) return false;
-    return ws.helloFor(id)?.upgradeCapable ?? false;
+    if (leg != null && leg() != WifiLinkLeg.tcp) return null;
+    return ws.helloFor(id);
+  }
+
+  /// Whether the daemon behind the active Wi-Fi link advertised the root
+  /// upgrade unit.
+  bool _upgradeCapableFor(BridgeTransportKind transport) =>
+      _upgradeHelloFor(transport)?.upgradeCapable ?? false;
+
+  /// Whether the daemon accepts the pre-release upgrade channel. The channel
+  /// field needs the root upgrade unit too, so both flags must be present.
+  bool _upgradePreReleaseCapableFor(BridgeTransportKind transport) {
+    final hello = _upgradeHelloFor(transport);
+    return hello != null &&
+        hello.upgradeCapable &&
+        hello.upgradePreReleaseCapable;
   }
 
   /// The service behind the current connection, for consumers that share its
@@ -917,6 +944,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       lanError: clearLanError ? null : (lanError ?? state.lanError),
       bridgeUpgrade: bridgeUpgrade ?? state.bridgeUpgrade,
       bridgeUpgradeCapable: _upgradeCapableFor(nextTransport),
+      bridgeUpgradePreReleaseCapable: _upgradePreReleaseCapableFor(
+        nextTransport,
+      ),
     );
   }
 
@@ -1193,11 +1223,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   /// Asks the connected Wi-Fi daemon to install its latest release.
   ///
+  /// With [preRelease] the request names the pre-release channel, but only
+  /// when the daemon advertised both `upgradeCapable` and
+  /// `upgradePreReleaseCapable`. A legacy daemon gets the stable request and
+  /// the screen offers the tag-pinned command instead.
+  ///
   /// An accepted request restarts the daemon, so the link is expected to
   /// drop; the ordinary reconnect campaign then dials it back. While the
   /// upgrade is pending its retry budget is extended past the usual six
   /// attempts, because a package install takes longer than a transient drop.
-  Future<void> requestBridgeUpgrade() async {
+  Future<void> requestBridgeUpgrade({bool preRelease = false}) async {
     if (state.bridgeUpgrade.isActive) return;
     final id = _wifiDeviceId;
     final ws = _wsTransport;
@@ -1212,19 +1247,22 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       );
       return;
     }
+    final usePreRelease =
+        preRelease &&
+        state.bridgeUpgradeCapable &&
+        state.bridgeUpgradePreReleaseCapable;
     _update(
       bridgeUpgrade: const BridgeUpgradeState(BridgeUpgradePhase.sending),
     );
     try {
-      final status = await ws.requestUpgrade(id);
+      final status = await ws.requestUpgrade(id, preRelease: usePreRelease);
       switch (status.state) {
         case WmrWsUpgradeState.started:
+          final timeout = ref.read(bridgeUpgradeTimeoutProvider);
           _upgradeAwaitingReconnect = true;
-          _upgradeReconnectDeadline = DateTime.now().add(
-            const Duration(minutes: 5),
-          );
+          _upgradeReconnectDeadline = DateTime.now().add(timeout);
           _upgradeWatchdog?.cancel();
-          _upgradeWatchdog = Timer(const Duration(minutes: 5), () {
+          _upgradeWatchdog = Timer(timeout, () {
             if (!_upgradeAwaitingReconnect) return;
             _finishUpgrade(
               const BridgeUpgradeState(

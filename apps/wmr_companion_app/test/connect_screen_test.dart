@@ -841,7 +841,15 @@ void main() {
     final command = tester.widget<SelectableText>(
       find.byKey(const Key('bridge-upgrade-command')),
     );
-    expect(command.data, contains('/download/v0.3.27-rc.2/install.sh'));
+    expect(
+      command.data,
+      'Run this on the Pi: '
+      'curl -fsSL '
+      'https://github.com/nightcinder/WMR_Bridge/releases/download/'
+      'v0.3.27-rc.2/install.sh'
+      ' | sudo env WMR_BRIDGE_VERSION=0.3.27-rc.2 '
+      'WMR_BRIDGE_TAG=v0.3.27-rc.2 bash',
+    );
 
     // A fresh screen restores the saved opt-in.
     await tester.pumpWidget(const SizedBox());
@@ -852,6 +860,56 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+
+  testWidgets(
+    'a pre-release-capable bridge upgrades to the pre-release in one tap',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final bridge = _UpgradeableBridge(preReleaseCapable: true);
+      final store = _MemoryUpdateSettingsStore(value: true);
+      final checker = BridgeReleaseChecker(
+        fetch: (uri) async => uri.path.endsWith('/latest')
+            ? '{"tag_name":"v0.3.19"}'
+            : jsonEncode([
+                {'tag_name': 'v0.3.19', 'draft': false, 'prerelease': false},
+                {
+                  'tag_name': 'v0.3.27-rc.2',
+                  'draft': false,
+                  'prerelease': true,
+                },
+              ]),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            streamModeProvider.overrideWith(RawModeNotifier.new),
+            realDeviceProvider.overrideWith(() => bridge),
+            bridgeUpdateSettingsStoreProvider.overrideWithValue(store),
+            bridgeReleaseCheckerProvider.overrideWithValue(checker),
+          ],
+          child: const MaterialApp(home: ConnectScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('pre-release available'), findsOneWidget);
+      expect(find.byKey(const Key('bridge-upgrade-command')), findsNothing);
+      final upgrade = find.byKey(const Key('bridge-upgrade'));
+      expect(upgrade, findsOneWidget);
+      await tester.ensureVisible(upgrade);
+      await tester.tap(upgrade);
+      await tester.pump();
+
+      expect(bridge.requested, isTrue);
+      expect(bridge.preReleaseRequested, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
 }
 
 /// A release lookup for widget tests, with the pre-release flag derived the
@@ -914,11 +972,14 @@ class _UpgradeableBridge extends RealDeviceController {
   _UpgradeableBridge({
     this.upgrade = const BridgeUpgradeState.idle(),
     this.wifiConnected = true,
+    this.preReleaseCapable = false,
   });
 
   final BridgeUpgradeState upgrade;
   final bool wifiConnected;
+  final bool preReleaseCapable;
   bool requested = false;
+  bool preReleaseRequested = false;
 
   @override
   RealDeviceState build() => RealDeviceState(
@@ -937,12 +998,14 @@ class _UpgradeableBridge extends RealDeviceController {
           )
         : null,
     bridgeUpgradeCapable: true,
+    bridgeUpgradePreReleaseCapable: preReleaseCapable,
     bridgeUpgrade: upgrade,
   );
 
   @override
-  Future<void> requestBridgeUpgrade() async {
+  Future<void> requestBridgeUpgrade({bool preRelease = false}) async {
     requested = true;
+    preReleaseRequested = preRelease;
   }
 }
 
