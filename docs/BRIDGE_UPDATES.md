@@ -26,7 +26,23 @@ You can opt in to test pre-release bridge builds.
 
 Under the bridge version row, select the **Include pre-release bridge builds** checkbox. The application saves this choice in local device storage. When this option is active, the app queries the full GitHub release list. It evaluates the newest release candidate tags, such as `0.3.27-rc.2`.
 
-When a pre-release build is newer than the connected bridge, the update banner shows the pre-release target. A bridge that advertises `upgradePreReleaseCapable` installs it with the one-tap **Upgrade Pi Bridge** button. An older bridge cannot select the pre-release channel, so the banner displays a one-line command that downloads the installer from the tagged release URL and pins the same tag. Run that command on the Pi.
+When a pre-release build is newer than the connected bridge, the update banner shows the target pre-release version.
+
+## In-app pre-release upgrades
+
+An in-app pre-release upgrade requires two capability flags from the bridge daemon.
+
+During WebSocket connection setup, the bridge sends a `hello` control message. The bridge must advertise both `upgradeCapable` and `upgradePreReleaseCapable` as true. The active connection must also run over Wi-Fi.
+
+When the bridge satisfies these conditions, the update banner shows the **Upgrade Pi Bridge** button. When you tap the button, the app sends `{"type":"upgrade","channel":"prerelease"}` to the bridge. The bridge daemon starts the update service and restarts.
+
+## Fallback for legacy and tokenless bridges
+
+Bridges that run version `0.3.27-rc.3` or earlier do not advertise `upgradePreReleaseCapable`.
+
+The app also disables the in-app upgrade button if the bridge lacks token authentication or connects only over Bluetooth LE. For these bridges, the update banner displays a manual command. For a pre-release target, the command downloads the installer from the tagged release URL and sets version environment variables. For a stable target, the command downloads the installer from the latest release URL without environment variables.
+
+Run that command in a terminal on the Raspberry Pi.
 
 ## Installing a pre-release build on Raspberry Pi
 
@@ -48,7 +64,7 @@ curl -fsSL \
   | sudo env WMR_BRIDGE_VERSION=0.3.27-rc.2 WMR_BRIDGE_TAG=v0.3.27-rc.2 bash
 ```
 
-`sudo env` sets the variables in the root shell. Without `WMR_BRIDGE_VERSION`, the script falls back to the latest stable release. The installer downloads the release package, makes sure that signatures match, and installs the package with `apt-get`.
+The command downloads `install.sh` from the tagged release instead of the repository default branch. `sudo env` sets `WMR_BRIDGE_VERSION` and `WMR_BRIDGE_TAG` in the root environment. If you omit `WMR_BRIDGE_VERSION`, the script falls back to the latest stable release. The installer downloads the release package, makes sure that signatures match, and installs the package with `apt-get`.
 
 ## Upgrading from release candidate to stable
 
