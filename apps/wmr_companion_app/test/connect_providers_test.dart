@@ -45,6 +45,7 @@ void main() {
     Future<List<WmrWsEndpoint>> Function()? discovery,
     FakeBleAdapter? adapter,
     ReconnectPolicy? reconnectPolicy,
+    Duration? upgradeTimeout,
   }) {
     final ble = UniversalBleTransport(
       adapter: adapter ?? FakeBleAdapter(),
@@ -68,6 +69,8 @@ void main() {
         ),
         if (reconnectPolicy != null)
           reconnectPolicyProvider.overrideWithValue(reconnectPolicy),
+        if (upgradeTimeout != null)
+          bridgeUpgradeTimeoutProvider.overrideWithValue(upgradeTimeout),
         streamModeProvider.overrideWith(RawModeNotifier.new),
       ],
     );
@@ -613,6 +616,7 @@ void main() {
           hostname: 'pi',
           authRequired: false,
           upgradeCapable: true,
+          upgradePreReleaseCapable: true,
           streams: const {'raw', 'decoded', 'batched'},
           recordSize: 56,
           batchMax: 9,
@@ -627,6 +631,12 @@ void main() {
           maxAttempts: 2,
         ),
       );
+      final phases = <BridgeUpgradePhase>[];
+      container.listen(realDeviceProvider, (_, next) {
+        if (phases.isEmpty || phases.last != next.bridgeUpgrade.phase) {
+          phases.add(next.bridgeUpgrade.phase);
+        }
+      });
       final controller = container.read(realDeviceProvider.notifier);
       await controller.connectWifi(
         host: 'pi.local',
@@ -634,10 +644,15 @@ void main() {
         bleFallback: false,
       );
       expect(container.read(realDeviceProvider).bridgeUpgradeCapable, isTrue);
+      expect(
+        container.read(realDeviceProvider).bridgeUpgradePreReleaseCapable,
+        isTrue,
+      );
 
-      await controller.requestBridgeUpgrade();
+      await controller.requestBridgeUpgrade(preRelease: true);
 
       expect(transport.upgradeRequests, [id]);
+      expect(transport.upgradePreReleaseRequests, [true]);
       var state = container.read(realDeviceProvider);
       expect(state.bridgeUpgrade.phase, BridgeUpgradePhase.restarting);
       expect(state.bridgeUpgrade.message, contains('restart'));
@@ -658,6 +673,101 @@ void main() {
       state = container.read(realDeviceProvider);
       expect(state.bridgeUpgrade.phase, BridgeUpgradePhase.idle);
       expect(state.bridgeUpgradeCapable, isTrue);
+      expect(phases, [
+        BridgeUpgradePhase.idle,
+        BridgeUpgradePhase.sending,
+        BridgeUpgradePhase.restarting,
+        BridgeUpgradePhase.idle,
+      ]);
+    },
+  );
+
+  test('requestBridgeUpgrade keeps a pre-release target on the stable channel '
+      'when the daemon is not pre-release capable', () async {
+    const id = 'pi.local:8765';
+    final inner = FakeTransport(devices: const [FakeDevice(id: id)]);
+    final transport = _ScriptedTcp(
+      inner,
+      hello: WmrWsHello(
+        protocol: 1,
+        transport: 'wifi',
+        device: 'wmr-pi',
+        version: '0.3.23',
+        hostname: 'pi',
+        authRequired: false,
+        upgradeCapable: true,
+        streams: const {'raw'},
+        recordSize: 56,
+        batchMax: 9,
+        fragmentCapacity: 244,
+      ),
+    );
+    final container = makeContainer(wifiFactory: (_) => transport);
+    final controller = container.read(realDeviceProvider.notifier);
+    await controller.connectWifi(
+      host: 'pi.local',
+      port: 8765,
+      bleFallback: false,
+    );
+    expect(
+      container.read(realDeviceProvider).bridgeUpgradePreReleaseCapable,
+      isFalse,
+    );
+
+    await controller.requestBridgeUpgrade(preRelease: true);
+
+    expect(transport.upgradePreReleaseRequests, [false]);
+  });
+
+  test(
+    'requestBridgeUpgrade reports a watchdog timeout and a dead request',
+    () async {
+      const id = 'pi.local:8765';
+      final inner = FakeTransport(devices: const [FakeDevice(id: id)]);
+      final transport = _ScriptedTcp(
+        inner,
+        hello: WmrWsHello(
+          protocol: 1,
+          transport: 'wifi',
+          device: 'wmr-pi',
+          version: '0.3.23',
+          hostname: 'pi',
+          authRequired: false,
+          upgradeCapable: true,
+          streams: const {'raw'},
+          recordSize: 56,
+          batchMax: 9,
+          fragmentCapacity: 244,
+        ),
+      );
+      final container = makeContainer(
+        wifiFactory: (_) => transport,
+        upgradeTimeout: const Duration(milliseconds: 20),
+      );
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connectWifi(
+        host: 'pi.local',
+        port: 8765,
+        bleFallback: false,
+      );
+
+      await controller.requestBridgeUpgrade();
+      await _waitFor(
+        () =>
+            container.read(realDeviceProvider).bridgeUpgrade.phase ==
+            BridgeUpgradePhase.failed,
+        reason: 'the upgrade watchdog never fired',
+      );
+      expect(
+        container.read(realDeviceProvider).bridgeUpgrade.message,
+        contains('did not come back'),
+      );
+
+      transport.upgradeError = TimeoutException('no reply');
+      await controller.requestBridgeUpgrade();
+      final failed = container.read(realDeviceProvider).bridgeUpgrade;
+      expect(failed.phase, BridgeUpgradePhase.failed);
+      expect(failed.message, contains('Upgrade request failed'));
     },
   );
 
@@ -1279,6 +1389,7 @@ class _ScriptedTcp extends WmrWsTransport {
   /// Fallback hello for transports whose endpoint was not registered.
   final WmrWsHello? hello;
   final List<String> upgradeRequests = [];
+  final List<bool> upgradePreReleaseRequests = [];
   WmrWsUpgradeState upgradeState = WmrWsUpgradeState.started;
   String? upgradeCode;
   Object? upgradeError;
@@ -1361,6 +1472,7 @@ class _ScriptedTcp extends WmrWsTransport {
     bool preRelease = false,
   }) async {
     upgradeRequests.add(deviceId);
+    upgradePreReleaseRequests.add(preRelease);
     final failure = upgradeError;
     if (failure != null) throw failure;
     return WmrWsUpgradeStatus(state: upgradeState, code: upgradeCode);

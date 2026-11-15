@@ -804,9 +804,11 @@ class _AppUpdateBanner extends ConsumerWidget {
 ///
 /// When the daemon advertises `upgradeCapable` the card offers the in-app
 /// upgrade; older daemons, or a link on the BLE fallback, get the one-line
-/// command to run on the Pi instead. While an accepted upgrade restarts the
-/// daemon the card stays visible even though the link is down, so progress is
-/// not lost with the connection.
+/// command to run on the Pi instead. A pre-release target needs
+/// `upgradePreReleaseCapable` too, otherwise the card keeps the tag-pinned
+/// command rather than silently installing the stable channel. While an
+/// accepted upgrade restarts the daemon the card stays visible even though
+/// the link is down, so progress is not lost with the connection.
 class _BridgeUpdateBanner extends ConsumerWidget {
   const _BridgeUpdateBanner({required this.connected});
 
@@ -822,6 +824,9 @@ class _BridgeUpdateBanner extends ConsumerWidget {
     final upgradeCapable = ref.watch(
       realDeviceProvider.select((s) => s.bridgeUpgradeCapable),
     );
+    final preReleaseCapable = ref.watch(
+      realDeviceProvider.select((s) => s.bridgeUpgradePreReleaseCapable),
+    );
     final connectedVersion = connected?.semanticVersion;
     final updateAvailable =
         latest != null &&
@@ -836,9 +841,13 @@ class _BridgeUpdateBanner extends ConsumerWidget {
     // A failed upgrade can leave the link down; the message stays visible but
     // the in-app action needs the daemon on the other end of it.
     //
-    // A pre-release target cannot use the daemon's upgrade, which follows the
-    // latest stable release, so it always shows the tag-pinned command.
-    final canRequest = upgradeCapable && connected != null && !preReleaseTarget;
+    // A pre-release target needs the daemon's pre-release channel. An older
+    // daemon follows the latest stable release, so it shows the tag-pinned
+    // command instead of installing a different build.
+    final canRequest =
+        upgradeCapable &&
+        connected != null &&
+        (!preReleaseTarget || preReleaseCapable);
     final command = preReleaseTarget
         ? bridgeTaggedUpgradeCommand(latest)
         : bridgeManualUpgradeCommand;
@@ -882,7 +891,9 @@ class _BridgeUpdateBanner extends ConsumerWidget {
                         unawaited(
                           ref
                               .read(realDeviceProvider.notifier)
-                              .requestBridgeUpgrade(),
+                              .requestBridgeUpgrade(
+                                preRelease: preReleaseTarget,
+                              ),
                         );
                       },
                 icon: active
