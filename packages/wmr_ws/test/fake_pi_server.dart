@@ -133,6 +133,29 @@ class FakePiServer {
       case 'status':
         sendText(_options.statusJson());
       case 'upgrade':
+        if (!_options.sendUpgradeReply) return;
+        final channel = decoded['channel'];
+        if (channel != null &&
+            (channel != 'prerelease' ||
+                !(_options.upgradeCapable &&
+                    _options.upgradePreReleaseCapable))) {
+          // Mirrors the daemon: an unsupported channel is refused, it is not
+          // silently treated as stable.
+          sendText({
+            'type': 'upgrade_status',
+            'state': 'error',
+            'code': 'unsupported_channel',
+          });
+          return;
+        }
+        if (!_options.upgradeCapable) {
+          sendText({
+            'type': 'upgrade_status',
+            'state': 'error',
+            'code': 'unavailable',
+          });
+          return;
+        }
         sendText({
           'type': 'upgrade_status',
           'state': _options.upgradeState,
@@ -177,8 +200,10 @@ class FakePiOptions {
     this.batchMax = 9,
     this.fragmentCapacity = 244,
     this.upgradeCapable = true,
+    this.upgradePreReleaseCapable = true,
     this.upgradeState = 'started',
     this.upgradeCode,
+    this.sendUpgradeReply = true,
     this.subscribeError,
     this.serverTimeUs = 123456789,
     this.statusHands = 2,
@@ -197,8 +222,13 @@ class FakePiOptions {
   final int batchMax;
   final int fragmentCapacity;
   final bool upgradeCapable;
+  final bool upgradePreReleaseCapable;
   final String upgradeState;
   final String? upgradeCode;
+
+  /// When false, an upgrade request is accepted but never answered, as when
+  /// the daemon restarts for the install before it can reply.
+  final bool sendUpgradeReply;
 
   /// When set, every subscribe is answered with this error code.
   final String? subscribeError;
@@ -215,6 +245,7 @@ class FakePiOptions {
     'hostname': hostname,
     'authRequired': authRequired,
     'upgradeCapable': upgradeCapable,
+    'upgradePreReleaseCapable': upgradePreReleaseCapable,
     'streams': streams,
     'recordSize': recordSize,
     'batchMax': batchMax,

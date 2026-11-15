@@ -21,6 +21,7 @@ class WmrWsHello {
     required this.batchMax,
     required this.fragmentCapacity,
     this.upgradeCapable = false,
+    this.upgradePreReleaseCapable = false,
   }) : streams = Set.unmodifiable(streams);
 
   /// Parses a decoded JSON control message. Throws
@@ -59,6 +60,7 @@ class WmrWsHello {
       batchMax: _int(json['batchMax'], 'batchMax', 9),
       fragmentCapacity: _int(json['fragmentCapacity'], 'fragmentCapacity', 244),
       upgradeCapable: json['upgradeCapable'] == true,
+      upgradePreReleaseCapable: json['upgradePreReleaseCapable'] == true,
     );
   }
 
@@ -101,6 +103,11 @@ class WmrWsHello {
   /// Whether this daemon accepts `{"type":"upgrade"}`. Absent (and therefore
   /// false) on daemons that predate the root upgrade unit.
   final bool upgradeCapable;
+
+  /// Whether this daemon accepts `{"type":"upgrade","channel":"prerelease"}`.
+  /// Absent (and therefore false) on daemons that predate the channel field;
+  /// those bridges only install stable releases.
+  final bool upgradePreReleaseCapable;
 
   bool supportsStreamNamed(String name) => streams.contains(name);
 

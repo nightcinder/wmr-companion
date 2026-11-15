@@ -284,6 +284,111 @@ void main() {
       'streams': ['raw'],
     });
     expect(hello.upgradeCapable, isFalse);
+    expect(hello.upgradePreReleaseCapable, isFalse);
+  });
+
+  test('hello advertises the pre-release channel', () async {
+    await start();
+    await transport.connect(id);
+    expect(transport.helloFor(id)?.upgradePreReleaseCapable, isTrue);
+  });
+
+  test(
+    'a hello without upgradePreReleaseCapable is not pre-release capable',
+    () {
+      final hello = WmrWsHello.fromJson({
+        'type': 'hello',
+        'protocol': 1,
+        'streams': ['raw'],
+        'upgradeCapable': true,
+      });
+      expect(hello.upgradeCapable, isTrue);
+      expect(hello.upgradePreReleaseCapable, isFalse);
+    },
+  );
+
+  test(
+    'requestUpgrade sends a plain upgrade when preRelease is false',
+    () async {
+      await start();
+      await transport.connect(id);
+      final status = await transport.requestUpgrade(id);
+      expect(status.state, WmrWsUpgradeState.started);
+      expect(server.messagesOfType('upgrade'), [
+        {'type': 'upgrade'},
+      ]);
+    },
+  );
+
+  test(
+    'requestUpgrade sends the pre-release channel when advertised',
+    () async {
+      await start();
+      await transport.connect(id);
+      final status = await transport.requestUpgrade(id, preRelease: true);
+      expect(status.state, WmrWsUpgradeState.started);
+      expect(server.messagesOfType('upgrade'), [
+        {'type': 'upgrade', 'channel': 'prerelease'},
+      ]);
+    },
+  );
+
+  test('a bridge without the channel gets a plain upgrade', () async {
+    await start(const FakePiOptions(upgradePreReleaseCapable: false));
+    await transport.connect(id);
+    expect(transport.helloFor(id)?.upgradePreReleaseCapable, isFalse);
+    final status = await transport.requestUpgrade(id, preRelease: true);
+    expect(status.state, WmrWsUpgradeState.started);
+    expect(server.messagesOfType('upgrade'), [
+      {'type': 'upgrade'},
+    ]);
+  });
+
+  test(
+    'a bridge without the upgrade unit gets a plain upgrade and an error',
+    () async {
+      await start(
+        const FakePiOptions(
+          upgradeCapable: false,
+          upgradePreReleaseCapable: false,
+        ),
+      );
+      await transport.connect(id);
+      final status = await transport.requestUpgrade(id, preRelease: true);
+      expect(status.state, WmrWsUpgradeState.error);
+      expect(status.code, 'unavailable');
+      expect(server.messagesOfType('upgrade'), [
+        {'type': 'upgrade'},
+      ]);
+    },
+  );
+
+  test('requestUpgrade reports busy', () async {
+    await start(const FakePiOptions(upgradeState: 'busy'));
+    await transport.connect(id);
+    final status = await transport.requestUpgrade(id);
+    expect(status.state, WmrWsUpgradeState.busy);
+    expect(status.code, isNull);
+  });
+
+  test('requestUpgrade reports an error code', () async {
+    await start(
+      const FakePiOptions(upgradeState: 'error', upgradeCode: 'auth_failed'),
+    );
+    await transport.connect(id);
+    final status = await transport.requestUpgrade(id);
+    expect(status.state, WmrWsUpgradeState.error);
+    expect(status.code, 'auth_failed');
+  });
+
+  test('requestUpgrade fails when the socket drops before the reply', () async {
+    await start(const FakePiOptions(sendUpgradeReply: false));
+    await transport.connect(id);
+    final pending = transport.requestUpgrade(id, preRelease: true);
+    await waitFor(() => server.messagesOfType('upgrade').isNotEmpty);
+    await server.closeClients(1001, 'going down for install');
+    await expectLater(pending, throwsA(isA<WmrWsClosedException>()));
+    expect(transport.helloFor(id), isNull);
   });
 
   test('requestUpgrade sends the control message and parses started', () async {
