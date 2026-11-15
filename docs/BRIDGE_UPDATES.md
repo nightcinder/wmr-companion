@@ -40,7 +40,7 @@ When the bridge satisfies these conditions, the update banner shows the **Upgrad
 
 Bridges that run version `0.3.27-rc.3` or earlier do not advertise `upgradePreReleaseCapable`.
 
-The app also disables the in-app upgrade button if the bridge lacks token authentication or connects only over Bluetooth LE. For these bridges, the update banner displays a manual command. The command downloads the installer from the tagged release URL and pins the version with environment variables.
+The app also disables the in-app upgrade button if the bridge lacks token authentication or connects only over Bluetooth LE. For these bridges, the update banner displays a manual command. For a pre-release target, the command downloads the installer from the tagged release URL and sets version environment variables. For a stable target, the command downloads the installer from the latest release URL without environment variables.
 
 Run that command in a terminal on the Raspberry Pi.
 
