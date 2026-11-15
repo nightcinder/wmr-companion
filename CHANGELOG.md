@@ -5,8 +5,8 @@ keeps its own changelog. This file records the release as a whole.
 
 ## 0.3.25+33
 
-WMR Companion release. It carries the changes merged since v0.3.24 (#319-#326
-and #329-#331), including those in release candidates 1 to 3.
+WMR Companion release. It carries the changes merged since v0.3.24
+(#294-#331), including those in release candidates 1 to 3.
 
 - The Connect screen provides a manual bridge update check and a pre-release
   opt-in toggle. Stable builds remain the default target; opting in searches
