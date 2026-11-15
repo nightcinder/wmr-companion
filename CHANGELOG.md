@@ -3,6 +3,44 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog. This file records the release as a whole.
 
+## 0.3.25+33
+
+WMR Companion release. It carries the changes merged since v0.3.24 (#319-#326
+and #329-#331), including those in release candidates 1 to 3.
+
+- The Connect screen provides a manual bridge update check and a pre-release
+  opt-in toggle. Stable builds remain the default target; opting in searches
+  release candidate tags such as `0.3.27-rc.2`, and the choice is saved in local
+  device storage across launches (ONY-1403, ONY-1405).
+- The bridge release lookup reports the chosen tag, whether it is a pre-release,
+  and the failure when there was one, instead of collapsing every outcome to
+  "no update". It picks the highest published tag from the release list when
+  pre-releases are opted in, and serves a repeated manual check from the
+  previous request for 30 s (ONY-1404).
+- The app can install a pre-release bridge build over Wi-Fi in one tap. It sends
+  `{"type":"upgrade","channel":"prerelease"}` only when the daemon's `hello`
+  advertises both `upgradeCapable` and `upgradePreReleaseCapable`; a legacy or
+  tokenless bridge keeps the tag-pinned terminal command, and an accepted
+  upgrade extends the reconnect campaign under a five-minute watchdog
+  (ONY-1435, ONY-1437, ONY-1439).
+- `wmr_ws` parses the `upgradePreReleaseCapable` hello capability, and
+  `requestUpgrade(preRelease: true)` omits the channel field for a bridge that
+  does not advertise it, so an older daemon receives the stable request
+  (ONY-1435).
+- `wmr_core` rejects a decoded FF14 batch whose record count exceeds the most
+  one notification can carry, and the DroidDeck stream shows the transport's
+  accepted and dropped packet counts instead of a locally incremented sent
+  count (ONY-1396).
+- The Android app disables backup and ships API 31+ data extraction rules that
+  also refuse device-to-device transfer, closing the CodeQL backup alerts
+  (ONY-1395).
+- `docs/BRIDGE_UPDATES.md` documents manual bridge checks, stable and
+  pre-release channels, one-tap pre-release upgrades, the fallback for legacy
+  and tokenless bridges, and the tag-pinned Raspberry Pi install command with
+  `sudo env` (ONY-1407, ONY-1439).
+- CI keeps the Gradle build cache to one Android writer, bounds its entry, and
+  resolves the workspace once for both iOS config checks (#324, #325, #328).
+
 ## 0.3.25+32
 
 Release candidate 3 for the Pixel + Pi simultaneous BLE gamepad and Wi-Fi check
