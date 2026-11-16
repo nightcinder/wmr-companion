@@ -1020,6 +1020,62 @@ void main() {
   );
 
   test(
+    'a loss while the FF16 upgrade activates TCP falls back to BLE',
+    () async {
+      ble.dispose();
+      ble = newBle();
+      // The first FF16 read names the LAN host; the fallback's re-read only
+      // returns a version string, so no second upgrade probe follows and the
+      // route stays on BLE.
+      final document = _endpointDocument();
+      var ff16Reads = 0;
+      ble.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return ff16Reads++ == 0 ? document : _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      // The dial succeeds, but the leg reports `disconnected` on subscribe,
+      // before the switch names TCP active: only the upgrade's own release can
+      // retry that loss.
+      tcp.dropOnWatch = true;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_bleDeviceId);
+      expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+      await _waitFor(
+        () =>
+            tcp.tcpDisconnects.contains(_lanDeviceId) &&
+            transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+        reason: 'the loss during the upgrade activation was not retried',
+      );
+      expect(tcp.connectCalls, contains(_lanDeviceId));
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _bleDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [5]), isTrue);
+      await _settle();
+      expect(received.single.value, [5]);
+    },
+  );
+
+  test(
     're-promotes a configured TCP endpoint when FF16 is a version string',
     () async {
       tcp.failConnect = true;

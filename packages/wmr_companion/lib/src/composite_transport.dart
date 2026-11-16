@@ -1007,6 +1007,11 @@ class CompositeBleTransport implements BleTransport {
       // Stay on BLE; the next tick retries.
     } finally {
       route.upgrading = false;
+      // A dial can report its loss while this probe is activating it: the
+      // state stream yields on subscribe, before the switch names TCP active,
+      // so the listener only remembers it. No other switch will release the
+      // route, so retry it here.
+      _kickFallback(route);
     }
   }
 
