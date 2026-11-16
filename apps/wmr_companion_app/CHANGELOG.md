@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.26+34
+
+WMR Companion release. It carries the changes merged since v0.3.25 (#333).
+
+- The Wi-Fi transport detects a half-open TCP connection: it pings the bridge
+  after each answered pong and, when a pong misses the liveness timeout, closes
+  the stalled socket and fails the session over to BLE. A TCP loss that lands
+  while a transport switch or an upgrade activation still holds the route is
+  remembered and retried when the route is released (ONY-1476).
+
 ## 0.3.25+33
 
 WMR Companion release. It carries the changes merged since v0.3.24
