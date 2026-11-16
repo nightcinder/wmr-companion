@@ -116,6 +116,19 @@ not. `ControllerService.start()` rebaselines sequence and loss windows, so a
 daemon restart after reconnect is not reported as catastrophic loss. The
 reconnect tests in `test/reconnect_test.dart` pin that.
 
+### Half-open links
+
+A TCP peer that disappears without closing the socket (Wi-Fi lost, phone
+asleep) leaves it writable and silent: `dart:io` reports neither an error nor
+`done`. While a session is ready, `WmrWsTransport` sends a JSON `ping` every
+`livenessInterval` (500 ms by default) and requires its `pong` within
+`livenessTimeout` (1000 ms). A missed deadline closes the socket and reports
+`disconnected` with `WmrWsLivenessException`, so `CompositeBleTransport` can
+fall back to BLE instead of showing a connected link that carries nothing. The
+probe ids start at `wmrWsLivenessPingIdBase` (0x10000), above the 16-bit FF15
+id range, so a probe answer never reaches the echo sink. A non-positive
+`livenessInterval` disables the probes.
+
 ### Queue behaviour
 
 The daemon has a 512-message queue per client and drops the **newest** message

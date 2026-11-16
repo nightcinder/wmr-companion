@@ -36,6 +36,17 @@ enum CompositeLeg { tcp, ble }
 /// clients. FF15 (echo) is the exception: it stays on until the answers to
 /// pings already written on BLE have landed, then goes off too.
 ///
+/// ## Stall detection
+///
+/// A TCP socket whose peer vanished stays open and silent. [WmrWsTransport]
+/// probes it with a liveness `ping`, closes the session when no `pong` arrives
+/// and reports `disconnected`; this composite then closes the stalled leg,
+/// dials BLE and re-subscribes the live channels' CCCDs, keeping the
+/// connection state `connected` across the switch. A loss reported while a
+/// switch still holds the route is remembered and retried when that switch
+/// finishes, so a dial that goes silent during activation cannot leave the
+/// route marked connected on a dead leg.
+///
 /// ## Clock
 ///
 /// [clock] is the TCP transport's clock. BLE notifications are re-stamped
@@ -311,6 +322,7 @@ class CompositeBleTransport implements BleTransport {
         route.switchingDone = null;
       }
       if (!switchingDone.isCompleted) switchingDone.complete();
+      _kickFallback(route);
     }
 
     _setState(route, BleConnectionState.disconnected);
@@ -826,8 +838,13 @@ class CompositeBleTransport implements BleTransport {
     route.tcpStateId = id;
     route.tcpStateSub = tcp.connectionState(id).listen((state) {
       if (_disposed || route.intentional) return;
-      if (state == BleConnectionState.disconnected &&
-          route.active == _Lane.tcp) {
+      if (route.tcpDeviceId != id) return;
+      // The stream yields the current state on subscribe, which can land
+      // before the switch that activated this leg has named it active. Keep
+      // the loss so the switch can retry the failover when it releases the
+      // route.
+      route.tcpLost = state == BleConnectionState.disconnected;
+      if (route.tcpLost && route.active == _Lane.tcp) {
         unawaited(_fallbackToBle(route));
       }
     }, onError: (Object _) {});
@@ -850,9 +867,21 @@ class CompositeBleTransport implements BleTransport {
 
   Future<void> _fallbackToBle(_Route route) async {
     if (_disposed || route.intentional || route.switching) return;
+    route.tcpLost = false;
     route.switching = true;
     final switchingDone = route.switchingDone = Completer<void>();
     try {
+      // A leg can report `disconnected` while its socket is still open (the
+      // half-open case the liveness probe catches). Close it before dialling
+      // BLE so it cannot keep carrying frames behind the new route.
+      final stalledTcpId = route.tcpDeviceId;
+      if (stalledTcpId != null) {
+        try {
+          await tcp.disconnect(stalledTcpId);
+        } catch (_) {
+          // A link that already dropped needs no further teardown.
+        }
+      }
       final bleCandidates = _bleCandidatesFor(
         route,
         route.deviceId,
@@ -878,7 +907,24 @@ class CompositeBleTransport implements BleTransport {
         route.switchingDone = null;
       }
       if (!switchingDone.isCompleted) switchingDone.complete();
+      _kickFallback(route);
     }
+  }
+
+  /// Runs a failover that arrived while a switch held the route.
+  ///
+  /// A TCP loss can be reported between the dial succeeding and the switch
+  /// naming TCP active (the transport's state stream yields the current state
+  /// on subscribe). [_fallbackToBle] cannot take the route then, so the loss
+  /// is remembered and retried once the switch releases it.
+  void _kickFallback(_Route route) {
+    if (!route.tcpLost || route.switching || _disposed) return;
+    if (route.active != _Lane.tcp) {
+      route.tcpLost = false;
+      return;
+    }
+    route.tcpLost = false;
+    unawaited(_fallbackToBle(route));
   }
 
   Future<void> _recoverFromBleDrop(_Route route) async {
@@ -904,11 +950,13 @@ class CompositeBleTransport implements BleTransport {
         route.switchingDone = null;
       }
       if (!switchingDone.isCompleted) switchingDone.complete();
+      _kickFallback(route);
     }
   }
 
   Future<void> _lose(_Route route) async {
     _stopUpgrade(route);
+    route.tcpLost = false;
     // A drop is reported from the BLE subscription's own listener; awaiting
     // that generator's cancel() there can park the loss until the next event.
     // The streams are done after a loss, so detach without waiting.
@@ -959,6 +1007,11 @@ class CompositeBleTransport implements BleTransport {
       // Stay on BLE; the next tick retries.
     } finally {
       route.upgrading = false;
+      // A dial can report its loss while this probe is activating it: the
+      // state stream yields on subscribe, before the switch names TCP active,
+      // so the listener only remembers it. No other switch will release the
+      // route, so retry it here.
+      _kickFallback(route);
     }
   }
 
@@ -1144,6 +1197,11 @@ class _Route {
   bool intentional = false;
   bool switching = false;
   bool upgrading = false;
+
+  /// The watched TCP leg's last reported state: true once it reported
+  /// `disconnected`. A loss that lands while a switch still holds the route
+  /// is remembered here and retried by [_kickFallback].
+  bool tcpLost = false;
 
   /// Completed when an in-flight failover or loss finishes, so a concurrent
   /// [CompositeBleTransport.connect] can wait instead of returning as if the

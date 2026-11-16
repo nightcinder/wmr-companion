@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
@@ -70,7 +71,13 @@ class _FakeTcp extends WmrWsTransport {
   final Map<String, StreamController<BleNotification>> streams = {};
   final List<String> connectCalls = [];
   final List<String> unsubscribeCalls = [];
+  final List<String> tcpDisconnects = [];
   bool failConnect = false;
+
+  /// When set, the first [connectionState] subscription reports the leg as
+  /// already lost, like a stall that lands between the dial and the switch
+  /// that names TCP active.
+  bool dropOnWatch = false;
 
   /// When true, [connect] never answers, like a LAN address that no longer
   /// exists: the socket attempt runs until the transport's own timeout.
@@ -97,12 +104,18 @@ class _FakeTcp extends WmrWsTransport {
 
   @override
   Future<void> disconnect(String deviceId) async {
+    tcpDisconnects.add(deviceId);
     _setState(deviceId, BleConnectionState.disconnected);
   }
 
   @override
   Stream<BleConnectionState> connectionState(String deviceId) async* {
-    yield states[deviceId] ?? BleConnectionState.disconnected;
+    if (dropOnWatch) {
+      dropOnWatch = false;
+      yield BleConnectionState.disconnected;
+    } else {
+      yield states[deviceId] ?? BleConnectionState.disconnected;
+    }
     if (_disposed) return;
     yield* _stateController(deviceId).stream;
   }
@@ -434,6 +447,51 @@ class _CccdBle extends FakeTransport {
   ) async {
     cccLog.add('off ${characteristicUuid.toLowerCase()}');
   }
+}
+
+/// A loopback WebSocket daemon that says `hello` and then never answers again,
+/// like a Pi whose TCP peer vanished while the socket stayed open.
+class _SilentPi {
+  _SilentPi._(this._server);
+
+  final HttpServer _server;
+
+  int get port => _server.port;
+
+  static Future<_SilentPi> start({required String bridgeId}) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final pi = _SilentPi._(server);
+    server.listen((request) async {
+      final ws = await WebSocketTransformer.upgrade(
+        request,
+        protocolSelector: (protocols) =>
+            protocols.contains('wmr-wifi-v1') ? 'wmr-wifi-v1' : null,
+        compression: CompressionOptions.compressionOff,
+      );
+      // Keep reading so the socket is drained, and answer nothing: no `pong`,
+      // no `subscribed`.
+      ws.listen((_) {}, onError: (Object _) {}, onDone: () {});
+      ws.add(
+        jsonEncode({
+          'type': 'hello',
+          'protocol': 1,
+          'transport': 'wifi',
+          'device': 'wmr-pi',
+          'version': '0.2.4',
+          'hostname': 'pi',
+          'bridge_id': bridgeId,
+          'authRequired': false,
+          'streams': ['raw', 'decoded', 'batched'],
+          'recordSize': 56,
+          'batchMax': 9,
+          'fragmentCapacity': 244,
+        }),
+      );
+    });
+    return pi;
+  }
+
+  Future<void> stop() => _server.close(force: true);
 }
 
 void main() {
@@ -867,6 +925,155 @@ void main() {
     expect(received.last.value, [2]);
     expect(states, isNot(contains(BleConnectionState.disconnected)));
   });
+
+  test('a silent TCP socket fails over to BLE within 2500 ms', () async {
+    final pi = await _SilentPi.start(bridgeId: _bridgeId);
+    final tcpLink = WmrWsTransport(
+      endpoints: [
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: pi.port,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      ],
+    );
+    addTearDown(pi.stop);
+
+    final transport = CompositeBleTransport(
+      tcp: tcpLink,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    final stopwatch = Stopwatch()..start();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+    final received = <BleNotification>[];
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(received.add);
+    addTearDown(sub.cancel);
+
+    await _waitFor(
+      () =>
+          transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble &&
+          ble.cccLog.contains('on $wmrBridgeBatchedCharUuid'),
+      timeout: const Duration(seconds: 3),
+      reason: 'the silent TCP socket did not fail over to BLE',
+    );
+    stopwatch.stop();
+
+    expect(
+      stopwatch.elapsed,
+      lessThan(const Duration(milliseconds: 2500)),
+      reason: 'stall detection plus failover must stay inside 2500 ms',
+    );
+    expect(states, isNot(contains(BleConnectionState.disconnected)));
+    expect(tcpLink.helloFor(_tcpDeviceId), isNull);
+
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
+    await _settle();
+    expect(received.last.value, [3]);
+  });
+
+  test(
+    'a TCP loss delivered while a switch holds the route is retried',
+    () async {
+      tcp.dropOnWatch = true;
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the loss that landed during activation was dropped',
+      );
+      expect(tcp.tcpDisconnects, contains(_tcpDeviceId));
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [4]), isTrue);
+      await _settle();
+      expect(received.single.value, [4]);
+    },
+  );
+
+  test(
+    'a loss while the FF16 upgrade activates TCP falls back to BLE',
+    () async {
+      ble.dispose();
+      ble = newBle();
+      // The first FF16 read names the LAN host; the fallback's re-read only
+      // returns a version string, so no second upgrade probe follows and the
+      // route stays on BLE.
+      final document = _endpointDocument();
+      var ff16Reads = 0;
+      ble.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return ff16Reads++ == 0 ? document : _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      // The dial succeeds, but the leg reports `disconnected` on subscribe,
+      // before the switch names TCP active: only the upgrade's own release can
+      // retry that loss.
+      tcp.dropOnWatch = true;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_bleDeviceId);
+      expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+      await _waitFor(
+        () =>
+            tcp.tcpDisconnects.contains(_lanDeviceId) &&
+            transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+        reason: 'the loss during the upgrade activation was not retried',
+      );
+      expect(tcp.connectCalls, contains(_lanDeviceId));
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _bleDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [5]), isTrue);
+      await _settle();
+      expect(received.single.value, [5]);
+    },
+  );
 
   test(
     're-promotes a configured TCP endpoint when FF16 is a version string',

@@ -534,7 +534,11 @@ void main() {
     expect(answer.rxTimeUs, 123456789);
     expect(answer.turnaroundUs, 0);
     expect(answer.queueDepth, 0);
-    final ping = server.messagesOfType('ping').single;
+    final ping = server
+        .messagesOfType('ping')
+        .singleWhere(
+          (message) => (message['id']! as int) < wmrWsLivenessPingIdBase,
+        );
     expect(ping['id'], 7);
     expect(ping['t'], isA<int>());
   });
