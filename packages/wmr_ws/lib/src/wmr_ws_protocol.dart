@@ -19,6 +19,15 @@ const int wmrWsDefaultPort = 8765;
 /// Default HTTP path of the daemon.
 const String wmrWsDefaultPath = '/wmr';
 
+/// First `id` reserved for the transport's own liveness probes.
+///
+/// An FF15 echo request carries a 16-bit ping id, so the daemon echoes back a
+/// value below this base for every echo answer. A `pong` at or above it is a
+/// reply to `WmrWsTransport`'s keepalive and must never be synthesized into an
+/// echo answer. Protocol 1 echoes `id` verbatim
+/// (WMR_Bridge `docs/PI_BRIDGE.md`, "Wire protocol, version 1").
+const int wmrWsLivenessPingIdBase = 0x10000;
+
 /// The three payload streams and the `BleTransport` characteristic each one
 /// maps to. The UUIDs are the firmware constants from `wmr_core`, not new
 /// strings: the Wi-Fi bridge carries the same FF11/FF12/FF14 payloads.

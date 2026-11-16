@@ -93,6 +93,12 @@ class FakePiServer {
     await _server.close(force: true);
   }
 
+  /// Replies to `ping` with `pong` unless cleared.
+  ///
+  /// A test that clears it models a half-open TCP peer: the socket stays open
+  /// and writable, but nothing behind it answers.
+  bool answerPings = true;
+
   void _onMessage(WebSocket ws, dynamic data) {
     if (data is! String) {
       sendText({'type': 'error', 'code': 'binary_not_accepted'});
@@ -162,6 +168,7 @@ class FakePiServer {
           if (_options.upgradeCode != null) 'code': _options.upgradeCode,
         });
       case 'ping':
+        if (!answerPings) return;
         sendText({
           'type': 'pong',
           'id': decoded['id'],

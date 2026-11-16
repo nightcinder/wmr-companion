@@ -70,6 +70,17 @@ Future<WebSocket> _defaultConnector(Uri uri) => WebSocket.connect(
 /// `ControllerService.start()` again, as with BLE. A daemon restart resets its
 /// per-hand sequence numbers; `ControllerService.start()` rebaselines them and
 /// resets `LossWindow`, so the restart is not reported as catastrophic loss.
+///
+/// ## Half-open sockets
+///
+/// A TCP peer that disappears without closing the socket (Wi-Fi lost, phone
+/// asleep) leaves it writable and silent: `dart:io` reports neither an error
+/// nor `done`. While a session is ready the transport sends a JSON `ping`
+/// every [livenessInterval] and requires the `pong` within
+/// [livenessTimeout]. A missed deadline closes the socket and reports
+/// `disconnected`, which is what lets `CompositeBleTransport` fall back to
+/// BLE. Probes are not FF15: their ids start at [wmrWsLivenessPingIdBase] and
+/// never reach the echo sink.
 class WmrWsTransport implements BleTransport {
   WmrWsTransport({
     required Iterable<WmrWsEndpoint> endpoints,
@@ -79,6 +90,8 @@ class WmrWsTransport implements BleTransport {
     this.handshakeTimeout = const Duration(seconds: 5),
     this.authTimeout = const Duration(seconds: 5),
     this.requestTimeout = const Duration(seconds: 5),
+    this.livenessInterval = const Duration(milliseconds: 500),
+    this.livenessTimeout = const Duration(milliseconds: 1000),
     this.queueSize = 512,
     WmrWsDiscovery? discovery,
     bool enableDiscovery = false,
@@ -113,6 +126,24 @@ class WmrWsTransport implements BleTransport {
 
   /// Time allowed for `subscribed`, `unsubscribed` or `status` replies.
   final Duration requestTimeout;
+
+  /// How long after the previous `pong` the next liveness probe is sent. A
+  /// non-positive duration disables the probes.
+  ///
+  /// A TCP peer that vanished (Wi-Fi gone, cable pulled, phone asleep) leaves
+  /// the socket open and writable: no error, no close, no traffic. The daemon
+  /// answers `{"type":"ping"}` with a `pong`, so a probe that is not answered
+  /// proves the path is dead and the session is failed with
+  /// [WmrWsLivenessException], which reports `disconnected`.
+  ///
+  /// Probes use ids from [wmrWsLivenessPingIdBase] upwards, so they never
+  /// produce an FF15 echo answer.
+  final Duration livenessInterval;
+
+  /// How long one liveness probe may stay unanswered before the session is
+  /// considered half-open. Defaults to one second, so with the default
+  /// [livenessInterval] a silent peer is reported within 1500 ms.
+  final Duration livenessTimeout;
 
   /// Client-side notification queue bound per stream, mirroring the daemon's
   /// 512-message queue. Overflow drops the newest message and is counted in
@@ -225,6 +256,12 @@ class WmrWsTransport implements BleTransport {
         session.startHelloTimer(handshakeTimeout, _fail);
         await ready;
         session.cancelTimers();
+        session.startLiveness(
+          interval: livenessInterval,
+          timeout: livenessTimeout,
+          nowMs: () => clock.nowUs ~/ 1000,
+          onTimeout: _fail,
+        );
         // A later socket failure is terminal and must report `disconnected`.
         session.suppressDisconnectState = false;
         _setState(deviceId, BleConnectionState.connected);
@@ -626,6 +663,15 @@ class _WmrWsSession {
   Timer? _authTimer;
   _PendingControl? _pending;
 
+  Timer? _livenessTimer;
+  Timer? _livenessDeadline;
+  Duration _livenessInterval = Duration.zero;
+  Duration _livenessTimeout = Duration.zero;
+  int _livenessSeq = 0;
+  int? _livenessPendingId;
+  int Function()? _livenessNowMs;
+  void Function(_WmrWsSession, WmrWsException)? _livenessOnTimeout;
+
   /// The characteristic whose frames the socket should deliver right now.
   /// Set before the `subscribe` message is written, so frames that race the
   /// `subscribed` reply are not lost.
@@ -702,6 +748,62 @@ class _WmrWsSession {
     _helloTimer = null;
     _authTimer?.cancel();
     _authTimer = null;
+    _livenessTimer?.cancel();
+    _livenessTimer = null;
+    _livenessDeadline?.cancel();
+    _livenessDeadline = null;
+    _livenessPendingId = null;
+  }
+
+  /// Starts the half-open detector: one probe at a time, each answered by a
+  /// `pong` within [timeout]. A non-positive [interval] or [timeout] leaves it
+  /// off.
+  void startLiveness({
+    required Duration interval,
+    required Duration timeout,
+    required int Function() nowMs,
+    required void Function(_WmrWsSession, WmrWsException) onTimeout,
+  }) {
+    if (interval <= Duration.zero || timeout <= Duration.zero) return;
+    _livenessInterval = interval;
+    _livenessTimeout = timeout;
+    _livenessNowMs = nowMs;
+    _livenessOnTimeout = onTimeout;
+    _scheduleLivenessProbe();
+  }
+
+  void _scheduleLivenessProbe() {
+    if (isClosed || _livenessInterval <= Duration.zero) return;
+    _livenessTimer?.cancel();
+    _livenessTimer = Timer(_livenessInterval, _sendLivenessProbe);
+  }
+
+  void _sendLivenessProbe() {
+    if (isClosed || !isReady) return;
+    final id = wmrWsLivenessPingIdBase + ++_livenessSeq;
+    _livenessPendingId = id;
+    _livenessDeadline?.cancel();
+    _livenessDeadline = Timer(_livenessTimeout, () {
+      if (isClosed || !isReady) return;
+      _livenessDeadline = null;
+      _livenessPendingId = null;
+      _livenessOnTimeout?.call(
+        this,
+        WmrWsLivenessException(
+          'no pong within ${_livenessTimeout.inMilliseconds} ms: the TCP peer '
+          'is silent',
+        ),
+      );
+    });
+    _sendJson({'type': 'ping', 'id': id, 't': _livenessNowMs?.call() ?? 0});
+  }
+
+  void _onLivenessPong(int id) {
+    if (isClosed || !isReady || id != _livenessPendingId) return;
+    _livenessPendingId = null;
+    _livenessDeadline?.cancel();
+    _livenessDeadline = null;
+    _scheduleLivenessProbe();
   }
 
   // ---- handshake --------------------------------------------------------
@@ -866,9 +968,20 @@ class _WmrWsSession {
 
   void _onPong(Map<String, Object?> json, int receivedAtUs) {
     final id = json['id'];
+    if (id is! num) {
+      unexpectedMessages++;
+      return;
+    }
+    final pingId = id.toInt();
+    if (pingId >= wmrWsLivenessPingIdBase) {
+      // The transport's own keepalive. Never synthesize an echo answer for
+      // it: the FF15 sink belongs to the app's echo client.
+      _onLivenessPong(pingId);
+      return;
+    }
     final serverTimeUs = json['serverTimeUs'];
     final sink = _echoSink;
-    if (id is! num || serverTimeUs is! num) {
+    if (serverTimeUs is! num) {
       unexpectedMessages++;
       return;
     }
@@ -878,7 +991,7 @@ class _WmrWsSession {
     // EchoSample.rttUs then equals end-to-end minus nothing, which is the
     // round trip the client can actually observe.
     final answer = EchoAnswer(
-      pingId: id.toInt() & 0xffff,
+      pingId: pingId & 0xffff,
       rxTimeUs: serverTimeUs.toInt(),
       turnaroundUs: 0,
       queueDepth: 0,

@@ -67,6 +67,18 @@ class WmrWsControlException extends WmrWsException {
   String toString() => 'WmrWsControlException($code): $message';
 }
 
+/// The peer stopped answering the transport's liveness probes.
+///
+/// A TCP socket in a half-open state accepts writes and reports no error, so
+/// only an unanswered application-level `ping` distinguishes it from an idle
+/// link. The transport closes the socket and reports `disconnected`.
+class WmrWsLivenessException extends WmrWsException {
+  const WmrWsLivenessException(super.message, {super.cause});
+
+  @override
+  String toString() => 'WmrWsLivenessException: $message';
+}
+
 /// The socket closed while it was needed.
 class WmrWsClosedException extends WmrWsException {
   const WmrWsClosedException(
