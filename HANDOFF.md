@@ -1,6 +1,6 @@
 # Handoff for a new orchestrator
 
-Written 2026-10-22 by the outgoing "director" session. General Helmuth von Moltke updated it on 2026-10-23, 2026-10-24 and 2026-10-27 for 0.2.1, on 2026-10-31 for the 0.3.5 and 0.3.6 releases, on 2026-11-01 for 0.3.7, on 2026-11-02 for 0.3.11, 0.3.12 and 0.3.14, on 2026-11-06 for 0.3.17, on 2026-11-07 for the 0.3.0 Dart package version and docs refresh, and on 2026-11-09 for 0.3.19. Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
+Written 2026-10-22 by the outgoing "director" session. General Helmuth von Moltke updated it on 2026-10-23, 2026-10-24 and 2026-10-27 for 0.2.1, on 2026-10-31 for the 0.3.5 and 0.3.6 releases, on 2026-11-01 for 0.3.7, on 2026-11-02 for 0.3.11, 0.3.12 and 0.3.14, on 2026-11-06 for 0.3.17, on 2026-11-07 for the 0.3.0 Dart package version and docs refresh, and on 2026-11-09 for 0.3.19, and on 2026-11-18 for the 0.3.25 and 0.3.26 release state. Read `docs/STATUS.md` first (current state and every hardware result), then this file. Where the two differ, STATUS is newer than this page's table of results.
 
 Everything the project owner (Nick) has not reported is **not verified on hardware**. Results below are labelled "user-reported" when Nick pasted or told us the figure.
 
@@ -221,7 +221,7 @@ All milestone planning and ordering is governed by [PLAN.md](docs/PLAN.md). Do n
 | Milestone plan (M10–M15) | [PLAN.md](docs/PLAN.md) |
 | Library design & phases | [docs/LIBRARY.md](docs/LIBRARY.md) |
 | Hardware results and open problems | [docs/STATUS.md](docs/STATUS.md) |
-| Current release, flavors and unified export | [`v0.3.23` release](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.23), [docs/tracking/BUILDS.md](docs/tracking/BUILDS.md), [`apps/wmr_companion_app/android/unity/README.md`](apps/wmr_companion_app/android/unity/README.md) |
+| Current release, flavors and unified export | [`v0.3.26` release](https://github.com/nightcinder/wmr-companion/releases/tag/v0.3.26), [docs/tracking/BUILDS.md](docs/tracking/BUILDS.md), [`apps/wmr_companion_app/android/unity/README.md`](apps/wmr_companion_app/android/unity/README.md) |
 | Architecture and data flow | [docs/PLAN.md](docs/PLAN.md) |
 | Latency test runs and decision rule | [docs/LATENCY.md](docs/LATENCY.md) |
 | Native iOS kit (WMRCompanionKit) | [docs/IOS.md](docs/IOS.md), `packages/WMRCompanionKit` |
