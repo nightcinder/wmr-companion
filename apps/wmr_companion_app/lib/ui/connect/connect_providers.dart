@@ -280,8 +280,10 @@ final lanInterfaceProbeProvider = Provider<Future<bool> Function()>(
 );
 
 /// Interface name prefixes that are never a LAN the Pi is reachable on:
-/// Android/iOS mobile data, VPN tunnels and peer-to-peer links.
+/// mobile data (Android/iOS and WWAN modems), VPN tunnels and peer-to-peer
+/// links.
 const List<String> _nonLanInterfacePrefixes = [
+  'wwan',
   'rmnet',
   'ccmni',
   'pdp',
@@ -305,14 +307,23 @@ bool isLanInterfaceName(String name) {
   return !_nonLanInterfacePrefixes.any(lower.startsWith);
 }
 
+/// Reads the device's interfaces for [hasLanInterface]. Production lists the
+/// platform's real interfaces; tests pass a fixed list.
+typedef LanInterfaceLister = Future<List<NetworkInterface>> Function({
+  bool includeLoopback,
+});
+
 /// Whether an active, non-loopback LAN interface exists.
 ///
 /// A platform that cannot list interfaces answers true: guessing "no LAN"
 /// would disable Wi-Fi for everyone. Both IPv4 and IPv6 addresses count, so an
-/// IPv6-only Wi-Fi link is not mistaken for a missing LAN.
-Future<bool> hasLanInterface() async {
+/// IPv6-only Wi-Fi link is not mistaken for a missing LAN. A phone whose every
+/// non-loopback interface is cellular answers false: the Pi is unreachable
+/// over mobile data, so the composites skip the TCP probe and dial BLE.
+Future<bool> hasLanInterface({LanInterfaceLister? interfaceLister}) async {
+  final list = interfaceLister ?? NetworkInterface.list;
   try {
-    final interfaces = await NetworkInterface.list(includeLoopback: false);
+    final interfaces = await list(includeLoopback: false);
     return interfaces.any(
       (interface) =>
           interface.addresses.isNotEmpty && isLanInterfaceName(interface.name),

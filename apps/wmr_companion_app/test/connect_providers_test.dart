@@ -35,6 +35,11 @@ Future<void> _waitFor(
   }
 }
 
+/// A [hasLanInterface] seam that answers with [interfaces] instead of reading
+/// the platform's interface list.
+LanInterfaceLister _interfaceLister(List<NetworkInterface> interfaces) =>
+    ({bool includeLoopback = false}) async => interfaces;
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -387,12 +392,72 @@ void main() {
     expect(isLanInterfaceName('wlan0'), isTrue);
     expect(isLanInterfaceName('en0'), isTrue);
     expect(isLanInterfaceName('eth0'), isTrue);
+    expect(isLanInterfaceName('wwan0'), isFalse);
     expect(isLanInterfaceName('rmnet_data0'), isFalse);
+    expect(isLanInterfaceName('ccmni0'), isFalse);
+    expect(isLanInterfaceName('clat0'), isFalse);
     expect(isLanInterfaceName('pdp_ip0'), isFalse);
     expect(isLanInterfaceName('utun3'), isFalse);
     expect(isLanInterfaceName('ppp0'), isFalse);
 
     expect(await hasLanInterface(), isA<bool>());
+  });
+
+  group('LAN interface probe', () {
+    test('cellular-only interfaces answer no LAN', () async {
+      expect(
+        await hasLanInterface(
+          interfaceLister: _interfaceLister(const [
+            _TestInterface('wwan0'),
+            _TestInterface('rmnet_data0'),
+            _TestInterface('ccmni0'),
+            _TestInterface('pdp_ip0'),
+            _TestInterface('clat0'),
+          ]),
+        ),
+        isFalse,
+        reason: 'mobile data cannot reach the Pi over the LAN',
+      );
+    });
+
+    test('cellular plus Wi-Fi interfaces answer LAN', () async {
+      expect(
+        await hasLanInterface(
+          interfaceLister: _interfaceLister(const [
+            _TestInterface('wwan0'),
+            _TestInterface('wlan0'),
+          ]),
+        ),
+        isTrue,
+      );
+    });
+
+    test('Wi-Fi-only interfaces answer LAN', () async {
+      expect(
+        await hasLanInterface(
+          interfaceLister: _interfaceLister(const [_TestInterface('wlan0')]),
+        ),
+        isTrue,
+      );
+    });
+
+    test('no interfaces answer no LAN', () async {
+      expect(
+        await hasLanInterface(interfaceLister: _interfaceLister(const [])),
+        isFalse,
+      );
+    });
+
+    test('a listing failure still answers LAN', () async {
+      expect(
+        await hasLanInterface(
+          interfaceLister: ({bool includeLoopback = false}) async =>
+              throw const FileSystemException('no interface list'),
+        ),
+        isTrue,
+        reason: 'guessing "no LAN" would disable Wi-Fi for everyone',
+      );
+    });
   });
 
   test('the Wi-Fi fallback composite consults the LAN probe', () async {
@@ -537,6 +602,99 @@ void main() {
     expect(
       await ble.connectionState(bleDeviceId).first,
       BleConnectionState.connected,
+    );
+  });
+
+  test('cellular-only interfaces skip the TCP probe and dial BLE', () async {
+    const bridgeId = 'pi-1';
+    const bleDeviceId = 'ble-pi-1';
+    final endpoint = WmrWsEndpoint(
+      host: '192.168.1.42',
+      port: 8765,
+      bridgeId: bridgeId,
+    );
+    // The TCP leg would answer, so a dial that happens means the composite
+    // chose to probe it.
+    final tcp = _CountingTcp(
+      FakeTransport(devices: const [FakeDevice(id: '192.168.1.42:8765')]),
+      endpoint,
+    );
+    final ble = FakeTransport(
+      devices: const [
+        FakeDevice(id: bleDeviceId, name: 'WMR Bridge', mtu: 244),
+      ],
+    );
+    ble.onRead = (deviceId, characteristic) {
+      if (characteristic == wmrBridgeVersionCharUuid) {
+        return Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': bridgeId,
+              'name': 'WMR Bridge',
+              'version': '0.2.4',
+              'hosts': ['192.168.1.42'],
+              'port': 8765,
+              'path': '/wmr',
+              'authRequired': false,
+            }),
+          ),
+        );
+      }
+      throw StateError('unexpected read $characteristic');
+    };
+    final composite = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: Duration.zero,
+      bleScanWait: const Duration(seconds: 2),
+      lanAvailable: () => hasLanInterface(
+        interfaceLister: _interfaceLister(const [
+          _TestInterface('wwan0'),
+          _TestInterface('rmnet_data0'),
+          _TestInterface('ccmni0'),
+          _TestInterface('pdp_ip0'),
+          _TestInterface('clat0'),
+        ]),
+      ),
+    );
+    addTearDown(composite.dispose);
+
+    final container = makeContainer(
+      compositeFactory: (_) => WifiLink(
+        composite,
+        activeLeg: () =>
+            switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+              CompositeLeg.tcp => WifiLinkLeg.tcp,
+              CompositeLeg.ble => WifiLinkLeg.ble,
+              null => null,
+            },
+      ),
+    );
+
+    await container
+        .read(realDeviceProvider.notifier)
+        .connectWifi(
+          host: endpoint.host,
+          port: endpoint.port,
+          bridgeId: bridgeId,
+          bleFallback: true,
+        );
+
+    final state = container.read(realDeviceProvider);
+    expect(state.connected, isTrue);
+    expect(state.wifiFallback, isTrue);
+    expect(state.wifiLeg, WifiLinkLeg.ble);
+    expect(composite.activeLegFor(endpoint.resolvedDeviceId), CompositeLeg.ble);
+    expect(
+      await ble.connectionState(bleDeviceId).first,
+      BleConnectionState.connected,
+    );
+    expect(
+      tcp.dials,
+      0,
+      reason: 'a cellular-only phone must not run the TCP probe',
     );
   });
 
@@ -1503,6 +1661,72 @@ class _ThrowingSettingsStore implements BridgeUpdateSettingsStore {
 
   @override
   Future<void> save(bool includePreReleases) async {}
+}
+
+/// An interface [hasLanInterface] tests can name; the platform's
+/// [NetworkInterface] cannot be constructed.
+class _TestInterface implements NetworkInterface {
+  const _TestInterface(this.name);
+
+  @override
+  final String name;
+
+  @override
+  int get index => 0;
+
+  @override
+  List<InterfaceAddress> get addresses => const [_TestAddress()];
+}
+
+/// The one address every [_TestInterface] carries.
+class _TestAddress implements InterfaceAddress {
+  const _TestAddress();
+
+  @override
+  String get address => '192.168.1.5';
+
+  @override
+  String get host => address;
+
+  @override
+  InternetAddressType get type => InternetAddressType.IPv4;
+
+  @override
+  Uint8List get rawAddress => Uint8List.fromList([192, 168, 1, 5]);
+
+  @override
+  bool get isLoopback => false;
+
+  @override
+  bool get isLinkLocal => false;
+
+  @override
+  bool get isMulticast => false;
+
+  @override
+  Future<InternetAddress> reverse() async => InternetAddress(address);
+
+  @override
+  int get prefixLength => 24;
+
+  @override
+  InternetAddress? get broadcast => InternetAddress('192.168.1.255');
+}
+
+/// A TCP leg that would connect if dialled, counting every dial so a test can
+/// prove the composite chose not to probe it.
+class _CountingTcp extends _ScriptedTcp {
+  _CountingTcp(super.inner, WmrWsEndpoint endpoint) {
+    registerEndpoint(endpoint);
+  }
+
+  int dials = 0;
+
+  @override
+  Future<void> connect(String deviceId) {
+    dials++;
+    return super.connect(deviceId);
+  }
 }
 
 class _MemorySettingsStore implements BridgeUpdateSettingsStore {
