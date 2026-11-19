@@ -44,6 +44,19 @@ class _DroppableWifiTransport extends FakeTransport {
   }
 }
 
+/// Counts transport preflights: every dial reads the radio's availability
+/// before it touches the stack, so a read that arrives while the radio is
+/// off is a dial against a dead stack.
+class _CountingAdapter extends FakeBleAdapter {
+  int availabilityReads = 0;
+
+  @override
+  Future<BleAvailability> availability() async {
+    availabilityReads++;
+    return super.availability();
+  }
+}
+
 class TestModeNotifier extends StreamModeNotifier {
   TestModeNotifier(this.mode);
 
@@ -1000,6 +1013,129 @@ void main() {
 
         expect(container.read(realDeviceProvider).connected, isFalse);
         expect(connectCalls(), connectsBefore);
+      },
+    );
+
+    test('a Wi-Fi loss while the radio is off is not a radio loss and '
+        're-dials', () async {
+      final wifi = _DroppableWifiTransport(
+        devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+      );
+      addTearDown(wifi.dispose);
+      const policy = ReconnectPolicy(
+        baseDelay: Duration(milliseconds: 150),
+        maxDelay: Duration(milliseconds: 300),
+        maxAttempts: 3,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+          streamModeProvider.overrideWith(
+            () => TestModeNotifier(StreamMode.raw),
+          ),
+          reconnectPolicyProvider.overrideWithValue(policy),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connectWifi(
+        host: 'pi.local',
+        port: 8765,
+        bleFallback: false,
+      );
+      expect(container.read(realDeviceProvider).connected, isTrue);
+
+      // The Bluetooth radio dies: the Wi-Fi session it cannot touch must
+      // stay up.
+      adapter.emitAvailability(BleAvailability.poweredOff);
+      await wait(50);
+      expect(container.read(realDeviceProvider).connected, isTrue);
+
+      // The Wi-Fi link then drops for its own reasons. That is a Wi-Fi
+      // failure, not a radio loss, and the ordinary campaign re-dials it
+      // over Wi-Fi while the radio is still off.
+      final connectsBefore = wifi.connectCalls;
+      await wifi.disconnect('pi.local:8765');
+      await until(
+        () =>
+            container.read(realDeviceProvider).status.phase ==
+            BleLinkPhase.connectionLost,
+        reason: 'the Wi-Fi drop was not reported as its own loss',
+      );
+
+      for (
+        var elapsed = 0;
+        elapsed < 1500 &&
+            (wifi.connectCalls < connectsBefore + 1 ||
+                !container.read(realDeviceProvider).connected);
+        elapsed += 20
+      ) {
+        await wait(20);
+      }
+
+      expect(container.read(realDeviceProvider).connected, isTrue);
+      expect(wifi.connectCalls, greaterThanOrEqualTo(connectsBefore + 1));
+    });
+
+    test(
+      'a retry armed before the radio dies is parked, not dialled',
+      () async {
+        final countingAdapter = _CountingAdapter();
+        final ble = UniversalBleTransport(
+          adapter: countingAdapter,
+          scanTimeout: const Duration(minutes: 5),
+        );
+        addTearDown(ble.dispose);
+        const policy = ReconnectPolicy(
+          baseDelay: Duration(milliseconds: 150),
+          maxDelay: Duration(milliseconds: 300),
+          maxAttempts: 3,
+        );
+        final container = ProviderContainer(
+          overrides: [
+            realTransportProvider.overrideWithValue(ble),
+            streamModeProvider.overrideWith(
+              () => TestModeNotifier(StreamMode.batched),
+            ),
+            reconnectPolicyProvider.overrideWithValue(policy),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        final controller = container.read(realDeviceProvider.notifier);
+        await controller.connect(fakeBridgeDeviceId);
+        await until(
+          () => countingAdapter.ccc.contains('on ff14'),
+          reason: 'the stream CCCD was never enabled',
+        );
+        int connectCalls() =>
+            countingAdapter.calls.where((c) => c == 'connect').length;
+        final connectsBefore = connectCalls();
+        final readsAfterConnect = countingAdapter.availabilityReads;
+
+        // The link drops while the radio is alive, arming a retry; the
+        // radio dies before the retry's delay elapses.
+        countingAdapter.dropLink(deviceId: fakeBridgeDeviceId);
+        countingAdapter.emitAvailability(BleAvailability.poweredOff);
+        // Past the whole retry delay: the armed timer fired inside the
+        // radio-off window and must not have dialled the dead stack.
+        await wait(500);
+
+        expect(
+          countingAdapter.availabilityReads,
+          readsAfterConnect,
+          reason: 'a retry armed before the radio died dialled the dead radio',
+        );
+        expect(connectCalls(), connectsBefore);
+
+        countingAdapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+
+        // The radio's return dials the parked bridge exactly once.
+        expect(connectCalls(), connectsBefore + 1);
+        expect(countingAdapter.availabilityReads, readsAfterConnect + 1);
       },
     );
   });

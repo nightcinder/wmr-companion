@@ -742,10 +742,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   void _handleLinkStatus(BleLinkStatus s) {
-    // While the radio is off a lost or ended link is a radio loss,
+    // While the radio is off a lost or ended BLE link is a radio loss,
     // whichever leg reported it: the status stays honest for the UI and the
-    // recovery.
+    // recovery. A Wi-Fi tab session is untouched by the Bluetooth radio, so
+    // its own losses keep their phase and reach the ordinary reconnect path.
     if (_radioOff &&
+        state.activeTransport == BridgeTransportKind.ble &&
         (s.phase == BleLinkPhase.connectionLost ||
             s.phase == BleLinkPhase.disconnected)) {
       s = BleLinkStatus(
@@ -901,10 +903,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     // Both the raw BLE loss and the composite's loss can report the same
     // drop; one pending retry is enough.
     if (_reconnectTimers[id] != null) return;
-    // The radio is off: every GATT link is already gone and every dial would
-    // fail its preflight against the dead stack. Park the bridge for the
-    // radio's return instead of burning the campaign's attempts.
-    if (_radioOff) {
+    // The radio is off: every GATT link is already gone and every BLE dial
+    // would fail its preflight against the dead stack. Park the bridge for
+    // the radio's return instead of burning the campaign's attempts. A
+    // Wi-Fi tab redial runs normally: the radio cannot hold it up.
+    if (_radioOff && state.activeTransport == BridgeTransportKind.ble) {
       _reconnectTimers.remove(id)?.cancel();
       _reconnectAttempts.remove(id);
       _reconnecting.remove(id);
@@ -936,6 +939,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _reconnectTimers.remove(id);
       if (_intentionalDisconnect) {
         _reconnecting.remove(id);
+        return;
+      }
+      // The radio died while this retry waited. A BLE dial now would only
+      // fail its preflight against the dead stack, so park the bridge for
+      // the radio's return; a Wi-Fi dial is unaffected and still runs.
+      if (_radioOff && state.activeTransport == BridgeTransportKind.ble) {
+        _reconnectAttempts.remove(id);
+        _reconnecting.remove(id);
+        _droppedDeviceIds.add(id);
         return;
       }
       await _connect(id, userInitiated: false);
