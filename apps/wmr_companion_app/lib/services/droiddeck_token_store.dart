@@ -43,8 +43,8 @@ class DroidDeckTokenStore {
     }
   }
 
-  /// Removes the saved token. Opting out of remembering does not call this;
-  /// only emptying the field while remembering is on does.
+  /// Removes the saved token. Unchecking remember and emptying the field
+  /// while remembering is on both revoke the stored value.
   Future<void> clear() async {
     try {
       await _backend.delete(_key);

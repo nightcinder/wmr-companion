@@ -549,12 +549,24 @@ class _DroidDeckPanelState extends ConsumerState<DroidDeckPanel> {
 
   /// A remembered token fills the field, opts back into remembering and feeds
   /// the live provider, so one launch's token survives an app restart.
+  ///
+  /// With nothing saved the field is seeded from the live provider instead:
+  /// this state dies with the route, the app-scoped provider does not, and a
+  /// token typed before the route was popped must stay visible. Otherwise
+  /// Start would feed a hidden token an already-empty field cannot clear.
   Future<void> _loadSavedToken() async {
     final saved = await ref.read(droidDeckTokenStoreProvider).load();
-    if (!mounted || saved == null) return;
-    _token.text = '$saved';
-    ref.read(droidDeckTokenProvider.notifier).state = saved;
-    setState(() => _remember = true);
+    if (!mounted) return;
+    if (saved != null) {
+      _token.text = '$saved';
+      ref.read(droidDeckTokenProvider.notifier).state = saved;
+      setState(() => _remember = true);
+      return;
+    }
+    final held = ref.read(droidDeckTokenProvider);
+    if (held != null) {
+      _token.text = '$held';
+    }
   }
 
   void _onTokenChanged(String raw) {
@@ -562,14 +574,15 @@ class _DroidDeckPanelState extends ConsumerState<DroidDeckPanel> {
     final invalid = raw.trim().isNotEmpty && parsed == null;
     ref.read(droidDeckTokenProvider.notifier).state = parsed;
     setState(() => _invalid = invalid);
-    // Opting out writes nothing: an edit while the box is off never touches
-    // the platform store.
+    // While the box is off an edit never touches the platform store.
     if (!_remember) return;
     final store = ref.read(droidDeckTokenStoreProvider);
     if (parsed != null) {
       unawaited(store.save(parsed));
-    } else {
+    } else if (raw.trim().isEmpty) {
       // Emptying the field while remembering is on is the clear path.
+      // Invalid non-empty text clears only the live provider; the saved
+      // value stays until the field is emptied or the box is unchecked.
       unawaited(store.clear());
     }
   }
@@ -577,10 +590,17 @@ class _DroidDeckPanelState extends ConsumerState<DroidDeckPanel> {
   void _onRememberChanged(bool? value) {
     final remember = value ?? false;
     setState(() => _remember = remember);
-    if (!remember) return;
+    final store = ref.read(droidDeckTokenStoreProvider);
+    if (!remember) {
+      // Unchecking revokes persistence: the saved value is removed, so a
+      // later launch cannot silently re-check the box and re-enable the
+      // token. The typed field and the live provider are untouched.
+      unawaited(store.clear());
+      return;
+    }
     final parsed = parseDroidDeckToken(_token.text);
     if (parsed != null) {
-      unawaited(ref.read(droidDeckTokenStoreProvider).save(parsed));
+      unawaited(store.save(parsed));
     }
   }
 
@@ -636,8 +656,8 @@ class _DroidDeckPanelState extends ConsumerState<DroidDeckPanel> {
           subtitle: const Text(
             'Save the typed token in platform secure storage, so a later '
             'launch can use the UDP fallback without retyping. Unchecking '
-            'writes nothing; emptying the field while this is on clears the '
-            'saved value.',
+            'removes the saved value; emptying the field while this is on '
+            'also clears it.',
           ),
         ),
         const SizedBox(height: 8),

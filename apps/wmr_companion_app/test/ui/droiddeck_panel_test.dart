@@ -159,7 +159,7 @@ void main() {
   });
 
   testWidgets(
-    'remembering saves only when opted in; emptying while on clears',
+    'remembering saves only when opted in; unchecking and emptying both clear',
     (tester) async {
       tall(tester);
       final backend = MemorySecureTokenBackend();
@@ -177,12 +177,14 @@ void main() {
       await tester.pump();
       expect(backend.values, {'wmr.droiddeck.token.v1.value': '12345'});
 
-      // Opting out writes nothing: a new value never reaches the store.
+      // Unchecking revokes the saved value, and while the box is off a new
+      // value never reaches the store.
       await tester.tap(find.byKey(const Key('droiddeck-remember-token')));
       await tester.pump();
+      expect(backend.values, isEmpty);
       await tester.enterText(find.byKey(const Key('droiddeck-token')), '67890');
       await tester.pump();
-      expect(backend.values, {'wmr.droiddeck.token.v1.value': '12345'});
+      expect(backend.values, isEmpty);
 
       // Opting back in syncs the field's current value.
       await tester.tap(find.byKey(const Key('droiddeck-remember-token')));
@@ -195,6 +197,40 @@ void main() {
       expect(backend.values, isEmpty);
     },
   );
+
+  testWidgets('invalid text keeps the saved value; only emptying clears', (
+    tester,
+  ) async {
+    tall(tester);
+    final backend = MemorySecureTokenBackend();
+    final container = await pumpGamepad(tester, backend, () async {
+      return _FakeTransport();
+    });
+    await tester.tap(find.text('DroidDeck 6DoF streaming'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('droiddeck-token')), '12345');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('droiddeck-remember-token')));
+    await tester.pump();
+    expect(backend.values, {'wmr.droiddeck.token.v1.value': '12345'});
+
+    // An out-of-range paste errors the field and clears the live token,
+    // but the saved value survives: only the provider drops to null.
+    await tester.enterText(
+      find.byKey(const Key('droiddeck-token')),
+      '4294967296',
+    );
+    await tester.pump();
+    expect(container.read(droidDeckTokenProvider), isNull);
+    expect(find.text('Not a number from 0 to 4294967295'), findsOneWidget);
+    expect(backend.values, {'wmr.droiddeck.token.v1.value': '12345'});
+
+    // Emptying the field while remembering is on is what clears storage.
+    await tester.enterText(find.byKey(const Key('droiddeck-token')), '');
+    await tester.pump();
+    expect(backend.values, isEmpty);
+  });
 
   testWidgets('a remembered token reloads into the field and the provider', (
     tester,
@@ -221,6 +257,88 @@ void main() {
       isTrue,
     );
     expect(container.read(droidDeckTokenProvider), 987654321);
+  });
+
+  testWidgets('re-entering the screen seeds the field from the provider', (
+    tester,
+  ) async {
+    tall(tester);
+    final backend = MemorySecureTokenBackend();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          hidTransportProvider.overrideWithValue(FakeHid()),
+          gamepadInputsProvider.overrideWith(
+            (ref, source) => const Stream.empty(),
+          ),
+          droidDeckTokenStoreProvider.overrideWithValue(
+            DroidDeckTokenStore(backend),
+          ),
+          droidDeckTransportFactoryProvider.overrideWithValue(
+            () async => _FakeTransport(),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                key: const Key('open-gamepad'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const GamepadScreen(),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // First visit: type a token with remember off, so nothing is stored.
+    await tester.tap(find.byKey(const Key('open-gamepad')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DroidDeck 6DoF streaming'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('droiddeck-token')), '12345');
+    await tester.pump();
+    expect(backend.values, isEmpty);
+
+    // Leave: the panel's state dies with the route, the app-scoped
+    // provider does not.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(DroidDeckPanel), findsNothing);
+
+    // Second visit with nothing saved: the field shows what the provider
+    // holds, so what Start will use is exactly what the field reads.
+    await tester.tap(find.byKey(const Key('open-gamepad')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DroidDeck 6DoF streaming'));
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(
+      find.byKey(const Key('droiddeck-token')),
+    );
+    expect(field.controller!.text, '12345');
+    expect(
+      tester
+          .widget<CheckboxListTile>(
+            find.byKey(const Key('droiddeck-remember-token')),
+          )
+          .value,
+      isFalse,
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(GamepadScreen)),
+    );
+    expect(container.read(droidDeckTokenProvider), 12345);
+
+    // The seeded field is editable: clearing it clears the provider too,
+    // which an empty unseeded field could never do.
+    await tester.enterText(find.byKey(const Key('droiddeck-token')), '');
+    await tester.pump();
+    expect(container.read(droidDeckTokenProvider), isNull);
   });
 
   testWidgets('a mid-stream token edit does not restart the stream', (
