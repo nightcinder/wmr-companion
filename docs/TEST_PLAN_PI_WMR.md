@@ -6,8 +6,9 @@ PSVR2, Switch and headset tracking are out of scope except where a spec item
 (S1-S5) touches them.
 
 Status of this plan: written 2026-11-13. **No row marked "owner-run hardware
-test" has a recorded result.** When one is run, its result is entered as
-user-reported with the date, the board, the phone and the build, and the
+test" has a result recorded in this file.** The Pi 3B+ baseline in M2-H1 is
+the 2026-11-18 bench run, cited there. When a row is run, its result is entered
+as user-reported with the date, the board, the phone and the build, and the
 figure is not generalised beyond that sitting.
 
 How to read it:
@@ -38,7 +39,7 @@ addresses and the session token are never written into a sheet.
 | Id | Milestone | Depends on | Code state |
 | --- | --- | --- | --- |
 | M1 | Pi bring-up: pair, stream, probe | - | Pi daemon merged, host-tested |
-| M2 | Decode CPU on the target board | M1 | fast decoder in review (separate PR) |
+| M2 | Daemon CPU on the target board | M1 | fast decoder in review (separate PR) |
 | M3 | Non-blocking `0x06` enable | M1 | in review (separate PR) |
 | M4 | App end to end: WebSocket, BLE fallback, failover | M1 | app transports merged, host-tested |
 | M5 | Raw IMU recorder | M4 | specified, not implemented ([IMU_LOG.md](IMU_LOG.md)) |
@@ -77,7 +78,7 @@ WebSocket at the expected rate with no bridge-side errors.
 | M1-H4 | Same run | per hand `lossPct` and `periodMs` recorded (no pass bar here: upstream loss is a measurement, PI_BRIDGE P6) |
 | M1-H5 | `iw dev wlan0 link` during the run | band recorded; on 5 GHz for the reference result |
 
-## M2. Decode CPU
+## M2. Daemon CPU
 
 Goal: the daemon leaves headroom on the target board with both hands
 streaming to one batched client.
@@ -94,13 +95,15 @@ streaming to one batched client.
 
 | Id | Procedure | Pass |
 | --- | --- | --- |
-| M2-H1 | On the target board, both controllers streaming, one `batched` probe client for 10 minutes. Sample the daemon's CPU every 10 s (`pidstat -p <pid> 10` or `top -b -d 10 -p <pid>`) | mean CPU of the daemon process **below 25 % of one core** over the 10 minutes, and no 10 s sample above 50 % |
+| M2-H1 | On the target board, both controllers streaming, one `batched` probe client for 10 minutes. Sample mean daemon CPU for the whole run with `top -b -n 60 -d 10 -p MainPID`. Here `MainPID` is the daemon PID from `systemctl show -p MainPID --value wmr-bridge.service` | The gate depends on the board (decision, ONY-1583). On a Pi 4 or Pi 5, mean daemon CPU below 25 % of one core and no 10 s sample above 50 %. On a Pi 3B+, the interim gate is mean at or below 38.5 % and no 10 s sample above 40.5 %. That baseline is 61 samples from the 2026-11-18 run (ONY-1159 `bench-run-2026-11-18`, `0efef418`). Record the board and the sample count |
 | M2-H2 | `python3 tools/bench_decode.py` on the board | microseconds per report recorded for both decoders |
 | M2-H3 | `vcgencmd get_throttled` before and after M2-H1 (Raspberry Pi boards) | `0x0` both times |
 | M2-H4 | The M1-H3 probe during M2-H1 | still passes M1-H3 |
 
 M2-H1 is run once with the merged decoder as the baseline and once with the
-fast decoder, so the change is a measured difference on the same board.
+fast decoder, so the change is a measured difference on the same board. On a
+Pi 3B+, the interim gate stays in force after the per-report CPU cut (ONY-1507
+child 4).
 
 ## M3. Non-blocking enable
 
