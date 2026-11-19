@@ -296,6 +296,8 @@ class BridgeLinkSnapshot {
     this.loss = const [null, null],
     this.protocol,
     this.protocolUnavailable = false,
+    this.stalled = false,
+    this.silentFor,
   });
 
   final String bridgeId;
@@ -324,6 +326,19 @@ class BridgeLinkSnapshot {
   /// first read is still in flight and once it has produced a result.
   final bool protocolUnavailable;
 
+  /// True when the link is connected and no record has arrived for the
+  /// service's stall timeout, so the stream has gone quiet without a
+  /// disconnect. Warn-only: nothing acts on it. Derived from [silentFor], so
+  /// polling [ControllerService.bridgeLink] needs no stream listener. Cleared
+  /// as soon as a record arrives again or the link drops.
+  final bool stalled;
+
+  /// Time since the last accepted record (a frame on FF11, a record on FF12
+  /// and FF14), measured on the transport's monotonic clock. Null when no
+  /// stream is subscribed or the bridge is not connected, so there is no
+  /// silence to measure.
+  final Duration? silentFor;
+
   /// Total rate over both hands.
   double get totalRateHz => rateHz.fold(0, (sum, rate) => sum + rate);
 
@@ -335,6 +350,29 @@ class BridgeLinkSnapshot {
     }
     return worst;
   }
+}
+
+/// A bridge's stall state changed.
+///
+/// Warn-only, like the Wi-Fi transport's liveness probe: it tells the app the
+/// stream has gone quiet, and nothing disconnects on it.
+class BridgeStallState {
+  const BridgeStallState({
+    required this.bridgeId,
+    required this.stalled,
+    this.silentFor,
+  });
+
+  /// Transport device id of the bridge.
+  final String bridgeId;
+
+  /// Whether the link is stalled: connected, subscribed, and silent for the
+  /// service's stall timeout.
+  final bool stalled;
+
+  /// Time since the last accepted record when this state was published, or
+  /// null when no stream is subscribed or the bridge is not connected.
+  final Duration? silentFor;
 }
 
 /// Records per second over a sliding window of about a second.
@@ -462,6 +500,8 @@ class ControllerService {
     StickConfig stickConfig = const StickConfig(),
     this.onStickCentre,
     this.onStreamValue,
+    this.stallInterval = const Duration(milliseconds: 500),
+    this.stallTimeout = const Duration(seconds: 3),
   }) : _deviceIds = {
          if (deviceIdOrIds is Iterable<String>)
            ...deviceIdOrIds
@@ -495,6 +535,26 @@ class ControllerService {
   /// bridge's device id. Used by the raw IMU log; no effect when null.
   final void Function(Uint8List value, int receivedAtUs, String sourceDeviceId)?
   onStreamValue;
+
+  /// How often a subscribed bridge's silence is checked while [stallChanges]
+  /// has a listener. A non-positive duration disables stall detection.
+  ///
+  /// A GATT link stays `connected` while its notifications stop (a wedged
+  /// ESP32, a controller that stopped reporting, or a stack that kept the
+  /// connection through a range excursion), so the stream going quiet is
+  /// otherwise invisible. The check compares the monotonic arrival time of
+  /// the bridge's last accepted record against [stallTimeout].
+  final Duration stallInterval;
+
+  /// How long a subscribed bridge may go without an accepted record before
+  /// its link is reported [BridgeLinkSnapshot.stalled]. Defaults to three
+  /// seconds, about 600 reports at 200 Hz. A non-positive duration disables
+  /// stall detection.
+  ///
+  /// Warn-only: nothing is disconnected. Auto-reconnect on a stall would
+  /// fight a legitimate idle power-off (#199), so it stays behind a setting
+  /// until a hardware run shows the threshold separates the two.
+  final Duration stallTimeout;
 
   final BleTransport transport;
   final List<String> _deviceIds;
@@ -554,6 +614,18 @@ class ControllerService {
   final StreamController<DecodedSample> _samples = StreamController.broadcast();
   final StreamController<String> _deviceRemovals = StreamController.broadcast();
 
+  // Stall detection: the monotonic arrival time of each bridge's last
+  // accepted record, which links are up, and which are stalled.
+  final Map<String, int> _lastRecordUs = {};
+  final Set<String> _connected = {};
+  final Set<String> _stalledBridges = {};
+  late final StreamController<BridgeStallState> _stallChanges =
+      StreamController<BridgeStallState>.broadcast(
+        onListen: _startStallWatch,
+        onCancel: _stopStallWatch,
+      );
+  Timer? _stallTimer;
+
   StreamMode _mode;
   ModeFault? _fault;
   AxisMapping _mapping;
@@ -581,6 +653,17 @@ class ControllerService {
   /// lost its source, so they can release that hand without stopping the
   /// other one.
   Stream<String> get deviceRemovals => _deviceRemovals.stream;
+
+  /// Emits when a bridge's link goes stalled and when records resume.
+  ///
+  /// The service never acts on a stall: a legitimate idle power-off (#199)
+  /// looks the same as a wedge, so the app decides. [BridgeLinkSnapshot.stalled]
+  /// and [BridgeLinkSnapshot.silentFor] carry the same state for pollers, with
+  /// no listener needed.
+  ///
+  /// The periodic [stallInterval] check runs only while this stream has a
+  /// listener; the current state is published as the first event on listen.
+  Stream<BridgeStallState> get stallChanges => _stallChanges.stream;
 
   /// The FF16 firmware version and GATT feature matrix of one bridge, or null
   /// while the one-time read after connect has not finished and when
@@ -760,6 +843,9 @@ class ControllerService {
     _decodedBridges.remove(deviceId);
     _protocolUnavailable.remove(deviceId);
     if (_protocols.remove(deviceId) != null) _emitProtocols();
+    _connected.remove(deviceId);
+    _lastRecordUs.remove(deviceId);
+    _stalledBridges.remove(deviceId);
     final sub = _subscriptions.remove(deviceId);
     await sub?.cancel();
     for (var h = 0; h < wmrNumControllers; h++) {
@@ -798,6 +884,7 @@ class ControllerService {
       await sub.cancel();
     }
     _subscriptions.clear();
+    _clearStalls();
     final uuid = previous.characteristicUuid;
     if (uuid == null) {
       _emitMode();
@@ -825,6 +912,8 @@ class ControllerService {
     _lastSeq.fillRange(0, _lastSeq.length, null);
     _dLastSeq.fillRange(0, _dLastSeq.length, null);
     _lastDeviceForHand.fillRange(0, _lastDeviceForHand.length, null);
+    // A stream that is restarted has no silence yet.
+    _clearStalls();
     for (final p in _pipelines) {
       p.streamRestarted();
     }
@@ -875,12 +964,35 @@ class ControllerService {
     if (uuid == null) return;
     _subscriptions[id] = transport
         .subscribe(id, wmrBridgeServiceUuid, uuid)
-        .listen(switch (_mode) {
-          StreamMode.none => throw StateError('No stream to subscribe to'),
-          StreamMode.raw => (n) => _onNotification(n, id),
-          StreamMode.decoded => (n) => _onDecoded(n, id),
-          StreamMode.batched => (n) => _onBatched(n, id),
-        }, onError: _onStreamError);
+        .listen(
+          switch (_mode) {
+            StreamMode.none => throw StateError('No stream to subscribe to'),
+            StreamMode.raw => (n) => _onNotification(n, id),
+            StreamMode.decoded => (n) => _onDecoded(n, id),
+            StreamMode.batched => (n) => _onBatched(n, id),
+          },
+          onError: _onStreamError,
+          // disconnect() closes the stream on every transport, so a stream
+          // that ends is a link that went away: a stalled link is one that is
+          // up and silent, not one that is down. Only an explicit disconnect
+          // guarantees the end of the stream; a spontaneous loss shows up on
+          // the transport's connection state, which the app turns into
+          // removeDevice.
+          onDone: () => _onStreamClosed(id),
+        );
+    // A fresh subscription has no record history, so silence is measured from
+    // now.
+    _lastRecordUs[id] = transport.clock.nowUs;
+    _connected.add(id);
+  }
+
+  /// A transport closed [bridgeId]'s stream, which means the link dropped.
+  /// The bridge is no longer live, so it must not be reported as stalled: it
+  /// is disconnected, and the app's own link state says so.
+  void _onStreamClosed(String bridgeId) {
+    _connected.remove(bridgeId);
+    _lastRecordUs.remove(bridgeId);
+    _setStalled(bridgeId, false, null);
   }
 
   Future<void> _checkMtu(String id) async {
@@ -920,6 +1032,105 @@ class ControllerService {
     if (!_modeChanges.isClosed) _modeChanges.add(modeState);
   }
 
+  // ---- stall detection --------------------------------------------------
+  //
+  // Mirrors the Wi-Fi transport's liveness probe: a link that is up but has
+  // gone quiet is reported. It is warn-only, so unlike the probe it never
+  // closes the link.
+
+  /// Whether stall detection is on. A non-positive [stallInterval] or
+  /// [stallTimeout] turns it off, so a disabled service never reports a
+  /// stall.
+  bool get _stallDetection =>
+      stallInterval > Duration.zero && stallTimeout > Duration.zero;
+
+  void _startStallWatch() {
+    if (!_stallDetection) return;
+    _stallTimer ??= Timer.periodic(stallInterval, (_) => _checkStalls());
+    // Publish the state the new listener came in on, rather than waiting for
+    // the next transition. The timer is the watch's lifetime: a check left
+    // over from a listener that has since cancelled must not revive a mark
+    // nobody is listening for.
+    scheduleMicrotask(() {
+      if (_stallTimer != null) _checkStalls();
+    });
+  }
+
+  void _stopStallWatch() {
+    _stallTimer?.cancel();
+    _stallTimer = null;
+    // The marks only suppress repeated events to the listener that saw them.
+    // With no listener left there is nothing to suppress, and keeping them
+    // would make the next listener miss the initial state of a bridge that is
+    // still stalled (the change-only check below would stay silent).
+    _stalledBridges.clear();
+  }
+
+  /// True when data is expected from [bridgeId]: a stream is subscribed and
+  /// the link is up. A disconnected or unsubscribed bridge has no silence to
+  /// measure, so it is never stalled.
+  bool _isLive(String bridgeId) =>
+      _connected.contains(bridgeId) && _subscriptions.containsKey(bridgeId);
+
+  /// Time since [bridgeId]'s last accepted record, or null when no data is
+  /// expected from it.
+  Duration? _silentFor(String bridgeId, int nowUs) {
+    if (!_isLive(bridgeId)) return null;
+    final last = _lastRecordUs[bridgeId];
+    if (last == null) return null;
+    final silentUs = nowUs - last;
+    return Duration(microseconds: silentUs < 0 ? 0 : silentUs);
+  }
+
+  void _checkStalls() {
+    final now = transport.clock.nowUs;
+    for (final id in _deviceIds) {
+      final silentFor = _silentFor(id, now);
+      _setStalled(
+        id,
+        silentFor != null && silentFor >= stallTimeout,
+        silentFor,
+      );
+    }
+  }
+
+  /// Publishes a change of stall state. Repeated checks at the same state are
+  /// silent.
+  void _setStalled(String bridgeId, bool stalled, Duration? silentFor) {
+    if (stalled == _stalledBridges.contains(bridgeId)) return;
+    if (stalled) {
+      _stalledBridges.add(bridgeId);
+    } else {
+      _stalledBridges.remove(bridgeId);
+    }
+    if (!_stallChanges.isClosed) {
+      _stallChanges.add(
+        BridgeStallState(
+          bridgeId: bridgeId,
+          stalled: stalled,
+          silentFor: silentFor,
+        ),
+      );
+    }
+  }
+
+  /// Clears every stall mark, for a stream that is being stopped or
+  /// restarted: with no subscription there is nothing to call stalled.
+  void _clearStalls() {
+    for (final id in _stalledBridges.toList()) {
+      _setStalled(id, false, null);
+    }
+  }
+
+  /// Records an accepted record as [bridgeId]'s latest activity and clears a
+  /// stall the moment data resumes.
+  void _touchBridge(String bridgeId, int receivedAtUs) {
+    _lastRecordUs[bridgeId] = receivedAtUs;
+    if (_stalledBridges.contains(bridgeId)) {
+      _setStalled(bridgeId, false, _silentFor(bridgeId, receivedAtUs));
+    }
+  }
+
   void _onNotification(BleNotification n, String sourceDeviceId) {
     final bridge = _rawBridge(sourceDeviceId);
     final beforeLeft = bridge.reassembler.framesIncomplete[wmrHandLeft];
@@ -932,6 +1143,7 @@ class ControllerService {
         bridge.reassembler.framesIncomplete[wmrHandRight] - beforeRight;
     _rawErrors += bridge.reassembler.errors - beforeErrors;
     if (result != ReassemblyResult.frameComplete) return;
+    _touchBridge(sourceDeviceId, n.receivedAtUs);
     final frame = bridge.reassembler.lastFrame!;
     final hand = frame.hand;
     _rawFrames[hand]++;
@@ -1015,6 +1227,7 @@ class ControllerService {
       return;
     }
     final hand = r.hand;
+    _touchBridge(sourceDeviceId, receivedAtUs);
 
     // Switch 0x30 reports carry three IMU samples in one raw frame, so the
     // three FF12/FF14 records share a sequence. The burst clock gives them
@@ -1286,6 +1499,7 @@ class ControllerService {
     final raw = _rawBridge(bridgeId);
     final decoded = _decodedBridge(bridgeId);
     final records = _mode.carriesRecords;
+    final silentFor = _silentFor(bridgeId, now);
     return BridgeLinkSnapshot(
       bridgeId: bridgeId,
       mode: _mode,
@@ -1305,10 +1519,15 @@ class ControllerService {
       ],
       protocol: _protocols[bridgeId],
       protocolUnavailable: _protocolUnavailable.contains(bridgeId),
+      stalled:
+          _stallDetection && silentFor != null && silentFor >= stallTimeout,
+      silentFor: silentFor,
     );
   }
 
   Future<void> dispose() async {
+    _stallTimer?.cancel();
+    _stallTimer = null;
     final subs = _subscriptions.values.toList();
     _subscriptions.clear();
     for (final sub in subs) {
@@ -1319,5 +1538,6 @@ class ControllerService {
     await _modeChanges.close();
     await _deviceRemovals.close();
     await _protocolChanges.close();
+    await _stallChanges.close();
   }
 }
