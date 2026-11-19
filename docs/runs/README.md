@@ -12,6 +12,10 @@ The `sheets/` directory contains five active run sheets:
 - [pose-viture.md](sheets/pose-viture.md): Pose and camera validation on the VITURE Pro Neckband with Luma Ultra glasses. It covers stereo rendering, gripping hand tracking, and Carina diagnostics.
 - [pose-xreal.md](sheets/pose-xreal.md): Pose validation for XREAL Air 2 Ultra glasses. It covers the Unity relay, hand joint rates while gripping, and 10 to 50 cm/s guided speed checks.
 
+## Related Sheets
+
+- [analogue-recovery.md](../bench/analogue-recovery.md): Steps 4 and 5 of the Pi bench. It defines the timing marks, names the app row and bundle keys that produce each number, and holds the fill-in table.
+
 ## Closed Sheets
 
 - `latency-2.md`: Removed. The Flutter against native GATT probe comparison closed with the verdict to stay on Flutter. No more runs are required. The decision rule and thresholds are preserved at git commit `4c6e6ac` and summarised in `docs/LATENCY.md`.
