@@ -6,6 +6,8 @@ import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import 'link_timeline.dart';
+
 /// Which leg of a [CompositeBleTransport] currently carries a bridge.
 enum CompositeLeg { tcp, ble }
 
@@ -45,7 +47,10 @@ enum CompositeLeg { tcp, ble }
 /// connection state `connected` across the switch. A loss reported while a
 /// switch still holds the route is remembered and retried when that switch
 /// finishes, so a dial that goes silent during activation cannot leave the
-/// route marked connected on a dead leg.
+/// route marked connected on a dead leg. Every step of that recovery, and of
+/// an upgrade dial back to TCP, is stamped on the route's timeline;
+/// [linkTimelineFor] exposes the marks so a host can show how long the stall
+/// took to detect and the switch to land.
 ///
 /// ## Clock
 ///
@@ -162,6 +167,17 @@ class CompositeBleTransport implements BleTransport {
         _Lane.ble => CompositeLeg.ble,
         null => null,
       };
+
+  /// The link-switch timeline of [deviceId]'s route, or null before the
+  /// bridge has been connected through this composite.
+  ///
+  /// The values are microseconds on [clock], one `<mark>_us` key per mark
+  /// ([LinkTimeline.toJson] names them), null before a mark landed. The
+  /// Debug screen renders its "Last link switch" row from them and the
+  /// diagnostics bundle carries them verbatim. Hosts only sample: the
+  /// composite keeps recording.
+  Map<String, Object?>? linkTimelineFor(String deviceId) =>
+      _routes[deviceId]?.timeline.timeline.toJson();
 
   @override
   Stream<BleScanResult> scan({List<String> withServices = const []}) {
@@ -843,7 +859,15 @@ class CompositeBleTransport implements BleTransport {
       // before the switch that activated this leg has named it active. Keep
       // the loss so the switch can retry the failover when it releases the
       // route.
-      route.tcpLost = state == BleConnectionState.disconnected;
+      final lost = state == BleConnectionState.disconnected;
+      // The first report outside a switch is the detection. While a switch
+      // holds the route the composite may be closing the stalled leg
+      // itself, and that echo must not move the mark past the failover it
+      // began.
+      if (lost && !route.tcpLost && !route.switching) {
+        route.timeline.onStallDetected(clock.nowUs);
+      }
+      route.tcpLost = lost;
       if (route.tcpLost && route.active == _Lane.tcp) {
         unawaited(_fallbackToBle(route));
       }
@@ -870,6 +894,7 @@ class CompositeBleTransport implements BleTransport {
     route.tcpLost = false;
     route.switching = true;
     final switchingDone = route.switchingDone = Completer<void>();
+    route.timeline.onFailoverBegin(clock.nowUs);
     try {
       // A leg can report `disconnected` while its socket is still open (the
       // half-open case the liveness probe catches). Close it before dialling
@@ -893,6 +918,7 @@ class CompositeBleTransport implements BleTransport {
         try {
           await _connectBle(route, bleId, requireIdentity: requireIdentity);
           await _activateBle(route);
+          route.timeline.onFailoverEnd(clock.nowUs);
           return;
         } catch (_) {
           if (route.bleDeviceId == bleId) await _rejectBle(route);
@@ -985,7 +1011,13 @@ class CompositeBleTransport implements BleTransport {
     if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
     route.upgrading = true;
     try {
-      final id = await _tryTcp(route, route.tcpCandidates.toList());
+      route.timeline.onUpgradeDialStart(clock.nowUs);
+      String? id;
+      try {
+        id = await _tryTcp(route, route.tcpCandidates.toList());
+      } finally {
+        route.timeline.onUpgradeDialEnd(clock.nowUs);
+      }
       if (id == null) return;
       // A drop, failover or connect may own the route right now, and it can
       // adopt this same socket (the transport hands out in-flight dials to
@@ -1183,6 +1215,9 @@ class _Route {
   final List<_Channel> channels = [];
   final Map<String, int> bleRefs = {};
 
+  /// Recovery-path marks of the most recent link switch on this route.
+  final LinkTimelineRecorder timeline = LinkTimelineRecorder();
+
   String? bridgeId;
   String? bleDeviceId;
   String? tcpDeviceId;
@@ -1338,6 +1373,14 @@ class _Channel {
               // Only a BLE-lane answer proves the kept BLE subscription has
               // drained; a TCP answer must not cancel it early.
               if (isEcho && lane == _Lane.ble) route.echoAnswerReceived();
+              // The timeline records the arrival on the lane that carried
+              // it: the TCP stamp is the transport's own, a BLE record is
+              // re-stamped below like the notification itself.
+              if (lane == _Lane.ble) {
+                route.timeline.onBleRecord(route.clock.nowUs);
+              } else {
+                route.timeline.onTcpRecord(notification.receivedAtUs);
+              }
               if (_controller.isClosed) return;
               _controller.add(
                 lane == _Lane.ble

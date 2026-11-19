@@ -317,6 +317,7 @@ class TestBundleInput {
     this.firmwareSha,
     this.wifiFallback = false,
     this.activeLeg,
+    this.linkTimeline,
     this.stickSettings = const StickSettings(),
     this.handTrackingDiagnostics = const HandTrackingDiagnostics(),
   });
@@ -375,6 +376,12 @@ class TestBundleInput {
   /// `TCP` or `BLE` while a [wifiFallback] link is up, null otherwise.
   final String? activeLeg;
 
+  /// Marks of the composite link's most recent leg switch, as
+  /// `CompositeBleTransport.linkTimelineFor` recorded them: one
+  /// `<mark>_us` key per step, microseconds on the link's monotonic clock.
+  /// Null for a plain Wi-Fi or BLE link, or before the first switch.
+  final Map<String, Object?>? linkTimeline;
+
   /// Dead zone, rest-centre learning and the per-hand centres on screen.
   final StickSettings stickSettings;
 
@@ -418,7 +425,8 @@ Future<TestBundle> writeTestBundle(
   final present = <String>[
     '`manifest.md` — date, phone, Android version, firmware, MTU',
     '`diagnostics.json` — app, FF16 firmware, MTU, stream and link stats, '
-        'composite leg, stick settings and relay hand-tracking stats',
+        'composite leg, link-switch timeline, stick settings and relay '
+        'hand-tracking stats',
   ];
   final missing = <String>[];
   final files = <String, List<int>>{};
@@ -590,6 +598,7 @@ Future<TestBundle> writeTestBundle(
     'firmware_sha': input.firmwareSha,
     'ble_fallback': input.wifiFallback,
     'active_leg': input.activeLeg,
+    'link_timeline': input.linkTimeline,
     'hand_tracking_diagnostics': input.handTrackingDiagnostics.toJson(),
     'stick': {
       'dead_zone': input.stickSettings.config.deadZone,
