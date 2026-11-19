@@ -23,6 +23,12 @@ abstract final class DroidDeckXrProtocol {
   /// Abstract `SOCK_SEQPACKET` name, without the leading NUL.
   static const String socketName = 'droiddeck-ext-xr';
 
+  /// Loopback UDP fallback port, used when the abstract socket is unavailable.
+  static const int udpPort = 29842;
+
+  /// Header offset of the 32-bit UDP pairing token.
+  static const int tokenOffset = 32;
+
   /// The host drops a session after this long without a packet.
   static const int sessionTimeoutMs = 1000;
 
