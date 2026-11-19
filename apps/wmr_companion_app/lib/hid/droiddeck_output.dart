@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector3;
 
 import 'package:wmr_core/domain/droiddeck_xr_sink.dart';
@@ -14,11 +15,18 @@ import '../ui/debug/debug_providers.dart';
 import '../ui/gamepad/gamepad_providers.dart';
 import 'hid_output.dart';
 
-/// Opens the DroidDeck v0 socket. A seam for tests and for a host that reaches
-/// the sink another way.
+/// Opens the DroidDeck v0 socket, with the loopback UDP fallback when the
+/// abstract socket cannot open and a pairing token is set. A seam for tests
+/// and for a host that reaches the sink another way.
+///
+/// The token is read when the factory is invoked, once per start, so an edit
+/// while streaming reaches only the next start: the running transport keeps
+/// the token it opened with.
 final droidDeckTransportFactoryProvider =
     Provider<Future<DroidDeckXrTransport> Function()>(
-      (ref) => openDroidDeckXrTransport,
+      (ref) =>
+          () =>
+              openDroidDeckXrTransport(token: ref.read(droidDeckTokenProvider)),
     );
 
 /// The Android `InputDevice` the sink asks DroidDeck to ignore.
@@ -29,6 +37,13 @@ final droidDeckTransportFactoryProvider =
 /// that device's vendor/product id, which the app cannot read without a new
 /// platform call; see `docs/GAMEPAD.md`.
 final droidDeckClaimProvider = Provider<DroidDeckXrClaim?>((ref) => null);
+
+/// The optional loopback UDP pairing token, or null to stay socket-only.
+///
+/// The DroidDeck panel's field owns this value; nothing else writes it. The
+/// factory reads it once per start, so a mid-stream edit applies only after
+/// the stream restarts, and the field alone restarts nothing.
+final droidDeckTokenProvider = StateProvider<int?>((ref) => null);
 
 /// Where the DroidDeck session is. The `v0` host owns the recenter counter, so
 /// the companion never sets it.

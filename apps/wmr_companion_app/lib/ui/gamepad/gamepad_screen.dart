@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import 'package:wmr_companion_hid_android/wmr_companion_hid_android.dart';
 
 import '../../hid/droiddeck_output.dart';
 import '../../hid/hid_output.dart';
+import '../../services/droiddeck_token_store.dart';
 import '../debug/debug_providers.dart';
 import '../debug/stream_settings.dart';
 import 'gamepad_providers.dart';
@@ -518,13 +521,91 @@ class HidOutputPanel extends ConsumerWidget {
 }
 
 /// Starts and stops the DroidDeck `v0` external 6DoF stream.
-class DroidDeckPanel extends ConsumerWidget {
+class DroidDeckPanel extends ConsumerStatefulWidget {
   const DroidDeckPanel({super.key, required this.source});
 
   final DebugSource source;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DroidDeckPanel> createState() => _DroidDeckPanelState();
+}
+
+class _DroidDeckPanelState extends ConsumerState<DroidDeckPanel> {
+  final TextEditingController _token = TextEditingController();
+  bool _remember = false;
+  bool _invalid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadSavedToken());
+  }
+
+  @override
+  void dispose() {
+    _token.dispose();
+    super.dispose();
+  }
+
+  /// A remembered token fills the field, opts back into remembering and feeds
+  /// the live provider, so one launch's token survives an app restart.
+  ///
+  /// With nothing saved the field is seeded from the live provider instead:
+  /// this state dies with the route, the app-scoped provider does not, and a
+  /// token typed before the route was popped must stay visible. Otherwise
+  /// Start would feed a hidden token an already-empty field cannot clear.
+  Future<void> _loadSavedToken() async {
+    final saved = await ref.read(droidDeckTokenStoreProvider).load();
+    if (!mounted) return;
+    if (saved != null) {
+      _token.text = '$saved';
+      ref.read(droidDeckTokenProvider.notifier).state = saved;
+      setState(() => _remember = true);
+      return;
+    }
+    final held = ref.read(droidDeckTokenProvider);
+    if (held != null) {
+      _token.text = '$held';
+    }
+  }
+
+  void _onTokenChanged(String raw) {
+    final parsed = parseDroidDeckToken(raw);
+    final invalid = raw.trim().isNotEmpty && parsed == null;
+    ref.read(droidDeckTokenProvider.notifier).state = parsed;
+    setState(() => _invalid = invalid);
+    // While the box is off an edit never touches the platform store.
+    if (!_remember) return;
+    final store = ref.read(droidDeckTokenStoreProvider);
+    if (parsed != null) {
+      unawaited(store.save(parsed));
+    } else if (raw.trim().isEmpty) {
+      // Emptying the field while remembering is on is the clear path.
+      // Invalid non-empty text clears only the live provider; the saved
+      // value stays until the field is emptied or the box is unchecked.
+      unawaited(store.clear());
+    }
+  }
+
+  void _onRememberChanged(bool? value) {
+    final remember = value ?? false;
+    setState(() => _remember = remember);
+    final store = ref.read(droidDeckTokenStoreProvider);
+    if (!remember) {
+      // Unchecking revokes persistence: the saved value is removed, so a
+      // later launch cannot silently re-check the box and re-enable the
+      // token. The typed field and the live provider are untouched.
+      unawaited(store.clear());
+      return;
+    }
+    final parsed = parseDroidDeckToken(_token.text);
+    if (parsed != null) {
+      unawaited(store.save(parsed));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final out = ref.watch(droidDeckOutputProvider);
     final n = ref.read(droidDeckOutputProvider.notifier);
     final small = Theme.of(context).textTheme.bodySmall;
@@ -547,13 +628,46 @@ class DroidDeckPanel extends ConsumerWidget {
           style: small,
         ),
         const SizedBox(height: 8),
+        TextField(
+          key: const Key('droiddeck-token'),
+          controller: _token,
+          autocorrect: false,
+          enableSuggestions: false,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: 'Pairing token (optional)',
+            helperMaxLines: 4,
+            helperText:
+                'Loopback UDP fallback token, used only when the '
+                'abstract socket cannot open. Paste the value DroidDeck wrote '
+                'to droiddeck-ext-xr.token; this app cannot read that file or '
+                'verify the token, and a wrong one is dropped silently.',
+            errorText: _invalid ? 'Not a number from 0 to 4294967295' : null,
+          ),
+          onChanged: _onTokenChanged,
+        ),
+        CheckboxListTile(
+          key: const Key('droiddeck-remember-token'),
+          contentPadding: EdgeInsets.zero,
+          value: _remember,
+          onChanged: _onRememberChanged,
+          title: const Text('Remember this token'),
+          subtitle: const Text(
+            'Save the typed token in platform secure storage, so a later '
+            'launch can use the UDP fallback without retyping. Unchecking '
+            'removes the saved value; emptying the field while this is on '
+            'also clears it.',
+          ),
+        ),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
             if (!out.running)
               FilledButton(
-                onPressed: () => n.start(source),
+                onPressed: () => n.start(widget.source),
                 child: const Text('Start streaming'),
               )
             else
@@ -600,6 +714,11 @@ class DroidDeckPanel extends ConsumerWidget {
           const SizedBox(height: 8),
           Text(
             'Streaming while the app is open and this screen stays bound.',
+            style: small,
+          ),
+          Text(
+            'The running stream keeps the token it started with; a change in '
+            'the token field applies the next time streaming starts.',
             style: small,
           ),
         ],

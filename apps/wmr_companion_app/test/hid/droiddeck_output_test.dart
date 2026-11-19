@@ -10,6 +10,7 @@ import 'package:wmr_core/domain/droiddeck_xr_sink.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_core/services/droiddeck_xr_queued_transport.dart';
 import 'package:wmr_core/services/droiddeck_xr_transport.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 import 'package:wmr_companion_app/hid/droiddeck_output.dart';
@@ -232,5 +233,85 @@ void main() {
       data.getUint32(152, Endian.little) & DroidDeckXrProtocol.handConnected,
       0,
     );
+  });
+
+  test(
+    'the real factory with no token refuses and names the untaken fallback',
+    () async {
+      final plain = ProviderContainer();
+      addTearDown(plain.dispose);
+      await expectLater(
+        plain.read(droidDeckTransportFactoryProvider)(),
+        throwsA(
+          isA<DroidDeckXrTransportException>().having(
+            (e) => e.message,
+            'message',
+            contains('was not tried because no pairing token is set'),
+          ),
+        ),
+      );
+      expect(plain.read(droidDeckTokenProvider), isNull);
+    },
+  );
+
+  test(
+    'the real factory reads the token when invoked, not when built',
+    () async {
+      final plain = ProviderContainer();
+      addTearDown(plain.dispose);
+      // Build the factory before any token exists: a build-time read would
+      // refuse exactly like the no-token test above.
+      final open = plain.read(droidDeckTransportFactoryProvider);
+      plain.read(droidDeckTokenProvider.notifier).state = 12648430;
+      final transport = await open();
+      addTearDown(transport.close);
+      // The abstract socket has no listener here, so the token is what makes
+      // the open succeed through the loopback UDP fallback.
+      expect(transport, isA<DroidDeckXrQueuedTransport>());
+    },
+  );
+
+  test('a token edit while streaming reaches only the next start', () async {
+    final opened = <int?>[];
+    final stream = StreamController<DebugPoses>.broadcast();
+    final tokenContainer = ProviderContainer(
+      overrides: [
+        hidTransportProvider.overrideWithValue(hid),
+        controllerServiceProvider(DebugSource.fake).overrideWithValue(service),
+        droidDeckTransportFactoryProvider.overrideWith((ref) {
+          return () async {
+            opened.add(ref.read(droidDeckTokenProvider));
+            return droidDeck;
+          };
+        }),
+        debugPosesProvider(DebugSource.fake)
+            .overrideWith((ref) => stream.stream),
+      ],
+    );
+    addTearDown(() async {
+      tokenContainer.dispose();
+      await stream.close();
+    });
+
+    tokenContainer.read(droidDeckTokenProvider.notifier).state = 1;
+    final output = tokenContainer.read(droidDeckOutputProvider.notifier);
+    await output.start(DebugSource.fake);
+    expect(opened, [1]);
+
+    // Mid-stream, the edit is visible only to the factory; start() is the
+    // only reader, and nothing restarts the transport for it.
+    tokenContainer.read(droidDeckTokenProvider.notifier).state = 2;
+    feed(record(1));
+    await pump();
+    expect(
+      tokenContainer.read(droidDeckOutputProvider).status,
+      DroidDeckStatus.streaming,
+    );
+    expect(opened, [1]);
+
+    await output.stop();
+    await output.start(DebugSource.fake);
+    expect(opened, [1, 2]);
+    await output.stop();
   });
 }
