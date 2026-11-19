@@ -15,11 +15,12 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
-import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
+import 'package:wmr_companion/wmr_companion.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 
 import '../hid/fake_hid.dart';
 import '../services/memory_secure_token_backend.dart';
@@ -55,6 +56,16 @@ class _CountingAdapter extends FakeBleAdapter {
     availabilityReads++;
     return super.availability();
   }
+}
+
+/// A TCP leg that refuses every dial, so a composite built on it falls back
+/// to its BLE leg and stays there.
+class _RefusedTcp extends WmrWsTransport {
+  _RefusedTcp(WmrWsEndpoint endpoint) : super(endpoints: [endpoint]);
+
+  @override
+  Future<void> connect(String deviceId) async =>
+      throw StateError('tcp refused');
 }
 
 class TestModeNotifier extends StreamModeNotifier {
@@ -1078,6 +1089,113 @@ void main() {
       expect(container.read(realDeviceProvider).connected, isTrue);
       expect(wifi.connectCalls, greaterThanOrEqualTo(connectsBefore + 1));
     });
+
+    test(
+      'the radio taking a composite BLE-carried Wi-Fi session parks it too',
+      () async {
+        // The default Wi-Fi tab: the composite's TCP leg cannot answer, so
+        // its BLE fallback leg carries the session and dies with the radio.
+        const bridgeId = 'pi-1';
+        const bleDeviceId = 'ble-pi-1';
+        final endpoint = WmrWsEndpoint(
+          host: '192.168.1.42',
+          port: 8765,
+          bridgeId: bridgeId,
+        );
+        final countingAdapter = _CountingAdapter();
+        final bleTab = UniversalBleTransport(
+          adapter: countingAdapter,
+          scanTimeout: const Duration(minutes: 5),
+        );
+        addTearDown(bleTab.dispose);
+        final composite = CompositeBleTransport(
+          tcp: _RefusedTcp(endpoint),
+          ble: UniversalBleTransport(
+            adapter: countingAdapter,
+            scanTimeout: const Duration(minutes: 5),
+          ),
+          upgradeInterval: Duration.zero,
+          bleScanWait: const Duration(seconds: 2),
+        );
+        addTearDown(composite.dispose);
+        final wifiLink = WifiLink(
+          composite,
+          activeLeg: () =>
+              switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+                CompositeLeg.tcp => WifiLinkLeg.tcp,
+                CompositeLeg.ble => WifiLinkLeg.ble,
+                null => null,
+              },
+        );
+        final container = ProviderContainer(
+          overrides: [
+            realTransportProvider.overrideWithValue(bleTab),
+            compositeWifiTransportFactoryProvider.overrideWithValue(
+              (_) => wifiLink,
+            ),
+            streamModeProvider.overrideWith(
+              () => TestModeNotifier(StreamMode.batched),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        final controller = container.read(realDeviceProvider.notifier);
+        // The composite waits for the fallback scan to name its BLE
+        // candidate after the TCP refusal.
+        final dial = controller.connectWifi(
+          host: endpoint.host,
+          port: endpoint.port,
+          bridgeId: bridgeId,
+          bleFallback: true,
+        );
+        await wait(50);
+        countingAdapter.emitScanResult(
+          BleScanResult(deviceId: bleDeviceId, name: 'WMR Bridge', rssi: -55),
+        );
+        await dial;
+
+        var state = container.read(realDeviceProvider);
+        expect(state.connected, isTrue);
+        expect(state.wifiLeg, WifiLinkLeg.ble);
+        await until(
+          () => countingAdapter.ccc.contains('on ff14'),
+          reason: 'the stream CCCD was never enabled',
+        );
+        int connectCalls() =>
+            countingAdapter.calls.where((c) => c == 'connect').length;
+        final connectsBefore = connectCalls();
+        final readsBefore = countingAdapter.availabilityReads;
+
+        // The radio dies: the composite's BLE-carried session went with it.
+        countingAdapter.emitAvailability(BleAvailability.poweredOff);
+        await wait(100);
+
+        state = container.read(realDeviceProvider);
+        expect(state.status.phase, BleLinkPhase.bluetoothOff);
+        expect(state.connected, isFalse);
+        expect(
+          connectCalls(),
+          connectsBefore,
+          reason: 'a parked composite session redialled the dead radio',
+        );
+        expect(
+          countingAdapter.availabilityReads,
+          readsBefore,
+          reason: 'a parked composite session dialled the dead radio',
+        );
+
+        // The radio's return redials the parked session once through the
+        // ordinary connect path, over the composite's BLE leg again.
+        countingAdapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+
+        state = container.read(realDeviceProvider);
+        expect(state.wifiLeg, WifiLinkLeg.ble);
+        expect(countingAdapter.availabilityReads, readsBefore + 1);
+        expect(connectCalls(), connectsBefore + 1);
+      },
+    );
 
     test(
       'a retry armed before the radio dies is parked, not dialled',

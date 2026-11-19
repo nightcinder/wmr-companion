@@ -561,6 +561,24 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// dial would fail its preflight against the dead stack.
   bool _radioOff = false;
 
+  /// Whether the radio went off while the composite carried the Wi-Fi tab's
+  /// session on its BLE fallback leg.
+  ///
+  /// Frozen at the radio-off event itself: the composite nulls its route
+  /// before reporting the loss, so by the time the loss reaches
+  /// [_handleLinkStatus] the leg reads as gone and a radio loss could no
+  /// longer be told from a Wi-Fi one.
+  bool _radioOffWifiBleCarried = false;
+
+  /// Whether the current session dies with the Bluetooth radio: the
+  /// Bluetooth tab's own GATT links, or a Wi-Fi tab session the composite
+  /// was carrying on its BLE fallback leg when the radio went off. A plain
+  /// (or TCP-carried) Wi-Fi link cannot be lost to the radio.
+  bool get _sessionDiesWithRadio =>
+      state.activeTransport == BridgeTransportKind.ble ||
+      (state.activeTransport == BridgeTransportKind.wifi &&
+          _radioOffWifiBleCarried);
+
   /// Numbers every dial per bridge, so a dial superseded by a newer one can
   /// be told apart and must not publish its result or tear down what the
   /// newer dial built.
@@ -742,12 +760,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   void _handleLinkStatus(BleLinkStatus s) {
-    // While the radio is off a lost or ended BLE link is a radio loss,
-    // whichever leg reported it: the status stays honest for the UI and the
-    // recovery. A Wi-Fi tab session is untouched by the Bluetooth radio, so
-    // its own losses keep their phase and reach the ordinary reconnect path.
+    // While the radio is off a lost or ended BLE-carried link is a radio
+    // loss, whichever tab reported it: the status stays honest for the UI
+    // and the recovery. A Wi-Fi session the composite was not carrying on
+    // its BLE leg is untouched by the Bluetooth radio, so its own losses
+    // keep their phase and reach the ordinary reconnect path.
     if (_radioOff &&
-        state.activeTransport == BridgeTransportKind.ble &&
+        _sessionDiesWithRadio &&
         (s.phase == BleLinkPhase.connectionLost ||
             s.phase == BleLinkPhase.disconnected)) {
       s = BleLinkStatus(
@@ -903,11 +922,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     // Both the raw BLE loss and the composite's loss can report the same
     // drop; one pending retry is enough.
     if (_reconnectTimers[id] != null) return;
-    // The radio is off: every GATT link is already gone and every BLE dial
-    // would fail its preflight against the dead stack. Park the bridge for
-    // the radio's return instead of burning the campaign's attempts. A
-    // Wi-Fi tab redial runs normally: the radio cannot hold it up.
-    if (_radioOff && state.activeTransport == BridgeTransportKind.ble) {
+    // The radio is off: every GATT link is already gone and every
+    // BLE-carried dial would fail its preflight against the dead stack. Park
+    // the bridge for the radio's return instead of burning the campaign's
+    // attempts. A plain or TCP-carried Wi-Fi redial runs normally: the radio
+    // cannot hold it up.
+    if (_radioOff && _sessionDiesWithRadio) {
       _reconnectTimers.remove(id)?.cancel();
       _reconnectAttempts.remove(id);
       _reconnecting.remove(id);
@@ -941,10 +961,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _reconnecting.remove(id);
         return;
       }
-      // The radio died while this retry waited. A BLE dial now would only
-      // fail its preflight against the dead stack, so park the bridge for
-      // the radio's return; a Wi-Fi dial is unaffected and still runs.
-      if (_radioOff && state.activeTransport == BridgeTransportKind.ble) {
+      // The radio died while this retry waited. A BLE-carried dial now would
+      // only fail its preflight against the dead stack, so park the bridge
+      // for the radio's return; a plain or TCP-carried Wi-Fi dial is
+      // unaffected and still runs.
+      if (_radioOff && _sessionDiesWithRadio) {
         _reconnectAttempts.remove(id);
         _reconnecting.remove(id);
         _droppedDeviceIds.add(id);
@@ -966,11 +987,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     switch (state) {
       case BleAvailability.poweredOff:
         _radioOff = true;
+        // A Wi-Fi session the composite carries on its BLE fallback leg dies
+        // with the radio exactly like the Bluetooth tab's links. The leg is
+        // still named at this instant — the composite unwinds its route only
+        // after this event — so freeze it here: once the loss lands, the leg
+        // reads as gone and a radio loss could not be told from a Wi-Fi one.
+        _radioOffWifiBleCarried =
+            this.state.activeTransport == BridgeTransportKind.wifi &&
+            _wifiLink?.activeLeg?.call() == WifiLinkLeg.ble;
       case BleAvailability.poweredOn:
         // Only a return from off redials; an initial poweredOn event must
         // not.
         if (!_radioOff) return;
         _radioOff = false;
+        _radioOffWifiBleCarried = false;
         unawaited(_recoverAfterRadioOn());
       default:
         break;
@@ -1289,6 +1319,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     final transport = _wifiTransport;
     _wifiTransport = null;
     _wifiLink = null;
+    _radioOffWifiBleCarried = false;
     if (id != null) {
       ref.read(bridgeTransportKindsProvider.notifier).remove(id);
     }
@@ -1741,6 +1772,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         ? ref.read(compositeWifiTransportFactoryProvider)(endpoint)
         : WifiLink(ref.read(wifiTransportFactoryProvider)(endpoint));
     _wifiLink = link;
+    // The previous link's freeze, if any, described a session that no longer
+    // exists; this link has not met the radio yet.
+    _radioOffWifiBleCarried = false;
     final transport = _wifiTransport = link.transport;
     _wifiStateSub = transport
         .connectionState(id)
