@@ -972,9 +972,12 @@ class ControllerService {
             StreamMode.batched => (n) => _onBatched(n, id),
           },
           onError: _onStreamError,
-          // The transports close a stream when its link drops, so the end of
-          // the stream is the disconnect signal: a stalled link is one that is
-          // up and silent, not one that is down.
+          // disconnect() closes the stream on every transport, so a stream
+          // that ends is a link that went away: a stalled link is one that is
+          // up and silent, not one that is down. Only an explicit disconnect
+          // guarantees the end of the stream; a spontaneous loss shows up on
+          // the transport's connection state, which the app turns into
+          // removeDevice.
           onDone: () => _onStreamClosed(id),
         );
     // A fresh subscription has no record history, so silence is measured from
@@ -1042,16 +1045,25 @@ class ControllerService {
       stallInterval > Duration.zero && stallTimeout > Duration.zero;
 
   void _startStallWatch() {
-    if (_stallTimer != null || !_stallDetection) return;
-    _stallTimer = Timer.periodic(stallInterval, (_) => _checkStalls());
+    if (!_stallDetection) return;
+    _stallTimer ??= Timer.periodic(stallInterval, (_) => _checkStalls());
     // Publish the state the new listener came in on, rather than waiting for
-    // the next transition.
-    scheduleMicrotask(_checkStalls);
+    // the next transition. The timer is the watch's lifetime: a check left
+    // over from a listener that has since cancelled must not revive a mark
+    // nobody is listening for.
+    scheduleMicrotask(() {
+      if (_stallTimer != null) _checkStalls();
+    });
   }
 
   void _stopStallWatch() {
     _stallTimer?.cancel();
     _stallTimer = null;
+    // The marks only suppress repeated events to the listener that saw them.
+    // With no listener left there is nothing to suppress, and keeping them
+    // would make the next listener miss the initial state of a bridge that is
+    // still stalled (the change-only check below would stay silent).
+    _stalledBridges.clear();
   }
 
   /// True when data is expected from [bridgeId]: a stream is subscribed and

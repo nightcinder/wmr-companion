@@ -95,6 +95,28 @@ void main() {
     expect(link.silentFor!.inMilliseconds, lessThan(_timeout.inMilliseconds));
   });
 
+  test('a new listener is told a still-silent bridge is stalled', () async {
+    final first = <BridgeStallState>[];
+    var sub = service.stallChanges.listen(first.add);
+
+    await service.start();
+    await waitFor(() => first.any((event) => event.stalled));
+    expect((await service.bridgeLink(fakeBridgeDeviceId)).stalled, isTrue);
+
+    // The last listener leaving does not change what the link is doing.
+    await sub.cancel();
+
+    final second = <BridgeStallState>[];
+    sub = service.stallChanges.listen(second.add);
+    addTearDown(sub.cancel);
+
+    // The documented first-event-on-listen state must survive the transition
+    // dedupe: the bridge was already stalled before this subscription, so a
+    // change-only publish would stay silent.
+    await waitFor(() => second.any((event) => event.stalled));
+    expect(second.first.bridgeId, fakeBridgeDeviceId);
+  });
+
   test('a real disconnect is reported disconnected, not stalled', () async {
     final events = <BridgeStallState>[];
     final sub = service.stallChanges.listen(events.add);
