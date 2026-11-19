@@ -7,8 +7,9 @@
 /// * A TCP stall and failover to BLE: the newest TCP record before the
 ///   stall, the moment the stalled leg was reported lost, the failover's
 ///   begin and end, and the first BLE record after the switch.
-/// * An upgrade dial back to TCP while BLE carries: the dial's start and
-///   end, and the first TCP record after the route moved.
+/// * A dial back to TCP while BLE carried — an upgrade probe, or the
+///   recovery from a dropped BLE link: the dial's start and end, and the
+///   first TCP record after the route moved.
 ///
 /// The composite is the only writer; hosts read the immutable
 /// [LinkTimelineRecorder.timeline] snapshot through
@@ -18,7 +19,8 @@ library;
 /// The marks of one link switch, microseconds on the composite's clock.
 ///
 /// A mark is null until its event has happened. Each episode resets its own
-/// "first record" mark when it begins, so a later switch re-records it.
+/// "first record" mark when it begins, so a later switch re-records it, and
+/// a failover's begin clears the marks of the episode it supersedes.
 class LinkTimeline {
   const LinkTimeline({
     this.lastTcpRecordUs,
@@ -47,8 +49,8 @@ class LinkTimeline {
   /// First BLE record after the failover began.
   final int? firstBleRecordUs;
 
-  /// When an upgrade dial to TCP started, and when the dial finished
-  /// (successfully or not).
+  /// When a dial to TCP started — an upgrade probe, or the recovery from a
+  /// dropped BLE link — and when that dial finished (successfully or not).
   final int? upgradeDialStartUs;
   final int? upgradeDialEndUs;
 
@@ -95,10 +97,18 @@ class LinkTimelineRecorder {
   void onStallDetected(int us) => _stallDetectedUs = us;
 
   /// A failover to BLE took the route; the next BLE record opens the new
-  /// episode's "first BLE record".
+  /// episode's "first BLE record". The marks of the episode this failover
+  /// supersedes go with it: that failover's end until this one lands, and
+  /// any dial it left behind. The stall mark stays: a fresh detection
+  /// immediately precedes the begin, and one that predates the last TCP
+  /// record belongs to a remembered loss, which the reader rejects.
   void onFailoverBegin(int us) {
     _failoverBeginUs = us;
+    _failoverEndUs = null;
     _firstBleRecordUs = null;
+    _upgradeDialStartUs = null;
+    _upgradeDialEndUs = null;
+    _firstTcpRecordUs = null;
   }
 
   /// The failover landed: the route is active on BLE.
@@ -110,8 +120,8 @@ class LinkTimelineRecorder {
     _firstBleRecordUs ??= us;
   }
 
-  /// An upgrade dial to TCP started; the next TCP record opens the new
-  /// episode's "first TCP record".
+  /// A dial to TCP started (an upgrade probe, or a BLE-drop recovery); the
+  /// next TCP record opens the new episode's "first TCP record".
   void onUpgradeDialStart(int us) {
     _upgradeDialStartUs = us;
     _firstTcpRecordUs = null;

@@ -999,6 +999,77 @@ void main() {
     expect(firstBle - lastTcp, greaterThan(0));
   });
 
+  test('a BLE drop recovered over TCP records the dial, and a later failover clears it', () async {
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+
+    // Fail over to BLE first, so a BLE drop has a route to recover.
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+    await _settle();
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+    final failoverEnd =
+        transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us']! as int;
+
+    // The BLE link drops: the recovery dials back to TCP and marks it.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the dropped BLE link was not recovered over TCP',
+    );
+    await _settle();
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+          null,
+      reason: 'the first TCP record after the recovery was not marked',
+    );
+
+    final recovered = transport.linkTimelineFor(_tcpDeviceId)!;
+    final dialStart = recovered['upgrade_dial_start_us']! as int;
+    final dialEnd = recovered['upgrade_dial_end_us']! as int;
+    final firstTcp = recovered['first_tcp_record_us']! as int;
+    // The recovery is a dial back to TCP, newer than the failover it
+    // followed, and its first record follows the dial.
+    expect(dialStart, greaterThan(failoverEnd));
+    expect(dialEnd, greaterThan(dialStart));
+    expect(firstTcp, greaterThan(dialEnd));
+
+    // The next stall fails over again, and its begin clears the marks of
+    // the episode it supersedes: the recovery's dial and first record.
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the recovered TCP leg did not fail over to BLE again',
+    );
+    final second = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(second['upgrade_dial_start_us'], isNull);
+    expect(second['upgrade_dial_end_us'], isNull);
+    expect(second['first_tcp_record_us'], isNull);
+    expect(second['failover_end_us']! as int, greaterThan(failoverEnd));
+    // The second failover's stall is its own: it follows its own records.
+    expect(
+      second['stall_detected_us']! as int,
+      greaterThan(second['last_tcp_record_us']! as int),
+    );
+  });
+
   test('a silent TCP socket fails over to BLE within 2500 ms', () async {
     final pi = await _SilentPi.start(bridgeId: _bridgeId);
     final tcpLink = WmrWsTransport(

@@ -577,6 +577,14 @@ class LinkSwitchRow extends StatelessWidget {
       ? '—'
       : '${((later - earlier) / 1000).toStringAsFixed(1)} ms';
 
+  /// The stall gap, or `—` when this failover has no stall mark of its own:
+  /// a loss remembered while a switch held the route leaves the older
+  /// episode's stall, which predates the TCP records that followed it.
+  static String _stallDelta(int? stall, int? lastTcp) =>
+      stall == null || lastTcp == null || stall <= lastTcp
+      ? '—'
+      : '${((stall - lastTcp) / 1000).toStringAsFixed(1)} ms';
+
   static String _ago(int us) {
     final seconds = us / 1e6;
     if (seconds < 1) return '${(us / 1000).toStringAsFixed(0)} ms ago';
@@ -585,8 +593,11 @@ class LinkSwitchRow extends StatelessWidget {
   }
 
   /// The row text. Only a switch that landed is shown: a failover counts
-  /// once its route became active on BLE, an upgrade once its first TCP
-  /// record arrived, and the later landing wins.
+  /// once its route became active on BLE, a dial back to TCP (an upgrade,
+  /// or a BLE-drop recovery) once its first TCP record arrived, and the
+  /// later landing wins. A failover that began from a loss remembered
+  /// while a switch held the route has no stall of its own: its older
+  /// mark predates the records that followed it, and renders as `—`.
   static String label(Map<String, Object?> timeline, int nowUs) {
     final lastTcp = _mark(timeline, 'last_tcp_record_us');
     final stall = _mark(timeline, 'stall_detected_us');
@@ -600,7 +611,7 @@ class LinkSwitchRow extends StatelessWidget {
     if (failoverEnd != null &&
         (dialEnd == null || firstTcp == null || failoverEnd >= dialEnd)) {
       return 'Last link switch ${_ago(nowUs - failoverEnd)}  '
-          'TCP→BLE  stall +${_delta(stall, lastTcp)}  '
+          'TCP→BLE  stall +${_stallDelta(stall, lastTcp)}  '
           'failover ${_delta(failoverEnd, failoverBegin)}  '
           'first BLE +${_delta(firstBle, failoverEnd)}';
     }

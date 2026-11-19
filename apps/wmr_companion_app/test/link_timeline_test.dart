@@ -35,6 +35,21 @@ const _upgradeTimeline = {
   'first_tcp_record_us': 5120000,
 };
 
+/// Marks of a failover that began from a loss remembered while a switch
+/// held the route: no stall of its own exists, and the older episode's
+/// mark predates the TCP records that followed it. The row must not print
+/// a negative stall gap.
+const _rememberedLossTimeline = {
+  'last_tcp_record_us': 5000000,
+  'stall_detected_us': 1100000,
+  'failover_begin_us': 5100000,
+  'failover_end_us': 5180000,
+  'first_ble_record_us': 5200000,
+  'upgrade_dial_start_us': null,
+  'upgrade_dial_end_us': null,
+  'first_tcp_record_us': null,
+};
+
 Future<void> _pumpRow(
   WidgetTester tester,
   Map<String, Object?> timeline,
@@ -81,6 +96,30 @@ void main() {
       expect(find.textContaining('dial 105.0 ms'), findsOneWidget);
       expect(find.textContaining('first TCP +15.0 ms'), findsOneWidget);
     });
+
+    testWidgets(
+      'renders no stall gap when the stall predates the last TCP record',
+      (tester) async {
+        // The clock sits 1.5 s after the remembered-loss failover landed.
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LinkSwitchRow(
+                timeline: _rememberedLossTimeline,
+                nowUs: 6700000,
+              ),
+            ),
+          ),
+        );
+
+        expect(
+          find.textContaining('Last link switch 1.5 s ago  TCP→BLE'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('stall +—'), findsOneWidget);
+        expect(find.textContaining('stall +-'), findsNothing);
+      },
+    );
 
     testWidgets('says so while no switch has landed', (tester) async {
       await _pumpRow(tester, const {});

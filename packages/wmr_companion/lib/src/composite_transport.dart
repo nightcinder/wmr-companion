@@ -960,7 +960,16 @@ class CompositeBleTransport implements BleTransport {
     try {
       if (route.tcpCandidates.isNotEmpty) {
         try {
-          final id = await _tryTcp(route, route.tcpCandidates.toList());
+          // Recovering the dropped BLE link over TCP is a dial back to TCP:
+          // it leaves the same marks an upgrade dial leaves, so the row
+          // reports the switch that actually landed.
+          route.timeline.onUpgradeDialStart(clock.nowUs);
+          String? id;
+          try {
+            id = await _tryTcp(route, route.tcpCandidates.toList());
+          } finally {
+            route.timeline.onUpgradeDialEnd(clock.nowUs);
+          }
           if (id != null) {
             await _activateTcp(route, id);
             return;
