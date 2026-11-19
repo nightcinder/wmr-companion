@@ -554,6 +554,17 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   StreamSubscription<BleScanResult>? _scanSub;
   int _scanGeneration = 0;
   StreamSubscription<BleLinkStatus>? _statusSub;
+  StreamSubscription<BleAvailability>? _availabilitySub;
+
+  /// True while the Bluetooth radio is off, from the shared BLE transport's
+  /// adapter stream. The reconnect campaign is parked while it is set: every
+  /// dial would fail its preflight against the dead stack.
+  bool _radioOff = false;
+
+  /// Numbers every dial per bridge, so a dial superseded by a newer one can
+  /// be told apart and must not publish its result or tear down what the
+  /// newer dial built.
+  final Map<String, int> _connectGenerations = {};
   AppLifecycleListener? _lifecycle;
   ControllerService? _service;
   Timer? _statsTimer;
@@ -593,6 +604,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   RealDeviceState build() {
     final transport = ref.watch(realTransportProvider);
     _statusSub = transport.statusChanges.listen(_handleBleLinkStatus);
+    _availabilitySub = transport.availabilityChanges.listen(_onRadioState);
     _lifecycle?.dispose();
     final lifecycle = _lifecycle = AppLifecycleListener(
       onStateChange: (s) {
@@ -631,6 +643,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       lifecycle.dispose();
       _scanSub?.cancel();
       _statusSub?.cancel();
+      _availabilitySub?.cancel();
       _wifiStateSub?.cancel();
       _fallbackScanSub?.cancel();
       _bleCompositeStateSub?.cancel();
@@ -729,6 +742,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   }
 
   void _handleLinkStatus(BleLinkStatus s) {
+    // While the radio is off a lost or ended link is a radio loss,
+    // whichever leg reported it: the status stays honest for the UI and the
+    // recovery.
+    if (_radioOff &&
+        (s.phase == BleLinkPhase.connectionLost ||
+            s.phase == BleLinkPhase.disconnected)) {
+      s = BleLinkStatus(
+        BleLinkPhase.bluetoothOff,
+        deviceId: s.deviceId,
+        message: 'Bluetooth is turned off',
+      );
+    }
     if (state.activeTransport == BridgeTransportKind.wifi &&
         s.deviceId != null &&
         s.deviceId != _wifiDeviceId) {
@@ -767,6 +792,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
             if (!_userDisconnectedDeviceIds.contains(id)) {
               _droppedDeviceIds.add(id);
               _scheduleReconnect(id);
+            }
+          } else if (s.phase == BleLinkPhase.bluetoothOff) {
+            // The radio took the link: remember the bridge for the redial
+            // when the radio returns. No campaign is scheduled here; one
+            // against a powered-off stack can only burn its attempts.
+            if (!_userDisconnectedDeviceIds.contains(id)) {
+              _droppedDeviceIds.add(id);
             }
           } else if (s.isFailure && _reconnecting.contains(id)) {
             // An automatic re-dial failed. Keep trying with backoff until
@@ -869,6 +901,16 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     // Both the raw BLE loss and the composite's loss can report the same
     // drop; one pending retry is enough.
     if (_reconnectTimers[id] != null) return;
+    // The radio is off: every GATT link is already gone and every dial would
+    // fail its preflight against the dead stack. Park the bridge for the
+    // radio's return instead of burning the campaign's attempts.
+    if (_radioOff) {
+      _reconnectTimers.remove(id)?.cancel();
+      _reconnectAttempts.remove(id);
+      _reconnecting.remove(id);
+      _droppedDeviceIds.add(id);
+      return;
+    }
     _reconnectTimers[id]?.cancel();
     final policy = ref.read(reconnectPolicyProvider);
     final attempt = _reconnectAttempts[id] ?? 0;
@@ -898,6 +940,52 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       }
       await _connect(id, userInitiated: false);
     });
+  }
+
+  /// The Bluetooth radio's power transitions, from the shared BLE transport.
+  ///
+  /// When the radio goes, every GATT link dies at once: the transport
+  /// reports each bridge as [BleLinkPhase.bluetoothOff] without calling into
+  /// the dead stack, and the reconnect campaign is parked rather than
+  /// burning its attempts. When the radio returns, every dropped bridge is
+  /// dialled once through the ordinary connect path, which rebuilds the
+  /// controller service and re-subscribes the stream.
+  void _onRadioState(BleAvailability state) {
+    switch (state) {
+      case BleAvailability.poweredOff:
+        _radioOff = true;
+      case BleAvailability.poweredOn:
+        // Only a return from off redials; an initial poweredOn event must
+        // not.
+        if (!_radioOff) return;
+        _radioOff = false;
+        unawaited(_recoverAfterRadioOn());
+      default:
+        break;
+    }
+  }
+
+  /// Dials every bridge the radio took down, once, when the radio returns.
+  ///
+  /// A dial still in flight from an earlier cycle is superseded and must
+  /// not publish over this one. A redial that fails for its own reasons
+  /// falls back into the ordinary reconnect campaign.
+  Future<void> _recoverAfterRadioOn() async {
+    if (_intentionalDisconnect) return;
+    final dropped = _droppedDeviceIds
+        .where((id) => !_userDisconnectedDeviceIds.contains(id))
+        .toList(growable: false);
+    for (final id in dropped) {
+      _reconnectTimers.remove(id)?.cancel();
+      _reconnectAttempts.remove(id);
+      // A failed redial must fall back into the campaign instead of leaving
+      // the bridge un-dialled, so it counts as an automatic dial.
+      _reconnecting.add(id);
+    }
+    for (final id in dropped) {
+      if (!ref.mounted) return;
+      await _connect(id, userInitiated: false, supersede: true);
+    }
   }
 
   void _update({
@@ -1018,11 +1106,18 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// connection: it repeats the whole sequence.
   ///
   /// An automatic retry must not clear the records a resume relies on, so the
-  /// user-action bookkeeping lives in the [userInitiated] branch.
+  /// user-action bookkeeping lives in the [userInitiated] branch. A
+  /// [supersede] dial replaces one still in flight from an earlier radio
+  /// cycle: the stale dial must not publish its result or tear down what
+  /// this one built.
   Future<void> connect(String deviceId) =>
       _connect(deviceId, userInitiated: true);
 
-  Future<void> _connect(String deviceId, {required bool userInitiated}) async {
+  Future<void> _connect(
+    String deviceId, {
+    required bool userInitiated,
+    bool supersede = false,
+  }) async {
     _autoConnectSuppressed = true;
     if (userInitiated) {
       _manualBrowseSuppressed = false;
@@ -1030,8 +1125,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _userDisconnectedDeviceIds.remove(deviceId);
       _droppedDeviceIds.remove(deviceId);
     }
-    if (_connectedDeviceIds.contains(deviceId) ||
-        _connectingDeviceIds.contains(deviceId)) {
+    if (_connectedDeviceIds.contains(deviceId)) {
+      return;
+    }
+    // A dial still in flight owns the bridge, unless this dial supersedes
+    // it: a radio-cycle redial must replace a stale attempt whose result
+    // would otherwise publish over this one.
+    if (!supersede && _connectingDeviceIds.contains(deviceId)) {
       return;
     }
     _parkedBleDeviceIds.remove(deviceId);
@@ -1042,6 +1142,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     }
     final deviceDisconnectGen = _deviceDisconnectGenerations[deviceId] ?? 0;
     final globalDisconnectGen = _globalDisconnectGeneration;
+    // Dials are numbered per bridge. A superseded dial still in flight must
+    // not publish its result, dispose the newer dial's service, or unpublish
+    // its bookkeeping.
+    final generation = _connectGenerations[deviceId] =
+        (_connectGenerations[deviceId] ?? 0) + 1;
+    bool stale() => (_connectGenerations[deviceId] ?? 0) != generation;
     _connectingDeviceIds.add(deviceId);
     ref
         .read(bridgeTransportKindsProvider.notifier)
@@ -1067,12 +1173,14 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         try {
           await service.start();
         } on BleTransportException {
+          if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
           _service?.dispose();
           _service = null;
           _update();
           return; // already in the status
         } catch (error) {
+          if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
           _service?.dispose();
           _service = null;
@@ -1084,10 +1192,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         try {
           await _service!.addDevice(deviceId);
         } on BleTransportException {
+          if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
           _update();
           return;
         } catch (error) {
+          if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
           _reportConnectFailure(deviceId, error);
           _update();
@@ -1096,6 +1206,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       }
 
       // Check if disconnect was called for this device or all devices:
+      if (stale()) return;
       if ((_deviceDisconnectGenerations[deviceId] ?? 0) !=
               deviceDisconnectGen ||
           globalDisconnectGen != _globalDisconnectGeneration) {
@@ -1109,8 +1220,12 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         _watchBleComposite(deviceId);
       }
     } finally {
-      _connectingDeviceIds.remove(deviceId);
-      _update();
+      // A superseded dial no longer owns the bridge's bookkeeping; the newer
+      // dial publishes through its own completion.
+      if (!stale()) {
+        _connectingDeviceIds.remove(deviceId);
+        _update();
+      }
     }
 
     void publish() => _update();

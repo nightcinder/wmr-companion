@@ -103,7 +103,10 @@ class _Wanted {
 /// whole sequence runs again on every [connect], because the bridge forgets
 /// the subscription when the link drops. After an unexpected drop the
 /// transport only reports [BleLinkPhase.connectionLost]; the caller
-/// reconnects.
+/// reconnects. When the adapter's radio goes off the transport clears every
+/// session without calling into the dead stack and reports
+/// [BleLinkPhase.bluetoothOff] per bridge; it never redials on its own, so
+/// the host decides when the radio's return is worth an attempt.
 ///
 /// Not verified on hardware.
 class UniversalBleTransport implements BleTransport {
@@ -119,6 +122,9 @@ class UniversalBleTransport implements BleTransport {
        clock = clock ?? MonotonicClock() {
     _paramsSub = adapter.connectionParams.listen(
       (p) => _intervalUs[p.deviceId] = p.intervalUs,
+    );
+    _availabilitySub = adapter.availabilityChanges.listen(
+      _onAvailabilityChange,
     );
   }
 
@@ -160,6 +166,68 @@ class UniversalBleTransport implements BleTransport {
   final Map<String, StreamSubscription<Uint8List>> _valueSubs = {};
   final Map<String, int> _intervalUs = {};
   StreamSubscription<AdapterConnectionParams>? _paramsSub;
+  StreamSubscription<BleAvailability>? _availabilitySub;
+
+  /// The radio's last reported state, from the adapter's change stream and
+  /// every availability read. [BleAvailability.unknown] until either speaks.
+  BleAvailability _radio = BleAvailability.unknown;
+
+  /// Whether the adapter reported its radio as off. Every GATT link is dead
+  /// while it is set, so no adapter call is made.
+  bool get _radioOff => _radio == BleAvailability.poweredOff;
+
+  /// The adapter's radio-state changes, forwarded for a host that reacts to
+  /// an adapter power cycle (the companion app redials on the radio's
+  /// return). The transport itself only tears its links down when the radio
+  /// goes; reconnecting stays the host's decision.
+  Stream<BleAvailability> get availabilityChanges =>
+      _adapter.availabilityChanges;
+
+  void _onAvailabilityChange(BleAvailability state) {
+    _radio = state;
+    if (state == BleAvailability.poweredOff) _loseLinksToRadioOff();
+  }
+
+  /// The radio went away, so every GATT link died with it.
+  ///
+  /// Nothing is called on the adapter here: a stack that just lost its radio
+  /// answers GATT calls with dead-object errors, which is what wedged the
+  /// client on hardware. The sessions are dropped locally, the wanted
+  /// subscriptions are kept for the redial, and every bridge reports
+  /// [BleLinkPhase.bluetoothOff]. The host redials when the radio returns.
+  void _loseLinksToRadioOff() {
+    for (final deviceId in _sessions.keys.toList()) {
+      _sessions.remove(deviceId);
+      _linkSubs.remove(deviceId)?.cancel();
+      _setState(deviceId, BleConnectionState.disconnected);
+      _emit(
+        BleLinkPhase.bluetoothOff,
+        deviceId: deviceId,
+        message: 'Bluetooth is turned off',
+      );
+    }
+    // A scan cannot outlive its radio either. The platform has already
+    // stopped it, so the stream is closed locally instead of calling into
+    // the dead stack again.
+    _scanWanted = false;
+    _scanPaused = false;
+    _adapterScanning = false;
+    _scanTimer?.cancel();
+    _scanTimer = null;
+    final scanSub = _scanSub;
+    _scanSub = null;
+    unawaited(scanSub?.cancel());
+    final ctl = _scanCtl;
+    if (ctl != null && !ctl.isClosed) {
+      ctl.addError(
+        const BleTransportException(
+          BleLinkPhase.bluetoothOff,
+          'Bluetooth is turned off',
+        ),
+      );
+      unawaited(ctl.close());
+    }
+  }
 
   StreamController<BleScanResult>? _scanCtl;
   StreamSubscription<BleScanResult>? _scanSub;
@@ -249,6 +317,10 @@ class UniversalBleTransport implements BleTransport {
       );
     }
     var state = await _adapter.availability();
+    if (state != BleAvailability.unknown &&
+        state != BleAvailability.resetting) {
+      _radio = state;
+    }
     if (state == BleAvailability.unknown ||
         state == BleAvailability.resetting) {
       try {
@@ -509,6 +581,17 @@ class UniversalBleTransport implements BleTransport {
         .whenComplete(() => _connecting.remove(deviceId));
   }
 
+  /// A setup step that lost its session aborts without publishing: the dial
+  /// that superseded it, or the radio handler that cleared the session,
+  /// owns the device's status. The exception still classifies so its caller
+  /// knows what happened — the radio when its going off is the cause, an
+  /// ordinary disconnect otherwise.
+  BleTransportException _setupSuperseded(String deviceId) =>
+      BleTransportException(
+        _radioOff ? BleLinkPhase.bluetoothOff : BleLinkPhase.connectionLost,
+        _radioOff ? 'Bluetooth is turned off' : 'Disconnected during setup',
+      );
+
   Future<void> _setup(String deviceId) async {
     final session = _sessions[deviceId] = _Session(deviceId);
     _setState(deviceId, BleConnectionState.connecting);
@@ -517,11 +600,7 @@ class UniversalBleTransport implements BleTransport {
     try {
       await _preflight(deviceId: deviceId);
       if (_sessions[deviceId] != session) {
-        throw _fail(
-          BleLinkPhase.connectionLost,
-          'Disconnected during setup',
-          deviceId: deviceId,
-        );
+        throw _setupSuperseded(deviceId);
       }
       await _linkSubs[deviceId]?.cancel();
       _linkSubs[deviceId] = _adapter
@@ -532,6 +611,7 @@ class UniversalBleTransport implements BleTransport {
       try {
         await _adapter.connect(deviceId);
       } catch (e) {
+        if (_radioOff) throw _setupSuperseded(deviceId);
         throw _fail(
           BleLinkPhase.connectFailed,
           'Connect failed: $e',
@@ -539,11 +619,7 @@ class UniversalBleTransport implements BleTransport {
         );
       }
       if (_sessions[deviceId] != session) {
-        throw _fail(
-          BleLinkPhase.connectionLost,
-          'Disconnected during setup',
-          deviceId: deviceId,
-        );
+        throw _setupSuperseded(deviceId);
       }
 
       _emit(BleLinkPhase.negotiatingMtu, deviceId: deviceId);
@@ -553,11 +629,7 @@ class UniversalBleTransport implements BleTransport {
         session.warnings.add('MTU request failed: $e');
       }
       if (_sessions[deviceId] != session) {
-        throw _fail(
-          BleLinkPhase.connectionLost,
-          'Disconnected during setup',
-          deviceId: deviceId,
-        );
+        throw _setupSuperseded(deviceId);
       }
 
       if (_adapter.supportsConnectionPriority) {
@@ -569,11 +641,7 @@ class UniversalBleTransport implements BleTransport {
           session.warnings.add('Connection priority request failed: $e');
         }
         if (_sessions[deviceId] != session) {
-          throw _fail(
-            BleLinkPhase.connectionLost,
-            'Disconnected during setup',
-            deviceId: deviceId,
-          );
+          throw _setupSuperseded(deviceId);
         }
       }
 
@@ -582,6 +650,7 @@ class UniversalBleTransport implements BleTransport {
       try {
         services = await _adapter.discoverServices(deviceId);
       } catch (e) {
+        if (_radioOff) throw _setupSuperseded(deviceId);
         throw _fail(
           BleLinkPhase.connectFailed,
           'Service discovery failed: $e',
@@ -589,11 +658,7 @@ class UniversalBleTransport implements BleTransport {
         );
       }
       if (_sessions[deviceId] != session) {
-        throw _fail(
-          BleLinkPhase.connectionLost,
-          'Disconnected during setup',
-          deviceId: deviceId,
-        );
+        throw _setupSuperseded(deviceId);
       }
       final hasStream = services.any(
         (s) =>
@@ -624,11 +689,7 @@ class UniversalBleTransport implements BleTransport {
           _streams[key]?.addError(_streamFault(w, e));
         }
         if (_sessions[deviceId] != session) {
-          throw _fail(
-            BleLinkPhase.connectionLost,
-            'Disconnected during setup',
-            deviceId: deviceId,
-          );
+          throw _setupSuperseded(deviceId);
         }
       }
       _setState(deviceId, BleConnectionState.connected);
@@ -636,31 +697,32 @@ class UniversalBleTransport implements BleTransport {
     } catch (e) {
       if (_sessions[deviceId] == session) _sessions.remove(deviceId);
       _setState(deviceId, BleConnectionState.disconnected);
-      if (linkAttempted) {
+      if (linkAttempted && !_radioOff) {
+        // The platform already dropped the link when the radio went, and a
+        // GATT call into the dead stack is what wedges the client.
         try {
           await _adapter.disconnect(deviceId);
         } catch (_) {}
       }
       if (e is BleTransportException) rethrow;
+      if (_radioOff) throw _setupSuperseded(deviceId);
       throw _fail(BleLinkPhase.connectFailed, '$e', deviceId: deviceId);
     }
   }
 
   void _onLinkEvent(_Session session, AdapterConnectionEvent e) {
     if (e.connected || _sessions[session.deviceId] != session) return;
-    final wasReady = session.ready;
     _sessions.remove(session.deviceId);
     _linkSubs.remove(session.deviceId)?.cancel();
     _setState(session.deviceId, BleConnectionState.disconnected);
-    // During setup the failing step reports the error; only a drop after
-    // setup is an unexpected disconnect.
-    if (wasReady) {
-      _emit(
-        BleLinkPhase.connectionLost,
-        deviceId: session.deviceId,
-        message: e.error ?? 'Connection lost',
-      );
-    }
+    // This is the only publisher for a link that died mid-setup: the
+    // failing step aborts silently, superseded by this report. Only a drop
+    // after setup is an unexpected disconnect of a ready link.
+    _emit(
+      BleLinkPhase.connectionLost,
+      deviceId: session.deviceId,
+      message: e.error ?? 'Connection lost',
+    );
   }
 
   Future<void> _enable(_Session session, String key, _Wanted w) async {
@@ -682,9 +744,12 @@ class UniversalBleTransport implements BleTransport {
         attempt++;
         await Future<void>.delayed(enableRetryDelay);
         if (_sessions[w.deviceId] != session) {
+          final off = _radioOff;
           throw BleTransportException(
-            BleLinkPhase.connectionLost,
-            'Disconnected while enabling notifications',
+            off ? BleLinkPhase.bluetoothOff : BleLinkPhase.connectionLost,
+            off
+                ? 'Bluetooth is turned off'
+                : 'Disconnected while enabling notifications',
           );
         }
       }
@@ -736,7 +801,9 @@ class UniversalBleTransport implements BleTransport {
       _emit(BleLinkPhase.disconnecting, deviceId: deviceId);
       await _closeStreams(deviceId);
       try {
-        await _adapter.disconnect(deviceId);
+        // The platform already dropped the link when the radio went; a GATT
+        // call into the dead stack is what wedges the client.
+        if (!_radioOff) await _adapter.disconnect(deviceId);
       } finally {
         _linkSubs.remove(deviceId)?.cancel();
         _setState(deviceId, BleConnectionState.disconnected);
@@ -977,6 +1044,7 @@ class UniversalBleTransport implements BleTransport {
     }
     _linkSubs.clear();
     await _paramsSub?.cancel();
+    await _availabilitySub?.cancel();
     // A reconnect in flight can still add a key while these awaits yield, so
     // iterate a snapshot instead of the live map.
     for (final s in _valueSubs.values.toList()) {
