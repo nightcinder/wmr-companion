@@ -329,6 +329,58 @@ void main() {
     expect(composite.activeLegFor(bleDeviceId), CompositeLeg.tcp);
   });
 
+  test('an adapter power cycle keeps a TCP-carried session and its return '
+      'restores the fallback leg', () async {
+    const bridgeId = 'pi-1';
+    const bleDeviceId = 'ble-pi-1';
+    const lanDeviceId = '192.168.1.42:8765';
+    final adapter = _EndpointAdapter(bridgeId: bridgeId);
+    final tcp = _ScriptedTcp(
+      FakeTransport(devices: const [FakeDevice(id: lanDeviceId, mtu: 4096)]),
+    );
+    addTearDown(tcp.dispose);
+    var lanUp = true;
+    late CompositeBleTransport composite;
+    final container = makeContainer(
+      adapter: adapter,
+      bleHandoffFactory: (ble) => composite = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+        lanAvailable: () async => lanUp,
+      ),
+    );
+
+    await container.read(realDeviceProvider.notifier).connect(bleDeviceId);
+    await _waitFor(
+      () => composite.activeLegFor(bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the FF16 LAN host was not dialled',
+    );
+    expect(container.read(realDeviceProvider).connected, isTrue);
+
+    // The radio dies while TCP carries the session: the BLE leg is lost
+    // and the dead stack is not called, but the session must stay up.
+    adapter.emitAvailability(BleAvailability.poweredOff);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(container.read(realDeviceProvider).connected, isTrue);
+    expect(composite.activeLegFor(bleDeviceId), CompositeLeg.tcp);
+    expect(adapter.calls, isNot(contains('disconnect')));
+
+    // The radio returns; Wi-Fi drops with the TCP leg it carried. The
+    // fallback dial now finds the radio alive and carries the session on
+    // BLE, with no LAN to upgrade back to.
+    lanUp = false;
+    adapter.emitAvailability(BleAvailability.poweredOn);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await tcp.inner.disconnect(lanDeviceId);
+    await _waitFor(
+      () => composite.activeLegFor(bleDeviceId) == CompositeLeg.ble,
+      reason: 'the fallback leg was not re-dialled after the radio returned',
+    );
+    expect(container.read(realDeviceProvider).connected, isTrue);
+  });
+
   test('losing both legs ends the BLE-mode session', () async {
     const bridgeId = 'pi-1';
     const bleDeviceId = 'ble-pi-1';

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,11 +15,12 @@ import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/protocol/wmr_fragment.dart';
-import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
+import 'package:wmr_companion/wmr_companion.dart';
+import 'package:wmr_core/ble/ble_transport.dart';
 
 import '../hid/fake_hid.dart';
 import '../services/memory_secure_token_backend.dart';
@@ -40,6 +43,29 @@ class _DroppableWifiTransport extends FakeTransport {
     }
     await super.connect(deviceId);
   }
+}
+
+/// Counts transport preflights: every dial reads the radio's availability
+/// before it touches the stack, so a read that arrives while the radio is
+/// off is a dial against a dead stack.
+class _CountingAdapter extends FakeBleAdapter {
+  int availabilityReads = 0;
+
+  @override
+  Future<BleAvailability> availability() async {
+    availabilityReads++;
+    return super.availability();
+  }
+}
+
+/// A TCP leg that refuses every dial, so a composite built on it falls back
+/// to its BLE leg and stays there.
+class _RefusedTcp extends WmrWsTransport {
+  _RefusedTcp(WmrWsEndpoint endpoint) : super(endpoints: [endpoint]);
+
+  @override
+  Future<void> connect(String deviceId) async =>
+      throw StateError('tcp refused');
 }
 
 class TestModeNotifier extends StreamModeNotifier {
@@ -815,4 +841,420 @@ void main() {
       expect(container.read(realDeviceProvider).connected, isTrue);
     },
   );
+
+  group('adapter power cycle', () {
+    Future<void> until(
+      bool Function() condition, {
+      String? reason,
+      Duration timeout = const Duration(seconds: 2),
+    }) async {
+      final deadline = DateTime.now().add(timeout);
+      while (!condition()) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail(reason ?? 'condition not met within $timeout');
+        }
+        await wait(5);
+      }
+    }
+
+    int connectCalls() => adapter.calls.where((c) => c == 'connect').length;
+
+    test(
+      'the radio going off parks the campaign; its return redials the stream',
+      () async {
+        final container = makeContainer(mode: StreamMode.batched);
+        final controller = container.read(realDeviceProvider.notifier);
+        await controller.connect(fakeBridgeDeviceId);
+        expect(container.read(realDeviceProvider).connected, isTrue);
+        await until(
+          () => adapter.ccc.contains('on ff14'),
+          reason: 'the stream CCCD was never enabled',
+        );
+        final connectsBefore = connectCalls();
+
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        // Past the campaign's first delay: nothing dials a powered-off radio.
+        await wait(800);
+
+        final state = container.read(realDeviceProvider);
+        expect(state.connected, isFalse);
+        expect(state.status.phase, BleLinkPhase.bluetoothOff);
+        expect(
+          connectCalls(),
+          connectsBefore,
+          reason: 'a parked campaign must not dial a dead radio',
+        );
+
+        adapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+
+        // One attempt per device: the radio's return dialled it once, and
+        // the wanted stream was re-subscribed with it.
+        expect(connectCalls(), connectsBefore + 1);
+        expect(adapter.ccc.where((c) => c == 'on ff14'), hasLength(2));
+      },
+    );
+
+    test(
+      'the radio going off mid-connect parks the dial for its return',
+      () async {
+        final container = makeContainer();
+        final controller = container.read(realDeviceProvider.notifier);
+        adapter.mtuGate = Completer<void>();
+        final connecting = controller.connect(fakeBridgeDeviceId);
+        await until(() => adapter.calls.contains('requestMtu 517'));
+
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        adapter.mtuGate!.complete();
+        await connecting;
+        await wait(100);
+
+        final state = container.read(realDeviceProvider);
+        expect(state.connected, isFalse);
+        expect(state.status.phase, BleLinkPhase.bluetoothOff);
+        // The dead stack is not called for a teardown either.
+        expect(adapter.calls, isNot(contains('disconnect')));
+        final connectsBefore = connectCalls();
+
+        adapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+        await until(
+          () => adapter.ccc.contains('on ff11'),
+          reason: 'the redial did not re-subscribe the stream',
+        );
+
+        expect(connectCalls(), connectsBefore + 1);
+        expect(adapter.ccc.where((c) => c == 'on ff11'), hasLength(1));
+      },
+    );
+
+    test(
+      'a rapid cycle supersedes the stale dial and it never publishes',
+      () async {
+        final container = makeContainer(mode: StreamMode.batched);
+        final controller = container.read(realDeviceProvider.notifier);
+        await controller.connect(fakeBridgeDeviceId);
+        await until(
+          () => adapter.ccc.contains('on ff14'),
+          reason: 'the stream CCCD was never enabled',
+        );
+        final connectsBefore = connectCalls();
+
+        // Cycle one: the return's redial is held at the MTU step.
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        await wait(100);
+        adapter.mtuGate = Completer<void>();
+        adapter.emitAvailability(BleAvailability.poweredOn);
+        await until(
+          () => connectCalls() == connectsBefore + 1,
+          reason: 'the radio return did not redial',
+        );
+        await until(
+          () => adapter.calls.where((c) => c == 'requestMtu 517').length == 2,
+          reason: 'the first redial never reached its MTU request',
+        );
+
+        // Cycle two lands while that dial is still in flight. The composite
+        // serializes its leg switches, so the superseding dial queues behind
+        // the stale one instead of being swallowed by it.
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        adapter.emitAvailability(BleAvailability.poweredOn);
+
+        // The stale dial aborts; the dial that owns this cycle finishes.
+        adapter.mtuGate!.complete();
+        await until(
+          () => connectCalls() == connectsBefore + 2,
+          reason: 'the second radio return did not redial over the stale one',
+        );
+        await until(() => container.read(realDeviceProvider).connected);
+
+        // One attempt per device per cycle, and the stale attempt published
+        // nothing over the recovery: the service the redial built survived.
+        expect(connectCalls(), connectsBefore + 2);
+        expect(adapter.ccc.where((c) => c == 'on ff14'), hasLength(2));
+        expect(controller.service, isNotNull);
+      },
+    );
+
+    test(
+      'the adapter staying off burns no attempts; its return redials',
+      () async {
+        const policy = ReconnectPolicy(
+          baseDelay: Duration(milliseconds: 5),
+          maxDelay: Duration(milliseconds: 10),
+          maxAttempts: 3,
+        );
+        final container = makeContainer(
+          mode: StreamMode.batched,
+          policy: policy,
+        );
+        final controller = container.read(realDeviceProvider.notifier);
+        await controller.connect(fakeBridgeDeviceId);
+        final connectsBefore = connectCalls();
+
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        // Long enough for the whole (fast) campaign to have run out, had one
+        // been armed against the dead radio.
+        await wait(300);
+
+        expect(container.read(realDeviceProvider).connected, isFalse);
+        expect(connectCalls(), connectsBefore);
+
+        adapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+
+        expect(connectCalls(), connectsBefore + 1);
+        expect(adapter.ccc.where((c) => c == 'on ff14'), hasLength(2));
+      },
+    );
+
+    test(
+      'a bridge the user disconnected stays down when the radio returns',
+      () async {
+        final container = makeContainer();
+        final controller = container.read(realDeviceProvider.notifier);
+        await controller.connect(fakeBridgeDeviceId);
+        await controller.disconnect(fakeBridgeDeviceId);
+        final connectsBefore = connectCalls();
+
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        await wait(50);
+        adapter.emitAvailability(BleAvailability.poweredOn);
+        await wait(300);
+
+        expect(container.read(realDeviceProvider).connected, isFalse);
+        expect(connectCalls(), connectsBefore);
+      },
+    );
+
+    test('a Wi-Fi loss while the radio is off is not a radio loss and '
+        're-dials', () async {
+      final wifi = _DroppableWifiTransport(
+        devices: const [FakeDevice(id: 'pi.local:8765', mtu: 4096)],
+      );
+      addTearDown(wifi.dispose);
+      const policy = ReconnectPolicy(
+        baseDelay: Duration(milliseconds: 150),
+        maxDelay: Duration(milliseconds: 300),
+        maxAttempts: 3,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(transport),
+          wifiTransportFactoryProvider.overrideWithValue((_) => wifi),
+          streamModeProvider.overrideWith(
+            () => TestModeNotifier(StreamMode.raw),
+          ),
+          reconnectPolicyProvider.overrideWithValue(policy),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connectWifi(
+        host: 'pi.local',
+        port: 8765,
+        bleFallback: false,
+      );
+      expect(container.read(realDeviceProvider).connected, isTrue);
+
+      // The Bluetooth radio dies: the Wi-Fi session it cannot touch must
+      // stay up.
+      adapter.emitAvailability(BleAvailability.poweredOff);
+      await wait(50);
+      expect(container.read(realDeviceProvider).connected, isTrue);
+
+      // The Wi-Fi link then drops for its own reasons. That is a Wi-Fi
+      // failure, not a radio loss, and the ordinary campaign re-dials it
+      // over Wi-Fi while the radio is still off.
+      final connectsBefore = wifi.connectCalls;
+      await wifi.disconnect('pi.local:8765');
+      await until(
+        () =>
+            container.read(realDeviceProvider).status.phase ==
+            BleLinkPhase.connectionLost,
+        reason: 'the Wi-Fi drop was not reported as its own loss',
+      );
+
+      for (
+        var elapsed = 0;
+        elapsed < 1500 &&
+            (wifi.connectCalls < connectsBefore + 1 ||
+                !container.read(realDeviceProvider).connected);
+        elapsed += 20
+      ) {
+        await wait(20);
+      }
+
+      expect(container.read(realDeviceProvider).connected, isTrue);
+      expect(wifi.connectCalls, greaterThanOrEqualTo(connectsBefore + 1));
+    });
+
+    test(
+      'the radio taking a composite BLE-carried Wi-Fi session parks it too',
+      () async {
+        // The default Wi-Fi tab: the composite's TCP leg cannot answer, so
+        // its BLE fallback leg carries the session and dies with the radio.
+        const bridgeId = 'pi-1';
+        const bleDeviceId = 'ble-pi-1';
+        final endpoint = WmrWsEndpoint(
+          host: '192.168.1.42',
+          port: 8765,
+          bridgeId: bridgeId,
+        );
+        final countingAdapter = _CountingAdapter();
+        final bleTab = UniversalBleTransport(
+          adapter: countingAdapter,
+          scanTimeout: const Duration(minutes: 5),
+        );
+        addTearDown(bleTab.dispose);
+        final composite = CompositeBleTransport(
+          tcp: _RefusedTcp(endpoint),
+          ble: UniversalBleTransport(
+            adapter: countingAdapter,
+            scanTimeout: const Duration(minutes: 5),
+          ),
+          upgradeInterval: Duration.zero,
+          bleScanWait: const Duration(seconds: 2),
+        );
+        addTearDown(composite.dispose);
+        final wifiLink = WifiLink(
+          composite,
+          activeLeg: () =>
+              switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+                CompositeLeg.tcp => WifiLinkLeg.tcp,
+                CompositeLeg.ble => WifiLinkLeg.ble,
+                null => null,
+              },
+        );
+        final container = ProviderContainer(
+          overrides: [
+            realTransportProvider.overrideWithValue(bleTab),
+            compositeWifiTransportFactoryProvider.overrideWithValue(
+              (_) => wifiLink,
+            ),
+            streamModeProvider.overrideWith(
+              () => TestModeNotifier(StreamMode.batched),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        final controller = container.read(realDeviceProvider.notifier);
+        // The composite waits for the fallback scan to name its BLE
+        // candidate after the TCP refusal.
+        final dial = controller.connectWifi(
+          host: endpoint.host,
+          port: endpoint.port,
+          bridgeId: bridgeId,
+          bleFallback: true,
+        );
+        await wait(50);
+        countingAdapter.emitScanResult(
+          BleScanResult(deviceId: bleDeviceId, name: 'WMR Bridge', rssi: -55),
+        );
+        await dial;
+
+        var state = container.read(realDeviceProvider);
+        expect(state.connected, isTrue);
+        expect(state.wifiLeg, WifiLinkLeg.ble);
+        await until(
+          () => countingAdapter.ccc.contains('on ff14'),
+          reason: 'the stream CCCD was never enabled',
+        );
+        int connectCalls() =>
+            countingAdapter.calls.where((c) => c == 'connect').length;
+        final connectsBefore = connectCalls();
+        final readsBefore = countingAdapter.availabilityReads;
+
+        // The radio dies: the composite's BLE-carried session went with it.
+        countingAdapter.emitAvailability(BleAvailability.poweredOff);
+        await wait(100);
+
+        state = container.read(realDeviceProvider);
+        expect(state.status.phase, BleLinkPhase.bluetoothOff);
+        expect(state.connected, isFalse);
+        expect(
+          connectCalls(),
+          connectsBefore,
+          reason: 'a parked composite session redialled the dead radio',
+        );
+        expect(
+          countingAdapter.availabilityReads,
+          readsBefore,
+          reason: 'a parked composite session dialled the dead radio',
+        );
+
+        // The radio's return redials the parked session once through the
+        // ordinary connect path, over the composite's BLE leg again.
+        countingAdapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+
+        state = container.read(realDeviceProvider);
+        expect(state.wifiLeg, WifiLinkLeg.ble);
+        expect(countingAdapter.availabilityReads, readsBefore + 1);
+        expect(connectCalls(), connectsBefore + 1);
+      },
+    );
+
+    test(
+      'a retry armed before the radio dies is parked, not dialled',
+      () async {
+        final countingAdapter = _CountingAdapter();
+        final ble = UniversalBleTransport(
+          adapter: countingAdapter,
+          scanTimeout: const Duration(minutes: 5),
+        );
+        addTearDown(ble.dispose);
+        const policy = ReconnectPolicy(
+          baseDelay: Duration(milliseconds: 150),
+          maxDelay: Duration(milliseconds: 300),
+          maxAttempts: 3,
+        );
+        final container = ProviderContainer(
+          overrides: [
+            realTransportProvider.overrideWithValue(ble),
+            streamModeProvider.overrideWith(
+              () => TestModeNotifier(StreamMode.batched),
+            ),
+            reconnectPolicyProvider.overrideWithValue(policy),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        final controller = container.read(realDeviceProvider.notifier);
+        await controller.connect(fakeBridgeDeviceId);
+        await until(
+          () => countingAdapter.ccc.contains('on ff14'),
+          reason: 'the stream CCCD was never enabled',
+        );
+        int connectCalls() =>
+            countingAdapter.calls.where((c) => c == 'connect').length;
+        final connectsBefore = connectCalls();
+        final readsAfterConnect = countingAdapter.availabilityReads;
+
+        // The link drops while the radio is alive, arming a retry; the
+        // radio dies before the retry's delay elapses.
+        countingAdapter.dropLink(deviceId: fakeBridgeDeviceId);
+        countingAdapter.emitAvailability(BleAvailability.poweredOff);
+        // Past the whole retry delay: the armed timer fired inside the
+        // radio-off window and must not have dialled the dead stack.
+        await wait(500);
+
+        expect(
+          countingAdapter.availabilityReads,
+          readsAfterConnect,
+          reason: 'a retry armed before the radio died dialled the dead radio',
+        );
+        expect(connectCalls(), connectsBefore);
+
+        countingAdapter.emitAvailability(BleAvailability.poweredOn);
+        await until(() => container.read(realDeviceProvider).connected);
+
+        // The radio's return dials the parked bridge exactly once.
+        expect(connectCalls(), connectsBefore + 1);
+        expect(countingAdapter.availabilityReads, readsAfterConnect + 1);
+      },
+    );
+  });
 }

@@ -39,6 +39,7 @@ class FakeBleAdapter implements BleAdapter {
   final _links = StreamController<AdapterConnectionEvent>.broadcast();
   final _scan = StreamController<BleScanResult>.broadcast();
   final _params = StreamController<AdapterConnectionParams>.broadcast();
+  final _availability = StreamController<BleAvailability>.broadcast();
 
   void emitNotification(
     String characteristic,
@@ -80,6 +81,14 @@ class FakeBleAdapter implements BleAdapter {
     permissionsGranted = true;
   }
 
+  /// Simulates the OS reporting a new radio state, as an adapter power cycle
+  /// does: updates [availabilityState] and delivers the state on
+  /// [availabilityChanges].
+  void emitAvailability(BleAvailability state) {
+    availabilityState = state;
+    _availability.add(state);
+  }
+
   @override
   Future<BleAvailability> availability() async {
     await availabilityGate?.future;
@@ -87,7 +96,7 @@ class FakeBleAdapter implements BleAdapter {
   }
 
   @override
-  Stream<BleAvailability> get availabilityChanges => const Stream.empty();
+  Stream<BleAvailability> get availabilityChanges => _availability.stream;
 
   @override
   Stream<BleScanResult> get scanResults => _scan.stream;
