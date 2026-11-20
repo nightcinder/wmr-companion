@@ -18,7 +18,10 @@
 /// landed per lane after its failover, so a stall that a later switch
 /// superseded stays readable. An episode's `last_tcp_record_us` is frozen
 /// at the record that preceded its own stall; the top-level mark keeps
-/// tracking the newest record the route delivered.
+/// tracking the newest record the route delivered. The snapshot also
+/// carries the live episode's frozen anchor as
+/// `episode_last_tcp_record_us`, so a bundle taken after a later upgrade
+/// still holds the anchor that episode's own figures need.
 ///
 /// The composite is the only writer; hosts read the immutable
 /// [LinkTimelineRecorder.snapshot] through
@@ -218,10 +221,12 @@ class LinkTimelineRecorder {
 
   /// The shape hosts read through `CompositeBleTransport.linkTimelineFor`:
   /// the top-level marks of the most recent episode ([LinkTimeline.toJson]
-  /// names the keys), plus an `episodes` list carrying the same marks for
-  /// each finished episode, oldest first.
+  /// names the keys), that episode's frozen anchor as
+  /// `episode_last_tcp_record_us`, plus an `episodes` list carrying the
+  /// same marks for each finished episode, oldest first.
   Map<String, Object?> get snapshot => {
     ...timeline.toJson(),
+    'episode_last_tcp_record_us': _episodeLastTcpRecordUs,
     'episodes': [for (final episode in _episodes) episode.toJson()],
   };
 }

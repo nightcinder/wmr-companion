@@ -62,7 +62,8 @@ Uint8List _versionString([String value = '0.2.4-pi']) =>
 
 /// The timeline keys `CompositeBleTransport.linkTimelineFor` records, the
 /// same ones the app's Debug row reads and the diagnostics bundle carries:
-/// one `<mark>_us` per step, plus the finished-episode list.
+/// one `<mark>_us` per step, the live episode's frozen anchor, plus the
+/// finished-episode list.
 const _timelineKeys = [
   'last_tcp_record_us',
   'stall_detected_us',
@@ -72,6 +73,7 @@ const _timelineKeys = [
   'upgrade_dial_start_us',
   'upgrade_dial_end_us',
   'first_tcp_record_us',
+  'episode_last_tcp_record_us',
   'episodes',
 ];
 

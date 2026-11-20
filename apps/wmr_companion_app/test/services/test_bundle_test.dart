@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_companion/testing.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_core/domain/stick_centre.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
@@ -279,6 +280,180 @@ void main() {
         null,
       ],
     });
+  });
+
+  test('diagnostics keeps each episode anchor after an upgrade', () async {
+    // Two stalls, each followed by a failover and an upgrade back to TCP.
+    // Each episode froze its own pre-stall anchor, while the records the
+    // upgrades delivered moved only the top-level mark, which the newest
+    // record (9.5 s) now owns; the third episode is the live one.
+    const timeline = {
+      'last_tcp_record_us': 9500000,
+      'stall_detected_us': 9100000,
+      'failover_begin_us': 9105000,
+      'failover_end_us': 9180000,
+      'first_ble_record_us': 9200000,
+      'upgrade_dial_start_us': null,
+      'upgrade_dial_end_us': null,
+      'first_tcp_record_us': null,
+      'episodes': [
+        {
+          'last_tcp_record_us': 1000000,
+          'stall_detected_us': 1100000,
+          'failover_begin_us': 1105000,
+          'failover_end_us': 1180000,
+          'first_ble_record_us': 1200000,
+          'upgrade_dial_start_us': 5000000,
+          'upgrade_dial_end_us': 5105000,
+          'first_tcp_record_us': 5120000,
+        },
+        {
+          'last_tcp_record_us': 6000000,
+          'stall_detected_us': 6100000,
+          'failover_begin_us': 6105000,
+          'failover_end_us': 6180000,
+          'first_ble_record_us': 6200000,
+          'upgrade_dial_start_us': 8000000,
+          'upgrade_dial_end_us': 8105000,
+          'first_tcp_record_us': 8120000,
+        },
+      ],
+    };
+
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 11, 19, 12),
+        appVersion: '0.3.27+35',
+        phone: 'Test Phone',
+        androidVersion: 'Android 14 (API 34)',
+        streamMode: 'raw',
+        linkTimeline: timeline,
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final diagnostics =
+        jsonDecode(text(archive, 'diagnostics.json')) as Map<String, Object?>;
+    final exported = diagnostics['link_timeline']! as Map<String, Object?>;
+    expect(exported['last_tcp_record_us'], 9500000);
+    final episodes = exported['episodes']! as List<Object?>;
+    expect(episodes, hasLength(2));
+
+    // The anchors the recorder froze survive the export, and each
+    // episode's first-BLE takeover stays computable and at least zero.
+    final episodeOne = episodes[0]! as Map<String, Object?>;
+    expect(episodeOne['last_tcp_record_us'], 1000000);
+    final takeoverOne =
+        (episodeOne['first_ble_record_us']! as int) -
+        (episodeOne['last_tcp_record_us']! as int);
+    expect(takeoverOne, greaterThanOrEqualTo(0));
+
+    final episodeTwo = episodes[1]! as Map<String, Object?>;
+    expect(episodeTwo['last_tcp_record_us'], 6000000);
+    final takeoverTwo =
+        (episodeTwo['first_ble_record_us']! as int) -
+        (episodeTwo['last_tcp_record_us']! as int);
+    expect(takeoverTwo, greaterThanOrEqualTo(0));
+
+    // The top-level mark no longer bounds either takeover: from it both
+    // would read negative. The frozen anchors are what keep step 4
+    // computable after the route has moved on.
+    expect(
+      episodeOne['first_ble_record_us']! as int,
+      lessThan(exported['last_tcp_record_us']! as int),
+    );
+  });
+
+  test('diagnostics keeps the anchors the recorder froze', () async {
+    // Driven through the recorder the composite keeps, not a hand-built
+    // map: a stall fails over to BLE, the upgrade dials back to TCP and
+    // its records move the top-level mark, and the next stall archives
+    // the episode. After two rounds two episodes are finished, and the
+    // third is live with its upgrade already past its first BLE record.
+    final timeline = LinkTimelineRecorder()
+      ..onTcpRecord(1000000)
+      ..onTcpRecord(1500000)
+      ..onStallDetected(1600000)
+      ..onFailoverBegin(1605000)
+      ..onFailoverEnd(1680000)
+      ..onBleRecord(1700000)
+      ..onUpgradeDialStart(2000000)
+      ..onUpgradeDialEnd(2105000)
+      ..onTcpRecord(2120000)
+      ..onTcpRecord(3000000)
+      ..onStallDetected(3100000)
+      ..onFailoverBegin(3105000)
+      ..onFailoverEnd(3180000)
+      ..onBleRecord(3200000)
+      ..onUpgradeDialStart(3500000)
+      ..onUpgradeDialEnd(3605000)
+      ..onTcpRecord(3620000)
+      ..onTcpRecord(6000000)
+      ..onStallDetected(6100000)
+      ..onFailoverBegin(6105000)
+      ..onFailoverEnd(6180000)
+      ..onBleRecord(6200000)
+      ..onUpgradeDialStart(6500000)
+      ..onUpgradeDialEnd(6605000)
+      ..onTcpRecord(6620000)
+      ..onTcpRecord(7000000);
+
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 11, 19, 13),
+        appVersion: '0.3.27+35',
+        phone: 'Test Phone',
+        androidVersion: 'Android 14 (API 34)',
+        streamMode: 'raw',
+        linkTimeline: timeline.snapshot,
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final diagnostics =
+        jsonDecode(text(archive, 'diagnostics.json')) as Map<String, Object?>;
+    final exported = diagnostics['link_timeline']! as Map<String, Object?>;
+
+    // The records the live episode's upgrade delivered own the top-level
+    // mark, past its own first BLE record: it is not an anchor.
+    expect(exported['last_tcp_record_us'], 7000000);
+    expect(
+      exported['first_ble_record_us']! as int,
+      lessThan(exported['last_tcp_record_us']! as int),
+    );
+
+    // The live episode's anchor survived that upgrade: the takeover stays
+    // computable and at least zero from the frozen mark.
+    expect(exported['episode_last_tcp_record_us'], 6000000);
+    final liveTakeover =
+        (exported['first_ble_record_us']! as int) -
+        (exported['episode_last_tcp_record_us']! as int);
+    expect(liveTakeover, greaterThanOrEqualTo(0));
+
+    // Two episodes export, each with the anchor the recorder froze at its
+    // own stall, and each first-BLE takeover still at least zero from it.
+    final episodes = exported['episodes']! as List<Object?>;
+    expect(episodes, hasLength(2));
+    final episodeOne = episodes[0]! as Map<String, Object?>;
+    expect(episodeOne['last_tcp_record_us'], 1500000);
+    expect(
+      (episodeOne['first_ble_record_us']! as int) -
+          (episodeOne['last_tcp_record_us']! as int),
+      greaterThanOrEqualTo(0),
+    );
+    final episodeTwo = episodes[1]! as Map<String, Object?>;
+    expect(episodeTwo['last_tcp_record_us'], 3000000);
+    expect(
+      (episodeTwo['first_ble_record_us']! as int) -
+          (episodeTwo['last_tcp_record_us']! as int),
+      greaterThanOrEqualTo(0),
+    );
   });
 
   test('names every missing artifact in the README and the result', () async {
