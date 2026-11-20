@@ -16,11 +16,11 @@ start with `WMR_Bridge` resolve in the sibling WMR_Bridge repository.
 | Step-4 takeover | First BLE record minus last TCP record. |
 
 Step 4 is measured on the phone. The composite stamps the last TCP record and
-the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1388-1392`).
+the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1472-1474`).
 Those two marks bound the takeover.
 
 T2 is the app's `first_tcp_record_us` mark. The app sets it on the first TCP
-record after an upgrade dial ends (`packages/wmr_companion/lib/src/link_timeline.dart:89-94`).
+record after an upgrade dial ends (`packages/wmr_companion/lib/src/link_timeline.dart:113-118`).
 
 T2−T1 and T2−T0 need one clock. T0 and T1 are Pi shell times, and the app mark
 is on the phone clock. Record T2 from the first
@@ -140,10 +140,10 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 | T0 | Pi shell | `date -u '+%F %T.%3N'` right after the down command |
 | T1 | Pi shell | `date -u '+%F %T.%3N'` right after the `ip` poll |
 | T2 | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
-| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:621`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:89-94`), and an attached export carries it in `link_timeline` (see below) |
-| Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:63-64`) |
-| Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:65-66`) |
-| First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:67`) |
+| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:621`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:113-118`), and an attached export carries it in `link_timeline` (see below) |
+| Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:74-75`) |
+| Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:76-77`) |
+| First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:78`) |
 | Takeover | Debug row, sum | `first_ble_record_us − last_tcp_record_us` |
 | Dropped | Pi journal | `dropped=` in the 5 s status line (`WMR_Bridge` `pi/wmr_bridge/__main__.py:943-953`) |
 

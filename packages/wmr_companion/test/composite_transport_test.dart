@@ -494,6 +494,25 @@ class _CccdBle extends FakeTransport {
   }
 }
 
+/// A BLE fake that reports the TCP leg lost from inside the BLE-notify
+/// disable a switch onto TCP runs: the loss lands while that switch still
+/// holds the route, so the composite remembers it instead of recording a
+/// fresh stall.
+class _DroppingBle extends FakeTransport {
+  _DroppingBle({required super.devices, required this.onUnsubscribe});
+
+  final void Function()? onUnsubscribe;
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    onUnsubscribe?.call();
+  }
+}
+
 /// A BLE fake whose notification subscription for [characteristic] refuses to
 /// cancel, like a platform stack that fails a GATT release mid-switch: the
 /// detach step of a lane switch throws, so the activation fails partway.
@@ -1418,6 +1437,152 @@ void main() {
       expect(episodeTwo['failover_begin_us']! as int, greaterThan(endOne));
     },
   );
+
+  test('a TCP loss during the upgrade activation archives the standing episode '
+      'once', () async {
+    // The recovery from a BLE drop dials back to TCP, and the BLE-notify
+    // disable it runs while still holding the route is where the TCP leg
+    // reports lost: the loss is remembered, not freshly detected.
+    ble.dispose();
+    var dropped = false;
+    final dropping =
+        _DroppingBle(
+            devices: const [
+              FakeDevice(
+                id: _bleDeviceId,
+                name: 'WMR Bridge',
+                services: fakeBridgeDeviceServices,
+              ),
+            ],
+            onUnsubscribe: () {
+              if (dropped) return;
+              dropped = true;
+              tcp.drop(_tcpDeviceId);
+            },
+          )
+          ..onRead = (deviceId, characteristicUuid) {
+            if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _versionString();
+            }
+            throw StateError('unexpected read $characteristicUuid');
+          };
+    ble = dropping;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+
+    // Episode one: the TCP leg stalls and the route fails over to BLE.
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+    await _settle();
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the first stall did not fail over to BLE',
+    );
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+          null,
+      reason: "the first episode's first BLE record was not marked",
+    );
+    // What the top-level marks said while episode one was the most recent,
+    // with nothing archived yet.
+    final episodeOneLive = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(episodeOneLive['episodes'], isEmpty);
+    final failoverEndOne = episodeOneLive['failover_end_us']! as int;
+
+    // The BLE link drops and the recovery dials back to TCP; the recovered
+    // leg reports lost during that activation, so the loss is remembered,
+    // and the failover it kicks archives the standing episode.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () =>
+          transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble &&
+          (transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us']!
+                  as int) >
+              failoverEndOne,
+      reason: 'the loss remembered during the activation was not retried',
+    );
+
+    // The new episode's first BLE record follows its own failover.
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+          episodeOneLive['first_ble_record_us'],
+      reason: "the second episode's first BLE record was not marked",
+    );
+
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    final episodes = marks['episodes']! as List<Object?>;
+    expect(
+      episodes,
+      hasLength(1),
+      reason: 'the standing episode was not archived exactly once',
+    );
+    final episodeOne = episodes.single as Map<String, Object?>;
+    // The archived episode is the one the top level described while it was
+    // the most recent: its marks are the values it held then.
+    expect(
+      episodeOne['last_tcp_record_us'],
+      episodeOneLive['last_tcp_record_us'],
+    );
+    expect(
+      episodeOne['stall_detected_us'],
+      episodeOneLive['stall_detected_us'],
+    );
+    expect(
+      episodeOne['failover_begin_us'],
+      episodeOneLive['failover_begin_us'],
+    );
+    expect(episodeOne['failover_end_us'], episodeOneLive['failover_end_us']);
+    expect(
+      episodeOne['first_ble_record_us'],
+      episodeOneLive['first_ble_record_us'],
+    );
+
+    // The recovery dial landed inside the standing episode, and the loss
+    // cut it before any record reached the recovered leg.
+    final firstBleOne = episodeOne['first_ble_record_us']! as int;
+    final dialStartOne = episodeOne['upgrade_dial_start_us']! as int;
+    final dialEndOne = episodeOne['upgrade_dial_end_us']! as int;
+    expect(dialStartOne, greaterThan(firstBleOne));
+    expect(dialEndOne, greaterThan(dialStartOne));
+    expect(episodeOne['first_tcp_record_us'], isNull);
+
+    // The new episode opened from the remembered loss: no fresh stall of
+    // its own — the standing one stays — and its failover follows the
+    // recovery dial it superseded, with the dial marks gone.
+    expect(marks['stall_detected_us'], episodeOneLive['stall_detected_us']);
+    final beginTwo = marks['failover_begin_us']! as int;
+    final endTwo = marks['failover_end_us']! as int;
+    expect(beginTwo, greaterThan(dialEndOne));
+    expect(endTwo, greaterThanOrEqualTo(beginTwo));
+    expect(marks['first_ble_record_us']! as int, greaterThan(endTwo));
+    expect(marks['upgrade_dial_start_us'], isNull);
+    expect(marks['upgrade_dial_end_us'], isNull);
+    expect(marks['first_tcp_record_us'], isNull);
+    // No TCP record ever landed past episode one's, so the top-level mark
+    // still names the record the archived episode froze.
+    expect(marks['last_tcp_record_us'], episodeOneLive['last_tcp_record_us']);
+
+    // The recovered leg the loss named was closed on the way back to BLE.
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    expect(tcp.tcpDisconnects, contains(_tcpDeviceId));
+  });
 
   test('a silent TCP socket fails over to BLE within 2500 ms', () async {
     final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
