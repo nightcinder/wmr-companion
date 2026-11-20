@@ -608,8 +608,11 @@ unless the WebSocket `hello` reports the same `bridge_id`.
 
 1. Try TCP endpoints that are known from configuration or discovery. The
    probe is skipped when no LAN interface is up, and it is capped at three
-   seconds in total (`tcpProbeBudget`), because the BLE leg is always
-   available; a phone with Wi-Fi off reaches BLE at once.
+   seconds in total (`tcpProbeBudget`) with one candidate holding at most
+   250 ms of it (`tcpCandidateShareCap`) — the last candidate alone keeps
+   the whole remaining budget, so a slow but answering handshake still
+   lands — because the BLE leg is always available; a phone with Wi-Fi off
+   reaches BLE at once.
 2. If TCP fails, connect over BLE GATT.
 3. While on BLE, retry TCP every 2 seconds by default.
 4. When TCP connects, move the notification subscriptions to TCP without

@@ -68,6 +68,7 @@ class CompositeBleTransport implements BleTransport {
     this.upgradeInterval = const Duration(seconds: 2),
     this.bleScanWait = const Duration(seconds: 5),
     this.tcpProbeBudget = const Duration(seconds: 3),
+    this.tcpCandidateShareCap = const Duration(milliseconds: 250),
     this.echoDrainTimeout = const Duration(milliseconds: 1200),
     this.lanAvailable,
     this.disposeBle = true,
@@ -102,12 +103,30 @@ class CompositeBleTransport implements BleTransport {
   ///
   /// The BLE leg is always available here, so a Wi-Fi dial that hangs must not
   /// hold the session: after the budget the composite gives up on TCP and
-  /// dials BLE instead. Each candidate gets an equal share of what is left, so
-  /// a dead address cannot consume the whole budget before a live one is
-  /// tried, and an attempt that outlives its share is torn down at once, so
-  /// the next probe dials fresh instead of joining the abandoned session. A
-  /// non-positive duration disables the TCP probe entirely.
+  /// dials BLE instead. Each candidate gets an equal share of what is left,
+  /// cut to [tcpCandidateShareCap] where the share is longer, so a dead
+  /// address can neither consume the whole budget nor hold a full share
+  /// before a live one is tried, and an attempt that outlives its share is
+  /// torn down at once, so the next probe dials fresh instead of joining the
+  /// abandoned session. The last candidate alone is never cut: no live
+  /// candidate hides behind it, so it keeps the whole remaining budget and a
+  /// handshake slower than the cap still lands. A non-positive duration
+  /// disables the TCP probe entirely.
   final Duration tcpProbeBudget;
+
+  /// The longest share of [tcpProbeBudget] a dialling candidate may hold
+  /// while another still waits behind it.
+  ///
+  /// A candidate whose port never answers — the remembered address of a link
+  /// that just stalled — then holds the attempt for at most this long, its
+  /// abandoned session is torn down at once and the next candidate is
+  /// dialled, so a candidate that can answer is reached within this bound of
+  /// the attempt's start instead of after a full equal slice of the budget.
+  /// The last candidate is exempt: no live candidate hides behind it, so it
+  /// keeps the whole remaining budget and a handshake slower than this cap
+  /// still lands. A non-positive duration leaves every candidate with its
+  /// uncapped equal slice.
+  final Duration tcpCandidateShareCap;
 
   /// How long a BLE FF15 echo subscription is kept open after the route moves
   /// to TCP, waiting for the answers to pings already written on BLE.
@@ -621,8 +640,20 @@ class CompositeBleTransport implements BleTransport {
       final remaining = tcpProbeBudget - stopwatch.elapsed;
       if (remaining <= Duration.zero) break;
       // Share what is left evenly, so one unresponsive address cannot use the
-      // whole budget and hide a reachable candidate behind it.
-      final slice = remaining ~/ left;
+      // whole budget and hide a reachable candidate behind it — and cut the
+      // share to the per-candidate cap, so a candidate that cannot answer
+      // holds the attempt for at most that long before the next candidate is
+      // dialled: the one that answers is reached within the cap of the
+      // attempt's start instead of after a full equal share. The last
+      // candidate is exempt: no live candidate hides behind it, so it keeps
+      // the whole remaining budget and a handshake slower than the cap still
+      // lands.
+      var slice = remaining ~/ left;
+      if (left > 1 &&
+          tcpCandidateShareCap > Duration.zero &&
+          slice > tcpCandidateShareCap) {
+        slice = tcpCandidateShareCap;
+      }
       left--;
       route.tcpCandidates.add(id);
       // Each attempt owns its dial. A transport can hand a later probe the
