@@ -6,6 +6,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'package:wmr_companion/wmr_companion.dart' show CompositeBleTransport;
 import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
 import 'package:wmr_tracking_dispatch/wmr_tracking_dispatch.dart';
@@ -177,6 +178,14 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
     }
 
     final run = benchRun ?? ref.read(benchBundleProvider);
+    // The live link's switch marks, as the Debug screen's row renders them:
+    // only a composite route has them, keyed by the connected device id.
+    final linkTransport = ref.read(realLinkTransportProvider);
+    final linkDeviceId = device.deviceId;
+    final linkTimeline =
+        linkTransport is CompositeBleTransport && linkDeviceId != null
+        ? linkTransport.linkTimelineFor(linkDeviceId)
+        : null;
     return TestBundleInput(
       now: ref.read(bundleClockProvider)(),
       appVersion: info.appVersion,
@@ -199,6 +208,7 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       firmwareSha: firmwareSha,
       wifiFallback: device.wifiFallback,
       activeLeg: device.wifiLeg?.label,
+      linkTimeline: linkTimeline,
       stickSettings: stickSettings,
       handTrackingDiagnostics: ref
           .read(handTrackingDiagnosticsProvider.notifier)
