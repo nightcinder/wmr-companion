@@ -189,22 +189,32 @@ step.
 ## The bundle's copy of the timeline
 
 `diagnostics.json` carries the marks under `link_timeline`
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:604`). The top-level
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:605`). The top-level
 keys are the eight marks of the most recent episode
-(`packages/wmr_companion/lib/src/link_timeline.dart`, `LinkTimeline.toJson`);
-the `episodes` key lists the same marks for the last finished episodes, so a
-stall a later switch superseded stays readable in the zip.
+(`packages/wmr_companion/lib/src/link_timeline.dart`, `LinkTimeline.toJson`)
+plus `episode_last_tcp_record_us`, the anchor that episode's own stall
+froze; the `episodes` key lists the same marks for the last finished
+episodes, so a stall a later switch superseded stays readable in the zip.
 
 The export builder passes the live transport's marks into the bundle
 (`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the
 `first TCP +` row and the failover rows are reproducible from the attached
 zip, not only from the Debug screen.
 
-Compute the run's figures from one `episodes[i]` entry, never from the
-top-level marks: each episode froze its own `last_tcp_record_us` at the
-record that preceded its stall, and the top-level mark keeps tracking the
-newest record the route delivered, which a later upgrade moves past every
-archived episode.
+Read an episode's figures from its own anchor, never from the top-level
+`last_tcp_record_us`: each episode froze its anchor at the record that
+preceded its stall, while the top-level mark keeps tracking the newest
+record the route delivered, which a later upgrade moves past it.
+
+The run's own episode is the one the top-level marks describe:
+
+* detect = `stall_detected_us − episode_last_tcp_record_us`
+* takeover = `first_ble_record_us − episode_last_tcp_record_us`, `n/a`
+  when either mark is absent
+* T2, app copy = `first_tcp_record_us`
+
+An episode a later stall superseded reads the same way from its
+`episodes[i]` entry, whose `last_tcp_record_us` is its own frozen anchor:
 
 * detect = `episodes[i].stall_detected_us − episodes[i].last_tcp_record_us`
 * takeover = `episodes[i].first_ble_record_us − episodes[i].last_tcp_record_us`,

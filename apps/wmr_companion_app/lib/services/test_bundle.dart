@@ -379,7 +379,8 @@ class TestBundleInput {
   /// The composite link's switch marks, as
   /// `CompositeBleTransport.linkTimelineFor` recorded them: the eight
   /// `<mark>_us` keys of the most recent leg switch in microseconds on the
-  /// link's monotonic clock, plus an `episodes` list of the finished
+  /// link's monotonic clock, that episode's frozen pre-stall anchor as
+  /// `episode_last_tcp_record_us`, plus an `episodes` list of the finished
   /// episodes before it, each carrying the same keys with its own frozen
   /// `last_tcp_record_us`. Null for a plain Wi-Fi or BLE link, or before
   /// the first switch.
