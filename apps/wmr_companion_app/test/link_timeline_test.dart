@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wmr_companion/testing.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/ui/debug/debug_screen.dart';
 
@@ -168,6 +169,56 @@ void main() {
       await _pumpRow(tester, const {});
 
       expect(find.text('Last link switch none yet'), findsOneWidget);
+    });
+  });
+
+  group('LinkTimelineRecorder', () {
+    test('keeps the first dial attempt beside the retried one', () {
+      // An episode that failed over dials back to TCP three times before
+      // the route moves: the newest attempt owns the start mark.
+      final recorder = LinkTimelineRecorder()
+        ..onTcpRecord(1000000)
+        ..onStallDetected(1100000)
+        ..onFailoverBegin(1105000)
+        ..onFailoverEnd(1180000)
+        ..onBleRecord(1200000)
+        ..onUpgradeDialStart(2000000)
+        ..onUpgradeDialEnd(2100000);
+      expect(recorder.snapshot['first_upgrade_dial_start_us'], 2000000);
+      expect(recorder.snapshot['upgrade_dial_attempts'], 1);
+
+      recorder
+        ..onUpgradeDialStart(3000000)
+        ..onUpgradeDialEnd(3100000);
+      expect(recorder.snapshot['upgrade_dial_start_us'], 3000000);
+      expect(recorder.snapshot['first_upgrade_dial_start_us'], 2000000);
+      expect(recorder.snapshot['upgrade_dial_attempts'], 2);
+
+      recorder
+        ..onUpgradeDialStart(4000000)
+        ..onUpgradeDialEnd(4100000);
+      final snapshot = recorder.snapshot;
+      expect(snapshot['upgrade_dial_start_us'], 4000000);
+      expect(snapshot['first_upgrade_dial_start_us'], 2000000);
+      expect(snapshot['upgrade_dial_attempts'], 3);
+
+      // The next episode starts its own first attempt and count.
+      recorder
+        ..onTcpRecord(5000000)
+        ..onStallDetected(5100000)
+        ..onFailoverBegin(5105000)
+        ..onBleRecord(5200000)
+        ..onUpgradeDialStart(6000000)
+        ..onUpgradeDialEnd(6100000);
+      final next = recorder.snapshot;
+      expect(next['first_upgrade_dial_start_us'], 6000000);
+      expect(next['upgrade_dial_attempts'], 1);
+
+      // The archived episode keeps the attempts it had.
+      final episodes = next['episodes']! as List<Object?>;
+      final archived = episodes.single! as Map<String, Object?>;
+      expect(archived['first_upgrade_dial_start_us'], 2000000);
+      expect(archived['upgrade_dial_attempts'], 3);
     });
   });
 
