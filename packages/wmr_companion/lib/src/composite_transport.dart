@@ -108,19 +108,24 @@ class CompositeBleTransport implements BleTransport {
   /// address can neither consume the whole budget nor hold a full share
   /// before a live one is tried, and an attempt that outlives its share is
   /// torn down at once, so the next probe dials fresh instead of joining the
-  /// abandoned session. A non-positive duration disables the TCP probe
-  /// entirely.
+  /// abandoned session. The last candidate alone is never cut: no live
+  /// candidate hides behind it, so it keeps the whole remaining budget and a
+  /// handshake slower than the cap still lands. A non-positive duration
+  /// disables the TCP probe entirely.
   final Duration tcpProbeBudget;
 
-  /// The longest share of [tcpProbeBudget] a single TCP candidate may hold.
+  /// The longest share of [tcpProbeBudget] a dialling candidate may hold
+  /// while another still waits behind it.
   ///
   /// A candidate whose port never answers — the remembered address of a link
   /// that just stalled — then holds the attempt for at most this long, its
   /// abandoned session is torn down at once and the next candidate is
   /// dialled, so a candidate that can answer is reached within this bound of
   /// the attempt's start instead of after a full equal slice of the budget.
-  /// A non-positive duration leaves every candidate with its uncapped equal
-  /// slice.
+  /// The last candidate is exempt: no live candidate hides behind it, so it
+  /// keeps the whole remaining budget and a handshake slower than this cap
+  /// still lands. A non-positive duration leaves every candidate with its
+  /// uncapped equal slice.
   final Duration tcpCandidateShareCap;
 
   /// How long a BLE FF15 echo subscription is kept open after the route moves
@@ -639,9 +644,13 @@ class CompositeBleTransport implements BleTransport {
       // share to the per-candidate cap, so a candidate that cannot answer
       // holds the attempt for at most that long before the next candidate is
       // dialled: the one that answers is reached within the cap of the
-      // attempt's start instead of after a full equal share.
+      // attempt's start instead of after a full equal share. The last
+      // candidate is exempt: no live candidate hides behind it, so it keeps
+      // the whole remaining budget and a handshake slower than the cap still
+      // lands.
       var slice = remaining ~/ left;
-      if (tcpCandidateShareCap > Duration.zero &&
+      if (left > 1 &&
+          tcpCandidateShareCap > Duration.zero &&
           slice > tcpCandidateShareCap) {
         slice = tcpCandidateShareCap;
       }

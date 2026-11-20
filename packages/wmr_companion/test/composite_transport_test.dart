@@ -490,6 +490,22 @@ class _RefusingTcp extends _FakeTcp {
   }
 }
 
+/// A TCP fake that answers each dial only after a delay — a handshake on
+/// congested Wi-Fi — so a test can prove the last candidate keeps the whole
+/// remaining budget rather than the per-candidate cap.
+class _SlowDialTcp extends _FakeTcp {
+  _SlowDialTcp(this.delay);
+
+  /// How long every [connect] takes to answer.
+  final Duration delay;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    await Future<void>.delayed(delay);
+    await super.connect(deviceId);
+  }
+}
+
 /// A TCP fake that holds every dial on its own completer, so a test can land
 /// one dial while another (started later on the same candidate) keeps running
 /// into its own budget.
@@ -2213,8 +2229,8 @@ void main() {
       aClosed!,
       lessThan(bDialed),
       reason:
-          'the answering candidate was dialled before the refusing '
-          "candidate's socket was closed",
+          "the refusing candidate's socket was still open when the "
+          'answering candidate was dialled',
     );
     expect(
       Duration(microseconds: aClosed - aDialed),
@@ -2268,6 +2284,57 @@ void main() {
       Duration(microseconds: dialEnd - dialStart),
       lessThan(const Duration(milliseconds: 750)),
       reason: 'a single answering candidate outlived the 750 ms landing bound',
+    );
+  });
+
+  test('the last candidate keeps the whole budget, not the cap', () async {
+    await tcp.dispose();
+    final slow = _SlowDialTcp(const Duration(milliseconds: 400))
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = slow;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+
+    final transport = CompositeBleTransport(
+      tcp: slow,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'a slow but answering last candidate never landed',
+    );
+    await _settle(30);
+
+    expect(slow.connectCalls, [
+      _lanDeviceId,
+    ], reason: 'the slow dial was abandoned and redialled');
+    final marks = transport.linkTimelineFor(_bleDeviceId)!;
+    final dialStart = marks['upgrade_dial_start_us']! as int;
+    final dialEnd = marks['upgrade_dial_end_us']! as int;
+    expect(
+      Duration(microseconds: dialEnd - dialStart),
+      greaterThan(const Duration(milliseconds: 250)),
+      reason: 'the last candidate was cut to its 250 ms cap',
+    );
+    expect(
+      Duration(microseconds: dialEnd - dialStart),
+      lessThan(const Duration(milliseconds: 750)),
+      reason: 'the slow dial outlived the 750 ms landing bound',
     );
   });
 
