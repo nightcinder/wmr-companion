@@ -361,6 +361,8 @@ class _JoiningTcp extends _FakeTcp {
   final Map<String, Future<void>> _pending = {};
   final List<String> dials = [];
   final List<String> disconnectCalls = [];
+  int freshDials = 0;
+  int joins = 0;
 
   /// Holds every dial for [id] until the returned completer completes.
   Completer<void> hold(String id) => holds.putIfAbsent(id, Completer.new);
@@ -368,6 +370,12 @@ class _JoiningTcp extends _FakeTcp {
   @override
   Future<void> connect(String deviceId) {
     dials.add(deviceId);
+    final pending = _pending[deviceId];
+    if (pending != null) {
+      joins++;
+      return pending;
+    }
+    freshDials++;
     return _pending[deviceId] ??= _dial(deviceId);
   }
 
@@ -515,6 +523,71 @@ class _StuckDetachBle extends FakeTransport {
   bool deliverStuck(List<int> value) {
     if (stuckSubs.isEmpty) return false;
     final controller = stuckSubs.last;
+    if (!controller.hasListener) return false;
+    controller.add(
+      BleNotification(
+        value: Uint8List.fromList(value),
+        receivedAtUs: clock.nowUs,
+      ),
+    );
+    return true;
+  }
+}
+
+/// A BLE fake for a lane switch that fails after an echo handoff: the cancel
+/// of every [failCharacteristic] subscription throws while [failCancel] is
+/// set, like a platform stack that fails a GATT release mid-switch, and every
+/// [trackCharacteristic] subscription is its own controller whose
+/// cancellation is counted, so a test can prove a handed-off drain
+/// subscription is released instead of orphaned beside the re-attach.
+class _FailingSwitchBle extends FakeTransport {
+  _FailingSwitchBle({
+    required super.devices,
+    required this.failCharacteristic,
+    required this.trackCharacteristic,
+  });
+
+  final String failCharacteristic;
+  final String trackCharacteristic;
+
+  /// Fails the cancel of every [failCharacteristic] subscription opened
+  /// while set. Clear it before the teardown so cancels there succeed.
+  bool failCancel = false;
+
+  /// One controller per [subscribe] call on [trackCharacteristic], newest
+  /// last, so the channel a rollback re-attached is the delivery target.
+  final List<StreamController<BleNotification>> tracked = [];
+  int cancelledSubscriptions = 0;
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final normalized = characteristicUuid.toLowerCase();
+    if (normalized == failCharacteristic) {
+      return StreamController<BleNotification>(
+        onCancel: () {
+          if (failCancel) throw StateError('unsubscribe failed');
+        },
+      ).stream;
+    }
+    if (normalized == trackCharacteristic) {
+      final controller = StreamController<BleNotification>(
+        onCancel: () => cancelledSubscriptions++,
+      );
+      tracked.add(controller);
+      return controller.stream;
+    }
+    return super.subscribe(deviceId, serviceUuid, characteristicUuid);
+  }
+
+  /// Delivers [value] on the newest tracked subscription. Returns false when
+  /// no channel is attached to it.
+  bool deliverTracked(List<int> value) {
+    if (tracked.isEmpty) return false;
+    final controller = tracked.last;
     if (!controller.hasListener) return false;
     controller.add(
       BleNotification(
@@ -1628,6 +1701,64 @@ void main() {
     },
   );
 
+  test(
+    'after a failover to BLE the budget still tears the abandoned dial down',
+    () async {
+      await tcp.dispose();
+      final held = _JoiningTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..scanResults.add(tcpScanResult());
+      tcp = held;
+
+      final transport = CompositeBleTransport(
+        tcp: held,
+        ble: ble,
+        tcpProbeBudget: const Duration(milliseconds: 150),
+        upgradeInterval: const Duration(milliseconds: 10),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      // The first dial lands, so the route is live on TCP before it drops.
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      // The TCP leg drops: the failover lands on BLE and leaves the old
+      // candidate named in `route.tcpDeviceId` behind.
+      await _settle();
+      held.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the TCP drop did not fail over to BLE',
+      );
+      final failoverTearDowns = held.disconnectCalls.length;
+
+      // Every upgrade tick dials the stale candidate again. Hold each one so
+      // it hits the budget: the abandoned dial must be torn down — the stale
+      // `tcpDeviceId` must not read as adoption — and the next tick must dial
+      // fresh instead of joining the abandoned session.
+      held.hold(_tcpDeviceId);
+      await _waitFor(
+        () => held.disconnectCalls.length > failoverTearDowns,
+        reason: 'the abandoned dial outlived the budget after the failover',
+      );
+      await _waitFor(
+        () => held.freshDials >= 3,
+        reason:
+            'a later tick joined the abandoned dial instead of dialling'
+            ' fresh',
+      );
+      expect(held.joins, 0);
+    },
+  );
+
   test('a probe that finishes while a BLE-drop recovery adopts its socket keeps it open', () async {
     await tcp.dispose();
     final held = _HeldDialTcp()
@@ -1932,6 +2063,102 @@ void main() {
 
     // Let the release succeed again so the teardown cancels cleanly.
     stuck.failCancel = false;
+  });
+
+  test('a switch that fails after the echo handoff still drains the orphaned'
+      ' subscription', () async {
+    ble.dispose();
+    final fake = _FailingSwitchBle(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+      failCharacteristic: wmrBridgeBatchedCharUuid,
+      trackCharacteristic: wmrBridgeEchoCharUuid,
+    );
+    fake.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _versionString();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = fake;
+    tcp.failConnect = true;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+      echoDrainTimeout: const Duration(milliseconds: 60),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    // The echo channel is subscribed first, so the switch hands it off to
+    // the drain before the batched channel's release fails. Its ping is in
+    // flight, which is why the subscription is kept at all.
+    final echoReceived = <BleNotification>[];
+    final echoSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+        .listen(echoReceived.add);
+    addTearDown(echoSub.cancel);
+    final batchedSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(batchedSub.cancel);
+    await transport.write(
+      _tcpDeviceId,
+      wmrBridgeServiceUuid,
+      wmrBridgeEchoCharUuid,
+      Uint8List.fromList([1, 39, 0, 0, 0, 0]),
+      withoutResponse: true,
+    );
+
+    // The upgrade dial lands; the switch fails partway: the echo
+    // subscription was handed off, then the batched release refuses.
+    fake.failCancel = true;
+    tcp.failConnect = false;
+    await _waitFor(
+      () => fake.tracked.length >= 2,
+      reason: 'the failed switch never handed the echo subscription off',
+    );
+    expect(
+      transport.activeLegFor(_tcpDeviceId),
+      CompositeLeg.ble,
+      reason: 'the failed switch did not roll back to BLE',
+    );
+
+    // The orphaned handoff must still drain: its subscription is cancelled
+    // once the drain window expires, not left beside the re-attach.
+    await _waitFor(
+      () => fake.cancelledSubscriptions >= 1,
+      reason: 'the handed-off echo subscription was orphaned',
+    );
+
+    // The rollback re-attached the channel on BLE; it still delivers.
+    tcp.failConnect = true;
+    await _settle(30);
+    expect(fake.deliverTracked([7]), isTrue);
+    await _settle();
+    expect(echoReceived.last.value, [7]);
+    expect(
+      states,
+      isNot(contains(BleConnectionState.disconnected)),
+      reason: 'the rollback reported a loss',
+    );
+
+    // Let the release succeed again so the teardown cancels cleanly.
+    fake.failCancel = false;
   });
 
   test('kicks the FF16 upgrade once a TCP-to-BLE failover lands on BLE', () async {
