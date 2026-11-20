@@ -1,4 +1,4 @@
-/// Monotonic marks of the most recent link switch on one bridge route.
+/// Monotonic marks of the link switches on one bridge route.
 ///
 /// [CompositeBleTransport] stamps every mark with its monotonic clock, so
 /// the values are microseconds comparable only with each other and with
@@ -11,16 +11,25 @@
 ///   recovery from a dropped BLE link: the dial's start and end, and the
 ///   first TCP record after the route moved.
 ///
+/// The eight top-level marks describe only the most recent episode: a later
+/// switch overwrites them. [LinkTimelineRecorder] also keeps an ordered
+/// history of the last [LinkTimelineRecorder.episodeHistoryCapacity]
+/// finished episodes, each with the same marks and the first record that
+/// landed per lane after its failover, so a stall that a later switch
+/// superseded stays readable. An episode's `last_tcp_record_us` is frozen
+/// at the record that preceded its own stall; the top-level mark keeps
+/// tracking the newest record the route delivered.
+///
 /// The composite is the only writer; hosts read the immutable
-/// [LinkTimelineRecorder.timeline] snapshot through
+/// [LinkTimelineRecorder.snapshot] through
 /// `CompositeBleTransport.linkTimelineFor`.
 library;
 
 /// The marks of one link switch, microseconds on the composite's clock.
 ///
 /// A mark is null until its event has happened. Each episode resets its own
-/// "first record" mark when it begins, so a later switch re-records it, and
-/// a failover's begin clears the marks of the episode it supersedes.
+/// "first record" mark when it opens, so a later switch re-records it, and
+/// the stall that opens one clears the marks of the episode it supersedes.
 class LinkTimeline {
   const LinkTimeline({
     this.lastTcpRecordUs,
@@ -34,7 +43,9 @@ class LinkTimeline {
   });
 
   /// Newest record delivered while the TCP leg carried the route. During a
-  /// stall this is the last record before the link went silent.
+  /// stall this is the last record before the link went silent; in a
+  /// finished episode it is the record that preceded that episode's own
+  /// stall.
   final int? lastTcpRecordUs;
 
   /// When the watched TCP leg was reported lost while it carried the route,
@@ -72,8 +83,11 @@ class LinkTimeline {
 }
 
 /// Records [LinkTimeline] marks as the composite moves a route between its
-/// legs.
+/// legs, keeping the last finished episodes beside the most recent one.
 class LinkTimelineRecorder {
+  /// How many finished episodes the history keeps; older ones drop.
+  static const int episodeHistoryCapacity = 3;
+
   int? _lastTcpRecordUs;
   int? _stallDetectedUs;
   int? _failoverBeginUs;
@@ -82,6 +96,16 @@ class LinkTimelineRecorder {
   int? _upgradeDialStartUs;
   int? _upgradeDialEndUs;
   int? _firstTcpRecordUs;
+
+  /// The current episode's "last TCP record": the record that preceded its
+  /// own stall, frozen when the episode opened. Records that arrive later
+  /// move only the top-level mark, so the episode's stall gap stays the one
+  /// it had while it was the most recent episode.
+  int? _episodeLastTcpRecordUs;
+
+  /// Finished episodes, oldest first, the last [episodeHistoryCapacity]
+  /// kept.
+  final List<LinkTimeline> _episodes = [];
 
   /// A TCP record arrived: it becomes the newest "last TCP record", and the
   /// first one after a finished upgrade dial opens that episode's "first
@@ -94,15 +118,30 @@ class LinkTimelineRecorder {
   }
 
   /// The watched TCP leg reported the link lost while it carried the route.
-  void onStallDetected(int us) => _stallDetectedUs = us;
+  ///
+  /// The stall opens an episode. When the marks hold an episode that has
+  /// begun, it is finished: freeze it into the history first, because a
+  /// fresh detection immediately precedes the failover that supersedes it.
+  void onStallDetected(int us) {
+    if (_failoverBeginUs != null) _archiveEpisode();
+    _resetEpisodeMarks();
+    _episodeLastTcpRecordUs = _lastTcpRecordUs;
+    _stallDetectedUs = us;
+  }
 
   /// A failover to BLE took the route; the next BLE record opens the new
-  /// episode's "first BLE record". The marks of the episode this failover
-  /// supersedes go with it: that failover's end until this one lands, and
-  /// any dial it left behind. The stall mark stays: a fresh detection
-  /// immediately precedes the begin, and one that predates the last TCP
-  /// record belongs to a remembered loss, which the reader rejects.
+  /// episode's "first BLE record". One that follows a fresh stall finds its
+  /// episode already opened and reset. One begun from a loss remembered
+  /// while a switch held the route supersedes the episode the standing
+  /// marks describe, so those marks go into the history first, and the
+  /// stall they keep predates the records that followed it, which the
+  /// reader rejects.
   void onFailoverBegin(int us) {
+    if (_failoverBeginUs != null) {
+      _archiveEpisode();
+      _resetEpisodeMarks();
+      _episodeLastTcpRecordUs = _lastTcpRecordUs;
+    }
     _failoverBeginUs = us;
     _failoverEndUs = null;
     _firstBleRecordUs = null;
@@ -130,7 +169,42 @@ class LinkTimelineRecorder {
   /// The upgrade dial finished, successfully or not.
   void onUpgradeDialEnd(int us) => _upgradeDialEndUs = us;
 
-  /// The marks so far, an immutable snapshot.
+  /// Clears the marks an episode owns, so the episode that opens now starts
+  /// its own. The stall stays: a fresh detection lands right after this,
+  /// and one that predates the last TCP record belongs to a remembered
+  /// loss, which the reader rejects. The top-level "last TCP record" stays
+  /// because it tracks the newest record, not the episode's.
+  void _resetEpisodeMarks() {
+    _failoverBeginUs = null;
+    _failoverEndUs = null;
+    _firstBleRecordUs = null;
+    _upgradeDialStartUs = null;
+    _upgradeDialEndUs = null;
+    _firstTcpRecordUs = null;
+  }
+
+  /// Freezes the standing marks as one finished episode, oldest dropped
+  /// once [episodeHistoryCapacity] are kept.
+  void _archiveEpisode() {
+    _episodes.add(
+      LinkTimeline(
+        lastTcpRecordUs: _episodeLastTcpRecordUs,
+        stallDetectedUs: _stallDetectedUs,
+        failoverBeginUs: _failoverBeginUs,
+        failoverEndUs: _failoverEndUs,
+        firstBleRecordUs: _firstBleRecordUs,
+        upgradeDialStartUs: _upgradeDialStartUs,
+        upgradeDialEndUs: _upgradeDialEndUs,
+        firstTcpRecordUs: _firstTcpRecordUs,
+      ),
+    );
+    if (_episodes.length > episodeHistoryCapacity) {
+      _episodes.removeAt(0);
+    }
+  }
+
+  /// The marks so far, an immutable snapshot: the eight top-level marks of
+  /// the most recent episode.
   LinkTimeline get timeline => LinkTimeline(
     lastTcpRecordUs: _lastTcpRecordUs,
     stallDetectedUs: _stallDetectedUs,
@@ -141,4 +215,13 @@ class LinkTimelineRecorder {
     upgradeDialEndUs: _upgradeDialEndUs,
     firstTcpRecordUs: _firstTcpRecordUs,
   );
+
+  /// The shape hosts read through `CompositeBleTransport.linkTimelineFor`:
+  /// the top-level marks of the most recent episode ([LinkTimeline.toJson]
+  /// names the keys), plus an `episodes` list carrying the same marks for
+  /// each finished episode, oldest first.
+  Map<String, Object?> get snapshot => {
+    ...timeline.toJson(),
+    'episodes': [for (final episode in _episodes) episode.toJson()],
+  };
 }

@@ -50,7 +50,10 @@ enum CompositeLeg { tcp, ble }
 /// route marked connected on a dead leg. Every step of that recovery, and of
 /// an upgrade dial back to TCP, is stamped on the route's timeline;
 /// [linkTimelineFor] exposes the marks so a host can show how long the stall
-/// took to detect and the switch to land.
+/// took to detect and the switch to land. The eight top-level marks carry the
+/// most recent episode; [linkTimelineFor] also carries an ordered history of
+/// the last finished episodes with the same marks, so a stall that a later
+/// switch superseded stays readable.
 ///
 /// ## Clock
 ///
@@ -173,13 +176,16 @@ class CompositeBleTransport implements BleTransport {
   /// The link-switch timeline of [deviceId]'s route, or null before the
   /// bridge has been connected through this composite.
   ///
-  /// The values are microseconds on [clock], one `<mark>_us` key per mark
-  /// ([LinkTimeline.toJson] names them), null before a mark landed. The
-  /// Debug screen renders its "Last link switch" row from them and the
-  /// diagnostics bundle carries them verbatim. Hosts only sample: the
-  /// composite keeps recording.
+  /// The values are microseconds on [clock]: the eight top-level
+  /// `<mark>_us` keys of the most recent episode ([LinkTimeline.toJson]
+  /// names them), null before a mark landed, plus an `episodes` list
+  /// carrying the same marks for the last finished episodes, oldest first —
+  /// a later switch does not erase them. The Debug screen renders its
+  /// "Last link switch" row from the top-level marks and the diagnostics
+  /// bundle carries the map verbatim. Hosts only sample: the composite
+  /// keeps recording.
   Map<String, Object?>? linkTimelineFor(String deviceId) =>
-      _routes[deviceId]?.timeline.timeline.toJson();
+      _routes[deviceId]?.timeline.snapshot;
 
   @override
   Stream<BleScanResult> scan({List<String> withServices = const []}) {
@@ -1300,7 +1306,8 @@ class _Route {
   final List<_Channel> channels = [];
   final Map<String, int> bleRefs = {};
 
-  /// Recovery-path marks of the most recent link switch on this route.
+  /// Recovery-path marks of this route's link switches: the most recent
+  /// episode, plus the last finished episodes before it.
   final LinkTimelineRecorder timeline = LinkTimelineRecorder();
 
   String? bridgeId;
