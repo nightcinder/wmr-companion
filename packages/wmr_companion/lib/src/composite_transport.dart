@@ -643,9 +643,9 @@ class CompositeBleTransport implements BleTransport {
         // (it owns the candidate now) and the route did not adopt it (a live
         // upgrade must not be torn down). `tcpDeviceId` names the candidate
         // whose session the route owns — one it is live on, or one a landed
-        // probe named for a later switch to adopt — and every path that kills
-        // a named session clears the pointer with it, so it never names a
-        // dead session here.
+        // probe named for a later switch to adopt — and every path that
+        // leaves the lane, loses the named session, or drops the route
+        // clears the pointer with it, so it never names a dead session here.
         unawaited(pending.catchError((Object _) {}));
         if (route.tcpDials[id] == dial && route.tcpDeviceId != id) {
           route.tcpDials.remove(id);
@@ -771,8 +771,14 @@ class CompositeBleTransport implements BleTransport {
     } catch (error) {
       // The switch failed partway, so the route must not keep a
       // half-attached lane. Restore the lane it came from; the upgrade
-      // timer is still armed, so the next tick retries.
+      // timer is still armed, so the next tick retries. The route must
+      // also stop naming the candidate: it is no longer heading onto TCP,
+      // and a session that later dies on its own would leave the pointer
+      // naming a dead session, which the teardown guard would read as
+      // adoption. The landed session stays with the transport, so the
+      // next dial still joins it instead of dialing fresh.
       await _restoreLane(route, from);
+      route.tcpDeviceId = null;
       rethrow;
     }
     _stopUpgrade(route);
@@ -919,6 +925,17 @@ class CompositeBleTransport implements BleTransport {
       route.tcpLost = lost;
       if (route.tcpLost && route.active == _Lane.tcp) {
         unawaited(_fallbackToBle(route));
+      } else if (route.tcpLost && !route.switching && !route.upgrading) {
+        // The named session died while the route was neither live on it
+        // nor switching onto it (a rollback left BLE active, or a landed
+        // probe named a candidate the route never adopted). Nothing will
+        // consume the pointer for this loss, and it must not outlive the
+        // session it names: a stale `tcpDeviceId` would read as adoption
+        // in `_tryTcp`'s teardown guard and keep a later abandoned dial
+        // alive past its slice instead of letting the next tick dial
+        // fresh. A switch or upgrade still in flight may adopt the named
+        // session, so its own release keeps the pointer for the failover.
+        route.tcpDeviceId = null;
       }
     }, onError: (Object _) {});
   }
@@ -1047,6 +1064,10 @@ class CompositeBleTransport implements BleTransport {
   Future<void> _lose(_Route route) async {
     _stopUpgrade(route);
     route.tcpLost = false;
+    // The route is over, so it must stop naming a TCP candidate: a stale
+    // `tcpDeviceId` would read as adoption in `_tryTcp`'s teardown guard on
+    // the next connect's dial.
+    route.tcpDeviceId = null;
     // A drop is reported from the BLE subscription's own listener; awaiting
     // that generator's cancel() there can park the loss until the next event.
     // The streams are done after a loss, so detach without waiting.
