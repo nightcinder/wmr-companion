@@ -29,7 +29,7 @@ is on the phone clock. Record T2 from the first
 accepts the subscription, before it sends the first record, so the line is a
 Pi-clock lower bound for T2. A lower bound can pass a gate that the app mark
 would fail. Record `first TCP +` from the Debug row in the same run as the
-phone-clock cross-check (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:621`).
+phone-clock cross-check (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:634`).
 If the bound sits inside the gate but `first TCP +` is large, look again before
 you pass the run.
 
@@ -64,7 +64,7 @@ The approved bench gate is 5 s.
 - The row appears only for a `CompositeBleTransport` on the real source
   (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:80-83`). It sits
   under **Stream** in the Debug screen (`:217-229`).
-- Before the first switch the row reads `Last link switch none yet` (`:623`).
+- Before the first switch the row reads `Last link switch none yet` (`:636`).
 - On the Pi, `wmr-bridge` runs and both controllers stream. Isolate or unplug
   `eth0`, and confirm that `wlan0` is the uplink (`WMR_Bridge`
   `docs/runs/sheets/bench.md:10`). With `eth0` still connected, the outage may
@@ -97,8 +97,8 @@ sudo ip link set wlan0 down
 date -u '+%F %T.%3N'
 ```
 
-**4. Step 4.** Watch the row change to `TCP→BLE`. Read the three figures:
-`stall +`, `failover`, `first BLE +`.
+**4. Step 4.** Watch the row change to `TCP→BLE`. Read `takeover` and the
+parts it is made of: `stall +`, `failover`, `first BLE +`.
 
 **5. Hold the outage for 10 s after T0.**
 
@@ -140,19 +140,26 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 | T0 | Pi shell | `date -u '+%F %T.%3N'` right after the down command |
 | T1 | Pi shell | `date -u '+%F %T.%3N'` right after the `ip` poll |
 | T2 | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
-| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:621`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:113-118`), and an attached export carries it in `link_timeline` (see below) |
+| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:634`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:113-118`), and an attached export carries it in `link_timeline` (see below) |
 | Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:74-75`) |
 | Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:76-77`) |
 | First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:78`) |
-| Takeover | Debug row, sum | `first_ble_record_us − last_tcp_record_us` |
+| Takeover | Debug row `takeover` | `first_ble_record_us − last_tcp_record_us` (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:629`) |
 | Dropped | Pi journal | `dropped=` in the 5 s status line (`WMR_Bridge` `pi/wmr_bridge/__main__.py:943-953`) |
 
-The row prints the takeover in three parts. Add `stall +`, `failover` and
-`first BLE +`. The sum leaves out the gap between the stall mark and the
-failover begin. Both stamps land in the same event-loop turn
-(`packages/wmr_companion/lib/src/composite_transport.dart:868`, `:897`). The
-sum is enough for the gate unless it lands within a few milliseconds of
-2500 ms.
+The row prints the takeover itself, as `takeover`: first BLE record minus
+last TCP record, the figure the gate reads, with `stall +`, `failover` and
+`first BLE +` as the parts it is made of. A failover that began from a loss
+remembered while a switch held the route has no `stall +` of its own; its
+takeover is the only computable figure. While the first BLE record or the
+last TCP record is missing the row prints `takeover n/a`: write `n/a` in
+the Takeover column.
+
+The parts leave out the gap between the stall mark and the failover
+begin. Both stamps land in the same event-loop turn
+(`packages/wmr_companion/lib/src/composite_transport.dart:929`, `:969`).
+The parts are enough to cross-check the takeover unless it lands within a
+few milliseconds of 2500 ms.
 
 The stall mark lands after the liveness probe gives up. The defaults are a
 500 ms probe interval and a 1000 ms timeout
@@ -182,7 +189,7 @@ step.
 ## The bundle's copy of the timeline
 
 `diagnostics.json` carries the marks under `link_timeline`
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:601`). The top-level
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:604`). The top-level
 keys are the eight marks of the most recent episode
 (`packages/wmr_companion/lib/src/link_timeline.dart`, `LinkTimeline.toJson`);
 the `episodes` key lists the same marks for the last finished episodes, so a
@@ -192,3 +199,19 @@ The export builder passes the live transport's marks into the bundle
 (`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the
 `first TCP +` row and the failover rows are reproducible from the attached
 zip, not only from the Debug screen.
+
+Compute the run's figures from one `episodes[i]` entry, never from the
+top-level marks: each episode froze its own `last_tcp_record_us` at the
+record that preceded its stall, and the top-level mark keeps tracking the
+newest record the route delivered, which a later upgrade moves past every
+archived episode.
+
+* detect = `episodes[i].stall_detected_us − episodes[i].last_tcp_record_us`
+* takeover = `episodes[i].first_ble_record_us − episodes[i].last_tcp_record_us`,
+  `n/a` when either mark is absent
+* T2, app copy = `episodes[i].first_tcp_record_us`
+
+The takeover this gives is the figure the row printed live, and it stays
+at least zero after the route has moved on. T2 itself stays the journal
+line: the episode's `first_tcp_record_us` is the phone-clock
+cross-check, information only, never a substitute.

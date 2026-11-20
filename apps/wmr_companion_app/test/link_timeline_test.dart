@@ -50,6 +50,32 @@ const _rememberedLossTimeline = {
   'first_tcp_record_us': null,
 };
 
+/// Marks of a failover whose route is active on BLE but whose first BLE
+/// record has not arrived: the takeover has nothing to subtract to yet.
+const _noFirstBleTimeline = {
+  'last_tcp_record_us': 1000000,
+  'stall_detected_us': 1100000,
+  'failover_begin_us': 1105000,
+  'failover_end_us': 1180000,
+  'first_ble_record_us': null,
+  'upgrade_dial_start_us': null,
+  'upgrade_dial_end_us': null,
+  'first_tcp_record_us': null,
+};
+
+/// Marks of a stall that fired before any TCP record landed: there is no
+/// anchor to take over from.
+const _noAnchorTimeline = {
+  'last_tcp_record_us': null,
+  'stall_detected_us': 1100000,
+  'failover_begin_us': 1105000,
+  'failover_end_us': 1180000,
+  'first_ble_record_us': 1200000,
+  'upgrade_dial_start_us': null,
+  'upgrade_dial_end_us': null,
+  'first_tcp_record_us': null,
+};
+
 Future<void> _pumpRow(
   WidgetTester tester,
   Map<String, Object?> timeline,
@@ -75,6 +101,7 @@ void main() {
       expect(find.textContaining('stall +100.0 ms'), findsOneWidget);
       expect(find.textContaining('failover 75.0 ms'), findsOneWidget);
       expect(find.textContaining('first BLE +20.0 ms'), findsOneWidget);
+      expect(find.textContaining('takeover 200.0 ms'), findsOneWidget);
     });
 
     testWidgets('renders the upgrade when it is the later switch', (
@@ -118,6 +145,22 @@ void main() {
         );
         expect(find.textContaining('stall +—'), findsOneWidget);
         expect(find.textContaining('stall +-'), findsNothing);
+        // The takeover stays computable from the anchor and the first BLE
+        // record, where the stall-based parts are not.
+        expect(find.textContaining('takeover 200.0 ms'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'shows takeover n/a while the first BLE record or the anchor is out',
+      (tester) async {
+        await _pumpRow(tester, _noFirstBleTimeline);
+        expect(find.textContaining('first BLE +—'), findsOneWidget);
+        expect(find.textContaining('takeover n/a'), findsOneWidget);
+
+        await _pumpRow(tester, _noAnchorTimeline);
+        expect(find.textContaining('stall +—'), findsOneWidget);
+        expect(find.textContaining('takeover n/a'), findsOneWidget);
       },
     );
 

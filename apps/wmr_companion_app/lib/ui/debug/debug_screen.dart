@@ -540,7 +540,8 @@ class BridgeLinkTable extends StatelessWidget {
 
 /// The "Last link switch" row: which way the composite link's most recent
 /// leg switch moved, how long ago it landed, and how long each recovery
-/// step took.
+/// step took. A failover also prints the step-4 takeover it produced: the
+/// first BLE record minus the last TCP record.
 ///
 /// [timeline] is the composite transport's link-switch timeline
 /// (`CompositeBleTransport.linkTimelineFor`): one `<mark>_us` entry per
@@ -585,6 +586,15 @@ class LinkSwitchRow extends StatelessWidget {
       ? '—'
       : '${((stall - lastTcp) / 1000).toStringAsFixed(1)} ms';
 
+  /// The step-4 takeover: the first BLE record minus the last TCP record,
+  /// the figure the bench gates at 2500 ms. `n/a` — not `—` — while either
+  /// mark is missing: the takeover is a gate figure, so a run without it
+  /// records the absence instead of reading as a mark still pending.
+  static String _takeover(int? firstBle, int? lastTcp) =>
+      firstBle == null || lastTcp == null
+      ? 'n/a'
+      : '${((firstBle - lastTcp) / 1000).toStringAsFixed(1)} ms';
+
   static String _ago(int us) {
     final seconds = us / 1e6;
     if (seconds < 1) return '${(us / 1000).toStringAsFixed(0)} ms ago';
@@ -597,7 +607,9 @@ class LinkSwitchRow extends StatelessWidget {
   /// or a BLE-drop recovery) once its first TCP record arrived, and the
   /// later landing wins. A failover that began from a loss remembered
   /// while a switch held the route has no stall of its own: its older
-  /// mark predates the records that followed it, and renders as `—`.
+  /// mark predates the records that followed it, and renders as `—`. Its
+  /// takeover is still computable, from the first BLE record and the last
+  /// TCP record, so the row prints it either way.
   static String label(Map<String, Object?> timeline, int nowUs) {
     final lastTcp = _mark(timeline, 'last_tcp_record_us');
     final stall = _mark(timeline, 'stall_detected_us');
@@ -613,7 +625,8 @@ class LinkSwitchRow extends StatelessWidget {
       return 'Last link switch ${_ago(nowUs - failoverEnd)}  '
           'TCP→BLE  stall +${_stallDelta(stall, lastTcp)}  '
           'failover ${_delta(failoverEnd, failoverBegin)}  '
-          'first BLE +${_delta(firstBle, failoverEnd)}';
+          'first BLE +${_delta(firstBle, failoverEnd)}  '
+          'takeover ${_takeover(firstBle, lastTcp)}';
     }
     if (firstTcp != null && dialEnd != null) {
       return 'Last link switch ${_ago(nowUs - dialEnd)}  '
