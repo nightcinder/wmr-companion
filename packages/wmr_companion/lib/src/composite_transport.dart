@@ -100,7 +100,9 @@ class CompositeBleTransport implements BleTransport {
   /// hold the session: after the budget the composite gives up on TCP and
   /// dials BLE instead. Each candidate gets an equal share of what is left, so
   /// a dead address cannot consume the whole budget before a live one is
-  /// tried. A non-positive duration disables the TCP probe entirely.
+  /// tried, and an attempt that outlives its share is torn down at once, so
+  /// the next probe dials fresh instead of joining the abandoned session. A
+  /// non-positive duration disables the TCP probe entirely.
   final Duration tcpProbeBudget;
 
   /// How long a BLE FF15 echo subscription is kept open after the route moves
@@ -633,18 +635,22 @@ class CompositeBleTransport implements BleTransport {
           'TCP connect to $id took longer than ${slice.inMilliseconds} ms',
           slice,
         );
-        // The dial may still land after the budget. Close it when it does, so
-        // a late socket cannot stay open behind the BLE fallback. If a later
-        // probe has joined this dial or an earlier one was adopted, leave the
-        // connection alone: closing it here would tear down a live upgrade.
-        unawaited(
-          pending.then<void>((_) async {
-            if (route.tcpDials[id] != dial) return;
-            if (route.tcpDeviceId == id) return;
-            route.tcpDials.remove(id);
+        // The budget is authoritative: the slice expired, so this attempt is
+        // abandoned now. A transport hands a later dial the same in-flight
+        // session, and one left open would make every following tick join it
+        // instead of issuing a fresh connect, so tear the abandoned session
+        // down at once — but only when no later probe has joined this dial
+        // (it owns the candidate now) and the route did not adopt it (a live
+        // upgrade must not be torn down).
+        unawaited(pending.catchError((Object _) {}));
+        if (route.tcpDials[id] == dial && route.tcpDeviceId != id) {
+          route.tcpDials.remove(id);
+          try {
             await tcp.disconnect(id);
-          }, onError: (Object _) {}),
-        );
+          } catch (_) {
+            // The abandoned session may already be gone.
+          }
+        }
       } catch (error) {
         lastError = error;
       }
@@ -755,9 +761,39 @@ class CompositeBleTransport implements BleTransport {
     route.tcpDeviceId = tcpId;
     _rememberBridge(route, tcp.helloFor(tcpId)?.bridgeId);
     _watchTcp(route);
-    await _switchChannels(route, _Lane.tcp);
+    final from = route.active;
+    try {
+      await _switchChannels(route, _Lane.tcp);
+    } catch (error) {
+      // The switch failed partway, so the route must not keep a
+      // half-attached lane. Restore the lane it came from; the upgrade
+      // timer is still armed, so the next tick retries.
+      await _restoreLane(route, from);
+      rethrow;
+    }
     _stopUpgrade(route);
     _setState(route, BleConnectionState.connected);
+  }
+
+  /// Undoes a lane switch that failed partway: every live channel is
+  /// detached from whatever it half-attached to, the route is named [to]
+  /// again, and every channel re-subscribes there, so the leg it fell back
+  /// to keeps delivering. A re-subscribe that also fails forwards its error
+  /// to the channel's stream instead of leaving a half-attached one behind.
+  Future<void> _restoreLane(_Route route, _Lane? to) async {
+    final live = route.channels.where((channel) => channel.isLive).toList();
+    for (final channel in live) {
+      try {
+        await channel.detach();
+      } catch (_) {
+        // The subscription was already given up; the re-attach below
+        // replaces it.
+      }
+    }
+    route.active = to;
+    for (final channel in live) {
+      channel.attach();
+    }
   }
 
   Future<void> _activateBle(_Route route) async {
