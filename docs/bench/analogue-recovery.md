@@ -182,8 +182,11 @@ step.
 ## The bundle's copy of the timeline
 
 `diagnostics.json` carries the marks under `link_timeline`
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:601`). The keys are the
-eight in `packages/wmr_companion/lib/src/link_timeline.dart:62-71`.
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:601`). The top-level
+keys are the eight marks of the most recent episode
+(`packages/wmr_companion/lib/src/link_timeline.dart`, `LinkTimeline.toJson`);
+the `episodes` key lists the same marks for the last finished episodes, so a
+stall a later switch superseded stays readable in the zip.
 
 The export builder passes the live transport's marks into the bundle
 (`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the

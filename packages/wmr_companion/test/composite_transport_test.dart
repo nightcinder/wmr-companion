@@ -61,7 +61,8 @@ Uint8List _versionString([String value = '0.2.4-pi']) =>
     Uint8List.fromList(utf8.encode(value));
 
 /// The timeline keys `CompositeBleTransport.linkTimelineFor` records, the
-/// same ones the app's Debug row reads and the diagnostics bundle carries.
+/// same ones the app's Debug row reads and the diagnostics bundle carries:
+/// one `<mark>_us` per step, plus the finished-episode list.
 const _timelineKeys = [
   'last_tcp_record_us',
   'stall_detected_us',
@@ -71,6 +72,7 @@ const _timelineKeys = [
   'upgrade_dial_start_us',
   'upgrade_dial_end_us',
   'first_tcp_record_us',
+  'episodes',
 ];
 
 class _FakeTcp extends WmrWsTransport {
@@ -608,18 +610,32 @@ class _FailingSwitchBle extends FakeTransport {
   }
 }
 
-/// A loopback WebSocket daemon that says `hello` and then never answers again,
-/// like a Pi whose TCP peer vanished while the socket stayed open.
-class _SilentPi {
-  _SilentPi._(this._server);
+/// A loopback WebSocket daemon that says `hello` and answers liveness
+/// `ping`s on a configurable delay — or stops answering, like a Pi whose TCP
+/// peer vanished while the socket stayed open.
+class _LoopbackPi {
+  _LoopbackPi._(this._server);
 
   final HttpServer _server;
+  bool _stopped = false;
+
+  /// Replies to liveness `ping`s unless cleared. A test that clears it
+  /// models a half-open TCP peer: the socket stays open and writable, but
+  /// nothing behind it answers.
+  bool answerPings = true;
+
+  /// How long each `ping` waits for its `pong`, like a loaded Pi that still
+  /// answers inside the deadline.
+  Duration pongDelay = Duration.zero;
+
+  /// Wall-clock time of each `pong` sent, oldest first.
+  final List<DateTime> pongAt = [];
 
   int get port => _server.port;
 
-  static Future<_SilentPi> start({required String bridgeId}) async {
+  static Future<_LoopbackPi> start({required String bridgeId}) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final pi = _SilentPi._(server);
+    final pi = _LoopbackPi._(server);
     server.listen((request) async {
       final ws = await WebSocketTransformer.upgrade(
         request,
@@ -627,9 +643,12 @@ class _SilentPi {
             protocols.contains('wmr-wifi-v1') ? 'wmr-wifi-v1' : null,
         compression: CompressionOptions.compressionOff,
       );
-      // Keep reading so the socket is drained, and answer nothing: no `pong`,
-      // no `subscribed`.
-      ws.listen((_) {}, onError: (Object _) {}, onDone: () {});
+      // Keep reading so the socket is drained.
+      ws.listen(
+        (dynamic data) => pi._onMessage(ws, data),
+        onError: (Object _) {},
+        onDone: () {},
+      );
       ws.add(
         jsonEncode({
           'type': 'hello',
@@ -650,7 +669,40 @@ class _SilentPi {
     return pi;
   }
 
-  Future<void> stop() => _server.close(force: true);
+  void _onMessage(WebSocket ws, dynamic data) {
+    if (data is! String) return;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(data);
+    } on FormatException {
+      return;
+    }
+    if (decoded is! Map || decoded['type'] != 'ping' || !answerPings) return;
+    final pong = jsonEncode({
+      'type': 'pong',
+      'id': decoded['id'],
+      't': decoded['t'],
+      'serverTimeUs': 0,
+    });
+    if (pongDelay <= Duration.zero) {
+      _sendPong(ws, pong);
+      return;
+    }
+    Timer(pongDelay, () {
+      if (_stopped || ws.readyState != WebSocket.open) return;
+      _sendPong(ws, pong);
+    });
+  }
+
+  void _sendPong(WebSocket ws, String pong) {
+    ws.add(pong);
+    pongAt.add(DateTime.now());
+  }
+
+  Future<void> stop() {
+    _stopped = true;
+    return _server.close(force: true);
+  }
 }
 
 void main() {
@@ -1216,8 +1268,160 @@ void main() {
     );
   });
 
+  test(
+    'records every stall episode, the earlier ones preserved in order',
+    () async {
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+      addTearDown(sub.cancel);
+
+      // Episode one: the TCP leg stalls and the route fails over to BLE.
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the first stall did not fail over to BLE',
+      );
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+            null,
+        reason: "the first episode's first BLE record was not marked",
+      );
+      // What the top-level marks said while episode one was the most recent.
+      final episodeOneLive = transport.linkTimelineFor(_tcpDeviceId)!;
+
+      // The BLE link drops: the recovery dials back to TCP inside episode one,
+      // and a record lands there.
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the dropped BLE link was not recovered over TCP',
+      );
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
+      await _settle();
+
+      // Episode two: its stall supersedes episode one, which moves into the
+      // history with its own marks.
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the second stall did not fail over to BLE',
+      );
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [4]), isTrue);
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+            null,
+        reason: "the second episode's first BLE record was not marked",
+      );
+
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final episodes = marks['episodes']! as List<Object?>;
+      expect(
+        episodes,
+        hasLength(1),
+        reason: 'the first episode was not archived',
+      );
+      final episodeOne = episodes.single as Map<String, Object?>;
+      // The first episode is preserved: its failover marks are the ones the
+      // top level showed while it was the most recent episode.
+      expect(
+        episodeOne['last_tcp_record_us'],
+        episodeOneLive['last_tcp_record_us'],
+      );
+      expect(
+        episodeOne['stall_detected_us'],
+        episodeOneLive['stall_detected_us'],
+      );
+      expect(
+        episodeOne['failover_begin_us'],
+        episodeOneLive['failover_begin_us'],
+      );
+      expect(episodeOne['failover_end_us'], episodeOneLive['failover_end_us']);
+      expect(
+        episodeOne['first_ble_record_us'],
+        episodeOneLive['first_ble_record_us'],
+      );
+
+      final lastTcpOne = episodeOne['last_tcp_record_us']! as int;
+      final stallOne = episodeOne['stall_detected_us']! as int;
+      final beginOne = episodeOne['failover_begin_us']! as int;
+      final endOne = episodeOne['failover_end_us']! as int;
+      final firstBleOne = episodeOne['first_ble_record_us']! as int;
+      final dialStartOne = episodeOne['upgrade_dial_start_us']! as int;
+      final dialEndOne = episodeOne['upgrade_dial_end_us']! as int;
+      final firstTcpOne = episodeOne['first_tcp_record_us']! as int;
+      // The archived episode's marks are coherent end to end: its stall
+      // follows the record that preceded it, and each step follows the last,
+      // dial and first TCP record included.
+      expect(stallOne, greaterThan(lastTcpOne));
+      expect(beginOne, greaterThanOrEqualTo(stallOne));
+      expect(endOne, greaterThanOrEqualTo(beginOne));
+      expect(firstBleOne, greaterThan(endOne));
+      expect(dialStartOne, greaterThan(firstBleOne));
+      expect(dialEndOne, greaterThan(dialStartOne));
+      expect(firstTcpOne, greaterThan(dialEndOne));
+
+      // The second episode is the most recent one, and it follows the first.
+      final stallTwo = marks['stall_detected_us']! as int;
+      final beginTwo = marks['failover_begin_us']! as int;
+      final endTwo = marks['failover_end_us']! as int;
+      final firstBleTwo = marks['first_ble_record_us']! as int;
+      expect(stallTwo, greaterThan(firstTcpOne));
+      expect(stallTwo, greaterThan(marks['last_tcp_record_us']! as int));
+      expect(beginTwo, greaterThanOrEqualTo(stallTwo));
+      expect(endTwo, greaterThanOrEqualTo(beginTwo));
+      expect(firstBleTwo, greaterThan(endTwo));
+      expect(endOne, lessThan(beginTwo));
+
+      // Episode three archives the second: the history keeps the last
+      // episodes in order, the first still preserved.
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the second dropped BLE link was not recovered over TCP',
+      );
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [5]), isTrue);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the third stall did not fail over to BLE',
+      );
+
+      final history = transport.linkTimelineFor(_tcpDeviceId)!;
+      final list = history['episodes']! as List<Object?>;
+      expect(list, hasLength(2));
+      final episodeTwo = list[1] as Map<String, Object?>;
+      expect((list[0] as Map)['failover_end_us'], endOne);
+      expect(episodeTwo['stall_detected_us'], stallTwo);
+      expect(episodeTwo['failover_end_us'], endTwo);
+      expect(episodeTwo['first_ble_record_us'], firstBleTwo);
+      expect(episodeTwo['failover_begin_us']! as int, greaterThan(endOne));
+    },
+  );
+
   test('a silent TCP socket fails over to BLE within 2500 ms', () async {
-    final pi = await _SilentPi.start(bridgeId: _bridgeId);
+    final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
+    pi.answerPings = false;
     final tcpLink = WmrWsTransport(
       endpoints: [
         WmrWsEndpoint(
@@ -1272,6 +1476,138 @@ void main() {
     expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
     await _settle();
     expect(received.last.value, [3]);
+  });
+
+  test(
+    'a peer that answers and then goes silent stalls within 1500 ms',
+    () async {
+      final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
+      addTearDown(pi.stop);
+      final tcpLink = WmrWsTransport(
+        endpoints: [
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: pi.port,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        ],
+      );
+      final transport = CompositeBleTransport(
+        tcp: tcpLink,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      // The link is healthy first: at least two probes were answered.
+      await _waitFor(
+        () => pi.pongAt.length >= 2,
+        reason: 'the liveness probes were not answered before the silence',
+      );
+
+      // Silence the peer right after one more pong, so the stall's budget
+      // is measured from the last answer the link gave.
+      final answered = pi.pongAt.length;
+      await _waitFor(
+        () => pi.pongAt.length > answered,
+        timeout: const Duration(seconds: 2),
+        reason: 'no further probe was answered',
+      );
+      pi.answerPings = false;
+      final silentAtUs = transport.clock.nowUs;
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['stall_detected_us'] !=
+            null,
+        timeout: const Duration(seconds: 3),
+        reason: 'the silent peer was not detected as a stall',
+      );
+
+      // The detector defaults are a 500 ms interval and a 1000 ms deadline,
+      // so the stall lands within 1500 ms of the last pong the peer sent;
+      // the slack left above that budget is the event loop's timer
+      // lateness.
+      final stallUs =
+          transport.linkTimelineFor(_tcpDeviceId)!['stall_detected_us']! as int;
+      expect(
+        stallUs - silentAtUs,
+        lessThanOrEqualTo(1550000),
+        reason: 'the stall outlived the 1500 ms liveness budget',
+      );
+
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the silent peer did not fail over to BLE',
+      );
+
+      // The stall episode is recorded: its marks name the detection and the
+      // failover it began. It is still the most recent episode, so the
+      // history behind it is empty.
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final stall = marks['stall_detected_us']! as int;
+      final begin = marks['failover_begin_us']! as int;
+      final end = marks['failover_end_us']! as int;
+      expect(begin, greaterThanOrEqualTo(stall));
+      expect(end, greaterThanOrEqualTo(begin));
+      expect(marks['episodes']! as List, isEmpty);
+    },
+  );
+
+  test('a pong just inside the deadline never fails over', () async {
+    final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
+    pi.pongDelay = const Duration(milliseconds: 900);
+    addTearDown(pi.stop);
+    final tcpLink = WmrWsTransport(
+      endpoints: [
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: pi.port,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      ],
+    );
+    final transport = CompositeBleTransport(
+      tcp: tcpLink,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+    // Every probe's answer lands 900 ms later, 100 ms inside the detector's
+    // 1000 ms deadline: a slow but live link. Three answers prove the
+    // detector re-arms and re-survives each deadline.
+    await _waitFor(
+      () => pi.pongAt.length >= 3,
+      timeout: const Duration(seconds: 8),
+      reason: 'the delayed pongs were not answered',
+    );
+
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    expect(states, isNot(contains(BleConnectionState.disconnected)));
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(
+      marks['stall_detected_us'],
+      isNull,
+      reason: 'a live link was recorded as a stall',
+    );
+    expect(
+      marks['episodes'],
+      isEmpty,
+      reason: 'a live link recorded a stall episode',
+    );
   });
 
   test(
