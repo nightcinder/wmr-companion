@@ -140,7 +140,7 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 | T0 | Pi shell | `date -u '+%F %T.%3N'` right after the down command |
 | T1 | Pi shell | `date -u '+%F %T.%3N'` right after the `ip` poll |
 | T2 | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
-| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:621`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:89-94`), but a real export leaves `link_timeline` null (see below) |
+| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:621`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:89-94`), and an attached export carries it in `link_timeline` (see below) |
 | Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:63-64`) |
 | Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:65-66`) |
 | First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:67`) |
@@ -185,9 +185,7 @@ step.
 (`apps/wmr_companion_app/lib/services/test_bundle.dart:601`). The keys are the
 eight in `packages/wmr_companion/lib/src/link_timeline.dart:62-71`.
 
-Current gap: a real export leaves this block null. The export builder creates
-`TestBundleInput` without a `linkTimeline:` value
-(`apps/wmr_companion_app/lib/services/test_bundle_export.dart:180-210`). Only
-tests set the field (`apps/wmr_companion_app/test/link_timeline_test.dart:150`).
-Copy the row's figures by hand until the builder passes it, so a run does not
-depend on the fix.
+The export builder passes the live transport's marks into the bundle
+(`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the
+`first TCP +` row and the failover rows are reproducible from the attached
+zip, not only from the Debug screen.
