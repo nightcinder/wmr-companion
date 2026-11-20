@@ -128,7 +128,7 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 **10. Export the bundle.** Tap **Export test bundle** on the Connect screen
 (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1189`). The file is
 `wmr-ext-<yyyyMMdd>.zip` in the app documents `exports` folder
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:422`,
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:426`,
 `apps/wmr_companion_app/lib/services/test_bundle_export.dart:85-88`).
 
 **11. Start the next run only after the route is back on TCP.**
