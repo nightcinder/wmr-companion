@@ -11,8 +11,10 @@
 ///   recovery from a dropped BLE link: the dial's start and end, and the
 ///   first TCP record after the route moved.
 ///
-/// The eight top-level marks describe only the most recent episode: a later
-/// switch overwrites them. [LinkTimelineRecorder] also keeps an ordered
+/// The top-level marks describe only the most recent episode: a later
+/// switch overwrites them, and a retried dial overwrites the dial's start
+/// mark, so the first attempt's start and the attempt count are kept beside
+/// it. [LinkTimelineRecorder] also keeps an ordered
 /// history of the last [LinkTimelineRecorder.episodeHistoryCapacity]
 /// finished episodes, each with the same marks and the first record that
 /// landed per lane after its failover, so a stall that a later switch
@@ -42,6 +44,8 @@ class LinkTimeline {
     this.firstBleRecordUs,
     this.upgradeDialStartUs,
     this.upgradeDialEndUs,
+    this.firstUpgradeDialStartUs,
+    this.upgradeDialAttempts = 0,
     this.firstTcpRecordUs,
   });
 
@@ -68,11 +72,21 @@ class LinkTimeline {
   final int? upgradeDialStartUs;
   final int? upgradeDialEndUs;
 
+  /// When this episode's first dial attempt started: a retried dial moves
+  /// [upgradeDialStartUs] onto the newest attempt, so the one that opened
+  /// the retries stays here.
+  final int? firstUpgradeDialStartUs;
+
+  /// How many dial attempts this episode has made; every start counts one,
+  /// whether or not it finished.
+  final int upgradeDialAttempts;
+
   /// First TCP record after the upgrade dial finished.
   final int? firstTcpRecordUs;
 
   /// The marks under the keys the diagnostics bundle carries: one
-  /// `<mark>_us` entry per field, null before the mark landed.
+  /// `<mark>_us` entry per mark field, null before the mark landed, plus
+  /// the attempt count.
   Map<String, Object?> toJson() => {
     'last_tcp_record_us': lastTcpRecordUs,
     'stall_detected_us': stallDetectedUs,
@@ -81,6 +95,8 @@ class LinkTimeline {
     'first_ble_record_us': firstBleRecordUs,
     'upgrade_dial_start_us': upgradeDialStartUs,
     'upgrade_dial_end_us': upgradeDialEndUs,
+    'first_upgrade_dial_start_us': firstUpgradeDialStartUs,
+    'upgrade_dial_attempts': upgradeDialAttempts,
     'first_tcp_record_us': firstTcpRecordUs,
   };
 }
@@ -99,6 +115,11 @@ class LinkTimelineRecorder {
   int? _upgradeDialStartUs;
   int? _upgradeDialEndUs;
   int? _firstTcpRecordUs;
+
+  /// The episode's first dial attempt's start, and how many attempts it
+  /// has made: a retried dial overwrites only the latest-attempt marks.
+  int? _firstUpgradeDialStartUs;
+  int _upgradeDialAttempts = 0;
 
   /// The current episode's "last TCP record": the record that preceded its
   /// own stall, frozen when the episode opened. Records that arrive later
@@ -151,6 +172,8 @@ class LinkTimelineRecorder {
     _upgradeDialStartUs = null;
     _upgradeDialEndUs = null;
     _firstTcpRecordUs = null;
+    _firstUpgradeDialStartUs = null;
+    _upgradeDialAttempts = 0;
   }
 
   /// The failover landed: the route is active on BLE.
@@ -163,20 +186,25 @@ class LinkTimelineRecorder {
   }
 
   /// A dial to TCP started (an upgrade probe, or a BLE-drop recovery); the
-  /// next TCP record opens the new episode's "first TCP record".
+  /// next TCP record opens the new episode's "first TCP record". Every
+  /// start is one attempt: the newest attempt owns the start mark, while
+  /// the first attempt's start and the attempt count are kept beside it.
   void onUpgradeDialStart(int us) {
     _upgradeDialStartUs = us;
+    _firstUpgradeDialStartUs ??= us;
+    _upgradeDialAttempts++;
     _firstTcpRecordUs = null;
   }
 
   /// The upgrade dial finished, successfully or not.
   void onUpgradeDialEnd(int us) => _upgradeDialEndUs = us;
 
-  /// Clears the marks an episode owns, so the episode that opens now starts
-  /// its own. The stall stays: a fresh detection lands right after this,
-  /// and one that predates the last TCP record belongs to a remembered
-  /// loss, which the reader rejects. The top-level "last TCP record" stays
-  /// because it tracks the newest record, not the episode's.
+  /// Clears the marks and the dial-attempt count an episode owns, so the
+  /// episode that opens now starts its own. The stall stays: a fresh
+  /// detection lands right after this, and one that predates the last TCP
+  /// record belongs to a remembered loss, which the reader rejects. The
+  /// top-level "last TCP record" stays because it tracks the newest
+  /// record, not the episode's.
   void _resetEpisodeMarks() {
     _failoverBeginUs = null;
     _failoverEndUs = null;
@@ -184,6 +212,8 @@ class LinkTimelineRecorder {
     _upgradeDialStartUs = null;
     _upgradeDialEndUs = null;
     _firstTcpRecordUs = null;
+    _firstUpgradeDialStartUs = null;
+    _upgradeDialAttempts = 0;
   }
 
   /// Freezes the standing marks as one finished episode, oldest dropped
@@ -198,6 +228,8 @@ class LinkTimelineRecorder {
         firstBleRecordUs: _firstBleRecordUs,
         upgradeDialStartUs: _upgradeDialStartUs,
         upgradeDialEndUs: _upgradeDialEndUs,
+        firstUpgradeDialStartUs: _firstUpgradeDialStartUs,
+        upgradeDialAttempts: _upgradeDialAttempts,
         firstTcpRecordUs: _firstTcpRecordUs,
       ),
     );
@@ -206,8 +238,9 @@ class LinkTimelineRecorder {
     }
   }
 
-  /// The marks so far, an immutable snapshot: the eight top-level marks of
-  /// the most recent episode.
+  /// The marks so far, an immutable snapshot: the top-level marks of the
+  /// most recent episode, its first dial attempt's start and its attempt
+  /// count among them.
   LinkTimeline get timeline => LinkTimeline(
     lastTcpRecordUs: _lastTcpRecordUs,
     stallDetectedUs: _stallDetectedUs,
@@ -216,6 +249,8 @@ class LinkTimelineRecorder {
     firstBleRecordUs: _firstBleRecordUs,
     upgradeDialStartUs: _upgradeDialStartUs,
     upgradeDialEndUs: _upgradeDialEndUs,
+    firstUpgradeDialStartUs: _firstUpgradeDialStartUs,
+    upgradeDialAttempts: _upgradeDialAttempts,
     firstTcpRecordUs: _firstTcpRecordUs,
   );
 

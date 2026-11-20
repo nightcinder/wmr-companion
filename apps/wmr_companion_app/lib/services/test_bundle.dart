@@ -377,13 +377,13 @@ class TestBundleInput {
   final String? activeLeg;
 
   /// The composite link's switch marks, as
-  /// `CompositeBleTransport.linkTimelineFor` recorded them: the eight
-  /// `<mark>_us` keys of the most recent leg switch in microseconds on the
-  /// link's monotonic clock, that episode's frozen pre-stall anchor as
-  /// `episode_last_tcp_record_us`, plus an `episodes` list of the finished
-  /// episodes before it, each carrying the same keys with its own frozen
-  /// `last_tcp_record_us`. Null for a plain Wi-Fi or BLE link, or before
-  /// the first switch.
+  /// `CompositeBleTransport.linkTimelineFor` recorded them: the
+  /// `<mark>_us` keys of the most recent leg switch in microseconds on
+  /// the link's monotonic clock, its dial-attempt count, that episode's
+  /// frozen pre-stall anchor as `episode_last_tcp_record_us`, plus an
+  /// `episodes` list of the finished episodes before it, each carrying
+  /// the same keys with its own frozen `last_tcp_record_us`. Null for a
+  /// plain Wi-Fi or BLE link, or before the first switch.
   final Map<String, Object?>? linkTimeline;
 
   /// Dead zone, rest-centre learning and the per-hand centres on screen.

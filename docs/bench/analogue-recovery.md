@@ -190,7 +190,8 @@ step.
 
 `diagnostics.json` carries the marks under `link_timeline`
 (`apps/wmr_companion_app/lib/services/test_bundle.dart:605`). The top-level
-keys are the eight marks of the most recent episode
+keys are the marks of the most recent episode — its first dial attempt's
+start and its dial-attempt count among them
 (`packages/wmr_companion/lib/src/link_timeline.dart`, `LinkTimeline.toJson`)
 plus `episode_last_tcp_record_us`, the anchor that episode's own stall
 froze; the `episodes` key lists the same marks for the last finished
