@@ -72,6 +72,8 @@ const _timelineKeys = [
   'first_ble_record_us',
   'upgrade_dial_start_us',
   'upgrade_dial_end_us',
+  'first_upgrade_dial_start_us',
+  'upgrade_dial_attempts',
   'first_tcp_record_us',
   'episode_last_tcp_record_us',
   'episodes',
