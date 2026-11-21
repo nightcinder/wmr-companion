@@ -614,7 +614,10 @@ unless the WebSocket `hello` reports the same `bridge_id`.
    lands — because the BLE leg is always available; a phone with Wi-Fi off
    reaches BLE at once.
 2. If TCP fails, connect over BLE GATT.
-3. While on BLE, retry TCP every 2 seconds by default.
+3. While on BLE, retry TCP every 2 seconds by default. For 30 seconds
+   after a failover (`upgradeRetryWindow`) a failed retry redials within
+   500 ms (`upgradeRetryDelay`) instead of waiting a whole tick, so a LAN
+   link that is coming back is reached in seconds.
 4. When TCP connects, move the notification subscriptions to TCP without
    closing them.
 5. If TCP drops later, fall back to BLE again.

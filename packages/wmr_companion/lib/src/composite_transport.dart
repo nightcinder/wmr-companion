@@ -21,9 +21,13 @@ enum CompositeLeg { tcp, ble }
 /// or because the FF16 endpoint document was read over BLE. When TCP cannot
 /// connect, or drops later, the same bridge is dialled over BLE GATT. While
 /// the bridge is on BLE, [upgradeInterval] retries TCP; when it succeeds the
-/// notification subscriptions move to TCP without being closed. TCP is probed
-/// only while a LAN interface is up, and never for longer than
-/// [tcpProbeBudget], so a phone with Wi-Fi off reaches BLE immediately.
+/// notification subscriptions move to TCP without being closed. For
+/// [upgradeRetryWindow] after a failover a failed retry redials within
+/// [upgradeRetryDelay] instead of waiting a whole tick, so a bridge whose
+/// LAN link is coming back is reached in seconds rather than tick-quantised
+/// attempts. TCP is probed only while a LAN interface is up, and never for
+/// longer than [tcpProbeBudget], so a phone with Wi-Fi off reaches BLE
+/// immediately.
 ///
 /// Bridges are identified by the daemon's stable `bridge_id` once a hello or
 /// an FF16 endpoint document has supplied it. Two scan results that resolve
@@ -66,6 +70,8 @@ class CompositeBleTransport implements BleTransport {
     required this.tcp,
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
+    this.upgradeRetryDelay = const Duration(milliseconds: 500),
+    this.upgradeRetryWindow = const Duration(seconds: 30),
     this.bleScanWait = const Duration(seconds: 5),
     this.tcpProbeBudget = const Duration(seconds: 3),
     this.tcpCandidateShareCap = const Duration(milliseconds: 250),
@@ -91,6 +97,28 @@ class CompositeBleTransport implements BleTransport {
   /// How often a bridge on BLE is probed for a working TCP endpoint. A
   /// non-positive duration disables the automatic upgrade.
   final Duration upgradeInterval;
+
+  /// How soon a failed upgrade dial is retried while the post-failover
+  /// window ([upgradeRetryWindow]) is still open.
+  ///
+  /// A failover means the LAN link went down and is coming back — a port
+  /// that refused one moment can answer the next — so a failed probe
+  /// redials at this cadence instead of waiting a whole [upgradeInterval]
+  /// tick: the bench's 9–10 s upgrade gap was mostly tick-quantised
+  /// retries of a port that had been up for seconds. A non-positive
+  /// duration disables the fast re-arm; the periodic tick then paces the
+  /// retries alone.
+  final Duration upgradeRetryDelay;
+
+  /// How long after a failover a failed upgrade dial keeps the fast
+  /// [upgradeRetryDelay] cadence.
+  ///
+  /// The window opens when the failover lands on BLE and closes this long
+  /// later; past it, a failed dial waits for the periodic [upgradeInterval]
+  /// tick, so the fast cadence cannot keep churning the radio interface
+  /// while a Wi-Fi link stays down. A non-positive duration disables the
+  /// fast cadence entirely.
+  final Duration upgradeRetryWindow;
 
   /// How long [connect] waits for a BLE scan hit when every TCP candidate
   /// failed while a [scan] is still running. Zero disables the wait.
@@ -1028,7 +1056,12 @@ class CompositeBleTransport implements BleTransport {
         try {
           await _connectBle(route, bleId, requireIdentity: requireIdentity);
           await _activateBle(route);
-          route.timeline.onFailoverEnd(clock.nowUs);
+          final nowUs = clock.nowUs;
+          route.timeline.onFailoverEnd(nowUs);
+          // BLE carries now, so the fast retry window is open: a failed
+          // upgrade dial retries within `upgradeRetryDelay` until this
+          // closes, then the periodic tick paces the retries again.
+          route.fastRetryUntilUs = nowUs + upgradeRetryWindow.inMicroseconds;
           return;
         } catch (_) {
           if (route.bleDeviceId == bleId) await _rejectBle(route);
@@ -1133,6 +1166,7 @@ class CompositeBleTransport implements BleTransport {
     if (route.switching) return;
     if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
     route.upgrading = true;
+    var landed = false;
     try {
       route.timeline.onUpgradeDialStart(clock.nowUs);
       String? id;
@@ -1158,8 +1192,9 @@ class CompositeBleTransport implements BleTransport {
         return;
       }
       await _activateTcp(route, id);
+      landed = true;
     } catch (_) {
-      // Stay on BLE; the next tick retries.
+      // Stay on BLE; the re-arm below paces the next attempt.
     } finally {
       route.upgrading = false;
       // A dial can report its loss while this probe is activating it: the
@@ -1167,7 +1202,30 @@ class CompositeBleTransport implements BleTransport {
       // so the listener only remembers it. No other switch will release the
       // route, so retry it here.
       _kickFallback(route);
+      if (!landed) _armFastRetry(route);
     }
+  }
+
+  /// Re-arms the next upgrade attempt at the fast [upgradeRetryDelay]
+  /// cadence while the post-failover window is open, so a failed dial does
+  /// not wait a whole [upgradeInterval] tick before the bridge's port is
+  /// tried again.
+  ///
+  /// One re-arm is pending at a time and none is armed while a dial is in
+  /// flight or a switch holds the route, so the fast cadence never adds a
+  /// second dial to the one already running.
+  void _armFastRetry(_Route route) {
+    if (_disposed || route.intentional || route.upgrading || route.switching) {
+      return;
+    }
+    if (route.active != _Lane.ble) return;
+    if (upgradeRetryDelay <= Duration.zero) return;
+    final until = route.fastRetryUntilUs;
+    if (until == null || clock.nowUs >= until) return;
+    route.fastRetryTimer ??= Timer(upgradeRetryDelay, () {
+      route.fastRetryTimer = null;
+      unawaited(_attemptUpgrade(route));
+    });
   }
 
   /// Waits until no switch holds the route. A switch that started while a
@@ -1214,6 +1272,8 @@ class CompositeBleTransport implements BleTransport {
   void _stopUpgrade(_Route route) {
     route.upgradeTimer?.cancel();
     route.upgradeTimer = null;
+    route.fastRetryTimer?.cancel();
+    route.fastRetryTimer = null;
   }
 
   Future<_LanEndpoint?> _readBleEndpoint(String bleId) async {
@@ -1375,6 +1435,16 @@ class _Route {
   String? tcpStateId;
   String? bleStateId;
   Timer? upgradeTimer;
+
+  /// The pending fast re-arm of the next upgrade attempt, armed when a dial
+  /// fails inside the post-failover window. One at a time; [_stopUpgrade]
+  /// cancels it with the periodic tick.
+  Timer? fastRetryTimer;
+
+  /// When the post-failover fast retry window closes, microseconds on
+  /// [clock]; null before this route's first failover. A later failover
+  /// moves the anchor with it.
+  int? fastRetryUntilUs;
 
   /// FF15 pings written on BLE whose answer has not arrived yet.
   int echoRequestsInFlight = 0;
