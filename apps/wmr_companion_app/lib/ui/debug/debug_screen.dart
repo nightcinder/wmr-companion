@@ -8,6 +8,7 @@ import 'package:wmr_core/domain/hand_pipeline.dart';
 import 'package:wmr_core/domain/orientation.dart';
 import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/services/controller_service.dart';
+import 'package:wmr_companion/wmr_companion.dart' show CompositeBleTransport;
 import 'package:wmr_companion_ui/wmr_companion_ui.dart';
 import 'package:wmr_tracking/wmr_tracking.dart';
 
@@ -70,6 +71,17 @@ class DebugScreen extends ConsumerWidget {
       ...ref.watch(bridgeTransportKindsProvider),
     };
     final wifiLeg = ref.watch(activeWifiLegProvider);
+    final linkTransport = source == DebugSource.fake
+        ? null
+        : ref.watch(realLinkTransportProvider);
+    final linkDeviceId = source == DebugSource.fake
+        ? null
+        : ref.watch(realDeviceProvider).deviceId;
+    final linkTimeline =
+        linkTransport is CompositeBleTransport && linkDeviceId != null
+        ? linkTransport.linkTimelineFor(linkDeviceId)
+        : null;
+    final linkClockUs = linkTransport?.clock.nowUs ?? 0;
 
     final vm.Quaternion raw = decoded
         ? view?.orientation ?? vm.Quaternion.identity()
@@ -209,6 +221,12 @@ class DebugScreen extends ConsumerWidget {
             transportKinds: transportKinds,
             wifiLeg: wifiLeg,
           ),
+          if (linkTimeline != null)
+            LinkSwitchRow(
+              timeline: linkTimeline,
+              nowUs: linkClockUs,
+              style: mono,
+            ),
           const SizedBox(height: 8),
           BridgeFirmwareView(bridges, style: mono),
           if (decoded)
@@ -501,7 +519,7 @@ class BridgeLinkTable extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final bridge in bridges)
+        for (final bridge in bridges) ...[
           Text(
             '${_kindLabel(bridge.bridgeId)}${bridge.bridgeId}  '
             '${bridge.mode.name}  '
@@ -510,6 +528,15 @@ class BridgeLinkTable extends StatelessWidget {
             '${_hand(bridge, 0)}  ${_hand(bridge, 1)}',
             style: style,
           ),
+          if (bridge.stalled && bridge.silentFor != null)
+            Text(
+              '${_kindLabel(bridge.bridgeId)}${bridge.bridgeId}: no data for '
+              '${(bridge.silentFor!.inMilliseconds / 1000).toStringAsFixed(1)} s',
+              style: (style ?? const TextStyle()).copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -517,6 +544,105 @@ class BridgeLinkTable extends StatelessWidget {
   String _kindLabel(String bridgeId) {
     final kind = transportKinds[bridgeId];
     return kind == null ? '' : '${kind.labelWithLeg(wifiLeg)}  ';
+  }
+}
+
+/// The "Last link switch" row: which way the composite link's most recent
+/// leg switch moved, how long ago it landed, and how long each recovery
+/// step took. A failover also prints the step-4 takeover it produced: the
+/// first BLE record minus the last TCP record.
+///
+/// [timeline] is the composite transport's link-switch timeline
+/// (`CompositeBleTransport.linkTimelineFor`): one `<mark>_us` entry per
+/// mark, in microseconds on the transport's monotonic clock. The row is
+/// rendered only for a link the composite carries; a route whose switches
+/// have not landed yet says so.
+class LinkSwitchRow extends StatelessWidget {
+  const LinkSwitchRow({
+    super.key,
+    required this.timeline,
+    required this.nowUs,
+    this.style,
+  });
+
+  /// Marks of the most recent link switch, as the composite recorded them.
+  final Map<String, Object?> timeline;
+
+  /// The transport clock's current value, for the "how long ago" prefix.
+  final int nowUs;
+
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(label(timeline, nowUs), style: style);
+  }
+
+  static int? _mark(Map<String, Object?> timeline, String key) =>
+      timeline[key] is int ? timeline[key] as int : null;
+
+  /// `later - earlier` in ms, or `—` before either mark landed.
+  static String _delta(int? later, int? earlier) =>
+      later == null || earlier == null
+      ? '—'
+      : '${((later - earlier) / 1000).toStringAsFixed(1)} ms';
+
+  /// The stall gap, or `—` when this failover has no stall mark of its own:
+  /// a loss remembered while a switch held the route leaves the older
+  /// episode's stall, which predates the TCP records that followed it.
+  static String _stallDelta(int? stall, int? lastTcp) =>
+      stall == null || lastTcp == null || stall <= lastTcp
+      ? '—'
+      : '${((stall - lastTcp) / 1000).toStringAsFixed(1)} ms';
+
+  /// The step-4 takeover: the first BLE record minus the last TCP record,
+  /// the figure the bench gates at 2500 ms. `n/a` — not `—` — while either
+  /// mark is missing: the takeover is a gate figure, so a run without it
+  /// records the absence instead of reading as a mark still pending.
+  static String _takeover(int? firstBle, int? lastTcp) =>
+      firstBle == null || lastTcp == null
+      ? 'n/a'
+      : '${((firstBle - lastTcp) / 1000).toStringAsFixed(1)} ms';
+
+  static String _ago(int us) {
+    final seconds = us / 1e6;
+    if (seconds < 1) return '${(us / 1000).toStringAsFixed(0)} ms ago';
+    if (seconds < 60) return '${seconds.toStringAsFixed(1)} s ago';
+    return '${(seconds / 60).toStringAsFixed(1)} min ago';
+  }
+
+  /// The row text. Only a switch that landed is shown: a failover counts
+  /// once its route became active on BLE, a dial back to TCP (an upgrade,
+  /// or a BLE-drop recovery) once its first TCP record arrived, and the
+  /// later landing wins. A failover that began from a loss remembered
+  /// while a switch held the route has no stall of its own: its older
+  /// mark predates the records that followed it, and renders as `—`. Its
+  /// takeover is still computable, from the first BLE record and the last
+  /// TCP record, so the row prints it either way.
+  static String label(Map<String, Object?> timeline, int nowUs) {
+    final lastTcp = _mark(timeline, 'last_tcp_record_us');
+    final stall = _mark(timeline, 'stall_detected_us');
+    final failoverBegin = _mark(timeline, 'failover_begin_us');
+    final failoverEnd = _mark(timeline, 'failover_end_us');
+    final firstBle = _mark(timeline, 'first_ble_record_us');
+    final dialStart = _mark(timeline, 'upgrade_dial_start_us');
+    final dialEnd = _mark(timeline, 'upgrade_dial_end_us');
+    final firstTcp = _mark(timeline, 'first_tcp_record_us');
+
+    if (failoverEnd != null &&
+        (dialEnd == null || firstTcp == null || failoverEnd >= dialEnd)) {
+      return 'Last link switch ${_ago(nowUs - failoverEnd)}  '
+          'TCP→BLE  stall +${_stallDelta(stall, lastTcp)}  '
+          'failover ${_delta(failoverEnd, failoverBegin)}  '
+          'first BLE +${_delta(firstBle, failoverEnd)}  '
+          'takeover ${_takeover(firstBle, lastTcp)}';
+    }
+    if (firstTcp != null && dialEnd != null) {
+      return 'Last link switch ${_ago(nowUs - dialEnd)}  '
+          'BLE→TCP  dial ${_delta(dialEnd, dialStart)}  '
+          'first TCP +${_delta(firstTcp, dialEnd)}';
+    }
+    return 'Last link switch none yet';
   }
 }
 

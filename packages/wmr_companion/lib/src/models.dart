@@ -186,6 +186,8 @@ class WmrLinkSnapshot {
     this.fault,
     this.stats,
     this.protocol,
+    this.stalled = false,
+    this.silentFor,
   });
 
   final WmrConnectionState state;
@@ -214,6 +216,13 @@ class WmrLinkSnapshot {
   /// error. See [WmrProtocolVersion.firmwareVersionMalformed] for a value that
   /// could not be decoded.
   final WmrProtocolVersion? protocol;
+
+  /// The connected, subscribed stream has exceeded the service's silence
+  /// threshold. Warn-only: this never disconnects or reconnects the bridge.
+  final bool stalled;
+
+  /// Time since the last accepted record, or null when no stream is live.
+  final Duration? silentFor;
 
   bool get connected => state == WmrConnectionState.ready;
 }

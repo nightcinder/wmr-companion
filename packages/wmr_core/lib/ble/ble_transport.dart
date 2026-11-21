@@ -147,6 +147,22 @@ abstract class BleTransport {
   Future<void> dispose();
 }
 
+/// A [BleTransport] that stamps the GATT steps of each device's dial on its
+/// [BleTransport.clock] and can report them.
+///
+/// The real BLE transport implements it; a composite carries the marks
+/// beside its own link-switch marks, and a transport that does not
+/// implement it reports none.
+abstract interface class BleSubscribeTimelineSource {
+  /// The GATT subscribe marks of [deviceId]'s most recent dial — the
+  /// connect start, service discovery done, the FF14 CCCD write, the first
+  /// FF14 notification after it, the disconnect, and the adapter's radio
+  /// off/on — in microseconds on the transport's monotonic clock, or null
+  /// before a GATT dial to the device began. The keys are the ones the
+  /// diagnostics bundle carries.
+  Map<String, Object?>? subscribeTimelineFor(String deviceId);
+}
+
 extension BleTransportMultiple on BleTransport {
   /// Subscribes to [characteristicUuid] on multiple devices and merges their
   /// notification streams.

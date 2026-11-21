@@ -608,10 +608,20 @@ unless the WebSocket `hello` reports the same `bridge_id`.
 
 1. Try TCP endpoints that are known from configuration or discovery. The
    probe is skipped when no LAN interface is up, and it is capped at three
-   seconds in total (`tcpProbeBudget`), because the BLE leg is always
-   available; a phone with Wi-Fi off reaches BLE at once.
+   seconds in total (`tcpProbeBudget`) with one candidate holding at most
+   250 ms of it (`tcpCandidateShareCap`) — the last candidate alone keeps
+   the whole remaining budget, so a slow but answering handshake still
+   lands — because the BLE leg is always available; a phone with Wi-Fi off
+   reaches BLE at once.
 2. If TCP fails, connect over BLE GATT.
-3. While on BLE, retry TCP every 2 seconds by default.
+3. While on BLE, retry TCP every 2 seconds by default. For 30 seconds
+   after a failover (`upgradeRetryWindow`) a failed retry redials within
+   100 ms (`upgradeRetryDelay`) instead of waiting a whole tick, so a LAN
+   link that is coming back is reached at most 400 ms after it answers —
+   the 300 ms probe plus the re-arm — with no Pi-reachability check in
+   between. One upgrade dial runs at most 300 ms
+   (`upgradeProbeBudget`), so a failed pass ends fast instead of holding
+   the leg for the whole probe budget.
 4. When TCP connects, move the notification subscriptions to TCP without
    closing them.
 5. If TCP drops later, fall back to BLE again.

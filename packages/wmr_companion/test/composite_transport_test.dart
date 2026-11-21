@@ -60,6 +60,32 @@ Uint8List _sessionToken([String token = 'secret']) => Uint8List.fromList(
 Uint8List _versionString([String value = '0.2.4-pi']) =>
     Uint8List.fromList(utf8.encode(value));
 
+/// The timeline keys `CompositeBleTransport.linkTimelineFor` records, the
+/// same ones the app's Debug row reads and the diagnostics bundle carries:
+/// one `<mark>_us` per step, the live episode's frozen anchor, plus the
+/// finished-episode list.
+const _timelineKeys = [
+  'last_tcp_record_us',
+  'stall_detected_us',
+  'failover_begin_us',
+  'failover_end_us',
+  'first_ble_record_us',
+  'upgrade_dial_start_us',
+  'upgrade_dial_end_us',
+  'first_upgrade_dial_start_us',
+  'upgrade_dial_attempts',
+  'first_tcp_record_us',
+  'first_tcp_record_session',
+  'first_tcp_record_wall_us',
+  'episode_last_tcp_record_us',
+  'failover_outcome',
+  'failover_reason',
+  'failover_candidate_count',
+  'upgrade_outcome',
+  'upgrade_candidate_count',
+  'episodes',
+];
+
 class _FakeTcp extends WmrWsTransport {
   _FakeTcp() : super(endpoints: const []);
 
@@ -73,6 +99,10 @@ class _FakeTcp extends WmrWsTransport {
   final List<String> unsubscribeCalls = [];
   final List<String> tcpDisconnects = [];
   bool failConnect = false;
+
+  /// When set, cancelling a notification subscription throws, like a stack
+  /// that fails the release of a channel during a lane switch.
+  bool failCancel = false;
 
   /// When set, the first [connectionState] subscription reports the leg as
   /// already lost, like a stall that lands between the dial and the switch
@@ -129,7 +159,15 @@ class _FakeTcp extends WmrWsTransport {
     String deviceId,
     String serviceUuid,
     String characteristicUuid,
-  ) => _stream(deviceId, characteristicUuid).stream;
+  ) {
+    final source = _stream(deviceId, characteristicUuid).stream;
+    if (!failCancel) return source;
+    final releasing = StreamController<BleNotification>(
+      onCancel: () => Future<void>.error(StateError('tcp unsubscribe failed')),
+    );
+    source.listen(releasing.add, onError: releasing.addError);
+    return releasing.stream;
+  }
 
   @override
   Future<void> unsubscribe(
@@ -174,13 +212,18 @@ class _FakeTcp extends WmrWsTransport {
     );
   }
 
-  bool emit(String deviceId, String characteristicUuid, List<int> value) {
+  bool emit(
+    String deviceId,
+    String characteristicUuid,
+    List<int> value, {
+    int? receivedAtUs,
+  }) {
     final controller = streams[_key(deviceId, characteristicUuid)];
     if (controller == null || !controller.hasListener) return false;
     controller.add(
       BleNotification(
         value: Uint8List.fromList(value),
-        receivedAtUs: clock.nowUs,
+        receivedAtUs: receivedAtUs ?? clock.nowUs,
       ),
     );
     return true;
@@ -303,17 +346,26 @@ class _StuckCancelBle extends FakeTransport {
 /// A TCP fake that hands every concurrent caller the same in-flight dial, like
 /// [WmrWsTransport.connect] joining an existing session, and holds it until
 /// [release] so a test can land a dial after its probe budget expired.
+///
+/// Like the real transport, [disconnect] tears the in-flight session down: the
+/// next [connect] dials fresh instead of joining the abandoned one.
 class _HeldDialTcp extends _FakeTcp {
   final Completer<void> release = Completer<void>();
   final List<String> disconnectCalls = [];
   Future<void>? _pending;
   int dialAttempts = 0;
+  int freshDials = 0;
+  int joins = 0;
 
   @override
   Future<void> connect(String deviceId) {
     dialAttempts++;
     final pending = _pending;
-    if (pending != null) return pending;
+    if (pending != null) {
+      joins++;
+      return pending;
+    }
+    freshDials++;
     final dial = _dial(deviceId);
     _pending = dial;
     return dial;
@@ -322,6 +374,7 @@ class _HeldDialTcp extends _FakeTcp {
   @override
   Future<void> disconnect(String deviceId) {
     disconnectCalls.add(deviceId);
+    _pending = null;
     return super.disconnect(deviceId);
   }
 
@@ -338,6 +391,8 @@ class _JoiningTcp extends _FakeTcp {
   final Map<String, Future<void>> _pending = {};
   final List<String> dials = [];
   final List<String> disconnectCalls = [];
+  int freshDials = 0;
+  int joins = 0;
 
   /// Holds every dial for [id] until the returned completer completes.
   Completer<void> hold(String id) => holds.putIfAbsent(id, Completer.new);
@@ -345,6 +400,12 @@ class _JoiningTcp extends _FakeTcp {
   @override
   Future<void> connect(String deviceId) {
     dials.add(deviceId);
+    final pending = _pending[deviceId];
+    if (pending != null) {
+      joins++;
+      return pending;
+    }
+    freshDials++;
     return _pending[deviceId] ??= _dial(deviceId);
   }
 
@@ -357,7 +418,19 @@ class _JoiningTcp extends _FakeTcp {
   @override
   Future<void> disconnect(String deviceId) {
     disconnectCalls.add(deviceId);
+    // A disconnect tears the session down, like WmrWsTransport removing it:
+    // the next dial for this candidate starts fresh instead of joining.
+    _pending.remove(deviceId);
     return super.disconnect(deviceId);
+  }
+
+  @override
+  void drop(String deviceId) {
+    // A dropped socket's session is gone the same way: the next dial for
+    // this candidate starts fresh instead of joining the dead session's
+    // dial.
+    _pending.remove(deviceId);
+    super.drop(deviceId);
   }
 }
 
@@ -408,6 +481,128 @@ class _RecordingBle extends FakeTransport {
   }
 }
 
+/// A TCP fake that parks the dials of chosen candidates — a LAN address whose
+/// port never answers — while every other candidate lands at once, recording
+/// when each dial started and when its socket was closed so a test can bound
+/// how long one candidate held the attempt.
+class _RefusingTcp extends _FakeTcp {
+  _RefusingTcp(this.refusing);
+
+  /// Candidates whose [connect] never completes.
+  final Set<String> refusing;
+
+  final Stopwatch _clock = Stopwatch()..start();
+
+  /// When each dial started, in dial order: the candidate id with the
+  /// stopwatch reading in microseconds.
+  final List<MapEntry<String, int>> dialAt = [];
+
+  /// When each candidate's socket was first closed, in the same units.
+  final Map<String, int> closedAt = {};
+
+  @override
+  Future<void> connect(String deviceId) {
+    dialAt.add(MapEntry(deviceId, _clock.elapsedMicroseconds));
+    if (!refusing.contains(deviceId)) return super.connect(deviceId);
+    return Completer<void>().future;
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) {
+    closedAt.putIfAbsent(deviceId, () => _clock.elapsedMicroseconds);
+    return super.disconnect(deviceId);
+  }
+}
+
+/// A TCP fake that answers each dial only after a delay — a handshake on
+/// congested Wi-Fi — so a test can prove the last candidate keeps the whole
+/// remaining budget rather than the per-candidate cap.
+class _SlowDialTcp extends _FakeTcp {
+  _SlowDialTcp(this.delay);
+
+  /// How long every [connect] takes to answer.
+  final Duration delay;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    await Future<void>.delayed(delay);
+    await super.connect(deviceId);
+  }
+}
+
+/// A TCP fake whose port answers until it goes dark, then parks or refuses
+/// every dial until it comes back up — a bridge whose LAN listener is gone —
+/// recording when each dial started and when each parked dial's socket was
+/// closed, so a test can bound a failed attempt and prove none leaked its
+/// socket.
+class _DarkPortTcp extends _FakeTcp {
+  _DarkPortTcp({this.hang = true});
+
+  /// Whether a dark dial hangs — a firewall dropping the SYN — instead of
+  /// being refused at once — a port that is not up yet.
+  final bool hang;
+
+  bool _dark = false;
+
+  /// A chosen stopwatch reading (µs): a dial that starts before it fails
+  /// even though [goDark] was called, and one that starts at or after it
+  /// answers as if the port had come back. Null keeps the port dark until
+  /// [comeUp].
+  int? failUntilUs;
+
+  final Stopwatch _clock = Stopwatch()..start();
+
+  /// The fake's stopwatch reading now, in the same units as [dialAt].
+  int get nowUs => _clock.elapsedMicroseconds;
+
+  /// Stopwatch reading (µs) when each dial started, oldest first.
+  final List<int> dialAt = [];
+
+  /// Stopwatch reading (µs) when each parked dial's socket was closed,
+  /// oldest first. Only a dial still in flight counts, so a probe teardown
+  /// lands here and a stalled leg's own close does not.
+  final List<int> closedAt = [];
+
+  /// Index into [dialAt] of the first dial made after the port went dark.
+  int darkFrom = 0;
+
+  final Set<String> _inFlight = {};
+
+  /// The port stops answering: every later dial fails until [comeUp] (or
+  /// past [failUntilUs]).
+  void goDark() {
+    _dark = true;
+    failUntilUs = null;
+    darkFrom = dialAt.length;
+  }
+
+  /// The port answers again: the next dial lands at once.
+  void comeUp() => _dark = false;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    final startedAt = _clock.elapsedMicroseconds;
+    dialAt.add(startedAt);
+    final until = failUntilUs;
+    final dark = _dark && (until == null || startedAt < until);
+    if (!dark) {
+      await super.connect(deviceId);
+      return;
+    }
+    if (!hang) throw StateError('connection refused');
+    _inFlight.add(deviceId);
+    await Completer<void>().future;
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async {
+    if (_inFlight.remove(deviceId)) {
+      closedAt.add(_clock.elapsedMicroseconds);
+    }
+    await super.disconnect(deviceId);
+  }
+}
+
 /// A TCP fake that holds every dial on its own completer, so a test can land
 /// one dial while another (started later on the same candidate) keeps running
 /// into its own budget.
@@ -449,18 +644,167 @@ class _CccdBle extends FakeTransport {
   }
 }
 
-/// A loopback WebSocket daemon that says `hello` and then never answers again,
-/// like a Pi whose TCP peer vanished while the socket stayed open.
-class _SilentPi {
-  _SilentPi._(this._server);
+/// A BLE fake that reports the TCP leg lost from inside the BLE-notify
+/// disable a switch onto TCP runs: the loss lands while that switch still
+/// holds the route, so the composite remembers it instead of recording a
+/// fresh stall.
+class _DroppingBle extends FakeTransport {
+  _DroppingBle({required super.devices, required this.onUnsubscribe});
+
+  final void Function()? onUnsubscribe;
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    onUnsubscribe?.call();
+  }
+}
+
+/// A BLE fake whose notification subscription for [characteristic] refuses to
+/// cancel, like a platform stack that fails a GATT release mid-switch: the
+/// detach step of a lane switch throws, so the activation fails partway.
+class _StuckDetachBle extends FakeTransport {
+  _StuckDetachBle({required super.devices, required this.characteristic});
+
+  final String characteristic;
+
+  /// Fails the cancel of every [characteristic] subscription opened while
+  /// set. Clear it before the teardown so cancels there succeed.
+  bool failCancel = false;
+
+  /// One controller per [subscribe] call on [characteristic]; a cancel
+  /// failed, so the listener a channel left on an older one stays until the
+  /// transport reaps it.
+  final List<StreamController<BleNotification>> stuckSubs = [];
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    if (characteristicUuid.toLowerCase() == characteristic) {
+      final controller = StreamController<BleNotification>(
+        onCancel: () {
+          if (failCancel) throw StateError('unsubscribe failed');
+        },
+      );
+      stuckSubs.add(controller);
+      return controller.stream;
+    }
+    return super.subscribe(deviceId, serviceUuid, characteristicUuid);
+  }
+
+  /// Delivers [value] on the newest stuck subscription. Returns false when no
+  /// channel is attached to it.
+  bool deliverStuck(List<int> value) {
+    if (stuckSubs.isEmpty) return false;
+    final controller = stuckSubs.last;
+    if (!controller.hasListener) return false;
+    controller.add(
+      BleNotification(
+        value: Uint8List.fromList(value),
+        receivedAtUs: clock.nowUs,
+      ),
+    );
+    return true;
+  }
+}
+
+/// A BLE fake for a lane switch that fails after an echo handoff: the cancel
+/// of every [failCharacteristic] subscription throws while [failCancel] is
+/// set, like a platform stack that fails a GATT release mid-switch, and every
+/// [trackCharacteristic] subscription is its own controller whose
+/// cancellation is counted, so a test can prove a handed-off drain
+/// subscription is released instead of orphaned beside the re-attach.
+class _FailingSwitchBle extends FakeTransport {
+  _FailingSwitchBle({
+    required super.devices,
+    required this.failCharacteristic,
+    required this.trackCharacteristic,
+  });
+
+  final String failCharacteristic;
+  final String trackCharacteristic;
+
+  /// Fails the cancel of every [failCharacteristic] subscription opened
+  /// while set. Clear it before the teardown so cancels there succeed.
+  bool failCancel = false;
+
+  /// One controller per [subscribe] call on [trackCharacteristic], newest
+  /// last, so the channel a rollback re-attached is the delivery target.
+  final List<StreamController<BleNotification>> tracked = [];
+  int cancelledSubscriptions = 0;
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final normalized = characteristicUuid.toLowerCase();
+    if (normalized == failCharacteristic) {
+      return StreamController<BleNotification>(
+        onCancel: () {
+          if (failCancel) throw StateError('unsubscribe failed');
+        },
+      ).stream;
+    }
+    if (normalized == trackCharacteristic) {
+      final controller = StreamController<BleNotification>(
+        onCancel: () => cancelledSubscriptions++,
+      );
+      tracked.add(controller);
+      return controller.stream;
+    }
+    return super.subscribe(deviceId, serviceUuid, characteristicUuid);
+  }
+
+  /// Delivers [value] on the newest tracked subscription. Returns false when
+  /// no channel is attached to it.
+  bool deliverTracked(List<int> value) {
+    if (tracked.isEmpty) return false;
+    final controller = tracked.last;
+    if (!controller.hasListener) return false;
+    controller.add(
+      BleNotification(
+        value: Uint8List.fromList(value),
+        receivedAtUs: clock.nowUs,
+      ),
+    );
+    return true;
+  }
+}
+
+/// A loopback WebSocket daemon that says `hello` and answers liveness
+/// `ping`s on a configurable delay — or stops answering, like a Pi whose TCP
+/// peer vanished while the socket stayed open.
+class _LoopbackPi {
+  _LoopbackPi._(this._server);
 
   final HttpServer _server;
+  bool _stopped = false;
+
+  /// Replies to liveness `ping`s unless cleared. A test that clears it
+  /// models a half-open TCP peer: the socket stays open and writable, but
+  /// nothing behind it answers.
+  bool answerPings = true;
+
+  /// How long each `ping` waits for its `pong`, like a loaded Pi that still
+  /// answers inside the deadline.
+  Duration pongDelay = Duration.zero;
+
+  /// Wall-clock time of each `pong` sent, oldest first.
+  final List<DateTime> pongAt = [];
 
   int get port => _server.port;
 
-  static Future<_SilentPi> start({required String bridgeId}) async {
+  static Future<_LoopbackPi> start({required String bridgeId}) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final pi = _SilentPi._(server);
+    final pi = _LoopbackPi._(server);
     server.listen((request) async {
       final ws = await WebSocketTransformer.upgrade(
         request,
@@ -468,9 +812,12 @@ class _SilentPi {
             protocols.contains('wmr-wifi-v1') ? 'wmr-wifi-v1' : null,
         compression: CompressionOptions.compressionOff,
       );
-      // Keep reading so the socket is drained, and answer nothing: no `pong`,
-      // no `subscribed`.
-      ws.listen((_) {}, onError: (Object _) {}, onDone: () {});
+      // Keep reading so the socket is drained.
+      ws.listen(
+        (dynamic data) => pi._onMessage(ws, data),
+        onError: (Object _) {},
+        onDone: () {},
+      );
       ws.add(
         jsonEncode({
           'type': 'hello',
@@ -491,7 +838,40 @@ class _SilentPi {
     return pi;
   }
 
-  Future<void> stop() => _server.close(force: true);
+  void _onMessage(WebSocket ws, dynamic data) {
+    if (data is! String) return;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(data);
+    } on FormatException {
+      return;
+    }
+    if (decoded is! Map || decoded['type'] != 'ping' || !answerPings) return;
+    final pong = jsonEncode({
+      'type': 'pong',
+      'id': decoded['id'],
+      't': decoded['t'],
+      'serverTimeUs': 0,
+    });
+    if (pongDelay <= Duration.zero) {
+      _sendPong(ws, pong);
+      return;
+    }
+    Timer(pongDelay, () {
+      if (_stopped || ws.readyState != WebSocket.open) return;
+      _sendPong(ws, pong);
+    });
+  }
+
+  void _sendPong(WebSocket ws, String pong) {
+    ws.add(pong);
+    pongAt.add(DateTime.now());
+  }
+
+  Future<void> stop() {
+    _stopped = true;
+    return _server.close(force: true);
+  }
 }
 
 void main() {
@@ -523,6 +903,57 @@ void main() {
     rssi: null,
     serviceUuids: const [wmrBridgeServiceUuid],
   );
+
+  /// Boots the dark-port route the upgrade-cadence tests share: the TCP
+  /// leg answers and carries, then the port goes dark and the leg drops, so
+  /// the route fails over to BLE with the FF16 endpoint naming
+  /// `127.0.0.1:8765` and the upgrade probe dialling a port that no longer
+  /// answers. The probe budget is the production default (3 s): the
+  /// upgrade dial's own cap is what keeps every failed pass short, not a
+  /// budget shrunken here.
+  Future<(_DarkPortTcp, CompositeBleTransport)> bootDarkRoute({
+    bool hang = true,
+    Duration tcpProbeBudget = const Duration(seconds: 3),
+    Duration upgradeInterval = const Duration(seconds: 2),
+    Duration upgradeRetryDelay = const Duration(milliseconds: 100),
+    Duration upgradeRetryWindow = const Duration(seconds: 30),
+  }) async {
+    await tcp.dispose();
+    final dark = _DarkPortTcp(hang: hang)
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = dark;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+    final transport = CompositeBleTransport(
+      tcp: dark,
+      ble: ble,
+      tcpProbeBudget: tcpProbeBudget,
+      upgradeInterval: upgradeInterval,
+      upgradeRetryDelay: upgradeRetryDelay,
+      upgradeRetryWindow: upgradeRetryWindow,
+    );
+    addTearDown(transport.dispose);
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    // Let the watched leg's state stream attach before the leg drops.
+    await _settle();
+    dark.goDark();
+    dark.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+    return (dark, transport);
+  }
 
   setUp(() {
     tcp = _FakeTcp()
@@ -926,8 +1357,437 @@ void main() {
     expect(states, isNot(contains(BleConnectionState.disconnected)));
   });
 
+  test('a synthetic stall records the recovery timeline in order', () async {
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+    await _settle();
+    final before = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(before['last_tcp_record_us'], isNotNull);
+    expect(before['stall_detected_us'], isNull);
+
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+    // Keep the failover's end and the first BLE record apart, so the gap
+    // between them is real rather than a same-tick coincidence.
+    await _settle();
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+          null,
+      reason: 'the first BLE record was not marked on the timeline',
+    );
+
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    // One entry per recovery step, under the keys the bundle carries.
+    expect(marks.keys, unorderedEquals(_timelineKeys));
+    final lastTcp = marks['last_tcp_record_us']! as int;
+    final stall = marks['stall_detected_us']! as int;
+    final begin = marks['failover_begin_us']! as int;
+    final end = marks['failover_end_us']! as int;
+    final firstBle = marks['first_ble_record_us']! as int;
+    // No upgrade ran, so no dial or TCP-record mark may exist.
+    expect(marks['upgrade_dial_start_us'], isNull);
+    expect(marks['upgrade_dial_end_us'], isNull);
+    expect(marks['first_tcp_record_us'], isNull);
+    // Mark order: the stall follows the last TCP record, the failover
+    // follows the stall, and the first BLE record follows the failover.
+    expect(stall, greaterThan(lastTcp));
+    expect(begin, greaterThanOrEqualTo(stall));
+    expect(end, greaterThanOrEqualTo(begin));
+    expect(firstBle, greaterThan(end));
+    // The recorded episode spans a non-zero gap end to end.
+    expect(firstBle - lastTcp, greaterThan(0));
+  });
+
+  test('a BLE drop recovered over TCP records the dial, and a later failover clears it', () async {
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+
+    // Fail over to BLE first, so a BLE drop has a route to recover.
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+    await _settle();
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+    final failoverEnd =
+        transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us']! as int;
+
+    // The BLE link drops: the recovery dials back to TCP and marks it.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'the dropped BLE link was not recovered over TCP',
+    );
+    await _settle();
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+          null,
+      reason: 'the first TCP record after the recovery was not marked',
+    );
+
+    final recovered = transport.linkTimelineFor(_tcpDeviceId)!;
+    final dialStart = recovered['upgrade_dial_start_us']! as int;
+    final dialEnd = recovered['upgrade_dial_end_us']! as int;
+    final firstTcp = recovered['first_tcp_record_us']! as int;
+    // The recovery is a dial back to TCP, newer than the failover it
+    // followed, and its first record follows the dial.
+    expect(dialStart, greaterThan(failoverEnd));
+    expect(dialEnd, greaterThan(dialStart));
+    expect(firstTcp, greaterThan(dialEnd));
+
+    // The next stall fails over again, and its begin clears the marks of
+    // the episode it supersedes: the recovery's dial and first record.
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the recovered TCP leg did not fail over to BLE again',
+    );
+    final second = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(second['upgrade_dial_start_us'], isNull);
+    expect(second['upgrade_dial_end_us'], isNull);
+    expect(second['first_tcp_record_us'], isNull);
+    expect(second['failover_end_us']! as int, greaterThan(failoverEnd));
+    // The second failover's stall is its own: it follows its own records.
+    expect(
+      second['stall_detected_us']! as int,
+      greaterThan(second['last_tcp_record_us']! as int),
+    );
+  });
+
+  test(
+    'records every stall episode, the earlier ones preserved in order',
+    () async {
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+      addTearDown(sub.cancel);
+
+      // Episode one: the TCP leg stalls and the route fails over to BLE.
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the first stall did not fail over to BLE',
+      );
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+            null,
+        reason: "the first episode's first BLE record was not marked",
+      );
+      // What the top-level marks said while episode one was the most recent.
+      final episodeOneLive = transport.linkTimelineFor(_tcpDeviceId)!;
+
+      // The BLE link drops: the recovery dials back to TCP inside episode one,
+      // and a record lands there.
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the dropped BLE link was not recovered over TCP',
+      );
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
+      await _settle();
+
+      // Episode two: its stall supersedes episode one, which moves into the
+      // history with its own marks.
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the second stall did not fail over to BLE',
+      );
+      expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [4]), isTrue);
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+            null,
+        reason: "the second episode's first BLE record was not marked",
+      );
+
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final episodes = marks['episodes']! as List<Object?>;
+      expect(
+        episodes,
+        hasLength(1),
+        reason: 'the first episode was not archived',
+      );
+      final episodeOne = episodes.single as Map<String, Object?>;
+      // The first episode is preserved: its failover marks are the ones the
+      // top level showed while it was the most recent episode.
+      expect(
+        episodeOne['last_tcp_record_us'],
+        episodeOneLive['last_tcp_record_us'],
+      );
+      expect(
+        episodeOne['stall_detected_us'],
+        episodeOneLive['stall_detected_us'],
+      );
+      expect(
+        episodeOne['failover_begin_us'],
+        episodeOneLive['failover_begin_us'],
+      );
+      expect(episodeOne['failover_end_us'], episodeOneLive['failover_end_us']);
+      expect(
+        episodeOne['first_ble_record_us'],
+        episodeOneLive['first_ble_record_us'],
+      );
+
+      final lastTcpOne = episodeOne['last_tcp_record_us']! as int;
+      final stallOne = episodeOne['stall_detected_us']! as int;
+      final beginOne = episodeOne['failover_begin_us']! as int;
+      final endOne = episodeOne['failover_end_us']! as int;
+      final firstBleOne = episodeOne['first_ble_record_us']! as int;
+      final dialStartOne = episodeOne['upgrade_dial_start_us']! as int;
+      final dialEndOne = episodeOne['upgrade_dial_end_us']! as int;
+      final firstTcpOne = episodeOne['first_tcp_record_us']! as int;
+      // The archived episode's marks are coherent end to end: its stall
+      // follows the record that preceded it, and each step follows the last,
+      // dial and first TCP record included.
+      expect(stallOne, greaterThan(lastTcpOne));
+      expect(beginOne, greaterThanOrEqualTo(stallOne));
+      expect(endOne, greaterThanOrEqualTo(beginOne));
+      expect(firstBleOne, greaterThan(endOne));
+      expect(dialStartOne, greaterThan(firstBleOne));
+      expect(dialEndOne, greaterThan(dialStartOne));
+      expect(firstTcpOne, greaterThan(dialEndOne));
+
+      // The second episode is the most recent one, and it follows the first.
+      final stallTwo = marks['stall_detected_us']! as int;
+      final beginTwo = marks['failover_begin_us']! as int;
+      final endTwo = marks['failover_end_us']! as int;
+      final firstBleTwo = marks['first_ble_record_us']! as int;
+      expect(stallTwo, greaterThan(firstTcpOne));
+      expect(stallTwo, greaterThan(marks['last_tcp_record_us']! as int));
+      expect(beginTwo, greaterThanOrEqualTo(stallTwo));
+      expect(endTwo, greaterThanOrEqualTo(beginTwo));
+      expect(firstBleTwo, greaterThan(endTwo));
+      expect(endOne, lessThan(beginTwo));
+
+      // Episode three archives the second: the history keeps the last
+      // episodes in order, the first still preserved.
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the second dropped BLE link was not recovered over TCP',
+      );
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [5]), isTrue);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the third stall did not fail over to BLE',
+      );
+
+      final history = transport.linkTimelineFor(_tcpDeviceId)!;
+      final list = history['episodes']! as List<Object?>;
+      expect(list, hasLength(2));
+      final episodeTwo = list[1] as Map<String, Object?>;
+      expect((list[0] as Map)['failover_end_us'], endOne);
+      expect(episodeTwo['stall_detected_us'], stallTwo);
+      expect(episodeTwo['failover_end_us'], endTwo);
+      expect(episodeTwo['first_ble_record_us'], firstBleTwo);
+      expect(episodeTwo['failover_begin_us']! as int, greaterThan(endOne));
+    },
+  );
+
+  test('a TCP loss during the upgrade activation archives the standing episode '
+      'once', () async {
+    // The recovery from a BLE drop dials back to TCP, and the BLE-notify
+    // disable it runs while still holding the route is where the TCP leg
+    // reports lost: the loss is remembered, not freshly detected.
+    ble.dispose();
+    var dropped = false;
+    final dropping =
+        _DroppingBle(
+            devices: const [
+              FakeDevice(
+                id: _bleDeviceId,
+                name: 'WMR Bridge',
+                services: fakeBridgeDeviceServices,
+              ),
+            ],
+            onUnsubscribe: () {
+              if (dropped) return;
+              dropped = true;
+              tcp.drop(_tcpDeviceId);
+            },
+          )
+          ..onRead = (deviceId, characteristicUuid) {
+            if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _versionString();
+            }
+            throw StateError('unexpected read $characteristicUuid');
+          };
+    ble = dropping;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+
+    // Episode one: the TCP leg stalls and the route fails over to BLE.
+    expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+    await _settle();
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the first stall did not fail over to BLE',
+    );
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [2]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+          null,
+      reason: "the first episode's first BLE record was not marked",
+    );
+    // What the top-level marks said while episode one was the most recent,
+    // with nothing archived yet.
+    final episodeOneLive = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(episodeOneLive['episodes'], isEmpty);
+    final failoverEndOne = episodeOneLive['failover_end_us']! as int;
+
+    // The BLE link drops and the recovery dials back to TCP; the recovered
+    // leg reports lost during that activation, so the loss is remembered,
+    // and the failover it kicks archives the standing episode.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () =>
+          transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble &&
+          (transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us']!
+                  as int) >
+              failoverEndOne,
+      reason: 'the loss remembered during the activation was not retried',
+    );
+
+    // The new episode's first BLE record follows its own failover.
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'] !=
+          episodeOneLive['first_ble_record_us'],
+      reason: "the second episode's first BLE record was not marked",
+    );
+
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    final episodes = marks['episodes']! as List<Object?>;
+    expect(
+      episodes,
+      hasLength(1),
+      reason: 'the standing episode was not archived exactly once',
+    );
+    final episodeOne = episodes.single as Map<String, Object?>;
+    // The archived episode is the one the top level described while it was
+    // the most recent: its marks are the values it held then.
+    expect(
+      episodeOne['last_tcp_record_us'],
+      episodeOneLive['last_tcp_record_us'],
+    );
+    expect(
+      episodeOne['stall_detected_us'],
+      episodeOneLive['stall_detected_us'],
+    );
+    expect(
+      episodeOne['failover_begin_us'],
+      episodeOneLive['failover_begin_us'],
+    );
+    expect(episodeOne['failover_end_us'], episodeOneLive['failover_end_us']);
+    expect(
+      episodeOne['first_ble_record_us'],
+      episodeOneLive['first_ble_record_us'],
+    );
+
+    // The recovery dial landed inside the standing episode, and the loss
+    // cut it before any record reached the recovered leg.
+    final firstBleOne = episodeOne['first_ble_record_us']! as int;
+    final dialStartOne = episodeOne['upgrade_dial_start_us']! as int;
+    final dialEndOne = episodeOne['upgrade_dial_end_us']! as int;
+    expect(dialStartOne, greaterThan(firstBleOne));
+    expect(dialEndOne, greaterThan(dialStartOne));
+    expect(episodeOne['first_tcp_record_us'], isNull);
+
+    // The new episode opened from the remembered loss: no fresh stall of
+    // its own — the standing one stays — and its failover follows the
+    // recovery dial it superseded, with the dial marks gone.
+    expect(marks['stall_detected_us'], episodeOneLive['stall_detected_us']);
+    final beginTwo = marks['failover_begin_us']! as int;
+    final endTwo = marks['failover_end_us']! as int;
+    expect(beginTwo, greaterThan(dialEndOne));
+    expect(endTwo, greaterThanOrEqualTo(beginTwo));
+    expect(marks['first_ble_record_us']! as int, greaterThan(endTwo));
+    expect(marks['upgrade_dial_start_us'], isNull);
+    expect(marks['upgrade_dial_end_us'], isNull);
+    expect(marks['first_tcp_record_us'], isNull);
+    // No TCP record ever landed past episode one's, so the top-level mark
+    // still names the record the archived episode froze.
+    expect(marks['last_tcp_record_us'], episodeOneLive['last_tcp_record_us']);
+
+    // The recovered leg the loss named was closed on the way back to BLE.
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    expect(tcp.tcpDisconnects, contains(_tcpDeviceId));
+  });
+
   test('a silent TCP socket fails over to BLE within 2500 ms', () async {
-    final pi = await _SilentPi.start(bridgeId: _bridgeId);
+    final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
+    pi.answerPings = false;
     final tcpLink = WmrWsTransport(
       endpoints: [
         WmrWsEndpoint(
@@ -982,6 +1842,138 @@ void main() {
     expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [3]), isTrue);
     await _settle();
     expect(received.last.value, [3]);
+  });
+
+  test(
+    'a peer that answers and then goes silent stalls within 1500 ms',
+    () async {
+      final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
+      addTearDown(pi.stop);
+      final tcpLink = WmrWsTransport(
+        endpoints: [
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: pi.port,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        ],
+      );
+      final transport = CompositeBleTransport(
+        tcp: tcpLink,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      // The link is healthy first: at least two probes were answered.
+      await _waitFor(
+        () => pi.pongAt.length >= 2,
+        reason: 'the liveness probes were not answered before the silence',
+      );
+
+      // Silence the peer right after one more pong, so the stall's budget
+      // is measured from the last answer the link gave.
+      final answered = pi.pongAt.length;
+      await _waitFor(
+        () => pi.pongAt.length > answered,
+        timeout: const Duration(seconds: 2),
+        reason: 'no further probe was answered',
+      );
+      pi.answerPings = false;
+      final silentAtUs = transport.clock.nowUs;
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['stall_detected_us'] !=
+            null,
+        timeout: const Duration(seconds: 3),
+        reason: 'the silent peer was not detected as a stall',
+      );
+
+      // The detector defaults are a 500 ms interval and a 1000 ms deadline,
+      // so the stall lands within 1500 ms of the last pong the peer sent;
+      // the slack left above that budget is the event loop's timer
+      // lateness.
+      final stallUs =
+          transport.linkTimelineFor(_tcpDeviceId)!['stall_detected_us']! as int;
+      expect(
+        stallUs - silentAtUs,
+        lessThanOrEqualTo(1550000),
+        reason: 'the stall outlived the 1500 ms liveness budget',
+      );
+
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the silent peer did not fail over to BLE',
+      );
+
+      // The stall episode is recorded: its marks name the detection and the
+      // failover it began. It is still the most recent episode, so the
+      // history behind it is empty.
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final stall = marks['stall_detected_us']! as int;
+      final begin = marks['failover_begin_us']! as int;
+      final end = marks['failover_end_us']! as int;
+      expect(begin, greaterThanOrEqualTo(stall));
+      expect(end, greaterThanOrEqualTo(begin));
+      expect(marks['episodes']! as List, isEmpty);
+    },
+  );
+
+  test('a pong just inside the deadline never fails over', () async {
+    final pi = await _LoopbackPi.start(bridgeId: _bridgeId);
+    pi.pongDelay = const Duration(milliseconds: 900);
+    addTearDown(pi.stop);
+    final tcpLink = WmrWsTransport(
+      endpoints: [
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: pi.port,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      ],
+    );
+    final transport = CompositeBleTransport(
+      tcp: tcpLink,
+      ble: ble,
+      upgradeInterval: const Duration(hours: 1),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+    // Every probe's answer lands 900 ms later, 100 ms inside the detector's
+    // 1000 ms deadline: a slow but live link. Three answers prove the
+    // detector re-arms and re-survives each deadline.
+    await _waitFor(
+      () => pi.pongAt.length >= 3,
+      timeout: const Duration(seconds: 8),
+      reason: 'the delayed pongs were not answered',
+    );
+
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    expect(states, isNot(contains(BleConnectionState.disconnected)));
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(
+      marks['stall_detected_us'],
+      isNull,
+      reason: 'a live link was recorded as a stall',
+    );
+    expect(
+      marks['episodes'],
+      isEmpty,
+      reason: 'a live link recorded a stall episode',
+    );
   });
 
   test(
@@ -1339,9 +2331,800 @@ void main() {
     );
   });
 
-  test('a slow dial adopted by a later upgrade probe stays connected', () async {
+  test('keeps the upgrade retry cadence inside its bounds', () {
+    final transport = CompositeBleTransport(tcp: tcp, ble: ble);
+    addTearDown(transport.dispose);
+
+    expect(
+      transport.upgradeRetryDelay,
+      lessThanOrEqualTo(const Duration(milliseconds: 100)),
+      reason: 'a failed attempt must retry within 100 ms',
+    );
+    expect(
+      transport.upgradeRetryWindow,
+      lessThanOrEqualTo(const Duration(seconds: 30)),
+      reason: 'the fast cadence must stop within 30 s of a failover',
+    );
+    expect(
+      transport.upgradeProbeBudget,
+      lessThanOrEqualTo(const Duration(milliseconds: 300)),
+      reason: 'a failed attempt must end within 300 ms',
+    );
+  });
+
+  test('a failed upgrade attempt ends fast, closes its socket, and retries '
+      'within 100 ms', () async {
+    final (dark, transport) = await bootDarkRoute();
+
+    // The upgrade failures must stay contained: the route keeps reporting
+    // connected on BLE while the fast cadence runs.
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    // The FF16 kick dials at once and every failure re-arms the next
+    // attempt at the fast cadence, so three whole passes land well
+    // before the first periodic tick could dial a second time.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 6,
+      timeout: const Duration(seconds: 6),
+      reason: 'a failed attempt waited a whole tick for the next dial',
+    );
+    final passes = dark.closedAt.length ~/ 2;
+
+    // Each failed attempt ends inside the 300 ms bound at the production
+    // probe budget (3 s): the pass's last socket closed no later than the
+    // upgrade dial's cap after the pass began, plus scheduler jitter.
+    for (var pass = 0; pass < passes; pass++) {
+      expect(
+        Duration(
+          microseconds:
+              dark.closedAt[pass * 2 + 1] -
+              dark.dialAt[dark.darkFrom + pass * 2],
+        ),
+        lessThan(const Duration(milliseconds: 400)),
+        reason: 'a failed attempt outlived the 300 ms cap',
+      );
+    }
+
+    // The next attempt starts within 100 ms of the last one's failure,
+    // plus scheduler jitter.
+    for (var pass = 0; pass + 1 < passes; pass++) {
+      expect(
+        Duration(
+          microseconds:
+              dark.dialAt[dark.darkFrom + (pass + 1) * 2] -
+              dark.closedAt[pass * 2 + 1],
+        ),
+        lessThan(const Duration(milliseconds: 250)),
+        reason: 'the next attempt started more than 100 ms later',
+      );
+    }
+
+    // Every failed dial's socket was closed: no attempt leaked one. The
+    // dial in flight when the window was sampled still has its slice to
+    // run, so wait for its teardown before counting.
+    final dials = dark.dialAt.length - dark.darkFrom;
+    await _waitFor(() => dark.closedAt.length >= dials);
+    expect(dark.closedAt.length, greaterThanOrEqualTo(dials));
+    // The failures are contained: the route never reported a loss.
+    expect(states, isNot(contains(BleConnectionState.disconnected)));
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    // Every finished pass is one counted attempt that ended as a failed
+    // dial; the in-flight attempt may still be running and reads as null.
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'] ==
+          'connect_threw',
+      reason: 'the failed attempt never recorded its outcome',
+    );
+    // A recorded outcome means no attempt is between its start and its dial,
+    // so the count and the port's dials are read at one settled boundary.
+    // Each attempt dials every candidate once.
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    final candidates = marks['upgrade_candidate_count']! as int;
+    expect(candidates, greaterThanOrEqualTo(1));
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      (marks['upgrade_dial_attempts']! as int) * candidates,
+      reason: 'the attempt count differs from the dials the port saw',
+    );
+  });
+
+  test('the fast cadence stops when the post-failover window closes', () async {
+    final (dark, transport) = await bootDarkRoute(
+      upgradeInterval: const Duration(milliseconds: 1200),
+      upgradeRetryDelay: const Duration(milliseconds: 100),
+      upgradeRetryWindow: const Duration(milliseconds: 1000),
+    );
+
+    // The fast cadence chains attempts inside the window; once it closes
+    // only the periodic tick dials, so six passes take a few ticks.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 12,
+      timeout: const Duration(seconds: 8),
+      reason: 'the upgrade attempts never resumed the tick cadence',
+    );
+    final starts = <int>[
+      for (var i = dark.darkFrom; i < dark.dialAt.length; i += 2)
+        dark.dialAt[i],
+    ];
+    expect(starts.length, greaterThanOrEqualTo(6));
+
+    // Retries inside the window are fast: the kick and its re-arms chain
+    // well under the tick.
+    expect(
+      Duration(microseconds: starts[1] - starts[0]),
+      lessThan(const Duration(milliseconds: 550)),
+      reason: 'the first retry waited for the tick instead of the re-arm',
+    );
+    expect(
+      Duration(microseconds: starts[2] - starts[1]),
+      lessThan(const Duration(milliseconds: 550)),
+      reason: 'the second retry waited for the tick instead of the re-arm',
+    );
+    // Past the window only the tick dials: the last gap is tick-sized, so
+    // the fast cadence never fired again after the window closed.
+    expect(
+      Duration(microseconds: starts.last - starts[starts.length - 2]),
+      greaterThan(const Duration(milliseconds: 1000)),
+      reason: 'a fast retry fired after the window closed',
+    );
+  });
+
+  test('a non-positive upgrade interval disables the fast re-arm', () async {
+    final (dark, transport) = await bootDarkRoute(
+      upgradeInterval: Duration.zero,
+    );
+
+    // The FF16 kick dials once even with the automatic upgrade disabled,
+    // and its failure must not chain the fast cadence: no dial may follow.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 2,
+      reason: 'the FF16 kick did not dial',
+    );
+    final kicked = dark.dialAt.length - dark.darkFrom;
+    // Several would-be re-arm deadlines pass inside the still-open
+    // window; none of them may start a dial.
+    await _settle(2000);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      kicked,
+      reason: 'the fast cadence chained behind a disabled upgrade',
+    );
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+  });
+
+  test('a fast re-arm does not dial while a switch holds the route', () async {
     await tcp.dispose();
-    final held = _HeldDialTcp()
+    final dark = _DarkPortTcp()
+      ..registerEndpoint(
+        WmrWsEndpoint(host: '127.0.0.1', port: 8765, bridgeId: _bridgeId),
+      );
+    tcp = dark;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+
+    final transport = CompositeBleTransport(
+      tcp: dark,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 1000),
+      upgradeInterval: const Duration(seconds: 2),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    // One candidate only: the remembered id is the endpoint the FF16
+    // document names again, so the probe and the recovery dial the same
+    // address.
+    await transport.connect(_lanDeviceId);
+    expect(transport.activeLegFor(_lanDeviceId), CompositeLeg.tcp);
+
+    // Let the watched leg's state stream attach before the leg drops.
+    await _settle();
+    dark.goDark();
+    dark.drop(_lanDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_lanDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+
+    // The kick's dial parks and its slice expires: the attempt failed and
+    // the fast re-arm is now pending.
+    await _waitFor(
+      () => dark.closedAt.length >= 1,
+      reason: 'the parked probe dial was never torn down',
+    );
+
+    // The BLE leg drops while the re-arm is pending: the recovery switch
+    // takes the route and dials the same candidate for itself.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 2,
+      reason: 'the BLE drop never started a recovery dial',
+    );
+
+    // The pending re-arm fires while the recovery still holds the route:
+    // it must not open a second dial.
+    await _settle(700);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      2,
+      reason: 'a dial started while a switch held the route',
+    );
+
+    // The recovery's own slice expires: its socket is closed too, the
+    // route is lost, and no later attempt dials again.
+    await _waitFor(
+      () => transport.activeLegFor(_lanDeviceId) == null,
+      reason: 'the recovery never gave the route up',
+    );
+    await _settle(700);
+    expect(dark.dialAt.length - dark.darkFrom, 2);
+    expect(
+      dark.closedAt.length,
+      2,
+      reason: 'a failed dial left its socket open',
+    );
+  });
+
+  test(
+    'a landing attempt ends the retries: one upgrade and no repeat dial',
+    () async {
+      final (dark, transport) = await bootDarkRoute();
+
+      // A live channel gives the upgrade a stream to carry across the
+      // switch, so the first TCP record after it lands is markable.
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      // The first attempt fails against the dark port and re-arms.
+      await _waitFor(
+        () => dark.closedAt.length >= 2,
+        reason: 'the first attempt never finished',
+      );
+
+      // The port answers again: the next fast attempt lands.
+      dark.comeUp();
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the upgrade dial never landed',
+      );
+
+      // One upgrade: the landing attempt is the second and last dial, and
+      // nothing dials again while TCP carries the route.
+      await _settle(700);
+      expect(
+        dark.dialAt.length - dark.darkFrom,
+        3,
+        reason: 'the route dialled again after the upgrade landed',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(
+        marks['upgrade_dial_attempts'],
+        2,
+        reason: 'the landing attempt was not the second dial',
+      );
+      final dialStart = marks['upgrade_dial_start_us']! as int;
+      final dialEnd = marks['upgrade_dial_end_us']! as int;
+      expect(
+        Duration(microseconds: dialEnd - dialStart),
+        lessThan(const Duration(milliseconds: 750)),
+        reason: 'the landing attempt outlived the 750 ms bound',
+      );
+
+      expect(marks['upgrade_outcome'], 'landed');
+      expect(marks['upgrade_candidate_count'], greaterThanOrEqualTo(1));
+
+      // The next TCP record was stamped 300 ms before it reached the
+      // listener. Its wall anchor must be the receipt instant, so it sits
+      // 300 ms before the listener's wall clock, on the record's own stamp.
+      const deliveryDelayUs = 300000;
+      final beforeWallUs = DateTime.now().microsecondsSinceEpoch;
+      expect(
+        dark.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [
+          9,
+        ], receivedAtUs: dark.clock.nowUs - deliveryDelayUs),
+        isTrue,
+      );
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+            null,
+        reason: 'the first TCP record after the upgrade was not marked',
+      );
+      final afterWallUs = DateTime.now().microsecondsSinceEpoch;
+      final landedMarks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(landedMarks['first_tcp_record_session'], _tcpDeviceId);
+      final wallUs = landedMarks['first_tcp_record_wall_us']! as int;
+      expect(
+        wallUs,
+        inInclusiveRange(
+          beforeWallUs - deliveryDelayUs - 100000,
+          afterWallUs - deliveryDelayUs,
+        ),
+      );
+      await _settle(300);
+      expect(
+        dark.dialAt.length - dark.darkFrom,
+        3,
+        reason: 'a dial repeated the upgrade while TCP was active',
+      );
+    },
+  );
+
+  test(
+    'dispose mid-dial closes the parked socket and stops the retries',
+    () async {
+      final (dark, transport) = await bootDarkRoute();
+
+      // The kick pass parks its first candidate; the dispose lands while
+      // that dial is in flight.
+      await _waitFor(
+        () => dark.dialAt.length - dark.darkFrom >= 1,
+        reason: 'the upgrade probe never dialled',
+      );
+      await transport.dispose();
+
+      // The in-flight pass still closes its parked sockets when their
+      // slices expire, and no attempt dials after the dispose.
+      await _waitFor(
+        () => dark.closedAt.length == dark.dialAt.length - dark.darkFrom,
+        reason: 'a disposed route left a parked socket open',
+      );
+      await _settle(700);
+      expect(
+        dark.dialAt.length - dark.darkFrom,
+        2,
+        reason: 'a dial started after the dispose',
+      );
+    },
+  );
+
+  test('an intentional disconnect mid-dial closes the parked socket and stops '
+      'the retries', () async {
+    final (dark, transport) = await bootDarkRoute();
+
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 1,
+      reason: 'the upgrade probe never dialled',
+    );
+    await transport.disconnect(_tcpDeviceId);
+
+    await _waitFor(
+      () => dark.closedAt.length == dark.dialAt.length - dark.darkFrom,
+      reason: 'the disconnected route left a parked socket open',
+    );
+    await _settle(700);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      2,
+      reason: 'a dial started after the disconnect',
+    );
+  });
+
+  test(
+    'an early dial before the port is up fails fast and keeps the cadence',
+    () async {
+      // The port is not up yet once dark: every dial is refused at once.
+      final (dark, transport) = await bootDarkRoute(hang: false);
+
+      // The early dial is the FF16 kick, not a tick, and the refusal does
+      // not consume the next attempt's slot: the retry follows within
+      // 100 ms, not a whole tick later.
+      await _waitFor(
+        () => dark.dialAt.length - dark.darkFrom >= 4,
+        timeout: const Duration(seconds: 4),
+        reason: 'the refused attempts were not retried at the fast cadence',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final firstStart = marks['first_upgrade_dial_start_us']! as int;
+      final failoverEnd = marks['failover_end_us']! as int;
+      expect(
+        Duration(microseconds: firstStart - failoverEnd),
+        lessThan(const Duration(milliseconds: 500)),
+        reason: 'the first attempt waited for a tick after the failover',
+      );
+      expect(
+        Duration(
+          microseconds:
+              dark.dialAt[dark.darkFrom + 1] - dark.dialAt[dark.darkFrom],
+        ),
+        lessThan(const Duration(milliseconds: 300)),
+        reason: 'the refused attempt outlived the 300 ms bound',
+      );
+      expect(
+        Duration(
+          microseconds:
+              dark.dialAt[dark.darkFrom + 2] - dark.dialAt[dark.darkFrom + 1],
+        ),
+        lessThan(const Duration(milliseconds: 250)),
+        reason: 'the early failure consumed the next attempt slot',
+      );
+
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'] ==
+            'connect_threw',
+        reason: 'a refused dial never recorded a connect_threw outcome',
+      );
+
+      // The port comes up: the next fast attempt lands on it.
+      dark.comeUp();
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the upgrade dial never landed once the port answered',
+      );
+      final landed = transport.linkTimelineFor(_tcpDeviceId)!;
+      final dialStart = landed['upgrade_dial_start_us']! as int;
+      final dialEnd = landed['upgrade_dial_end_us']! as int;
+      expect(
+        Duration(microseconds: dialEnd - dialStart),
+        lessThan(const Duration(milliseconds: 750)),
+        reason: 'the landing attempt outlived the 750 ms bound',
+      );
+      expect(
+        landed['upgrade_dial_attempts'],
+        greaterThanOrEqualTo(3),
+        reason: 'the landing attempt never ran',
+      );
+    },
+  );
+
+  test('a dial failing until a chosen instant lands within 400 ms and re-arms '
+      'within 100 ms', () async {
+    // No LAN or Pi reachability callback is installed: the cadence must
+    // depend only on the failed dial ending, not on a reachability probe.
+    final (dark, transport) = await bootDarkRoute();
+
+    // The kick's dial is in flight and failing. Choose the instant the
+    // port comes back: inside the first dial's 300 ms probe, so that
+    // dial still has to expire before the next attempt can land.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 1,
+      reason: 'the upgrade probe never dialled',
+    );
+    final instant =
+        dark.nowUs + const Duration(milliseconds: 200).inMicroseconds;
+    dark.failUntilUs = instant;
+
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      timeout: const Duration(seconds: 3),
+      reason: 'a dial started after the port came back never landed',
+    );
+
+    final landedStart = dark.dialAt.last;
+    expect(
+      landedStart,
+      greaterThanOrEqualTo(instant),
+      reason: 'the landed dial started before the port came back',
+    );
+    // The in-flight dial burns its 300 ms probe, then the 100 ms re-arm
+    // opens the attempt that lands: 400 ms after the port answered.
+    expect(
+      Duration(microseconds: landedStart - instant),
+      lessThanOrEqualTo(const Duration(milliseconds: 400)),
+      reason: 'the port was not reached within 400 ms of coming back',
+    );
+    expect(
+      Duration(microseconds: landedStart - dark.closedAt.last),
+      lessThan(const Duration(milliseconds: 250)),
+      reason: 'the re-arm waited longer than the 100 ms cadence',
+    );
+  });
+
+  test('an upgrade dial cuts a refusing candidate short and lands on the '
+      'answering one', () async {
+    const hostA = '192.168.1.50';
+    const hostB = '127.0.0.1';
+    final idA = '$hostA:$wmrWsDefaultPort';
+    final idB = '$hostB:$wmrWsDefaultPort';
+    await tcp.dispose();
+    final refusing = _RefusingTcp({idA})..scanResults.add(tcpScanResult());
+    tcp = refusing;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument(hosts: const [hostA, hostB]));
+
+    final transport = CompositeBleTransport(
+      tcp: refusing,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the upgrade dial never landed on the answering candidate',
+    );
+    await _settle(30);
+
+    // The first candidate refused and the second answered: the refusing
+    // candidate held only its bounded share, its abandoned socket was closed
+    // before the answering one was dialled, and the answering one's socket
+    // stayed open as the adopted session.
+    expect(refusing.dialAt.map((dial) => dial.key), [idA, idB]);
+    final aDialed = refusing.dialAt.first.value;
+    final aClosed = refusing.closedAt[idA];
+    expect(
+      aClosed,
+      isNotNull,
+      reason: 'the refusing candidate kept its abandoned socket open',
+    );
+    final bDialed = refusing.dialAt.last.value;
+    expect(
+      aClosed!,
+      lessThan(bDialed),
+      reason:
+          "the refusing candidate's socket was still open when the "
+          'answering candidate was dialled',
+    );
+    expect(
+      Duration(microseconds: aClosed - aDialed),
+      lessThan(const Duration(milliseconds: 300)),
+      reason: 'the refusing candidate held the attempt past its bounded share',
+    );
+    expect(
+      refusing.closedAt.containsKey(idB),
+      isFalse,
+      reason: "the answering candidate's adopted socket was closed",
+    );
+
+    final marks = transport.linkTimelineFor(_bleDeviceId)!;
+    final dialStart = marks['upgrade_dial_start_us']! as int;
+    final dialEnd = marks['upgrade_dial_end_us']! as int;
+    expect(
+      Duration(microseconds: dialEnd - dialStart),
+      lessThan(const Duration(milliseconds: 750)),
+      reason: 'the upgrade dial outlived the 750 ms landing bound',
+    );
+  });
+
+  test('a single answering candidate lands within the 750 ms bound', () async {
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'the upgrade dial never landed',
+    );
+    await _settle(30);
+
+    expect(tcp.connectCalls, [
+      _lanDeviceId,
+    ], reason: 'the dial opened more than one TCP socket');
+    final marks = transport.linkTimelineFor(_bleDeviceId)!;
+    final dialStart = marks['upgrade_dial_start_us']! as int;
+    final dialEnd = marks['upgrade_dial_end_us']! as int;
+    expect(
+      Duration(microseconds: dialEnd - dialStart),
+      lessThan(const Duration(milliseconds: 750)),
+      reason: 'a single answering candidate outlived the 750 ms landing bound',
+    );
+  });
+
+  test('the last candidate keeps the whole budget, not the cap', () async {
+    await tcp.dispose();
+    final slow = _SlowDialTcp(const Duration(milliseconds: 400))
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = slow;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+
+    // The handshake is slower than the share cap but well inside the
+    // budget this test pins: at the default 300 ms upgrade budget a 400 ms
+    // handshake is deliberately a failed attempt, so the exemption is
+    // proven here against a budget that still admits it.
+    final transport = CompositeBleTransport(
+      tcp: slow,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+      upgradeProbeBudget: const Duration(seconds: 3),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'a slow but answering last candidate never landed',
+    );
+    await _settle(30);
+
+    expect(slow.connectCalls, [
+      _lanDeviceId,
+    ], reason: 'the slow dial was abandoned and redialled');
+    final marks = transport.linkTimelineFor(_bleDeviceId)!;
+    final dialStart = marks['upgrade_dial_start_us']! as int;
+    final dialEnd = marks['upgrade_dial_end_us']! as int;
+    expect(
+      Duration(microseconds: dialEnd - dialStart),
+      greaterThan(const Duration(milliseconds: 250)),
+      reason: 'the last candidate was cut to its 250 ms cap',
+    );
+    expect(
+      Duration(microseconds: dialEnd - dialStart),
+      lessThan(const Duration(milliseconds: 750)),
+      reason: 'the slow dial outlived the 750 ms landing bound',
+    );
+  });
+
+  test(
+    'an abandoned dial cannot outlive the budget; the next tick dials fresh',
+    () async {
+      await tcp.dispose();
+      final held = _HeldDialTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..scanResults.add(tcpScanResult());
+      tcp = held;
+
+      final transport = CompositeBleTransport(
+        tcp: held,
+        ble: ble,
+        tcpProbeBudget: const Duration(milliseconds: 150),
+        upgradeInterval: const Duration(milliseconds: 10),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      // The connect path's own dial is abandoned when its budget expires, and
+      // must be torn down instead of left for a later dial to join.
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+      await _waitFor(
+        () => held.disconnectCalls.isNotEmpty,
+        reason: 'the abandoned dial outlived the budget',
+      );
+      expect(held.disconnectCalls, [_tcpDeviceId]);
+
+      // The next upgrade tick dials fresh instead of joining the abandoned one.
+      await _waitFor(
+        () => held.freshDials >= 2,
+        reason: 'the next tick joined the abandoned dial',
+      );
+      expect(held.joins, 0);
+      final inFlight = held.freshDials;
+
+      // While the tick's dial is in flight, no later tick opens a second one.
+      await _settle(60);
+      expect(
+        held.freshDials,
+        inFlight,
+        reason: 'a tick dialled while another probe held the route',
+      );
+
+      // The tick's dial hits the same budget, is torn down, and the next tick
+      // dials fresh again: no dial ever outlives the budget.
+      await _waitFor(
+        () => held.disconnectCalls.length >= 2,
+        reason: 'the tick dial outlived its budget',
+      );
+      await _waitFor(
+        () => held.freshDials > inFlight,
+        reason: 'the next tick never dialled fresh',
+      );
+      expect(held.joins, 0);
+
+      // Landing a fresh dial upgrades the route, and the adopted dial is kept.
+      held.release.complete();
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the fresh dial did not upgrade the route',
+      );
+      await _settle(30);
+
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      expect(held.joins, 0);
+      expect(
+        held.disconnectCalls.length,
+        2,
+        reason: 'an adopted dial was torn down',
+      );
+    },
+  );
+
+  test(
+    'after a failover to BLE the budget still tears the abandoned dial down',
+    () async {
+      await tcp.dispose();
+      final held = _JoiningTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..scanResults.add(tcpScanResult());
+      tcp = held;
+
+      final transport = CompositeBleTransport(
+        tcp: held,
+        ble: ble,
+        tcpProbeBudget: const Duration(milliseconds: 150),
+        upgradeInterval: const Duration(milliseconds: 10),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      // The first dial lands, so the route is live on TCP before it drops.
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      // The TCP leg drops: the failover lands on BLE and leaves the old
+      // candidate named in `route.tcpDeviceId` behind.
+      await _settle();
+      held.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the TCP drop did not fail over to BLE',
+      );
+      final failoverTearDowns = held.disconnectCalls.length;
+
+      // Every upgrade tick dials the stale candidate again. Hold each one so
+      // it hits the budget: the abandoned dial must be torn down — the stale
+      // `tcpDeviceId` must not read as adoption — and the next tick must dial
+      // fresh instead of joining the abandoned session.
+      held.hold(_tcpDeviceId);
+      await _waitFor(
+        () => held.disconnectCalls.length > failoverTearDowns,
+        reason: 'the abandoned dial outlived the budget after the failover',
+      );
+      await _waitFor(
+        () => held.freshDials >= 3,
+        reason:
+            'a later tick joined the abandoned dial instead of dialling'
+            ' fresh',
+      );
+      expect(held.joins, 0);
+    },
+  );
+
+  test('after a failed switch rolls back to BLE the budget still tears the'
+      ' abandoned dial down', () async {
+    await tcp.dispose();
+    final held = _JoiningTcp()
       ..registerEndpoint(
         WmrWsEndpoint(
           host: '127.0.0.1',
@@ -1353,37 +3136,105 @@ void main() {
       ..scanResults.add(tcpScanResult());
     tcp = held;
 
+    ble.dispose();
+    final stuck = _StuckDetachBle(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+      characteristic: wmrBridgeBatchedCharUuid,
+    );
+    stuck.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _versionString();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = stuck;
+
     final transport = CompositeBleTransport(
       tcp: held,
       ble: ble,
-      tcpProbeBudget: const Duration(milliseconds: 60),
+      tcpProbeBudget: const Duration(milliseconds: 150),
       upgradeInterval: const Duration(milliseconds: 10),
     );
     addTearDown(transport.dispose);
 
     await transport.scan().toList();
+    // The first dial lands, so the route is live on TCP before it drops.
     await transport.connect(_tcpDeviceId);
-    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
-
-    // The upgrade timer joins the dial the first attempt abandoned. Landing it
-    // now must upgrade the route, not be closed as a stale socket.
-    await _waitFor(
-      () => held.dialAttempts >= 2,
-      reason: 'the upgrade probe never joined the held dial',
-    );
-    held.release.complete();
-    await _waitFor(
-      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
-      reason: 'the adopted dial did not upgrade the route',
-    );
-    await _settle(50);
-
     expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
-    expect(
-      held.disconnectCalls,
-      isEmpty,
-      reason: 'the adopted dial was closed as a stale socket',
+
+    // A live channel gives the later switch something to fail on, and
+    // the failing release is armed before the leg drops.
+    final received = <BleNotification>[];
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(received.add);
+    addTearDown(sub.cancel);
+    stuck.failCancel = true;
+
+    // The TCP leg drops: the failover lands on BLE. The settle lets the
+    // state stream's forwarding subscription establish, so the drop's
+    // event reaches the route.
+    await _settle();
+    held.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the TCP drop did not fail over to BLE',
     );
+
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    // The next upgrade dial lands, but the switch that activates TCP
+    // fails partway: the route rolls back to BLE, and the landed session
+    // stays behind with the transport.
+    await _waitFor(
+      () => stuck.stuckSubs.length >= 2,
+      reason: 'the failed switch never rolled back to BLE',
+    );
+
+    // The landed session dies while the route is on BLE. The rollback
+    // and the silent loss must both leave no `tcpDeviceId` behind, or
+    // the teardown guard below would read the dead candidate as
+    // adopted.
+    final joinsAfterRollback = held.joins;
+    final freshAfterDrop = held.freshDials;
+    held.drop(_tcpDeviceId);
+    // Every upgrade tick dials the candidate again. Hold each one so it
+    // hits the budget: the abandoned dial must be torn down and the next
+    // tick must dial fresh instead of joining the abandoned session.
+    held.hold(_tcpDeviceId);
+    final tearDowns = held.disconnectCalls.length;
+    await _waitFor(
+      () => held.disconnectCalls.length > tearDowns,
+      reason: 'the abandoned dial outlived the budget after the rollback',
+    );
+    await _waitFor(
+      () => held.freshDials >= freshAfterDrop + 3,
+      reason:
+          'a later tick joined the abandoned dial instead of dialling'
+          ' fresh',
+    );
+    expect(held.joins, joinsAfterRollback);
+    expect(
+      transport.activeLegFor(_tcpDeviceId),
+      CompositeLeg.ble,
+      reason: 'the silent leg drop disconnected the route',
+    );
+    expect(
+      states,
+      isNot(contains(BleConnectionState.disconnected)),
+      reason: 'the rollback or the silent drop reported a loss',
+    );
+
+    // Let the release succeed again so the teardown cancels cleanly.
+    stuck.failCancel = false;
   });
 
   test('a probe that finishes while a BLE-drop recovery adopts its socket keeps it open', () async {
@@ -1411,13 +3262,18 @@ void main() {
     await transport.scan().toList();
     await transport.connect(_tcpDeviceId);
     expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    await _waitFor(
+      () => held.disconnectCalls.isNotEmpty,
+      reason: 'the connect-path dial outlived its budget',
+    );
 
-    // The upgrade probe joins the held dial. Then the BLE drop starts a
-    // recovery that joins the same dial, so both are still in flight when it
-    // lands. The recovery adopts the socket; the probe must not close it.
+    // The upgrade probe dials fresh after the budget tore the connect-path
+    // dial down. Then the BLE drop starts a recovery that joins that same
+    // in-flight dial, so both are still awaiting when it lands. The recovery
+    // adopts the socket; the probe must not close it.
     await _waitFor(
       () => held.dialAttempts >= 2,
-      reason: 'the upgrade probe never joined the held dial',
+      reason: 'the upgrade probe never dialled again after the teardown',
     );
     final attemptsBeforeDrop = held.dialAttempts;
     unawaited(ble.disconnect(_bleDeviceId));
@@ -1428,14 +3284,14 @@ void main() {
     held.release.complete();
     await _waitFor(
       () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
-      reason: 'the recovery did not adopt the held dial',
+      reason: 'the recovery did not adopt the fresh dial',
     );
     await _settle(50);
 
     expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
     expect(
-      held.disconnectCalls,
-      isEmpty,
+      held.disconnectCalls.length,
+      1,
       reason: 'the probe closed the socket that the recovery adopted',
     );
   });
@@ -1466,15 +3322,20 @@ void main() {
     expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
 
     // The probe spends its first slice on the first candidate and times out;
-    // its second dial is the one held here.
+    // the budget tears that abandoned dial down, and its second dial is the
+    // one held here.
     await _waitFor(
       () => joining.dials.contains(idB),
       reason: 'the probe never dialled the second candidate',
     );
+    await _waitFor(
+      () => joining.disconnectCalls.contains(idA),
+      reason: 'the abandoned first-candidate dial outlived its slice',
+    );
     unawaited(ble.disconnect(_bleDeviceId));
     await _waitFor(
       () => joining.dials.where((id) => id == idA).length >= 2,
-      reason: 'the BLE-drop recovery never joined the dial for the first one',
+      reason: 'the BLE-drop recovery never dialled the first candidate again',
     );
 
     // Land the probe's own candidate while the recovery still holds the
@@ -1499,9 +3360,10 @@ void main() {
       reason: 'the unused probe socket must be closed exactly once',
     );
     expect(
-      joining.disconnectCalls,
-      isNot(contains(idA)),
-      reason: 'the adopted socket was closed',
+      joining.disconnectCalls.where((id) => id == idA).length,
+      1,
+      reason:
+          'the abandoned dial must be torn down once and the adopted one kept',
     );
   });
 
@@ -1547,7 +3409,7 @@ void main() {
     );
   });
 
-  test('a concurrent connect adopts the probe socket', () async {
+  test('a connect after a lost route dials fresh and adopts it', () async {
     const hostA = '127.0.0.1';
     const idA = '$hostA:$wmrWsDefaultPort';
     await tcp.dispose();
@@ -1573,19 +3435,22 @@ void main() {
       reason: 'the upgrade probe never dialled',
     );
 
-    // The BLE drop starts a recovery that joins the same held dial and also
-    // times out, so the route loses both legs with the socket still in flight.
+    // The BLE drop starts a recovery that joins the same held dial. The probe
+    // leaves it alone — the recovery's dial owns the candidate — and when
+    // the recovery's own budget expires it tears the abandoned dial down, so
+    // the route loses both legs.
     unawaited(ble.disconnect(_bleDeviceId));
     await _waitFor(
       () => transport.activeLegFor(_bleDeviceId) == null,
       reason: 'the route never lost both legs',
     );
+    expect(joining.disconnectCalls, [idA]);
 
     final dialsBefore = joining.dials.length;
     final reconnect = transport.connect(_bleDeviceId);
     await _waitFor(
       () => joining.dials.length > dialsBefore,
-      reason: 'the connect did not join the in-flight dial',
+      reason: 'the connect never dialled',
     );
     joining.holds[idA]!.complete();
     await reconnect;
@@ -1594,9 +3459,190 @@ void main() {
     expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.tcp);
     expect(
       joining.disconnectCalls,
-      isEmpty,
-      reason: 'the probe or the dial cleanup closed the adopted socket',
+      [idA],
+      reason: 'the abandoned dial was left open or the adopted one was closed',
     );
+  });
+
+  test('a TCP activation that fails partway rolls back to BLE', () async {
+    ble.dispose();
+    final stuck = _StuckDetachBle(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+      characteristic: wmrBridgeBatchedCharUuid,
+    );
+    stuck.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _versionString();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = stuck;
+    tcp.failConnect = true;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final received = <BleNotification>[];
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(received.add);
+    addTearDown(sub.cancel);
+    expect(stuck.deliverStuck([1]), isTrue, reason: 'the BLE leg is silent');
+    await _settle();
+    expect(received.last.value, [1]);
+
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    // The upgrade dial lands, but the switch that activates TCP fails
+    // partway: the BLE notification release refuses.
+    stuck.failCancel = true;
+    tcp.failConnect = false;
+    await _settle(60);
+
+    expect(
+      transport.activeLegFor(_tcpDeviceId),
+      CompositeLeg.ble,
+      reason: 'the failed switch did not leave the route on BLE',
+    );
+    expect(
+      states,
+      isNot(contains(BleConnectionState.disconnected)),
+      reason: 'the rollback reported a loss',
+    );
+    // The rollback re-subscribed the channel on BLE; it still delivers.
+    expect(
+      stuck.deliverStuck([2]),
+      isTrue,
+      reason: 'the channel stayed half-attached to the failed switch',
+    );
+    await _settle();
+    expect(received.last.value, [2]);
+    expect(
+      tcp.connectCalls.length,
+      greaterThan(2),
+      reason: 'the upgrade timer did not resume',
+    );
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'] ==
+          'activation_threw',
+      reason: 'the failed activation never recorded its outcome',
+    );
+
+    // Let the release succeed again so the teardown cancels cleanly.
+    stuck.failCancel = false;
+  });
+
+  test('a switch that fails after the echo handoff still drains the orphaned'
+      ' subscription', () async {
+    ble.dispose();
+    final fake = _FailingSwitchBle(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+      failCharacteristic: wmrBridgeBatchedCharUuid,
+      trackCharacteristic: wmrBridgeEchoCharUuid,
+    );
+    fake.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _versionString();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = fake;
+    tcp.failConnect = true;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+      echoDrainTimeout: const Duration(milliseconds: 60),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    // The echo channel is subscribed first, so the switch hands it off to
+    // the drain before the batched channel's release fails. Its ping is in
+    // flight, which is why the subscription is kept at all.
+    final echoReceived = <BleNotification>[];
+    final echoSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeEchoCharUuid)
+        .listen(echoReceived.add);
+    addTearDown(echoSub.cancel);
+    final batchedSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(batchedSub.cancel);
+    await transport.write(
+      _tcpDeviceId,
+      wmrBridgeServiceUuid,
+      wmrBridgeEchoCharUuid,
+      Uint8List.fromList([1, 39, 0, 0, 0, 0]),
+      withoutResponse: true,
+    );
+
+    // The upgrade dial lands; the switch fails partway: the echo
+    // subscription was handed off, then the batched release refuses.
+    fake.failCancel = true;
+    tcp.failConnect = false;
+    await _waitFor(
+      () => fake.tracked.length >= 2,
+      reason: 'the failed switch never handed the echo subscription off',
+    );
+    expect(
+      transport.activeLegFor(_tcpDeviceId),
+      CompositeLeg.ble,
+      reason: 'the failed switch did not roll back to BLE',
+    );
+
+    // The orphaned handoff must still drain: its subscription is cancelled
+    // once the drain window expires, not left beside the re-attach.
+    await _waitFor(
+      () => fake.cancelledSubscriptions >= 1,
+      reason: 'the handed-off echo subscription was orphaned',
+    );
+
+    // The rollback re-attached the channel on BLE; it still delivers.
+    tcp.failConnect = true;
+    await _settle(30);
+    expect(fake.deliverTracked([7]), isTrue);
+    await _settle();
+    expect(echoReceived.last.value, [7]);
+    expect(
+      states,
+      isNot(contains(BleConnectionState.disconnected)),
+      reason: 'the rollback reported a loss',
+    );
+
+    // Let the release succeed again so the teardown cancels cleanly.
+    fake.failCancel = false;
   });
 
   test('kicks the FF16 upgrade once a TCP-to-BLE failover lands on BLE', () async {
@@ -1708,6 +3754,70 @@ void main() {
     expect(transport.activeLegFor(_tcpDeviceId), isNull);
   });
 
+  test('an upgrade dial the LAN gate skips records dial_skipped', () async {
+    tcp.failConnect = true;
+    var lan = true;
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      lanAvailable: () async => lan,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    lan = false;
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'] ==
+          'dial_skipped',
+      reason: 'the skipped dial never recorded its outcome',
+    );
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+  });
+
+  test('an explicit disconnect during an upgrade dial records route_moved'
+      ' and keeps the timeline readable', () async {
+    await tcp.dispose();
+    final held = _HoldableTcp()
+      ..failConnect = true
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = held;
+    final transport = CompositeBleTransport(
+      tcp: held,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    held.failConnect = false;
+    held.holdDials = Completer<void>();
+    await _waitFor(
+      () => held.heldDials > 0,
+      reason: 'the upgrade probe never dialled',
+    );
+    await transport.disconnect(_tcpDeviceId);
+    held.holdDials!.complete();
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)?['upgrade_outcome'] ==
+          'route_moved',
+      reason: 'the in-flight attempt never recorded its terminal outcome',
+    );
+  });
+
   test(
     'releases a BLE link whose connect fails in the initial candidate loop',
     () async {
@@ -1797,8 +3907,91 @@ void main() {
         reason: 'the failed failover did not release the route',
       );
       expect(refusing.disconnectCalls, [_bleDeviceId]);
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(marks['failover_outcome'], 'lost');
+      expect(marks['failover_reason'], 'connect_threw');
+      expect(marks['failover_candidate_count'], 1);
     },
   );
+
+  test(
+    'a failover with no BLE bridge to dial ends lost with no candidate',
+    () async {
+      ble.dispose();
+      final empty = _RecordingBle(devices: const []);
+      ble = empty;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == null,
+        reason: 'the failover with no BLE bridge did not release the route',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(marks['failover_outcome'], 'lost');
+      expect(marks['failover_reason'], 'no_candidate');
+      expect(marks['failover_candidate_count'], 0);
+    },
+  );
+
+  test('a failover whose BLE activation throws ends lost with '
+      'activation_threw', () async {
+    ble.dispose();
+    final bridge = _RecordingBle(
+      devices: const [
+        FakeDevice(
+          id: _bleDeviceId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+    );
+    bridge.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _versionString();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = bridge;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: Duration.zero,
+    );
+    addTearDown(transport.dispose);
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+    // A live TCP channel must release its subscription when the switch
+    // leaves TCP; that release fails, so the BLE activation throws.
+    tcp.failCancel = true;
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    addTearDown(sub.cancel);
+    await _settle();
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == null,
+      reason: 'the failed activation did not release the route',
+    );
+    final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(marks['failover_outcome'], 'lost');
+    expect(marks['failover_reason'], 'activation_threw');
+    expect(marks['failover_candidate_count'], 1);
+  });
 
   test(
     'keeps the FF15 BLE subscription until an in-flight echo answer lands',

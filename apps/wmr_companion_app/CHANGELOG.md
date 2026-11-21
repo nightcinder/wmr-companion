@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.27+35
+
+WMR Companion release candidate. It carries the changes merged since
+v0.3.26 (#335, #338, #339, #340, #341, #342).
+
+- The BLE transport watches the adapter's availability stream: when the
+  radio goes off it clears every session locally, reports `bluetoothOff`
+  per bridge and keeps the wanted subscriptions for the redial. The app
+  parks its reconnect campaign while the radio is off and dials each
+  dropped bridge once through the ordinary connect path when it returns,
+  so the service is rebuilt and the stream re-subscribed; a composite
+  Wi-Fi session carried on its BLE leg parks at radio-off too, while a
+  TCP-carried session keeps re-dialing over Wi-Fi (ONY-1557).
+- The controller reports a silent BLE link as stalled: it keeps the
+  arrival time of each bridge's last accepted record and marks a
+  subscribed, connected bridge stalled once it has been silent for 3 s.
+  A record that arrives clears the mark at once and a closed stream is
+  reported disconnected; the report is warn-only, so nothing disconnects
+  (ONY-1532).
+- `wmr_core` gains a token-stamped UDP fallback for DroidDeck: when the
+  abstract socket fails and a pairing token is supplied, it connects a
+  loopback UDP socket to 127.0.0.1:29842 and stamps the token into every
+  datagram at offset 32, claims included, and a reopen keeps the chosen
+  transport and token (ONY-1524).
+- The app adds token entry and persistence for the DroidDeck UDP
+  fallback: the field seeds from the app-scoped token provider, an
+  emptied field or an unchecked remember box clears the saved value, and
+  the opt-out survives a restart (ONY-1525).
+- A device whose only non-loopback interfaces are cellular answers no
+  LAN: WWAN modem names such as `wwan0`, `rmnet_data0` and `pdp_ip0` are
+  excluded from the LAN probe, so the composites skip the TCP probe and
+  dial BLE (ONY-1556).
+
 ## 0.3.26+34
 
 WMR Companion release. It carries the changes merged since v0.3.25 (#333).

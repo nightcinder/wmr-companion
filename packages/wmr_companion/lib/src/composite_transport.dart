@@ -6,6 +6,8 @@ import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_ws/wmr_ws.dart';
 
+import 'link_timeline.dart';
+
 /// Which leg of a [CompositeBleTransport] currently carries a bridge.
 enum CompositeLeg { tcp, ble }
 
@@ -19,9 +21,16 @@ enum CompositeLeg { tcp, ble }
 /// or because the FF16 endpoint document was read over BLE. When TCP cannot
 /// connect, or drops later, the same bridge is dialled over BLE GATT. While
 /// the bridge is on BLE, [upgradeInterval] retries TCP; when it succeeds the
-/// notification subscriptions move to TCP without being closed. TCP is probed
-/// only while a LAN interface is up, and never for longer than
-/// [tcpProbeBudget], so a phone with Wi-Fi off reaches BLE immediately.
+/// notification subscriptions move to TCP without being closed. For
+/// [upgradeRetryWindow] after a failover a failed retry redials within
+/// [upgradeRetryDelay] instead of waiting a whole tick, so a bridge whose
+/// LAN link is coming back is reached in seconds rather than tick-quantised
+/// attempts. One upgrade dial runs at most [upgradeProbeBudget] — less
+/// when [tcpProbeBudget] is shorter — so a failed pass ends fast and the
+/// cadence, not a hanging dial, paces the retries. TCP is probed only
+/// while a LAN interface is up, and never for
+/// longer than [tcpProbeBudget], so a phone with Wi-Fi off reaches BLE
+/// immediately.
 ///
 /// Bridges are identified by the daemon's stable `bridge_id` once a hello or
 /// an FF16 endpoint document has supplied it. Two scan results that resolve
@@ -45,7 +54,14 @@ enum CompositeLeg { tcp, ble }
 /// connection state `connected` across the switch. A loss reported while a
 /// switch still holds the route is remembered and retried when that switch
 /// finishes, so a dial that goes silent during activation cannot leave the
-/// route marked connected on a dead leg.
+/// route marked connected on a dead leg. Every step of that recovery, and of
+/// an upgrade dial back to TCP, is stamped on the route's timeline;
+/// [linkTimelineFor] exposes the marks so a host can show how long the stall
+/// took to detect and the switch to land. The top-level marks and the
+/// episode's dial-attempt count carry the most recent episode;
+/// [linkTimelineFor] also carries an ordered history of the last finished
+/// episodes with the same marks and count, so a stall that a later switch
+/// superseded stays readable.
 ///
 /// ## Clock
 ///
@@ -57,8 +73,12 @@ class CompositeBleTransport implements BleTransport {
     required this.tcp,
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
+    this.upgradeRetryDelay = const Duration(milliseconds: 100),
+    this.upgradeRetryWindow = const Duration(seconds: 30),
+    this.upgradeProbeBudget = const Duration(milliseconds: 300),
     this.bleScanWait = const Duration(seconds: 5),
     this.tcpProbeBudget = const Duration(seconds: 3),
+    this.tcpCandidateShareCap = const Duration(milliseconds: 250),
     this.echoDrainTimeout = const Duration(milliseconds: 1200),
     this.lanAvailable,
     this.disposeBle = true,
@@ -82,6 +102,44 @@ class CompositeBleTransport implements BleTransport {
   /// non-positive duration disables the automatic upgrade.
   final Duration upgradeInterval;
 
+  /// How soon a failed upgrade dial is retried while the post-failover
+  /// window ([upgradeRetryWindow]) is still open.
+  ///
+  /// A failover means the LAN link went down and is coming back — a port
+  /// that refused one moment can answer the next — so a failed probe
+  /// redials at this cadence instead of waiting a whole [upgradeInterval]
+  /// tick: the bench's 9–10 s upgrade gap was mostly tick-quantised
+  /// retries of a port that had been up for seconds. With the 100 ms
+  /// default, a port that comes back while a dial is in flight is reached
+  /// at most [upgradeProbeBudget] plus this delay later, and no Pi
+  /// reachability check stands between the failed dial and the next one.
+  /// A non-positive duration disables the fast re-arm; the periodic tick
+  /// then paces the retries alone.
+  final Duration upgradeRetryDelay;
+
+  /// How long after a failover a failed upgrade dial keeps the fast
+  /// [upgradeRetryDelay] cadence.
+  ///
+  /// The window opens when the failover lands on BLE and closes this long
+  /// later; past it, a failed dial waits for the periodic [upgradeInterval]
+  /// tick, so the fast cadence cannot keep churning the radio interface
+  /// while a Wi-Fi link stays down. A non-positive duration disables the
+  /// fast cadence entirely.
+  final Duration upgradeRetryWindow;
+
+  /// The longest one upgrade dial from BLE may run before the pass is
+  /// abandoned.
+  ///
+  /// BLE carries the route's traffic while the dial runs, so a port that
+  /// has not answered inside this bound is torn down at once and the
+  /// failed pass ends here — inside the post-failover window the re-arm
+  /// redials at the fast [upgradeRetryDelay] cadence, and outside it the
+  /// periodic [upgradeInterval] tick paces the next attempt — instead of
+  /// the leg's radio being held for a whole [tcpProbeBudget]. A
+  /// [tcpProbeBudget] shorter than this still wins, and a non-positive
+  /// duration disables the upgrade dial, so a route on BLE stays there.
+  final Duration upgradeProbeBudget;
+
   /// How long [connect] waits for a BLE scan hit when every TCP candidate
   /// failed while a [scan] is still running. Zero disables the wait.
   ///
@@ -93,10 +151,30 @@ class CompositeBleTransport implements BleTransport {
   ///
   /// The BLE leg is always available here, so a Wi-Fi dial that hangs must not
   /// hold the session: after the budget the composite gives up on TCP and
-  /// dials BLE instead. Each candidate gets an equal share of what is left, so
-  /// a dead address cannot consume the whole budget before a live one is
-  /// tried. A non-positive duration disables the TCP probe entirely.
+  /// dials BLE instead. Each candidate gets an equal share of what is left,
+  /// cut to [tcpCandidateShareCap] where the share is longer, so a dead
+  /// address can neither consume the whole budget nor hold a full share
+  /// before a live one is tried, and an attempt that outlives its share is
+  /// torn down at once, so the next probe dials fresh instead of joining the
+  /// abandoned session. The last candidate alone is never cut: no live
+  /// candidate hides behind it, so it keeps the whole remaining budget and a
+  /// handshake slower than the cap still lands. A non-positive duration
+  /// disables the TCP probe entirely.
   final Duration tcpProbeBudget;
+
+  /// The longest share of [tcpProbeBudget] a dialling candidate may hold
+  /// while another still waits behind it.
+  ///
+  /// A candidate whose port never answers — the remembered address of a link
+  /// that just stalled — then holds the attempt for at most this long, its
+  /// abandoned session is torn down at once and the next candidate is
+  /// dialled, so a candidate that can answer is reached within this bound of
+  /// the attempt's start instead of after a full equal slice of the budget.
+  /// The last candidate is exempt: no live candidate hides behind it, so it
+  /// keeps the whole remaining budget and a handshake slower than this cap
+  /// still lands. A non-positive duration leaves every candidate with its
+  /// uncapped equal slice.
+  final Duration tcpCandidateShareCap;
 
   /// How long a BLE FF15 echo subscription is kept open after the route moves
   /// to TCP, waiting for the answers to pings already written on BLE.
@@ -139,6 +217,11 @@ class CompositeBleTransport implements BleTransport {
   onTokenLearned;
 
   final Map<String, _Route> _routes = {};
+
+  /// The timeline of each route that was torn down, so an attempt still in
+  /// flight at teardown can record its outcome and a host can read it. A new
+  /// route for the device replaces it.
+  final Map<String, LinkTimelineRecorder> _closedTimelines = {};
   final Map<String, String> _bridgeIds = {};
   final Map<String, _ScanHit> _scanHits = {};
   bool _disposed = false;
@@ -162,6 +245,39 @@ class CompositeBleTransport implements BleTransport {
         _Lane.ble => CompositeLeg.ble,
         null => null,
       };
+
+  /// The link-switch timeline of [deviceId]'s route, or null before the
+  /// bridge has been connected through this composite.
+  ///
+  /// The values are microseconds on [clock]: the top-level `<mark>_us`
+  /// keys of the most recent episode, null before a mark landed, plus that
+  /// episode's dial-attempt count ([LinkTimeline.toJson] names the keys),
+  /// and an `episodes` list carrying the same keys for the last finished
+  /// episodes, oldest first — a later switch does not erase them. When the
+  /// route's BLE leg can report its GATT steps
+  /// ([BleSubscribeTimelineSource]), the map also carries them as a
+  /// `ble_subscribe` entry: the connect start, service discovery done, the
+  /// FF14 CCCD write, the first FF14 notification after it, the
+  /// disconnect, and the adapter's radio off/on, in microseconds on the
+  /// BLE transport's own clock — not [clock] — with the same null-before-
+  /// landed reading. The Debug screen renders its "Last link switch" row
+  /// from the top-level marks and the diagnostics bundle carries the map
+  /// verbatim. Hosts only sample: the composite keeps recording.
+  Map<String, Object?>? linkTimelineFor(String deviceId) {
+    final route = _routes[deviceId];
+    if (route == null) return _closedTimelines[deviceId]?.snapshot;
+    final bleId = route.bleDeviceId;
+    // A pattern rather than an `is` test: the interface sits outside the
+    // [BleTransport] hierarchy, so a type test alone does not promote the
+    // leg to it.
+    final subscribe = switch (ble) {
+      BleSubscribeTimelineSource source when bleId != null =>
+        source.subscribeTimelineFor(bleId),
+      _ => null,
+    };
+    if (subscribe == null) return route.timeline.snapshot;
+    return {...route.timeline.snapshot, 'ble_subscribe': subscribe};
+  }
 
   @override
   Stream<BleScanResult> scan({List<String> withServices = const []}) {
@@ -333,6 +449,7 @@ class CompositeBleTransport implements BleTransport {
   Future<void> disconnect(String deviceId) async {
     final route = _routes.remove(deviceId);
     if (route == null) return;
+    _closedTimelines[deviceId] = route.timeline;
     route.intentional = true;
     try {
       _stopUpgrade(route);
@@ -519,6 +636,9 @@ class CompositeBleTransport implements BleTransport {
     if (_disposed) return;
     _disposed = true;
     final routes = _routes.values.toList();
+    for (final entry in _routes.entries) {
+      _closedTimelines[entry.key] = entry.value.timeline;
+    }
     _routes.clear();
     for (final route in routes) {
       route.intentional = true;
@@ -585,19 +705,36 @@ class CompositeBleTransport implements BleTransport {
     return ids.toList();
   }
 
-  Future<String?> _tryTcp(_Route route, List<String> candidates) async {
+  Future<String?> _tryTcp(
+    _Route route,
+    List<String> candidates, {
+    Duration? budget,
+  }) async {
+    final probeBudget = budget ?? tcpProbeBudget;
     if (candidates.isEmpty) return null;
-    if (tcpProbeBudget <= Duration.zero) return null;
+    if (probeBudget <= Duration.zero) return null;
     if (!await _lanAvailable()) return null;
     Object? lastError;
     final stopwatch = Stopwatch()..start();
     var left = candidates.length;
     for (final id in candidates) {
-      final remaining = tcpProbeBudget - stopwatch.elapsed;
+      final remaining = probeBudget - stopwatch.elapsed;
       if (remaining <= Duration.zero) break;
       // Share what is left evenly, so one unresponsive address cannot use the
-      // whole budget and hide a reachable candidate behind it.
-      final slice = remaining ~/ left;
+      // whole budget and hide a reachable candidate behind it — and cut the
+      // share to the per-candidate cap, so a candidate that cannot answer
+      // holds the attempt for at most that long before the next candidate is
+      // dialled: the one that answers is reached within the cap of the
+      // attempt's start instead of after a full equal share. The last
+      // candidate is exempt: no live candidate hides behind it, so it keeps
+      // the whole remaining budget and a handshake slower than the cap still
+      // lands.
+      var slice = remaining ~/ left;
+      if (left > 1 &&
+          tcpCandidateShareCap > Duration.zero &&
+          slice > tcpCandidateShareCap) {
+        slice = tcpCandidateShareCap;
+      }
       left--;
       route.tcpCandidates.add(id);
       // Each attempt owns its dial. A transport can hand a later probe the
@@ -617,18 +754,26 @@ class CompositeBleTransport implements BleTransport {
           'TCP connect to $id took longer than ${slice.inMilliseconds} ms',
           slice,
         );
-        // The dial may still land after the budget. Close it when it does, so
-        // a late socket cannot stay open behind the BLE fallback. If a later
-        // probe has joined this dial or an earlier one was adopted, leave the
-        // connection alone: closing it here would tear down a live upgrade.
-        unawaited(
-          pending.then<void>((_) async {
-            if (route.tcpDials[id] != dial) return;
-            if (route.tcpDeviceId == id) return;
-            route.tcpDials.remove(id);
+        // The budget is authoritative: the slice expired, so this attempt is
+        // abandoned now. A transport hands a later dial the same in-flight
+        // session, and one left open would make every following tick join it
+        // instead of issuing a fresh connect, so tear the abandoned session
+        // down at once — but only when no later probe has joined this dial
+        // (it owns the candidate now) and the route did not adopt it (a live
+        // upgrade must not be torn down). `tcpDeviceId` names the candidate
+        // whose session the route owns — one it is live on, or one a landed
+        // probe named for a later switch to adopt — and every path that
+        // leaves the lane, loses the named session, or drops the route
+        // clears the pointer with it, so it never names a dead session here.
+        unawaited(pending.catchError((Object _) {}));
+        if (route.tcpDials[id] == dial && route.tcpDeviceId != id) {
+          route.tcpDials.remove(id);
+          try {
             await tcp.disconnect(id);
-          }, onError: (Object _) {}),
-        );
+          } catch (_) {
+            // The abandoned session may already be gone.
+          }
+        }
       } catch (error) {
         lastError = error;
       }
@@ -739,9 +884,45 @@ class CompositeBleTransport implements BleTransport {
     route.tcpDeviceId = tcpId;
     _rememberBridge(route, tcp.helloFor(tcpId)?.bridgeId);
     _watchTcp(route);
-    await _switchChannels(route, _Lane.tcp);
+    final from = route.active;
+    try {
+      await _switchChannels(route, _Lane.tcp);
+    } catch (error) {
+      // The switch failed partway, so the route must not keep a
+      // half-attached lane. Restore the lane it came from; the upgrade
+      // timer is still armed, so the next tick retries. The route must
+      // also stop naming the candidate: it is no longer heading onto TCP,
+      // and a session that later dies on its own would leave the pointer
+      // naming a dead session, which the teardown guard would read as
+      // adoption. The landed session stays with the transport, so the
+      // next dial still joins it instead of dialing fresh.
+      await _restoreLane(route, from);
+      route.tcpDeviceId = null;
+      rethrow;
+    }
     _stopUpgrade(route);
     _setState(route, BleConnectionState.connected);
+  }
+
+  /// Undoes a lane switch that failed partway: every live channel is
+  /// detached from whatever it half-attached to, the route is named [to]
+  /// again, and every channel re-subscribes there, so the leg it fell back
+  /// to keeps delivering. A re-subscribe that also fails forwards its error
+  /// to the channel's stream instead of leaving a half-attached one behind.
+  Future<void> _restoreLane(_Route route, _Lane? to) async {
+    final live = route.channels.where((channel) => channel.isLive).toList();
+    for (final channel in live) {
+      try {
+        await channel.detach();
+      } catch (_) {
+        // The subscription was already given up; the re-attach below
+        // replaces it.
+      }
+    }
+    route.active = to;
+    for (final channel in live) {
+      channel.attach();
+    }
   }
 
   Future<void> _activateBle(_Route route) async {
@@ -786,23 +967,32 @@ class CompositeBleTransport implements BleTransport {
       );
     }
     final handedOff = <_Channel, StreamSubscription<BleNotification>>{};
-    for (final channel in live) {
-      if (!draining.contains(channel)) {
-        await channel.detach();
-        continue;
+    try {
+      for (final channel in live) {
+        if (!draining.contains(channel)) {
+          await channel.detach();
+          continue;
+        }
+        // Every handoff drains on its own subscription. A route that returns
+        // to BLE and leaves again before the answers land must not lose the
+        // first handoff to the second: each one cancels only what it owns.
+        final subscription = channel.handOffBleToDrain();
+        if (subscription != null) handedOff[channel] = subscription;
       }
-      // Every handoff drains on its own subscription. A route that returns to
-      // BLE and leaves again before the answers land must not lose the first
-      // handoff to the second: each one cancels only what it owns.
-      final subscription = channel.handOffBleToDrain();
-      if (subscription != null) handedOff[channel] = subscription;
-    }
-    route.active = to;
-    for (final channel in live) {
-      channel.attach();
-    }
-    for (final entry in handedOff.entries) {
-      unawaited(entry.key.drainBle(route, entry.value, echoDrainTimeout));
+      route.active = to;
+      for (final channel in live) {
+        channel.attach();
+      }
+    } finally {
+      // A later channel's detach can fail the switch after some echo
+      // subscriptions were already handed off to the drain. The rollback
+      // re-attaches the channels but never cancels a drain, so schedule each
+      // handoff's drain here: it cancels its own subscription and releases
+      // the CCCD it kept once the answers land or the window expires,
+      // instead of leaving an orphan next to the re-attach.
+      for (final entry in handedOff.entries) {
+        unawaited(entry.key.drainBle(route, entry.value, echoDrainTimeout));
+      }
     }
   }
 
@@ -843,9 +1033,28 @@ class CompositeBleTransport implements BleTransport {
       // before the switch that activated this leg has named it active. Keep
       // the loss so the switch can retry the failover when it releases the
       // route.
-      route.tcpLost = state == BleConnectionState.disconnected;
+      final lost = state == BleConnectionState.disconnected;
+      // The first report outside a switch is the detection. While a switch
+      // holds the route the composite may be closing the stalled leg
+      // itself, and that echo must not move the mark past the failover it
+      // began.
+      if (lost && !route.tcpLost && !route.switching) {
+        route.timeline.onStallDetected(clock.nowUs);
+      }
+      route.tcpLost = lost;
       if (route.tcpLost && route.active == _Lane.tcp) {
         unawaited(_fallbackToBle(route));
+      } else if (route.tcpLost && !route.switching && !route.upgrading) {
+        // The named session died while the route was neither live on it
+        // nor switching onto it (a rollback left BLE active, or a landed
+        // probe named a candidate the route never adopted). Nothing will
+        // consume the pointer for this loss, and it must not outlive the
+        // session it names: a stale `tcpDeviceId` would read as adoption
+        // in `_tryTcp`'s teardown guard and keep a later abandoned dial
+        // alive past its slice instead of letting the next tick dial
+        // fresh. A switch or upgrade still in flight may adopt the named
+        // session, so its own release keeps the pointer for the failover.
+        route.tcpDeviceId = null;
       }
     }, onError: (Object _) {});
   }
@@ -870,11 +1079,18 @@ class CompositeBleTransport implements BleTransport {
     route.tcpLost = false;
     route.switching = true;
     final switchingDone = route.switchingDone = Completer<void>();
+    route.timeline.onFailoverBegin(clock.nowUs);
     try {
       // A leg can report `disconnected` while its socket is still open (the
       // half-open case the liveness probe catches). Close it before dialling
-      // BLE so it cannot keep carrying frames behind the new route.
+      // BLE so it cannot keep carrying frames behind the new route. The
+      // route must also stop naming it: the session is gone, and a stale
+      // `tcpDeviceId` would later read as adoption and keep an abandoned
+      // dial alive past its probe budget, making every following tick join
+      // it instead of dialling fresh. The candidate stays in
+      // `tcpCandidates`, so the ticks after the failover still retry it.
       final stalledTcpId = route.tcpDeviceId;
+      route.tcpDeviceId = null;
       if (stalledTcpId != null) {
         try {
           await tcp.disconnect(stalledTcpId);
@@ -889,16 +1105,29 @@ class CompositeBleTransport implements BleTransport {
       );
       final requireIdentity =
           route.bridgeId != null && bleCandidates.length > 1;
+      var reason = 'no_candidate';
       for (final bleId in bleCandidates) {
+        reason = 'connect_threw';
         try {
           await _connectBle(route, bleId, requireIdentity: requireIdentity);
+          reason = 'activation_threw';
           await _activateBle(route);
+          final nowUs = clock.nowUs;
+          route.timeline.onFailoverEnd(nowUs, candidates: bleCandidates.length);
+          // BLE carries now, so the fast retry window is open: a failed
+          // upgrade dial retries within `upgradeRetryDelay` until this
+          // closes, then the periodic tick paces the retries again.
+          route.fastRetryUntilUs = nowUs + upgradeRetryWindow.inMicroseconds;
           return;
         } catch (_) {
           if (route.bleDeviceId == bleId) await _rejectBle(route);
           // Try the next scanned bridge before giving up the session.
         }
       }
+      route.timeline.onFailoverLost(
+        candidates: bleCandidates.length,
+        reason: reason,
+      );
       await _lose(route);
     } finally {
       route.switching = false;
@@ -934,7 +1163,16 @@ class CompositeBleTransport implements BleTransport {
     try {
       if (route.tcpCandidates.isNotEmpty) {
         try {
-          final id = await _tryTcp(route, route.tcpCandidates.toList());
+          // Recovering the dropped BLE link over TCP is a dial back to TCP:
+          // it leaves the same marks an upgrade dial leaves, so the row
+          // reports the switch that actually landed.
+          route.timeline.onUpgradeDialStart(clock.nowUs);
+          String? id;
+          try {
+            id = await _tryTcp(route, route.tcpCandidates.toList());
+          } finally {
+            route.timeline.onUpgradeDialEnd(clock.nowUs);
+          }
           if (id != null) {
             await _activateTcp(route, id);
             return;
@@ -957,6 +1195,10 @@ class CompositeBleTransport implements BleTransport {
   Future<void> _lose(_Route route) async {
     _stopUpgrade(route);
     route.tcpLost = false;
+    // The route is over, so it must stop naming a TCP candidate: a stale
+    // `tcpDeviceId` would read as adoption in `_tryTcp`'s teardown guard on
+    // the next connect's dial.
+    route.tcpDeviceId = null;
     // A drop is reported from the BLE subscription's own listener; awaiting
     // that generator's cancel() there can park the loss until the next event.
     // The streams are done after a loss, so detach without waiting.
@@ -982,11 +1224,39 @@ class CompositeBleTransport implements BleTransport {
     // A failover or loss owns the route right now; it will kick again if
     // BLE is the lane it leaves active.
     if (route.switching) return;
-    if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
+    if (route.active != _Lane.ble) return;
+    // The upgrade dial is disabled; BLE stays the lane.
+    if (upgradeProbeBudget <= Duration.zero) return;
+    if (route.tcpCandidates.isEmpty) {
+      route.timeline.onUpgradeOutcome('no_candidate', candidates: 0);
+      return;
+    }
     route.upgrading = true;
+    final candidates = route.tcpCandidates.length;
+    var landed = false;
+    var outcome = 'connect_threw';
     try {
-      final id = await _tryTcp(route, route.tcpCandidates.toList());
-      if (id == null) return;
+      route.timeline.onUpgradeDialStart(clock.nowUs);
+      // BLE carries the route while the dial runs, so fail fast: the
+      // pass is cut at the upgrade budget — never above the probe
+      // budget — and a failure re-arms below instead of holding the
+      // leg's radio for a whole [tcpProbeBudget].
+      var dialBudget = upgradeProbeBudget;
+      if (tcpProbeBudget < dialBudget) dialBudget = tcpProbeBudget;
+      String? id;
+      try {
+        id = await _tryTcp(
+          route,
+          route.tcpCandidates.toList(),
+          budget: dialBudget,
+        );
+      } finally {
+        route.timeline.onUpgradeDialEnd(clock.nowUs);
+      }
+      if (id == null) {
+        outcome = 'dial_skipped';
+        return;
+      }
       // A drop, failover or connect may own the route right now, and it can
       // adopt this same socket (the transport hands out in-flight dials to
       // every joiner). Decide only once that switch has released the route:
@@ -995,24 +1265,56 @@ class CompositeBleTransport implements BleTransport {
       if (route.switching) {
         // That switch published no completion, so the route is still not
         // settled: it may adopt this dial, and the probe must not close it.
+        outcome = 'route_moved';
         return;
       }
       if (_disposed || route.intentional || route.active != _Lane.ble) {
         // The route moved on while this probe was dialling.
+        outcome = 'route_moved';
         await _discardTcpProbe(route, id);
         return;
       }
+      outcome = 'activation_threw';
       await _activateTcp(route, id);
+      outcome = 'landed';
+      landed = true;
     } catch (_) {
-      // Stay on BLE; the next tick retries.
+      // Stay on BLE; the re-arm below paces the next attempt.
     } finally {
       route.upgrading = false;
+      route.timeline.onUpgradeOutcome(outcome, candidates: candidates);
       // A dial can report its loss while this probe is activating it: the
       // state stream yields on subscribe, before the switch names TCP active,
       // so the listener only remembers it. No other switch will release the
       // route, so retry it here.
       _kickFallback(route);
+      if (!landed) _armFastRetry(route);
     }
+  }
+
+  /// Re-arms the next upgrade attempt at the fast [upgradeRetryDelay]
+  /// cadence while the post-failover window is open, so a failed dial does
+  /// not wait a whole [upgradeInterval] tick before the bridge's port is
+  /// tried again.
+  ///
+  /// One re-arm is pending at a time and none is armed while a dial is in
+  /// flight or a switch holds the route, so the fast cadence never adds a
+  /// second dial to the one already running. A non-positive
+  /// [upgradeInterval] disables the automatic upgrade, so a kicked dial
+  /// chains no re-arm either.
+  void _armFastRetry(_Route route) {
+    if (_disposed || route.intentional || route.upgrading || route.switching) {
+      return;
+    }
+    if (route.active != _Lane.ble) return;
+    if (upgradeInterval <= Duration.zero) return;
+    if (upgradeRetryDelay <= Duration.zero) return;
+    final until = route.fastRetryUntilUs;
+    if (until == null || clock.nowUs >= until) return;
+    route.fastRetryTimer ??= Timer(upgradeRetryDelay, () {
+      route.fastRetryTimer = null;
+      unawaited(_attemptUpgrade(route));
+    });
   }
 
   /// Waits until no switch holds the route. A switch that started while a
@@ -1059,6 +1361,8 @@ class CompositeBleTransport implements BleTransport {
   void _stopUpgrade(_Route route) {
     route.upgradeTimer?.cancel();
     route.upgradeTimer = null;
+    route.fastRetryTimer?.cancel();
+    route.fastRetryTimer = null;
   }
 
   Future<_LanEndpoint?> _readBleEndpoint(String bleId) async {
@@ -1183,6 +1487,10 @@ class _Route {
   final List<_Channel> channels = [];
   final Map<String, int> bleRefs = {};
 
+  /// Recovery-path marks of this route's link switches: the most recent
+  /// episode, plus the last finished episodes before it.
+  final LinkTimelineRecorder timeline = LinkTimelineRecorder();
+
   String? bridgeId;
   String? bleDeviceId;
   String? tcpDeviceId;
@@ -1216,6 +1524,16 @@ class _Route {
   String? tcpStateId;
   String? bleStateId;
   Timer? upgradeTimer;
+
+  /// The pending fast re-arm of the next upgrade attempt, armed when a dial
+  /// fails inside the post-failover window. One at a time; [_stopUpgrade]
+  /// cancels it with the periodic tick.
+  Timer? fastRetryTimer;
+
+  /// When the post-failover fast retry window closes, microseconds on
+  /// [clock]; null before this route's first failover. A later failover
+  /// moves the anchor with it.
+  int? fastRetryUntilUs;
 
   /// FF15 pings written on BLE whose answer has not arrived yet.
   int echoRequestsInFlight = 0;
@@ -1338,6 +1656,24 @@ class _Channel {
               // Only a BLE-lane answer proves the kept BLE subscription has
               // drained; a TCP answer must not cancel it early.
               if (isEcho && lane == _Lane.ble) route.echoAnswerReceived();
+              // The timeline records the arrival on the lane that carried
+              // it: the TCP stamp is the transport's own, a BLE record is
+              // re-stamped below like the notification itself.
+              if (lane == _Lane.ble) {
+                route.timeline.onBleRecord(route.clock.nowUs);
+              } else {
+                // The wall anchor is the receipt instant, not the moment this
+                // listener runs: back-date it by the delivery delay on the
+                // same clock that stamped the record.
+                final receivedAtUs = notification.receivedAtUs;
+                route.timeline.onTcpRecord(
+                  receivedAtUs,
+                  wallUs:
+                      DateTime.now().microsecondsSinceEpoch -
+                      (route.clock.nowUs - receivedAtUs),
+                  session: route.tcpDeviceId,
+                );
+              }
               if (_controller.isClosed) return;
               _controller.add(
                 lane == _Lane.ble

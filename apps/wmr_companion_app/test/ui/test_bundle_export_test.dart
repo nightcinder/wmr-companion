@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wmr_ble/wmr_ble.dart';
 import 'package:wmr_ble/testing.dart';
+import 'package:wmr_companion/wmr_companion.dart';
 import 'package:wmr_companion_app/services/test_bundle.dart';
 import 'package:wmr_companion_app/services/test_bundle_export.dart';
 import 'package:wmr_companion_app/ui/capture/capture_providers.dart';
@@ -47,6 +48,155 @@ class _FirmwareAdapter extends FakeBleAdapter {
       return Uint8List.fromList(utf8.encode('0.3.0'));
     }
     return super.read(deviceId, serviceUuid, characteristicUuid);
+  }
+}
+
+/// Replays the bridge's GATT table and answers FF16 with a valid endpoint
+/// document, so a composite reading it learns the LAN host. The
+/// `_EndpointAdapter` of `test/connect_providers_test.dart`.
+class _EndpointAdapter extends FakeBleAdapter {
+  _EndpointAdapter({required this.bridgeId});
+
+  final String bridgeId;
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+      return Uint8List.fromList(
+        utf8.encode(
+          jsonEncode({
+            'type': 'wmr_ble_endpoint',
+            'protocol': 1,
+            'bridge_id': bridgeId,
+            'name': 'WMR Bridge',
+            'version': '0.2.4',
+            'hosts': ['192.168.1.42'],
+            'port': 8765,
+            'path': '/wmr',
+            'authRequired': false,
+          }),
+        ),
+      );
+    }
+    return super.read(deviceId, serviceUuid, characteristicUuid);
+  }
+}
+
+/// A [WmrWsTransport] whose every operation runs on a [FakeTransport], so a
+/// composite's TCP leg can dial and carry records without a socket. The
+/// `_ScriptedTcp` pattern of `test/connect_providers_test.dart`, trimmed to
+/// the upgrade path.
+class _FakeWs extends WmrWsTransport {
+  _FakeWs(this.inner) : super(endpoints: const []);
+
+  final FakeTransport inner;
+  final Map<String, WmrWsEndpoint> endpoints = {};
+  final Map<String, WmrWsHello> hellos = {};
+
+  @override
+  Stream<BleScanResult> scan({List<String> withServices = const []}) =>
+      inner.scan(withServices: withServices);
+
+  @override
+  Future<void> stopScan() => inner.stopScan();
+
+  @override
+  Future<void> connect(String deviceId) => inner.connect(deviceId);
+
+  @override
+  Future<void> disconnect(String deviceId) => inner.disconnect(deviceId);
+
+  @override
+  Stream<BleConnectionState> connectionState(String deviceId) =>
+      inner.connectionState(deviceId);
+
+  @override
+  Future<List<BleServiceInfo>> discoverServices(String deviceId) =>
+      inner.discoverServices(deviceId);
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => inner.subscribe(deviceId, serviceUuid, characteristicUuid);
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => inner.unsubscribe(deviceId, serviceUuid, characteristicUuid);
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) => inner.read(deviceId, serviceUuid, characteristicUuid);
+
+  @override
+  Future<void> write(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+    Uint8List value, {
+    bool withoutResponse = false,
+  }) => inner.write(
+    deviceId,
+    serviceUuid,
+    characteristicUuid,
+    value,
+    withoutResponse: withoutResponse,
+  );
+
+  @override
+  Future<BleConnectionInfo> connectionInfo(String deviceId) =>
+      inner.connectionInfo(deviceId);
+
+  @override
+  Future<void> dispose() => inner.dispose();
+
+  @override
+  WmrWsEndpoint? endpointFor(String deviceId) => endpoints[deviceId];
+
+  @override
+  WmrWsHello? helloFor(String deviceId) => hellos[deviceId];
+
+  @override
+  void registerEndpoint(WmrWsEndpoint endpoint) {
+    endpoints[endpoint.resolvedDeviceId] = endpoint;
+    hellos[endpoint.resolvedDeviceId] = WmrWsHello(
+      protocol: 1,
+      transport: 'wifi',
+      device: 'wmr-pi',
+      version: '0.2.4',
+      hostname: 'pi',
+      bridgeId: endpoint.bridgeId ?? '',
+      authRequired: false,
+      streams: const {'raw', 'decoded', 'batched'},
+      recordSize: 56,
+      batchMax: 9,
+      fragmentCapacity: 244,
+    );
+  }
+}
+
+Future<void> _waitFor(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 2),
+  String? reason,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail(reason ?? 'condition not met within $timeout');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }
 
@@ -263,6 +413,203 @@ void main() {
       final ble = await container.read(testBundleInputProvider)();
       expect(ble.wifiFallback, isFalse);
       expect(ble.activeLeg, isNull);
+    },
+  );
+
+  test(
+    'an export carries the composite link-switch timeline it recorded',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const bridgeId = 'pi-1';
+      const bleDeviceId = 'ble-pi-1';
+      const lanDeviceId = '192.168.1.42:8765';
+      final latencyDir = Directory('${dir.path}/latency')..createSync();
+      final captureDir = Directory('${dir.path}/captures')..createSync();
+
+      // The Bluetooth tab's handoff: the radio's FF16 read names the LAN
+      // host, so the composite upgrades the route to TCP without waiting
+      // for the upgrade interval.
+      final adapter = _EndpointAdapter(bridgeId: bridgeId);
+      final ble = UniversalBleTransport(
+        adapter: adapter,
+        scanTimeout: const Duration(minutes: 5),
+      );
+      final tcp = _FakeWs(
+        FakeTransport(devices: const [FakeDevice(id: lanDeviceId, mtu: 4096)]),
+      );
+      late CompositeBleTransport composite;
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(ble),
+          bleHandoffTransportFactoryProvider.overrideWithValue(
+            (bleLeg) => composite = CompositeBleTransport(
+              tcp: tcp,
+              ble: bleLeg,
+              upgradeInterval: const Duration(hours: 1),
+            ),
+          ),
+          streamModeProvider.overrideWith(RawModeNotifier.new),
+          latencyStoreProvider.overrideWith((ref) => LatencyStore(latencyDir)),
+          captureStoreProvider.overrideWith((ref) => CaptureStore(captureDir)),
+          bundleDeviceInfoProvider.overrideWithValue(
+            () async => const BundleDeviceInfo(
+              appVersion: '0.2.2+4',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+            ),
+          ),
+          deviceEnvironmentProbeProvider.overrideWithValue(
+            const _FakeEnvironmentProbe(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(realDeviceProvider.notifier).connect(bleDeviceId);
+      await _waitFor(
+        () => composite.activeLegFor(bleDeviceId) == CompositeLeg.tcp,
+        reason: 'the FF16 LAN host was not dialled',
+      );
+
+      // One record on the leg that now carries the route opens the upgrade
+      // episode's first-TCP mark.
+      await _waitFor(
+        () => tcp.inner.emit(lanDeviceId, wmrBridgeStreamCharUuid, [1]),
+        reason: 'the stream was not subscribed on the TCP leg',
+      );
+      await _waitFor(
+        () =>
+            composite.linkTimelineFor(bleDeviceId)!['first_tcp_record_us'] !=
+            null,
+        reason: 'the first TCP record was not marked on the timeline',
+      );
+
+      final input = await container.read(testBundleInputProvider)();
+      final timeline = input.linkTimeline;
+      expect(timeline, composite.linkTimelineFor(bleDeviceId));
+      expect(timeline!['upgrade_dial_start_us'], isA<int>());
+      expect(timeline['upgrade_dial_end_us'], isA<int>());
+      expect(timeline['first_tcp_record_us'], isA<int>());
+
+      final bundle = await writeTestBundle(input, Directory('${dir.path}/out'));
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final diagnostics = jsonDecode(
+        utf8.decode(
+          archive.files.firstWhere((f) => f.name == 'diagnostics.json').content,
+        ),
+      ) as Map<String, Object?>;
+      expect(diagnostics['link_timeline'], timeline);
+    },
+  );
+
+  test(
+    'an export carries the BLE subscribe marks the GATT dial recorded',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final latencyDir = Directory('${dir.path}/latency')..createSync();
+      final captureDir = Directory('${dir.path}/captures')..createSync();
+
+      // The Bluetooth tab's handoff with no LAN endpoint in the FF16
+      // document, so the route stays on the BLE leg and its GATT marks are
+      // the link's own story. The default stream mode is FF14.
+      final adapter = _FirmwareAdapter();
+      final ble = UniversalBleTransport(
+        adapter: adapter,
+        scanTimeout: const Duration(minutes: 5),
+      );
+      final tcp = _FakeWs(FakeTransport(devices: const []));
+      late CompositeBleTransport composite;
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(ble),
+          bleHandoffTransportFactoryProvider.overrideWithValue(
+            (bleLeg) => composite = CompositeBleTransport(
+              tcp: tcp,
+              ble: bleLeg,
+              upgradeInterval: const Duration(hours: 1),
+            ),
+          ),
+          latencyStoreProvider.overrideWith((ref) => LatencyStore(latencyDir)),
+          captureStoreProvider.overrideWith((ref) => CaptureStore(captureDir)),
+          bundleDeviceInfoProvider.overrideWithValue(
+            () async => const BundleDeviceInfo(
+              appVersion: '0.2.2+4',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+            ),
+          ),
+          deviceEnvironmentProbeProvider.overrideWithValue(
+            const _FakeEnvironmentProbe(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(realDeviceProvider.notifier)
+          .connect(fakeBridgeDeviceId);
+      await _waitFor(
+        () =>
+            ble.subscribeTimelineFor(
+              fakeBridgeDeviceId,
+            )?['ff14_cccd_write_us'] !=
+            null,
+        reason: 'the FF14 CCCD write was not marked',
+      );
+      final discovery =
+          ble.subscribeTimelineFor(
+                fakeBridgeDeviceId,
+              )!['service_discovery_done_us']!
+              as int;
+      adapter.emitNotification(wmrBridgeBatchedCharUuid, [1]);
+      await _waitFor(
+        () =>
+            ble.subscribeTimelineFor(
+              fakeBridgeDeviceId,
+            )?['first_ff14_notification_us'] !=
+            null,
+        reason: 'the first FF14 notification was not marked',
+      );
+
+      // The route's timeline carries the BLE leg's marks beside its own,
+      // keyed as the bundle exports them.
+      final timeline = composite.linkTimelineFor(fakeBridgeDeviceId)!;
+      final subscribe = timeline['ble_subscribe']! as Map<String, Object?>;
+      final connectStart = subscribe['gatt_connect_start_us']! as int;
+      final cccd = subscribe['ff14_cccd_write_us']! as int;
+      final firstNotification = subscribe['first_ff14_notification_us']! as int;
+      // The dial's steps in order: the write follows discovery (the wait
+      // between them can be shorter than a microsecond tick) and the
+      // first record follows the write across a real gap.
+      expect(discovery, greaterThanOrEqualTo(connectStart));
+      expect(cccd, greaterThanOrEqualTo(discovery));
+      expect(firstNotification, greaterThan(cccd));
+      // Nothing died and the radio never moved during the dial.
+      expect(subscribe['disconnect_us'], isNull);
+      expect(subscribe['radio_off_us'], isNull);
+      expect(subscribe['radio_on_us'], isNull);
+
+      final input = await container.read(testBundleInputProvider)();
+      expect(input.linkTimeline, timeline);
+      final bundle = await writeTestBundle(input, Directory('${dir.path}/out'));
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final diagnostics = jsonDecode(
+        utf8.decode(
+          archive.files.firstWhere((f) => f.name == 'diagnostics.json').content,
+        ),
+      ) as Map<String, Object?>;
+      // The bundle carries the marks verbatim under the timeline's
+      // `ble_subscribe` entry.
+      expect(diagnostics['link_timeline'], timeline);
+      final exported =
+          (diagnostics['link_timeline']! as Map)['ble_subscribe'] as Map;
+      expect(exported['gatt_connect_start_us'], isA<int>());
+      expect(exported['ff14_cccd_write_us'], isA<int>());
+      expect(exported['first_ff14_notification_us'], isA<int>());
     },
   );
 

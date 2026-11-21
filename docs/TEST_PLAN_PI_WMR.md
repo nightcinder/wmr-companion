@@ -5,10 +5,11 @@ end to end against a Raspberry Pi bridge with two WMR controllers. ESP32,
 PSVR2, Switch and headset tracking are out of scope except where a spec item
 (S1-S5) touches them.
 
-Status of this plan: written 2026-11-13. **No row marked "owner-run hardware
-test" has a recorded result.** When one is run, its result is entered as
-user-reported with the date, the board, the phone and the build, and the
-figure is not generalised beyond that sitting.
+Status of this plan: written 2026-11-13. No row marked "owner-run hardware
+test" records a pass or fail result in this file. The Pi 3B+ baseline in M2-H1
+is a measurement from the 2026-11-18 bench run, cited there. When a row is run,
+enter its result as user-reported with the date, the board, the phone and the
+build. The figure applies to that sitting only.
 
 How to read it:
 
@@ -38,7 +39,7 @@ addresses and the session token are never written into a sheet.
 | Id | Milestone | Depends on | Code state |
 | --- | --- | --- | --- |
 | M1 | Pi bring-up: pair, stream, probe | - | Pi daemon merged, host-tested |
-| M2 | Decode CPU on the target board | M1 | fast decoder in review (separate PR) |
+| M2 | Daemon CPU on the target board | M1 | fast decoder in review (separate PR) |
 | M3 | Non-blocking `0x06` enable | M1 | in review (separate PR) |
 | M4 | App end to end: WebSocket, BLE fallback, failover | M1 | app transports merged, host-tested |
 | M5 | Raw IMU recorder | M4 | specified, not implemented ([IMU_LOG.md](IMU_LOG.md)) |
@@ -77,7 +78,7 @@ WebSocket at the expected rate with no bridge-side errors.
 | M1-H4 | Same run | per hand `lossPct` and `periodMs` recorded (no pass bar here: upstream loss is a measurement, PI_BRIDGE P6) |
 | M1-H5 | `iw dev wlan0 link` during the run | band recorded; on 5 GHz for the reference result |
 
-## M2. Decode CPU
+## M2. Daemon CPU
 
 Goal: the daemon leaves headroom on the target board with both hands
 streaming to one batched client.
@@ -94,13 +95,15 @@ streaming to one batched client.
 
 | Id | Procedure | Pass |
 | --- | --- | --- |
-| M2-H1 | On the target board, both controllers streaming, one `batched` probe client for 10 minutes. Sample the daemon's CPU every 10 s (`pidstat -p <pid> 10` or `top -b -d 10 -p <pid>`) | mean CPU of the daemon process **below 25 % of one core** over the 10 minutes, and no 10 s sample above 50 % |
+| M2-H1 | On the target board, both controllers streaming, one `batched` probe client for 10 minutes. Sample the daemon CPU every 10 s with `top -b -n 62 -d 10 -p MainPID` and discard the first frame. The first frame reports the average since the process started, not a 10 s sample, so 61 frames remain. Here `MainPID` is the daemon PID from `systemctl show -p MainPID --value wmr-bridge.service`. As an alternative, run `pidstat -p MainPID 10 61` | The gate depends on the board (decision, ONY-1583). On a Pi 4 or Pi 5, mean daemon CPU below 25 % of one core and no 10 s sample above 50 %. On a Pi 3B+, the interim gate is mean at or below 38.5 % and no 10 s sample above 40.5 %. That baseline is 61 samples from the 2026-11-18 run (ONY-1159 `bench-run-2026-11-18`, `0efef418`). Record the board and the sample count |
 | M2-H2 | `python3 tools/bench_decode.py` on the board | microseconds per report recorded for both decoders |
 | M2-H3 | `vcgencmd get_throttled` before and after M2-H1 (Raspberry Pi boards) | `0x0` both times |
 | M2-H4 | The M1-H3 probe during M2-H1 | still passes M1-H3 |
 
 M2-H1 is run once with the merged decoder as the baseline and once with the
-fast decoder, so the change is a measured difference on the same board.
+fast decoder, so the change is a measured difference on the same board. On a
+Pi 3B+, the interim gate stays in force after the per-report CPU cut (ONY-1507
+child 4).
 
 ## M3. Non-blocking enable
 
@@ -152,7 +155,7 @@ the daemon's.
 | --- | --- | --- |
 | M4-H1 | Fresh install, scan, pair, connect to the Pi. Both controllers streaming in the debug screen for 2 minutes | orientation follows both controllers; rate per hand 150 to 180 Hz; no fault banner |
 | M4-H2 | While streaming over Wi-Fi, switch the phone's Wi-Fi off | **BLE takes over in under 2.5 s** (time from the last WebSocket record to the first BLE record, from the app log or the raw IMU log once M5 exists); the longest pause between delivered records is under 3 s (PI_BRIDGE P12); sequence numbers continue |
-| M4-H3 | Switch Wi-Fi back on | the stream **upgrades back to the WebSocket** without user action, within 10 s of Wi-Fi being connected; no duplicate or out-of-order records across the switch; the BLE HID link stays up |
+| M4-H3 | Switch Wi-Fi back on | the stream **upgrades back to the WebSocket** without user action, within 5 s of Wi-Fi being connected; no duplicate or out-of-order records across the switch; the BLE HID link stays up |
 | M4-H4 | Power-cycle one controller while streaming | the hand reappears without touching the app; **its sequence numbers continue** from where they were (no restart at 1); the other hand is unaffected; the app shows one tick discontinuity for that hand at most |
 | M4-H5 | 10-minute session on Wi-Fi. At the end read the daemon's `status` (per hand `delivered`, `dropped`, `sequence`) and the app's per-hand counters (records, sequence gaps) | **the app's loss is within 1 % of the daemon's counters** per hand: `abs(app_records - daemon_delivered_to_this_client) <= 0.01 * daemon_delivered_to_this_client`, and the app's sequence-gap count matches the daemon's `dropped` for that client within the same 1 % |
 | M4-H6 | Background the app for 30 s, return | the stream resumes without a manual reconnect; no crash |
