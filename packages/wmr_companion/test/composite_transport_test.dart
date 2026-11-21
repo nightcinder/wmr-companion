@@ -870,10 +870,12 @@ void main() {
   /// leg answers and carries, then the port goes dark and the leg drops, so
   /// the route fails over to BLE with the FF16 endpoint naming
   /// `127.0.0.1:8765` and the upgrade probe dialling a port that no longer
-  /// answers.
+  /// answers. The probe budget is the production default (3 s): the
+  /// upgrade dial's own cap is what keeps every failed pass short, not a
+  /// budget shrunken here.
   Future<(_DarkPortTcp, CompositeBleTransport)> bootDarkRoute({
     bool hang = true,
-    Duration tcpProbeBudget = const Duration(milliseconds: 150),
+    Duration tcpProbeBudget = const Duration(seconds: 3),
     Duration upgradeInterval = const Duration(seconds: 2),
     Duration upgradeRetryDelay = const Duration(milliseconds: 500),
     Duration upgradeRetryWindow = const Duration(seconds: 30),
@@ -2305,6 +2307,11 @@ void main() {
       lessThanOrEqualTo(const Duration(seconds: 30)),
       reason: 'the fast cadence must stop within 30 s of a failover',
     );
+    expect(
+      transport.upgradeProbeBudget,
+      lessThanOrEqualTo(const Duration(milliseconds: 300)),
+      reason: 'a failed attempt must end within 300 ms',
+    );
   });
 
   test('a failed upgrade attempt ends fast, closes its socket, and retries '
@@ -2322,13 +2329,14 @@ void main() {
     // before the first periodic tick could dial a second time.
     await _waitFor(
       () => dark.dialAt.length - dark.darkFrom >= 6,
-      timeout: const Duration(seconds: 4),
+      timeout: const Duration(seconds: 6),
       reason: 'a failed attempt waited a whole tick for the next dial',
     );
     final passes = dark.closedAt.length ~/ 2;
 
-    // Each failed attempt ends inside the 300 ms bound: the pass's last
-    // socket closed no later than that after the pass began.
+    // Each failed attempt ends inside the 300 ms bound at the production
+    // probe budget (3 s): the pass's last socket closed no later than the
+    // upgrade dial's cap after the pass began, plus scheduler jitter.
     for (var pass = 0; pass < passes; pass++) {
       expect(
         Duration(
@@ -2336,8 +2344,8 @@ void main() {
               dark.closedAt[pass * 2 + 1] -
               dark.dialAt[dark.darkFrom + pass * 2],
         ),
-        lessThan(const Duration(milliseconds: 300)),
-        reason: 'a failed attempt outlived the 300 ms bound',
+        lessThan(const Duration(milliseconds: 400)),
+        reason: 'a failed attempt outlived the 300 ms cap',
       );
     }
 
@@ -2368,7 +2376,7 @@ void main() {
   test('the fast cadence stops when the post-failover window closes', () async {
     final (dark, transport) = await bootDarkRoute(
       upgradeInterval: const Duration(milliseconds: 1200),
-      upgradeRetryDelay: const Duration(milliseconds: 200),
+      upgradeRetryDelay: const Duration(milliseconds: 100),
       upgradeRetryWindow: const Duration(milliseconds: 1000),
     );
 
@@ -2404,6 +2412,29 @@ void main() {
       greaterThan(const Duration(milliseconds: 1000)),
       reason: 'a fast retry fired after the window closed',
     );
+  });
+
+  test('a non-positive upgrade interval disables the fast re-arm', () async {
+    final (dark, transport) = await bootDarkRoute(
+      upgradeInterval: Duration.zero,
+    );
+
+    // The FF16 kick dials once even with the automatic upgrade disabled,
+    // and its failure must not chain the fast cadence: no dial may follow.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 2,
+      reason: 'the FF16 kick did not dial',
+    );
+    final kicked = dark.dialAt.length - dark.darkFrom;
+    // Several would-be re-arm deadlines pass inside the still-open
+    // window; none of them may start a dial.
+    await _settle(2000);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      kicked,
+      reason: 'the fast cadence chained behind a disabled upgrade',
+    );
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
   });
 
   test('a fast re-arm does not dial while a switch holds the route', () async {
@@ -2711,7 +2742,7 @@ void main() {
     expect(
       Duration(microseconds: aClosed - aDialed),
       lessThan(const Duration(milliseconds: 300)),
-      reason: 'the refusing candidate held the attempt past its 250 ms share',
+      reason: 'the refusing candidate held the attempt past its bounded share',
     );
     expect(
       refusing.closedAt.containsKey(idB),
@@ -2779,10 +2810,15 @@ void main() {
     ble.dispose();
     ble = newBle(ff16: _endpointDocument());
 
+    // The handshake is slower than the share cap but well inside the
+    // budget this test pins: at the default 300 ms upgrade budget a 400 ms
+    // handshake is deliberately a failed attempt, so the exemption is
+    // proven here against a budget that still admits it.
     final transport = CompositeBleTransport(
       tcp: slow,
       ble: ble,
       upgradeInterval: const Duration(milliseconds: 10),
+      upgradeProbeBudget: const Duration(seconds: 3),
     );
     addTearDown(transport.dispose);
 

@@ -25,7 +25,10 @@ enum CompositeLeg { tcp, ble }
 /// [upgradeRetryWindow] after a failover a failed retry redials within
 /// [upgradeRetryDelay] instead of waiting a whole tick, so a bridge whose
 /// LAN link is coming back is reached in seconds rather than tick-quantised
-/// attempts. TCP is probed only while a LAN interface is up, and never for
+/// attempts. One upgrade dial runs at most [upgradeProbeBudget] — less
+/// when [tcpProbeBudget] is shorter — so a failed pass ends fast and the
+/// cadence, not a hanging dial, paces the retries. TCP is probed only
+/// while a LAN interface is up, and never for
 /// longer than [tcpProbeBudget], so a phone with Wi-Fi off reaches BLE
 /// immediately.
 ///
@@ -72,6 +75,7 @@ class CompositeBleTransport implements BleTransport {
     this.upgradeInterval = const Duration(seconds: 2),
     this.upgradeRetryDelay = const Duration(milliseconds: 500),
     this.upgradeRetryWindow = const Duration(seconds: 30),
+    this.upgradeProbeBudget = const Duration(milliseconds: 300),
     this.bleScanWait = const Duration(seconds: 5),
     this.tcpProbeBudget = const Duration(seconds: 3),
     this.tcpCandidateShareCap = const Duration(milliseconds: 250),
@@ -119,6 +123,19 @@ class CompositeBleTransport implements BleTransport {
   /// while a Wi-Fi link stays down. A non-positive duration disables the
   /// fast cadence entirely.
   final Duration upgradeRetryWindow;
+
+  /// The longest one upgrade dial from BLE may run before the pass is
+  /// abandoned.
+  ///
+  /// BLE carries the route's traffic while the dial runs, so a port that
+  /// has not answered inside this bound is torn down at once and the
+  /// failed pass ends here — inside the post-failover window the re-arm
+  /// redials at the fast [upgradeRetryDelay] cadence, and outside it the
+  /// periodic [upgradeInterval] tick paces the next attempt — instead of
+  /// the leg's radio being held for a whole [tcpProbeBudget]. A
+  /// [tcpProbeBudget] shorter than this still wins, and a non-positive
+  /// duration disables the upgrade dial, so a route on BLE stays there.
+  final Duration upgradeProbeBudget;
 
   /// How long [connect] waits for a BLE scan hit when every TCP candidate
   /// failed while a [scan] is still running. Zero disables the wait.
@@ -657,15 +674,20 @@ class CompositeBleTransport implements BleTransport {
     return ids.toList();
   }
 
-  Future<String?> _tryTcp(_Route route, List<String> candidates) async {
+  Future<String?> _tryTcp(
+    _Route route,
+    List<String> candidates, {
+    Duration? budget,
+  }) async {
+    final probeBudget = budget ?? tcpProbeBudget;
     if (candidates.isEmpty) return null;
-    if (tcpProbeBudget <= Duration.zero) return null;
+    if (probeBudget <= Duration.zero) return null;
     if (!await _lanAvailable()) return null;
     Object? lastError;
     final stopwatch = Stopwatch()..start();
     var left = candidates.length;
     for (final id in candidates) {
-      final remaining = tcpProbeBudget - stopwatch.elapsed;
+      final remaining = probeBudget - stopwatch.elapsed;
       if (remaining <= Duration.zero) break;
       // Share what is left evenly, so one unresponsive address cannot use the
       // whole budget and hide a reachable candidate behind it — and cut the
@@ -1165,13 +1187,25 @@ class CompositeBleTransport implements BleTransport {
     // BLE is the lane it leaves active.
     if (route.switching) return;
     if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
+    // The upgrade dial is disabled; BLE stays the lane.
+    if (upgradeProbeBudget <= Duration.zero) return;
     route.upgrading = true;
     var landed = false;
     try {
       route.timeline.onUpgradeDialStart(clock.nowUs);
+      // BLE carries the route while the dial runs, so fail fast: the
+      // pass is cut at the upgrade budget — never above the probe
+      // budget — and a failure re-arms below instead of holding the
+      // leg's radio for a whole [tcpProbeBudget].
+      var dialBudget = upgradeProbeBudget;
+      if (tcpProbeBudget < dialBudget) dialBudget = tcpProbeBudget;
       String? id;
       try {
-        id = await _tryTcp(route, route.tcpCandidates.toList());
+        id = await _tryTcp(
+          route,
+          route.tcpCandidates.toList(),
+          budget: dialBudget,
+        );
       } finally {
         route.timeline.onUpgradeDialEnd(clock.nowUs);
       }
@@ -1213,12 +1247,15 @@ class CompositeBleTransport implements BleTransport {
   ///
   /// One re-arm is pending at a time and none is armed while a dial is in
   /// flight or a switch holds the route, so the fast cadence never adds a
-  /// second dial to the one already running.
+  /// second dial to the one already running. A non-positive
+  /// [upgradeInterval] disables the automatic upgrade, so a kicked dial
+  /// chains no re-arm either.
   void _armFastRetry(_Route route) {
     if (_disposed || route.intentional || route.upgrading || route.switching) {
       return;
     }
     if (route.active != _Lane.ble) return;
+    if (upgradeInterval <= Duration.zero) return;
     if (upgradeRetryDelay <= Duration.zero) return;
     final until = route.fastRetryUntilUs;
     if (until == null || clock.nowUs >= until) return;
