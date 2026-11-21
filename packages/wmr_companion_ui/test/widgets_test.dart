@@ -65,6 +65,34 @@ void main() {
     expect(find.textContaining('fault mtuTooSmall: need 61'), findsOneWidget);
   });
 
+  testWidgets('warns during silence and clears when records resume', (
+    tester,
+  ) async {
+    Future<void> show(WmrLinkSnapshot link) =>
+        tester.pumpWidget(_host(LinkStatusView(link)));
+
+    await show(
+      const WmrLinkSnapshot(
+        state: WmrConnectionState.ready,
+        stalled: true,
+        silentFor: Duration(milliseconds: 3500),
+      ),
+    );
+    expect(find.text('no data for 3.5 s'), findsOneWidget);
+    expect(find.textContaining('link ready'), findsOneWidget);
+
+    await show(
+      const WmrLinkSnapshot(
+        state: WmrConnectionState.ready,
+        silentFor: Duration(milliseconds: 20),
+      ),
+    );
+    expect(find.textContaining('no data'), findsNothing);
+
+    await show(const WmrLinkSnapshot(state: WmrConnectionState.idle));
+    expect(find.textContaining('no data'), findsNothing);
+  });
+
   testWidgets('renders firmware version and offered FF tokens', (tester) async {
     await tester.pumpWidget(
       _host(

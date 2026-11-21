@@ -81,7 +81,7 @@ class WmrCompanion {
   ControllerControlClient? _controllerControl;
   ConfigClient? _configClient;
   EchoClient? _echoClient;
-  BleConnectionInfo? _lastInfo;
+  BridgeLinkSnapshot? _lastLink;
   DecodedStats? _lastStats;
   WmrProtocolVersion? _protocol;
   GamepadState? _previousGamepad;
@@ -718,7 +718,7 @@ class WmrCompanion {
     _linkTimer?.cancel();
     _linkTimer = null;
     _lastStats = null;
-    _lastInfo = null;
+    _lastLink = null;
     _protocol = null;
     _controllerControl = null;
     _configClient = null;
@@ -832,11 +832,16 @@ class WmrCompanion {
     _refreshingLink = true;
     try {
       if (_state == WmrConnectionState.ready) {
-        try {
-          _lastInfo = await _transport.connectionInfo(deviceId);
-        } catch (_) {
-          // The platform may not expose MTU/RSSI; keep the last known values.
+        final link = await service.bridgeLink(deviceId);
+        // A disconnect or replacement session may land during the platform
+        // read. It must not restore the old bridge's silence or link fields.
+        if (_disposed ||
+            _service != service ||
+            _deviceId != deviceId ||
+            _state != WmrConnectionState.ready) {
+          return;
         }
+        _lastLink = link;
         _lastStats = service.decodedStats;
       }
     } finally {
@@ -852,14 +857,19 @@ class WmrCompanion {
       WmrLinkSnapshot(
         state: _state,
         deviceId: _deviceId,
-        mtu: _lastInfo?.mtu,
-        rssi: _lastInfo?.rssi,
-        connectionIntervalUs: _lastInfo?.connectionIntervalUs,
-        phy: _lastInfo?.phy,
+        mtu: _lastLink?.mtu,
+        rssi: _lastLink?.rssi,
+        connectionIntervalUs: _lastLink?.connectionIntervalUs,
+        phy: _lastLink?.phy,
         mode: service?.mode ?? _config.streamMode,
         fault: service == null ? null : _faultOf(service.fault),
         stats: _lastStats,
         protocol: _protocol,
+        stalled:
+            _state == WmrConnectionState.ready && (_lastLink?.stalled ?? false),
+        silentFor: _state == WmrConnectionState.ready
+            ? _lastLink?.silentFor
+            : null,
       ),
     );
   }
@@ -922,7 +932,7 @@ class WmrCompanion {
     _latestInputs[0] = null;
     _latestInputs[1] = null;
     _previousGamepad = null;
-    _lastInfo = null;
+    _lastLink = null;
     _lastStats = null;
     _protocol = null;
     _linkUp = false;

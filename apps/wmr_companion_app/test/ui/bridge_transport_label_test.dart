@@ -45,6 +45,36 @@ void main() {
     );
   });
 
+  testWidgets('silence warning identifies only the stalled bridge and clears', (
+    tester,
+  ) async {
+    Future<void> show(List<BridgeLinkSnapshot> bridges) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: BridgeLinkTable(bridges, transportKinds: kinds)),
+      ),
+    );
+    await show(const [
+      BridgeLinkSnapshot(
+        bridgeId: 'bridge-left',
+        mode: StreamMode.raw,
+        stalled: true,
+        silentFor: Duration(milliseconds: 4250),
+      ),
+      BridgeLinkSnapshot(
+        bridgeId: 'bridge-right',
+        mode: StreamMode.raw,
+        silentFor: Duration(milliseconds: 10),
+      ),
+    ]);
+    expect(find.text('BLE  bridge-left: no data for 4.3 s'), findsOneWidget);
+    expect(find.textContaining('no data'), findsOneWidget);
+
+    await show(const [
+      BridgeLinkSnapshot(bridgeId: 'bridge-left', mode: StreamMode.raw),
+    ]);
+    expect(find.textContaining('no data'), findsNothing);
+  });
+
   testWidgets('decoded per-bridge rows label each bridge by transport', (
     tester,
   ) async {

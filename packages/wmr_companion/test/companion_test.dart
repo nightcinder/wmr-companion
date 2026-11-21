@@ -82,6 +82,44 @@ void main() {
     fakeBridge.stop();
   });
 
+  test(
+    'link snapshots report silence and clear after data or disconnect',
+    () async {
+      companion = WmrCompanion(ble: transport);
+      final links = <WmrLinkSnapshot>[];
+      subs.add(companion.link.listen(links.add));
+      await companion.connect(_bridge);
+
+      Future<void> waitFor(bool Function() condition) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 6));
+        while (!condition()) {
+          if (DateTime.now().isAfter(deadline))
+            fail('link status did not update');
+          await _settle();
+        }
+      }
+
+      await waitFor(() => links.isNotEmpty && links.last.stalled);
+      expect(companion.state, WmrConnectionState.ready);
+      expect(
+        links.last.silentFor,
+        greaterThanOrEqualTo(const Duration(seconds: 3)),
+      );
+
+      // FF14 waits for a full batch or a later tick that flushes its hold.
+      for (var i = 0; i < 20; i++) {
+        fakeBridge.tick();
+      }
+      await waitFor(() => !links.last.stalled);
+      expect(links.last.silentFor, lessThan(const Duration(seconds: 3)));
+
+      await transport.disconnect(fakeBridgeDeviceId);
+      await waitFor(() => !links.last.connected);
+      expect(links.last.stalled, isFalse);
+      expect(links.last.silentFor, isNull);
+    },
+  );
+
   test('scan publishes de-duplicated devices, strongest first', () async {
     await transport.dispose();
     transport = FakeTransport(
