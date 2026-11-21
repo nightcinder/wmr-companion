@@ -20,7 +20,7 @@ the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1
 Those two marks bound the takeover.
 
 T2 is the app's `first_tcp_record_us` mark. The app sets it on the first TCP
-record after an upgrade dial ends (`packages/wmr_companion/lib/src/link_timeline.dart:116-121`).
+record after an upgrade dial ends (`packages/wmr_companion/lib/src/link_timeline.dart:84-85`).
 
 T2−T1 and T2−T0 need one clock. T0 and T1 are Pi shell times, and the app mark
 is on the phone clock. Record T2 from the first
