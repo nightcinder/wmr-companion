@@ -728,8 +728,12 @@ class UniversalBleTransport
       if (_sessions[deviceId] == session) {
         _sessions.remove(deviceId);
         // The dial owned the device, so its end is a disconnect: the next
-        // dial's marks follow it on the timeline.
-        _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
+        // dial's marks follow it on the timeline. A dial that died at
+        // preflight never opened the link — nothing went down — so the
+        // last episode's end stands instead of a second disconnect.
+        if (linkAttempted) {
+          _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
+        }
       }
       _setState(deviceId, BleConnectionState.disconnected);
       if (linkAttempted && !_radioOff) {

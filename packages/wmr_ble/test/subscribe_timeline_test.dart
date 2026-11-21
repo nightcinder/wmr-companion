@@ -256,5 +256,41 @@ void main() {
         );
       },
     );
+
+    test(
+      'a redial that dies at preflight does not re-mark the disconnect',
+      () async {
+        await connectSubscribed();
+        adapter.emitNotification(wmrBridgeBatchedCharUuid, [1]);
+        await pump();
+
+        // The link drops, then the app's redial dies at preflight —
+        // permission denied — before any GATT dial began.
+        adapter.dropLink();
+        await pump();
+        final atDrop = t.subscribeTimelineFor(id)!;
+        expect(atDrop['disconnect_us'], isA<int>());
+        adapter.permissionsGranted = false;
+        adapter.grantOnRequest = false;
+        await settle();
+        await expectLater(
+          t.connect(id),
+          throwsA(
+            isA<BleTransportException>().having(
+              (e) => e.phase,
+              'phase',
+              BleLinkPhase.permissionDenied,
+            ),
+          ),
+        );
+
+        final failed = t.subscribeTimelineFor(id)!;
+        // No link the redial opened ever went down, so the failed dial
+        // stamped nothing: the marks still describe the good dial and its
+        // drop, and the disconnect keeps the instant of the real loss.
+        expect(_mark(failed, 'disconnect_us'), _mark(atDrop, 'disconnect_us'));
+        expect(failed, equals(atDrop));
+      },
+    );
   });
 }
