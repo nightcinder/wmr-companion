@@ -177,10 +177,10 @@ void main() {
       // An episode that failed over dials back to TCP three times before
       // the route moves: the newest attempt owns the start mark.
       final recorder = LinkTimelineRecorder()
-        ..onTcpRecord(1000000)
+        ..onTcpRecord(1000000, wallUs: 0)
         ..onStallDetected(1100000)
         ..onFailoverBegin(1105000)
-        ..onFailoverEnd(1180000)
+        ..onFailoverEnd(1180000, candidates: 1)
         ..onBleRecord(1200000)
         ..onUpgradeDialStart(2000000)
         ..onUpgradeDialEnd(2100000);
@@ -204,7 +204,7 @@ void main() {
 
       // The next episode starts its own first attempt and count.
       recorder
-        ..onTcpRecord(5000000)
+        ..onTcpRecord(5000000, wallUs: 0)
         ..onStallDetected(5100000)
         ..onFailoverBegin(5105000)
         ..onBleRecord(5200000)
