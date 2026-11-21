@@ -212,13 +212,18 @@ class _FakeTcp extends WmrWsTransport {
     );
   }
 
-  bool emit(String deviceId, String characteristicUuid, List<int> value) {
+  bool emit(
+    String deviceId,
+    String characteristicUuid,
+    List<int> value, {
+    int? receivedAtUs,
+  }) {
     final controller = streams[_key(deviceId, characteristicUuid)];
     if (controller == null || !controller.hasListener) return false;
     controller.add(
       BleNotification(
         value: Uint8List.fromList(value),
-        receivedAtUs: clock.nowUs,
+        receivedAtUs: receivedAtUs ?? clock.nowUs,
       ),
     );
     return true;
@@ -2414,12 +2419,16 @@ void main() {
           'connect_threw',
       reason: 'the failed attempt never recorded its outcome',
     );
+    // A recorded outcome means no attempt is between its start and its dial,
+    // so the count and the port's dials are read at one settled boundary.
+    // Each attempt dials every candidate once.
     final marks = transport.linkTimelineFor(_tcpDeviceId)!;
-    expect(marks['upgrade_candidate_count'], greaterThanOrEqualTo(1));
+    final candidates = marks['upgrade_candidate_count']! as int;
+    expect(candidates, greaterThanOrEqualTo(1));
     expect(
-      marks['upgrade_dial_attempts'] as int,
-      greaterThanOrEqualTo(passes),
-      reason: 'a finished attempt was not counted',
+      dark.dialAt.length - dark.darkFrom,
+      (marks['upgrade_dial_attempts']! as int) * candidates,
+      reason: 'the attempt count differs from the dials the port saw',
     );
   });
 
@@ -2615,10 +2624,17 @@ void main() {
       expect(marks['upgrade_outcome'], 'landed');
       expect(marks['upgrade_candidate_count'], greaterThanOrEqualTo(1));
 
-      // The next TCP record is marked on the timeline, with the session
-      // it arrived on and a wall-clock anchor for the same instant.
+      // The next TCP record was stamped 300 ms before it reached the
+      // listener. Its wall anchor must be the receipt instant, so it sits
+      // 300 ms before the listener's wall clock, on the record's own stamp.
+      const deliveryDelayUs = 300000;
       final beforeWallUs = DateTime.now().microsecondsSinceEpoch;
-      expect(dark.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [9]), isTrue);
+      expect(
+        dark.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [
+          9,
+        ], receivedAtUs: dark.clock.nowUs - deliveryDelayUs),
+        isTrue,
+      );
       await _waitFor(
         () =>
             transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
@@ -2629,7 +2645,13 @@ void main() {
       final landedMarks = transport.linkTimelineFor(_tcpDeviceId)!;
       expect(landedMarks['first_tcp_record_session'], _tcpDeviceId);
       final wallUs = landedMarks['first_tcp_record_wall_us']! as int;
-      expect(wallUs, inInclusiveRange(beforeWallUs, afterWallUs));
+      expect(
+        wallUs,
+        inInclusiveRange(
+          beforeWallUs - deliveryDelayUs - 100000,
+          afterWallUs - deliveryDelayUs,
+        ),
+      );
       await _settle(300);
       expect(
         dark.dialAt.length - dark.darkFrom,

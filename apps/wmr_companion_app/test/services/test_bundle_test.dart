@@ -374,32 +374,32 @@ void main() {
     // the episode. After two rounds two episodes are finished, and the
     // third is live with its upgrade already past its first BLE record.
     final timeline = LinkTimelineRecorder()
-      ..onTcpRecord(1000000)
-      ..onTcpRecord(1500000)
+      ..onTcpRecord(1000000, wallUs: 0)
+      ..onTcpRecord(1500000, wallUs: 0)
       ..onStallDetected(1600000)
       ..onFailoverBegin(1605000)
       ..onFailoverEnd(1680000, candidates: 1)
       ..onBleRecord(1700000)
       ..onUpgradeDialStart(2000000)
       ..onUpgradeDialEnd(2105000)
-      ..onTcpRecord(2120000)
-      ..onTcpRecord(3000000)
+      ..onTcpRecord(2120000, wallUs: 0)
+      ..onTcpRecord(3000000, wallUs: 0)
       ..onStallDetected(3100000)
       ..onFailoverBegin(3105000)
       ..onFailoverEnd(3180000, candidates: 1)
       ..onBleRecord(3200000)
       ..onUpgradeDialStart(3500000)
       ..onUpgradeDialEnd(3605000)
-      ..onTcpRecord(3620000)
-      ..onTcpRecord(6000000)
+      ..onTcpRecord(3620000, wallUs: 0)
+      ..onTcpRecord(6000000, wallUs: 0)
       ..onStallDetected(6100000)
       ..onFailoverBegin(6105000)
       ..onFailoverEnd(6180000, candidates: 1)
       ..onBleRecord(6200000)
       ..onUpgradeDialStart(6500000)
       ..onUpgradeDialEnd(6605000)
-      ..onTcpRecord(6620000)
-      ..onTcpRecord(7000000);
+      ..onTcpRecord(6620000, wallUs: 0)
+      ..onTcpRecord(7000000, wallUs: 0);
 
     final bundle = await writeTestBundle(
       TestBundleInput(

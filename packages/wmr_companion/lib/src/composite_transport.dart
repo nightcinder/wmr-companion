@@ -1653,8 +1653,15 @@ class _Channel {
               if (lane == _Lane.ble) {
                 route.timeline.onBleRecord(route.clock.nowUs);
               } else {
+                // The wall anchor is the receipt instant, not the moment this
+                // listener runs: back-date it by the delivery delay on the
+                // same clock that stamped the record.
+                final receivedAtUs = notification.receivedAtUs;
                 route.timeline.onTcpRecord(
-                  notification.receivedAtUs,
+                  receivedAtUs,
+                  wallUs:
+                      DateTime.now().microsecondsSinceEpoch -
+                      (route.clock.nowUs - receivedAtUs),
                   session: route.tcpDeviceId,
                 );
               }

@@ -10,18 +10,13 @@ void main() {
     recorder.onUpgradeDialStart(300);
     recorder.onUpgradeDialEnd(400);
 
-    final beforeWallUs = DateTime.now().microsecondsSinceEpoch;
-    recorder.onTcpRecord(500, session: 'bridge-a');
-    final afterWallUs = DateTime.now().microsecondsSinceEpoch;
-    recorder.onTcpRecord(600, session: 'bridge-b');
+    recorder.onTcpRecord(500, wallUs: 9000, session: 'bridge-a');
+    recorder.onTcpRecord(600, wallUs: 9100, session: 'bridge-b');
 
     final marks = recorder.snapshot;
     expect(marks['first_tcp_record_us'], 500);
     expect(marks['first_tcp_record_session'], 'bridge-a');
-    expect(
-      marks['first_tcp_record_wall_us'],
-      inInclusiveRange(beforeWallUs, afterWallUs),
-    );
+    expect(marks['first_tcp_record_wall_us'], 9000);
     expect(marks['last_tcp_record_us'], 600);
   });
 
@@ -56,7 +51,7 @@ void main() {
     recorder.onFailoverEnd(200, candidates: 1);
     recorder.onUpgradeDialStart(300);
     recorder.onUpgradeDialEnd(400);
-    recorder.onTcpRecord(500, session: 'bridge-a');
+    recorder.onTcpRecord(500, wallUs: 9000, session: 'bridge-a');
     recorder.onUpgradeOutcome('landed', candidates: 1);
 
     recorder.onUpgradeDialStart(700);

@@ -173,13 +173,13 @@ class LinkTimelineRecorder {
 
   /// A TCP record arrived: it becomes the newest "last TCP record", and the
   /// first one after a finished upgrade dial opens that episode's "first
-  /// TCP record".
-  void onTcpRecord(int us, {String? session}) {
+  /// TCP record". [wallUs] is the wall clock at the same instant as [us].
+  void onTcpRecord(int us, {required int wallUs, String? session}) {
     _lastTcpRecordUs = us;
     if (_firstTcpRecordUs == null && _upgradeDialEndUs != null) {
       _firstTcpRecordUs = us;
       _firstTcpRecordSession = session;
-      _firstTcpRecordWallUs = DateTime.now().microsecondsSinceEpoch;
+      _firstTcpRecordWallUs = wallUs;
     }
   }
 
