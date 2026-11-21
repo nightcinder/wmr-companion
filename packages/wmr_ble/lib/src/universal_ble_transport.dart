@@ -5,6 +5,7 @@ import 'package:wmr_core/protocol/bridge_status.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 
 import 'ble_adapter.dart';
+import 'subscribe_timeline.dart';
 
 import 'package:wmr_core/ble/ble_transport.dart';
 
@@ -108,8 +109,14 @@ class _Wanted {
 /// [BleLinkPhase.bluetoothOff] per bridge; it never redials on its own, so
 /// the host decides when the radio's return is worth an attempt.
 ///
+/// Every GATT step of a dial is stamped on [clock] and reported per bridge
+/// through [subscribeTimelineFor]: the connect start, the end of service
+/// discovery, the FF14 CCCD write, the first FF14 notification after it,
+/// every disconnect, and the adapter's radio off/on.
+///
 /// Not verified on hardware.
-class UniversalBleTransport implements BleTransport {
+class UniversalBleTransport
+    implements BleTransport, BleSubscribeTimelineSource {
   UniversalBleTransport({
     required BleAdapter adapter,
     MonotonicClock? clock,
@@ -183,9 +190,29 @@ class UniversalBleTransport implements BleTransport {
   Stream<BleAvailability> get availabilityChanges =>
       _adapter.availabilityChanges;
 
+  /// The GATT subscribe marks of each bridge dialled through this
+  /// transport, keyed by device id.
+  final Map<String, SubscribeTimeline> _subscribeTimelines = {};
+
+  /// When the adapter's radio last went off and came back, on [clock]. One
+  /// radio serves every bridge, so the pair is reported beside each
+  /// bridge's marks by [subscribeTimelineFor].
+  int? _radioOffUs;
+  int? _radioOnUs;
+
+  /// The marks of [deviceId]'s dial, recorded from the moment its GATT
+  /// connect began.
+  SubscribeTimeline _timelineFor(String deviceId) =>
+      _subscribeTimelines.putIfAbsent(deviceId, SubscribeTimeline.new);
+
   void _onAvailabilityChange(BleAvailability state) {
     _radio = state;
-    if (state == BleAvailability.poweredOff) _loseLinksToRadioOff();
+    if (state == BleAvailability.poweredOff) {
+      _radioOffUs = clock.nowUs;
+      _loseLinksToRadioOff();
+    } else if (state == BleAvailability.poweredOn) {
+      _radioOnUs = clock.nowUs;
+    }
   }
 
   /// The radio went away, so every GATT link died with it.
@@ -199,6 +226,7 @@ class UniversalBleTransport implements BleTransport {
     for (final deviceId in _sessions.keys.toList()) {
       _sessions.remove(deviceId);
       _linkSubs.remove(deviceId)?.cancel();
+      _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
       _setState(deviceId, BleConnectionState.disconnected);
       _emit(
         BleLinkPhase.bluetoothOff,
@@ -608,6 +636,7 @@ class UniversalBleTransport implements BleTransport {
           .listen((e) => _onLinkEvent(session, e));
 
       linkAttempted = true;
+      _timelineFor(deviceId).onGattConnectStart(clock.nowUs);
       try {
         await _adapter.connect(deviceId);
       } catch (e) {
@@ -660,6 +689,7 @@ class UniversalBleTransport implements BleTransport {
       if (_sessions[deviceId] != session) {
         throw _setupSuperseded(deviceId);
       }
+      _timelineFor(deviceId).onServiceDiscoveryDone(clock.nowUs);
       final hasStream = services.any(
         (s) =>
             s.uuid.toLowerCase() == wmrBridgeServiceUuid &&
@@ -695,7 +725,16 @@ class UniversalBleTransport implements BleTransport {
       _setState(deviceId, BleConnectionState.connected);
       _emit(BleLinkPhase.ready, deviceId: deviceId);
     } catch (e) {
-      if (_sessions[deviceId] == session) _sessions.remove(deviceId);
+      if (_sessions[deviceId] == session) {
+        _sessions.remove(deviceId);
+        // The dial owned the device, so its end is a disconnect: the next
+        // dial's marks follow it on the timeline. A dial that died at
+        // preflight never opened the link — nothing went down — so the
+        // last episode's end stands instead of a second disconnect.
+        if (linkAttempted) {
+          _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
+        }
+      }
       _setState(deviceId, BleConnectionState.disconnected);
       if (linkAttempted && !_radioOff) {
         // The platform already dropped the link when the radio went, and a
@@ -714,6 +753,7 @@ class UniversalBleTransport implements BleTransport {
     if (e.connected || _sessions[session.deviceId] != session) return;
     _sessions.remove(session.deviceId);
     _linkSubs.remove(session.deviceId)?.cancel();
+    _subscribeTimelines[session.deviceId]?.onDisconnect(clock.nowUs);
     _setState(session.deviceId, BleConnectionState.disconnected);
     // This is the only publisher for a link that died mid-setup: the
     // failing step aborts silently, superseded by this report. Only a drop
@@ -755,6 +795,11 @@ class UniversalBleTransport implements BleTransport {
       }
     }
     session.enabled.add(key);
+    // The FF14 subscribe mark: the CCCD write that turns the batched
+    // stream on, with the first notification after it still to come.
+    if (w.characteristicUuid.toLowerCase() == wmrBridgeBatchedCharUuid) {
+      _timelineFor(w.deviceId).onFf14CccdWrite(clock.nowUs);
+    }
   }
 
   Future<void> _disable(_Session session, String key, _Wanted w) async {
@@ -808,6 +853,7 @@ class UniversalBleTransport implements BleTransport {
         _linkSubs.remove(deviceId)?.cancel();
         _setState(deviceId, BleConnectionState.disconnected);
         _emit(BleLinkPhase.disconnected, deviceId: deviceId);
+        _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
       }
     });
   }
@@ -861,6 +907,9 @@ class UniversalBleTransport implements BleTransport {
       () => _adapter.notifications(deviceId, characteristicUuid).listen((v) {
         // Stamp first; nothing else happens on this path.
         final t = clock.nowUs;
+        if (characteristicUuid.toLowerCase() == wmrBridgeBatchedCharUuid) {
+          _subscribeTimelines[deviceId]?.onFirstFf14Notification(t);
+        }
         if (!ctl.isClosed) {
           ctl.add(BleNotification(value: v, receivedAtUs: t));
         }
@@ -1015,6 +1064,27 @@ class UniversalBleTransport implements BleTransport {
 
   /// MTU negotiated for the current session, or null.
   int? negotiatedMtu(String deviceId) => _sessions[deviceId]?.mtu;
+
+  /// The GATT subscribe marks of [deviceId]'s most recent dial, as
+  /// [SubscribeTimeline] records them plus the adapter's radio off/on
+  /// pair, in microseconds on [clock]. Null before a GATT dial to the
+  /// device began through this transport.
+  ///
+  /// The values are comparable only with each other and with [clock]'s
+  /// `nowUs` — never with the bridge's timestamps or another transport's
+  /// clock. A new dial re-records the dial's own marks; a mark that has
+  /// not landed reads null. The keys are the ones the diagnostics bundle
+  /// carries.
+  @override
+  Map<String, Object?>? subscribeTimelineFor(String deviceId) {
+    final timeline = _subscribeTimelines[deviceId];
+    if (timeline == null) return null;
+    return {
+      ...timeline.toJson(),
+      'radio_off_us': _radioOffUs,
+      'radio_on_us': _radioOnUs,
+    };
+  }
 
   /// PHY is not exposed by universal_ble, so it stays null. The connection
   /// interval is only known after Android reports a parameter update.
