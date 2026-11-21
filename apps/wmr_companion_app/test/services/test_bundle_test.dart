@@ -440,6 +440,22 @@ void main() {
     // own stall, and each first-BLE takeover still at least zero from it.
     final episodes = exported['episodes']! as List<Object?>;
     expect(episodes, hasLength(2));
+    // The bundle keeps every dial key on each finished episode: the Debug
+    // row and the bench sheet read the landing attempt and the retry count
+    // from this history, so a dropped key would silently break both.
+    const dialKeys = [
+      'upgrade_dial_start_us',
+      'upgrade_dial_end_us',
+      'first_upgrade_dial_start_us',
+      'upgrade_dial_attempts',
+    ];
+    for (final episode in episodes) {
+      expect(
+        (episode! as Map<String, Object?>).keys,
+        containsAll(dialKeys),
+        reason: 'an episode lost a dial key from the bundle',
+      );
+    }
     final episodeOne = episodes[0]! as Map<String, Object?>;
     expect(episodeOne['last_tcp_record_us'], 1500000);
     expect(

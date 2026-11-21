@@ -73,7 +73,7 @@ class CompositeBleTransport implements BleTransport {
     required this.tcp,
     required this.ble,
     this.upgradeInterval = const Duration(seconds: 2),
-    this.upgradeRetryDelay = const Duration(milliseconds: 500),
+    this.upgradeRetryDelay = const Duration(milliseconds: 100),
     this.upgradeRetryWindow = const Duration(seconds: 30),
     this.upgradeProbeBudget = const Duration(milliseconds: 300),
     this.bleScanWait = const Duration(seconds: 5),
@@ -109,9 +109,12 @@ class CompositeBleTransport implements BleTransport {
   /// that refused one moment can answer the next — so a failed probe
   /// redials at this cadence instead of waiting a whole [upgradeInterval]
   /// tick: the bench's 9–10 s upgrade gap was mostly tick-quantised
-  /// retries of a port that had been up for seconds. A non-positive
-  /// duration disables the fast re-arm; the periodic tick then paces the
-  /// retries alone.
+  /// retries of a port that had been up for seconds. With the 100 ms
+  /// default, a port that comes back while a dial is in flight is reached
+  /// at most [upgradeProbeBudget] plus this delay later, and no Pi
+  /// reachability check stands between the failed dial and the next one.
+  /// A non-positive duration disables the fast re-arm; the periodic tick
+  /// then paces the retries alone.
   final Duration upgradeRetryDelay;
 
   /// How long after a failover a failed upgrade dial keeps the fast
