@@ -504,6 +504,115 @@ void main() {
     },
   );
 
+  test(
+    'an export carries the BLE subscribe marks the GATT dial recorded',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final latencyDir = Directory('${dir.path}/latency')..createSync();
+      final captureDir = Directory('${dir.path}/captures')..createSync();
+
+      // The Bluetooth tab's handoff with no LAN endpoint in the FF16
+      // document, so the route stays on the BLE leg and its GATT marks are
+      // the link's own story. The default stream mode is FF14.
+      final adapter = _FirmwareAdapter();
+      final ble = UniversalBleTransport(
+        adapter: adapter,
+        scanTimeout: const Duration(minutes: 5),
+      );
+      final tcp = _FakeWs(FakeTransport(devices: const []));
+      late CompositeBleTransport composite;
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(ble),
+          bleHandoffTransportFactoryProvider.overrideWithValue(
+            (bleLeg) => composite = CompositeBleTransport(
+              tcp: tcp,
+              ble: bleLeg,
+              upgradeInterval: const Duration(hours: 1),
+            ),
+          ),
+          latencyStoreProvider.overrideWith((ref) => LatencyStore(latencyDir)),
+          captureStoreProvider.overrideWith((ref) => CaptureStore(captureDir)),
+          bundleDeviceInfoProvider.overrideWithValue(
+            () async => const BundleDeviceInfo(
+              appVersion: '0.2.2+4',
+              phone: 'Test Phone',
+              androidVersion: 'Android 14 (API 34)',
+            ),
+          ),
+          deviceEnvironmentProbeProvider.overrideWithValue(
+            const _FakeEnvironmentProbe(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(realDeviceProvider.notifier)
+          .connect(fakeBridgeDeviceId);
+      await _waitFor(
+        () =>
+            ble.subscribeTimelineFor(
+              fakeBridgeDeviceId,
+            )?['ff14_cccd_write_us'] !=
+            null,
+        reason: 'the FF14 CCCD write was not marked',
+      );
+      final discovery =
+          ble.subscribeTimelineFor(
+                fakeBridgeDeviceId,
+              )!['service_discovery_done_us']!
+              as int;
+      adapter.emitNotification(wmrBridgeBatchedCharUuid, [1]);
+      await _waitFor(
+        () =>
+            ble.subscribeTimelineFor(
+              fakeBridgeDeviceId,
+            )?['first_ff14_notification_us'] !=
+            null,
+        reason: 'the first FF14 notification was not marked',
+      );
+
+      // The route's timeline carries the BLE leg's marks beside its own,
+      // keyed as the bundle exports them.
+      final timeline = composite.linkTimelineFor(fakeBridgeDeviceId)!;
+      final subscribe = timeline['ble_subscribe']! as Map<String, Object?>;
+      final connectStart = subscribe['gatt_connect_start_us']! as int;
+      final cccd = subscribe['ff14_cccd_write_us']! as int;
+      final firstNotification = subscribe['first_ff14_notification_us']! as int;
+      // The dial's steps in order: the write follows discovery (the wait
+      // between them can be shorter than a microsecond tick) and the
+      // first record follows the write across a real gap.
+      expect(discovery, greaterThanOrEqualTo(connectStart));
+      expect(cccd, greaterThanOrEqualTo(discovery));
+      expect(firstNotification, greaterThan(cccd));
+      // Nothing died and the radio never moved during the dial.
+      expect(subscribe['disconnect_us'], isNull);
+      expect(subscribe['radio_off_us'], isNull);
+      expect(subscribe['radio_on_us'], isNull);
+
+      final input = await container.read(testBundleInputProvider)();
+      expect(input.linkTimeline, timeline);
+      final bundle = await writeTestBundle(input, Directory('${dir.path}/out'));
+      final archive = ZipDecoder().decodeBytes(
+        await File(bundle.path).readAsBytes(),
+      );
+      final diagnostics = jsonDecode(
+        utf8.decode(
+          archive.files.firstWhere((f) => f.name == 'diagnostics.json').content,
+        ),
+      ) as Map<String, Object?>;
+      // The bundle carries the marks verbatim under the timeline's
+      // `ble_subscribe` entry.
+      expect(diagnostics['link_timeline'], timeline);
+      final exported =
+          (diagnostics['link_timeline']! as Map)['ble_subscribe'] as Map;
+      expect(exported['gatt_connect_start_us'], isA<int>());
+      expect(exported['ff14_cccd_write_us'], isA<int>());
+      expect(exported['first_ff14_notification_us'], isA<int>());
+    },
+  );
+
   testWidgets('a published pose run puts every capture in the zip', (
     tester,
   ) async {

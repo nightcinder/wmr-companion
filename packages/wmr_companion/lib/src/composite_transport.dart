@@ -200,12 +200,31 @@ class CompositeBleTransport implements BleTransport {
   /// keys of the most recent episode, null before a mark landed, plus that
   /// episode's dial-attempt count ([LinkTimeline.toJson] names the keys),
   /// and an `episodes` list carrying the same keys for the last finished
-  /// episodes, oldest first — a later switch does not erase them. The
-  /// Debug screen renders its "Last link switch" row from the top-level
-  /// marks and the diagnostics bundle carries the map verbatim. Hosts only
-  /// sample: the composite keeps recording.
-  Map<String, Object?>? linkTimelineFor(String deviceId) =>
-      _routes[deviceId]?.timeline.snapshot;
+  /// episodes, oldest first — a later switch does not erase them. When the
+  /// route's BLE leg can report its GATT steps
+  /// ([BleSubscribeTimelineSource]), the map also carries them as a
+  /// `ble_subscribe` entry: the connect start, service discovery done, the
+  /// FF14 CCCD write, the first FF14 notification after it, the
+  /// disconnect, and the adapter's radio off/on, in microseconds on the
+  /// BLE transport's own clock — not [clock] — with the same null-before-
+  /// landed reading. The Debug screen renders its "Last link switch" row
+  /// from the top-level marks and the diagnostics bundle carries the map
+  /// verbatim. Hosts only sample: the composite keeps recording.
+  Map<String, Object?>? linkTimelineFor(String deviceId) {
+    final route = _routes[deviceId];
+    if (route == null) return null;
+    final bleId = route.bleDeviceId;
+    // A pattern rather than an `is` test: the interface sits outside the
+    // [BleTransport] hierarchy, so a type test alone does not promote the
+    // leg to it.
+    final subscribe = switch (ble) {
+      BleSubscribeTimelineSource source when bleId != null =>
+        source.subscribeTimelineFor(bleId),
+      _ => null,
+    };
+    if (subscribe == null) return route.timeline.snapshot;
+    return {...route.timeline.snapshot, 'ble_subscribe': subscribe};
+  }
 
   @override
   Stream<BleScanResult> scan({List<String> withServices = const []}) {
