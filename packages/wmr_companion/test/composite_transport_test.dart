@@ -506,6 +506,65 @@ class _SlowDialTcp extends _FakeTcp {
   }
 }
 
+/// A TCP fake whose port answers until it goes dark, then parks or refuses
+/// every dial until it comes back up — a bridge whose LAN listener is gone —
+/// recording when each dial started and when each parked dial's socket was
+/// closed, so a test can bound a failed attempt and prove none leaked its
+/// socket.
+class _DarkPortTcp extends _FakeTcp {
+  _DarkPortTcp({this.hang = true});
+
+  /// Whether a dark dial hangs — a firewall dropping the SYN — instead of
+  /// being refused at once — a port that is not up yet.
+  final bool hang;
+
+  bool _dark = false;
+
+  final Stopwatch _clock = Stopwatch()..start();
+
+  /// Stopwatch reading (µs) when each dial started, oldest first.
+  final List<int> dialAt = [];
+
+  /// Stopwatch reading (µs) when each parked dial's socket was closed,
+  /// oldest first. Only a dial still in flight counts, so a probe teardown
+  /// lands here and a stalled leg's own close does not.
+  final List<int> closedAt = [];
+
+  /// Index into [dialAt] of the first dial made after the port went dark.
+  int darkFrom = 0;
+
+  final Set<String> _inFlight = {};
+
+  /// The port stops answering: every later dial hangs or is refused.
+  void goDark() {
+    _dark = true;
+    darkFrom = dialAt.length;
+  }
+
+  /// The port answers again: the next dial lands at once.
+  void comeUp() => _dark = false;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    dialAt.add(_clock.elapsedMicroseconds);
+    if (!_dark) {
+      await super.connect(deviceId);
+      return;
+    }
+    if (!hang) throw StateError('connection refused');
+    _inFlight.add(deviceId);
+    await Completer<void>().future;
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async {
+    if (_inFlight.remove(deviceId)) {
+      closedAt.add(_clock.elapsedMicroseconds);
+    }
+    await super.disconnect(deviceId);
+  }
+}
+
 /// A TCP fake that holds every dial on its own completer, so a test can land
 /// one dial while another (started later on the same candidate) keeps running
 /// into its own budget.
@@ -806,6 +865,57 @@ void main() {
     rssi: null,
     serviceUuids: const [wmrBridgeServiceUuid],
   );
+
+  /// Boots the dark-port route the upgrade-cadence tests share: the TCP
+  /// leg answers and carries, then the port goes dark and the leg drops, so
+  /// the route fails over to BLE with the FF16 endpoint naming
+  /// `127.0.0.1:8765` and the upgrade probe dialling a port that no longer
+  /// answers. The probe budget is the production default (3 s): the
+  /// upgrade dial's own cap is what keeps every failed pass short, not a
+  /// budget shrunken here.
+  Future<(_DarkPortTcp, CompositeBleTransport)> bootDarkRoute({
+    bool hang = true,
+    Duration tcpProbeBudget = const Duration(seconds: 3),
+    Duration upgradeInterval = const Duration(seconds: 2),
+    Duration upgradeRetryDelay = const Duration(milliseconds: 500),
+    Duration upgradeRetryWindow = const Duration(seconds: 30),
+  }) async {
+    await tcp.dispose();
+    final dark = _DarkPortTcp(hang: hang)
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = dark;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+    final transport = CompositeBleTransport(
+      tcp: dark,
+      ble: ble,
+      tcpProbeBudget: tcpProbeBudget,
+      upgradeInterval: upgradeInterval,
+      upgradeRetryDelay: upgradeRetryDelay,
+      upgradeRetryWindow: upgradeRetryWindow,
+    );
+    addTearDown(transport.dispose);
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    // Let the watched leg's state stream attach before the leg drops.
+    await _settle();
+    dark.goDark();
+    dark.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+    return (dark, transport);
+  }
 
   setUp(() {
     tcp = _FakeTcp()
@@ -2183,6 +2293,403 @@ void main() {
     );
   });
 
+  test('keeps the upgrade retry cadence inside its bounds', () {
+    final transport = CompositeBleTransport(tcp: tcp, ble: ble);
+    addTearDown(transport.dispose);
+
+    expect(
+      transport.upgradeRetryDelay,
+      lessThanOrEqualTo(const Duration(milliseconds: 500)),
+      reason: 'a failed attempt must retry within 500 ms',
+    );
+    expect(
+      transport.upgradeRetryWindow,
+      lessThanOrEqualTo(const Duration(seconds: 30)),
+      reason: 'the fast cadence must stop within 30 s of a failover',
+    );
+    expect(
+      transport.upgradeProbeBudget,
+      lessThanOrEqualTo(const Duration(milliseconds: 300)),
+      reason: 'a failed attempt must end within 300 ms',
+    );
+  });
+
+  test('a failed upgrade attempt ends fast, closes its socket, and retries '
+      'within 500 ms', () async {
+    final (dark, transport) = await bootDarkRoute();
+
+    // The upgrade failures must stay contained: the route keeps reporting
+    // connected on BLE while the fast cadence runs.
+    final states = <BleConnectionState>[];
+    final stateSub = transport.connectionState(_tcpDeviceId).listen(states.add);
+    addTearDown(stateSub.cancel);
+
+    // The FF16 kick dials at once and every failure re-arms the next
+    // attempt at the fast cadence, so three whole passes land well
+    // before the first periodic tick could dial a second time.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 6,
+      timeout: const Duration(seconds: 6),
+      reason: 'a failed attempt waited a whole tick for the next dial',
+    );
+    final passes = dark.closedAt.length ~/ 2;
+
+    // Each failed attempt ends inside the 300 ms bound at the production
+    // probe budget (3 s): the pass's last socket closed no later than the
+    // upgrade dial's cap after the pass began, plus scheduler jitter.
+    for (var pass = 0; pass < passes; pass++) {
+      expect(
+        Duration(
+          microseconds:
+              dark.closedAt[pass * 2 + 1] -
+              dark.dialAt[dark.darkFrom + pass * 2],
+        ),
+        lessThan(const Duration(milliseconds: 400)),
+        reason: 'a failed attempt outlived the 300 ms cap',
+      );
+    }
+
+    // The next attempt starts within 500 ms of the last one's failure.
+    for (var pass = 0; pass + 1 < passes; pass++) {
+      expect(
+        Duration(
+          microseconds:
+              dark.dialAt[dark.darkFrom + (pass + 1) * 2] -
+              dark.closedAt[pass * 2 + 1],
+        ),
+        lessThan(const Duration(milliseconds: 700)),
+        reason: 'the next attempt started more than 500 ms later',
+      );
+    }
+
+    // Every failed dial's socket was closed: no attempt leaked one. The
+    // dial in flight when the window was sampled still has its slice to
+    // run, so wait for its teardown before counting.
+    final dials = dark.dialAt.length - dark.darkFrom;
+    await _waitFor(() => dark.closedAt.length >= dials);
+    expect(dark.closedAt.length, greaterThanOrEqualTo(dials));
+    // The failures are contained: the route never reported a loss.
+    expect(states, isNot(contains(BleConnectionState.disconnected)));
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+  });
+
+  test('the fast cadence stops when the post-failover window closes', () async {
+    final (dark, transport) = await bootDarkRoute(
+      upgradeInterval: const Duration(milliseconds: 1200),
+      upgradeRetryDelay: const Duration(milliseconds: 100),
+      upgradeRetryWindow: const Duration(milliseconds: 1000),
+    );
+
+    // The fast cadence chains attempts inside the window; once it closes
+    // only the periodic tick dials, so six passes take a few ticks.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 12,
+      timeout: const Duration(seconds: 8),
+      reason: 'the upgrade attempts never resumed the tick cadence',
+    );
+    final starts = <int>[
+      for (var i = dark.darkFrom; i < dark.dialAt.length; i += 2)
+        dark.dialAt[i],
+    ];
+    expect(starts.length, greaterThanOrEqualTo(6));
+
+    // Retries inside the window are fast: the kick and its re-arms chain
+    // well under the tick.
+    expect(
+      Duration(microseconds: starts[1] - starts[0]),
+      lessThan(const Duration(milliseconds: 550)),
+      reason: 'the first retry waited for the tick instead of the re-arm',
+    );
+    expect(
+      Duration(microseconds: starts[2] - starts[1]),
+      lessThan(const Duration(milliseconds: 550)),
+      reason: 'the second retry waited for the tick instead of the re-arm',
+    );
+    // Past the window only the tick dials: the last gap is tick-sized, so
+    // the fast cadence never fired again after the window closed.
+    expect(
+      Duration(microseconds: starts.last - starts[starts.length - 2]),
+      greaterThan(const Duration(milliseconds: 1000)),
+      reason: 'a fast retry fired after the window closed',
+    );
+  });
+
+  test('a non-positive upgrade interval disables the fast re-arm', () async {
+    final (dark, transport) = await bootDarkRoute(
+      upgradeInterval: Duration.zero,
+    );
+
+    // The FF16 kick dials once even with the automatic upgrade disabled,
+    // and its failure must not chain the fast cadence: no dial may follow.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 2,
+      reason: 'the FF16 kick did not dial',
+    );
+    final kicked = dark.dialAt.length - dark.darkFrom;
+    // Several would-be re-arm deadlines pass inside the still-open
+    // window; none of them may start a dial.
+    await _settle(2000);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      kicked,
+      reason: 'the fast cadence chained behind a disabled upgrade',
+    );
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+  });
+
+  test('a fast re-arm does not dial while a switch holds the route', () async {
+    await tcp.dispose();
+    final dark = _DarkPortTcp()
+      ..registerEndpoint(
+        WmrWsEndpoint(host: '127.0.0.1', port: 8765, bridgeId: _bridgeId),
+      );
+    tcp = dark;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument());
+
+    final transport = CompositeBleTransport(
+      tcp: dark,
+      ble: ble,
+      tcpProbeBudget: const Duration(milliseconds: 1000),
+      upgradeInterval: const Duration(seconds: 2),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    // One candidate only: the remembered id is the endpoint the FF16
+    // document names again, so the probe and the recovery dial the same
+    // address.
+    await transport.connect(_lanDeviceId);
+    expect(transport.activeLegFor(_lanDeviceId), CompositeLeg.tcp);
+
+    // Let the watched leg's state stream attach before the leg drops.
+    await _settle();
+    dark.goDark();
+    dark.drop(_lanDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_lanDeviceId) == CompositeLeg.ble,
+      reason: 'the stalled TCP leg did not fail over to BLE',
+    );
+
+    // The kick's dial parks and its slice expires: the attempt failed and
+    // the fast re-arm is now pending.
+    await _waitFor(
+      () => dark.closedAt.length >= 1,
+      reason: 'the parked probe dial was never torn down',
+    );
+
+    // The BLE leg drops while the re-arm is pending: the recovery switch
+    // takes the route and dials the same candidate for itself.
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 2,
+      reason: 'the BLE drop never started a recovery dial',
+    );
+
+    // The pending re-arm fires while the recovery still holds the route:
+    // it must not open a second dial.
+    await _settle(700);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      2,
+      reason: 'a dial started while a switch held the route',
+    );
+
+    // The recovery's own slice expires: its socket is closed too, the
+    // route is lost, and no later attempt dials again.
+    await _waitFor(
+      () => transport.activeLegFor(_lanDeviceId) == null,
+      reason: 'the recovery never gave the route up',
+    );
+    await _settle(700);
+    expect(dark.dialAt.length - dark.darkFrom, 2);
+    expect(
+      dark.closedAt.length,
+      2,
+      reason: 'a failed dial left its socket open',
+    );
+  });
+
+  test(
+    'a landing attempt ends the retries: one upgrade and no repeat dial',
+    () async {
+      final (dark, transport) = await bootDarkRoute();
+
+      // A live channel gives the upgrade a stream to carry across the
+      // switch, so the first TCP record after it lands is markable.
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      // The first attempt fails against the dark port and re-arms.
+      await _waitFor(
+        () => dark.closedAt.length >= 2,
+        reason: 'the first attempt never finished',
+      );
+
+      // The port answers again: the next fast attempt lands.
+      dark.comeUp();
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the upgrade dial never landed',
+      );
+
+      // One upgrade: the landing attempt is the second and last dial, and
+      // nothing dials again while TCP carries the route.
+      await _settle(700);
+      expect(
+        dark.dialAt.length - dark.darkFrom,
+        3,
+        reason: 'the route dialled again after the upgrade landed',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(
+        marks['upgrade_dial_attempts'],
+        2,
+        reason: 'the landing attempt was not the second dial',
+      );
+      final dialStart = marks['upgrade_dial_start_us']! as int;
+      final dialEnd = marks['upgrade_dial_end_us']! as int;
+      expect(
+        Duration(microseconds: dialEnd - dialStart),
+        lessThan(const Duration(milliseconds: 750)),
+        reason: 'the landing attempt outlived the 750 ms bound',
+      );
+
+      // The next TCP record is marked on the timeline.
+      expect(dark.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [9]), isTrue);
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+            null,
+        reason: 'the first TCP record after the upgrade was not marked',
+      );
+      await _settle(300);
+      expect(
+        dark.dialAt.length - dark.darkFrom,
+        3,
+        reason: 'a dial repeated the upgrade while TCP was active',
+      );
+    },
+  );
+
+  test(
+    'dispose mid-dial closes the parked socket and stops the retries',
+    () async {
+      final (dark, transport) = await bootDarkRoute();
+
+      // The kick pass parks its first candidate; the dispose lands while
+      // that dial is in flight.
+      await _waitFor(
+        () => dark.dialAt.length - dark.darkFrom >= 1,
+        reason: 'the upgrade probe never dialled',
+      );
+      await transport.dispose();
+
+      // The in-flight pass still closes its parked sockets when their
+      // slices expire, and no attempt dials after the dispose.
+      await _waitFor(
+        () => dark.closedAt.length == dark.dialAt.length - dark.darkFrom,
+        reason: 'a disposed route left a parked socket open',
+      );
+      await _settle(700);
+      expect(
+        dark.dialAt.length - dark.darkFrom,
+        2,
+        reason: 'a dial started after the dispose',
+      );
+    },
+  );
+
+  test('an intentional disconnect mid-dial closes the parked socket and stops '
+      'the retries', () async {
+    final (dark, transport) = await bootDarkRoute();
+
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 1,
+      reason: 'the upgrade probe never dialled',
+    );
+    await transport.disconnect(_tcpDeviceId);
+
+    await _waitFor(
+      () => dark.closedAt.length == dark.dialAt.length - dark.darkFrom,
+      reason: 'the disconnected route left a parked socket open',
+    );
+    await _settle(700);
+    expect(
+      dark.dialAt.length - dark.darkFrom,
+      2,
+      reason: 'a dial started after the disconnect',
+    );
+  });
+
+  test(
+    'an early dial before the port is up fails fast and keeps the cadence',
+    () async {
+      // The port is not up yet once dark: every dial is refused at once.
+      final (dark, transport) = await bootDarkRoute(hang: false);
+
+      // The early dial is the FF16 kick, not a tick, and the refusal does
+      // not consume the next attempt's slot: the retry follows within
+      // 500 ms, not a whole tick later.
+      await _waitFor(
+        () => dark.dialAt.length - dark.darkFrom >= 4,
+        timeout: const Duration(seconds: 4),
+        reason: 'the refused attempts were not retried at the fast cadence',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final firstStart = marks['first_upgrade_dial_start_us']! as int;
+      final failoverEnd = marks['failover_end_us']! as int;
+      expect(
+        Duration(microseconds: firstStart - failoverEnd),
+        lessThan(const Duration(milliseconds: 500)),
+        reason: 'the first attempt waited for a tick after the failover',
+      );
+      expect(
+        Duration(
+          microseconds:
+              dark.dialAt[dark.darkFrom + 1] - dark.dialAt[dark.darkFrom],
+        ),
+        lessThan(const Duration(milliseconds: 300)),
+        reason: 'the refused attempt outlived the 300 ms bound',
+      );
+      expect(
+        Duration(
+          microseconds:
+              dark.dialAt[dark.darkFrom + 2] - dark.dialAt[dark.darkFrom + 1],
+        ),
+        lessThan(const Duration(milliseconds: 700)),
+        reason: 'the early failure consumed the next attempt slot',
+      );
+
+      // The port comes up: the next fast attempt lands on it.
+      dark.comeUp();
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'the upgrade dial never landed once the port answered',
+      );
+      final landed = transport.linkTimelineFor(_tcpDeviceId)!;
+      final dialStart = landed['upgrade_dial_start_us']! as int;
+      final dialEnd = landed['upgrade_dial_end_us']! as int;
+      expect(
+        Duration(microseconds: dialEnd - dialStart),
+        lessThan(const Duration(milliseconds: 750)),
+        reason: 'the landing attempt outlived the 750 ms bound',
+      );
+      expect(
+        landed['upgrade_dial_attempts'],
+        greaterThanOrEqualTo(3),
+        reason: 'the landing attempt never ran',
+      );
+    },
+  );
+
   test('an upgrade dial cuts a refusing candidate short and lands on the '
       'answering one', () async {
     const hostA = '192.168.1.50';
@@ -2235,7 +2742,7 @@ void main() {
     expect(
       Duration(microseconds: aClosed - aDialed),
       lessThan(const Duration(milliseconds: 300)),
-      reason: 'the refusing candidate held the attempt past its 250 ms share',
+      reason: 'the refusing candidate held the attempt past its bounded share',
     );
     expect(
       refusing.closedAt.containsKey(idB),
@@ -2303,10 +2810,15 @@ void main() {
     ble.dispose();
     ble = newBle(ff16: _endpointDocument());
 
+    // The handshake is slower than the share cap but well inside the
+    // budget this test pins: at the default 300 ms upgrade budget a 400 ms
+    // handshake is deliberately a failed attempt, so the exemption is
+    // proven here against a budget that still admits it.
     final transport = CompositeBleTransport(
       tcp: slow,
       ble: ble,
       upgradeInterval: const Duration(milliseconds: 10),
+      upgradeProbeBudget: const Duration(seconds: 3),
     );
     addTearDown(transport.dispose);
 
