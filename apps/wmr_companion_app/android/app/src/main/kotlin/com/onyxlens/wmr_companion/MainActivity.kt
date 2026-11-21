@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
 import android.content.res.Configuration
 import android.net.Uri
@@ -12,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import com.onyxlens.wmr_tracking_dispatch.UnityPlayerHost
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
@@ -37,6 +39,22 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BENCH_LOG_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "log") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                // Debuggable builds only: a release APK emits no bench log.
+                val debuggable =
+                    (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                val tag = call.argument<String>("tag")
+                val message = call.argument<String>("message")
+                if (debuggable && tag == "WmrBenchReceipt" && message != null) {
+                    Log.i(tag, message)
+                }
+                result.success(null)
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_UPDATER_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -277,5 +295,6 @@ class MainActivity : FlutterActivity() {
     }
 }
 
+private const val BENCH_LOG_CHANNEL = "com.onyxlens.wmr_companion/bench_log"
 private const val APP_UPDATER_CHANNEL = "com.onyxlens.wmr_companion/app_updater"
 private const val ACTION_INSTALL_COMMIT = "com.onyxlens.wmr_companion.INSTALL_COMMIT"
