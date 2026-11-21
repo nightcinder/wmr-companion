@@ -1096,12 +1096,15 @@ class CompositeBleTransport implements BleTransport {
       );
       final requireIdentity =
           route.bridgeId != null && bleCandidates.length > 1;
+      var reason = 'no_candidate';
       for (final bleId in bleCandidates) {
+        reason = 'connect_threw';
         try {
           await _connectBle(route, bleId, requireIdentity: requireIdentity);
+          reason = 'activation_threw';
           await _activateBle(route);
           final nowUs = clock.nowUs;
-          route.timeline.onFailoverEnd(nowUs);
+          route.timeline.onFailoverEnd(nowUs, candidates: bleCandidates.length);
           // BLE carries now, so the fast retry window is open: a failed
           // upgrade dial retries within `upgradeRetryDelay` until this
           // closes, then the periodic tick paces the retries again.
@@ -1112,6 +1115,10 @@ class CompositeBleTransport implements BleTransport {
           // Try the next scanned bridge before giving up the session.
         }
       }
+      route.timeline.onFailoverLost(
+        candidates: bleCandidates.length,
+        reason: reason,
+      );
       await _lose(route);
     } finally {
       route.switching = false;
@@ -1208,11 +1215,17 @@ class CompositeBleTransport implements BleTransport {
     // A failover or loss owns the route right now; it will kick again if
     // BLE is the lane it leaves active.
     if (route.switching) return;
-    if (route.active != _Lane.ble || route.tcpCandidates.isEmpty) return;
+    if (route.active != _Lane.ble) return;
     // The upgrade dial is disabled; BLE stays the lane.
     if (upgradeProbeBudget <= Duration.zero) return;
+    if (route.tcpCandidates.isEmpty) {
+      route.timeline.onUpgradeOutcome('no_candidate', candidates: 0);
+      return;
+    }
     route.upgrading = true;
+    final candidates = route.tcpCandidates.length;
     var landed = false;
+    var outcome = 'connect_threw';
     try {
       route.timeline.onUpgradeDialStart(clock.nowUs);
       // BLE carries the route while the dial runs, so fail fast: the
@@ -1231,7 +1244,10 @@ class CompositeBleTransport implements BleTransport {
       } finally {
         route.timeline.onUpgradeDialEnd(clock.nowUs);
       }
-      if (id == null) return;
+      if (id == null) {
+        outcome = 'dial_skipped';
+        return;
+      }
       // A drop, failover or connect may own the route right now, and it can
       // adopt this same socket (the transport hands out in-flight dials to
       // every joiner). Decide only once that switch has released the route:
@@ -1240,19 +1256,24 @@ class CompositeBleTransport implements BleTransport {
       if (route.switching) {
         // That switch published no completion, so the route is still not
         // settled: it may adopt this dial, and the probe must not close it.
+        outcome = 'route_moved';
         return;
       }
       if (_disposed || route.intentional || route.active != _Lane.ble) {
         // The route moved on while this probe was dialling.
+        outcome = 'route_moved';
         await _discardTcpProbe(route, id);
         return;
       }
+      outcome = 'activation_threw';
       await _activateTcp(route, id);
+      outcome = 'landed';
       landed = true;
     } catch (_) {
       // Stay on BLE; the re-arm below paces the next attempt.
     } finally {
       route.upgrading = false;
+      route.timeline.onUpgradeOutcome(outcome, candidates: candidates);
       // A dial can report its loss while this probe is activating it: the
       // state stream yields on subscribe, before the switch names TCP active,
       // so the listener only remembers it. No other switch will release the
@@ -1632,7 +1653,10 @@ class _Channel {
               if (lane == _Lane.ble) {
                 route.timeline.onBleRecord(route.clock.nowUs);
               } else {
-                route.timeline.onTcpRecord(notification.receivedAtUs);
+                route.timeline.onTcpRecord(
+                  notification.receivedAtUs,
+                  session: route.tcpDeviceId,
+                );
               }
               if (_controller.isClosed) return;
               _controller.add(

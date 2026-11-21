@@ -47,6 +47,13 @@ class LinkTimeline {
     this.firstUpgradeDialStartUs,
     this.upgradeDialAttempts = 0,
     this.firstTcpRecordUs,
+    this.firstTcpRecordSession,
+    this.firstTcpRecordWallUs,
+    this.failoverOutcome,
+    this.failoverReason,
+    this.failoverCandidateCount,
+    this.upgradeOutcome,
+    this.upgradeCandidateCount,
   });
 
   /// Newest record delivered while the TCP leg carried the route. During a
@@ -84,9 +91,28 @@ class LinkTimeline {
   /// First TCP record after the upgrade dial finished.
   final int? firstTcpRecordUs;
 
+  /// The TCP session that delivered [firstTcpRecordUs], and the phone's wall
+  /// clock in microseconds since the epoch sampled at that same record, so
+  /// the stopwatch value can be placed on the wall clock.
+  final String? firstTcpRecordSession;
+  final int? firstTcpRecordWallUs;
+
+  /// How the failover to BLE ended: `landed`, or `lost` with the reason the
+  /// last BLE candidate failed (`no_candidate`, `connect_threw`,
+  /// `activation_threw`), over [failoverCandidateCount] candidates.
+  final String? failoverOutcome;
+  final String? failoverReason;
+  final int? failoverCandidateCount;
+
+  /// How the latest upgrade attempt ended: `landed`, `no_candidate`,
+  /// `dial_skipped`, `connect_threw`, `activation_threw` or `route_moved`,
+  /// over [upgradeCandidateCount] TCP candidates.
+  final String? upgradeOutcome;
+  final int? upgradeCandidateCount;
+
   /// The marks under the keys the diagnostics bundle carries: one
   /// `<mark>_us` entry per mark field, null before the mark landed, plus
-  /// the attempt count.
+  /// the attempt count, the receipt anchor and the terminal outcomes.
   Map<String, Object?> toJson() => {
     'last_tcp_record_us': lastTcpRecordUs,
     'stall_detected_us': stallDetectedUs,
@@ -98,6 +124,13 @@ class LinkTimeline {
     'first_upgrade_dial_start_us': firstUpgradeDialStartUs,
     'upgrade_dial_attempts': upgradeDialAttempts,
     'first_tcp_record_us': firstTcpRecordUs,
+    'first_tcp_record_session': firstTcpRecordSession,
+    'first_tcp_record_wall_us': firstTcpRecordWallUs,
+    'failover_outcome': failoverOutcome,
+    'failover_reason': failoverReason,
+    'failover_candidate_count': failoverCandidateCount,
+    'upgrade_outcome': upgradeOutcome,
+    'upgrade_candidate_count': upgradeCandidateCount,
   };
 }
 
@@ -115,6 +148,13 @@ class LinkTimelineRecorder {
   int? _upgradeDialStartUs;
   int? _upgradeDialEndUs;
   int? _firstTcpRecordUs;
+  String? _firstTcpRecordSession;
+  int? _firstTcpRecordWallUs;
+  String? _failoverOutcome;
+  String? _failoverReason;
+  int? _failoverCandidateCount;
+  String? _upgradeOutcome;
+  int? _upgradeCandidateCount;
 
   /// The episode's first dial attempt's start, and how many attempts it
   /// has made: a retried dial overwrites only the latest-attempt marks.
@@ -134,10 +174,12 @@ class LinkTimelineRecorder {
   /// A TCP record arrived: it becomes the newest "last TCP record", and the
   /// first one after a finished upgrade dial opens that episode's "first
   /// TCP record".
-  void onTcpRecord(int us) {
+  void onTcpRecord(int us, {String? session}) {
     _lastTcpRecordUs = us;
     if (_firstTcpRecordUs == null && _upgradeDialEndUs != null) {
       _firstTcpRecordUs = us;
+      _firstTcpRecordSession = session;
+      _firstTcpRecordWallUs = DateTime.now().microsecondsSinceEpoch;
     }
   }
 
@@ -166,18 +208,26 @@ class LinkTimelineRecorder {
       _resetEpisodeMarks();
       _episodeLastTcpRecordUs = _lastTcpRecordUs;
     }
+    _resetEpisodeMarks();
     _failoverBeginUs = us;
-    _failoverEndUs = null;
-    _firstBleRecordUs = null;
-    _upgradeDialStartUs = null;
-    _upgradeDialEndUs = null;
-    _firstTcpRecordUs = null;
-    _firstUpgradeDialStartUs = null;
-    _upgradeDialAttempts = 0;
   }
 
-  /// The failover landed: the route is active on BLE.
-  void onFailoverEnd(int us) => _failoverEndUs = us;
+  /// The failover landed: the route is active on BLE, over [candidates] BLE
+  /// candidates.
+  void onFailoverEnd(int us, {required int candidates}) {
+    _failoverEndUs = us;
+    _failoverOutcome = 'landed';
+    _failoverReason = null;
+    _failoverCandidateCount = candidates;
+  }
+
+  /// The failover found no BLE bridge that landed; [reason] names why the
+  /// last candidate failed.
+  void onFailoverLost({required int candidates, required String reason}) {
+    _failoverOutcome = 'lost';
+    _failoverReason = reason;
+    _failoverCandidateCount = candidates;
+  }
 
   /// A BLE record arrived. Only a route that failed over records one.
   void onBleRecord(int us) {
@@ -194,10 +244,22 @@ class LinkTimelineRecorder {
     _firstUpgradeDialStartUs ??= us;
     _upgradeDialAttempts++;
     _firstTcpRecordUs = null;
+    _firstTcpRecordSession = null;
+    _firstTcpRecordWallUs = null;
+    _upgradeOutcome = null;
+    _upgradeCandidateCount = null;
   }
 
   /// The upgrade dial finished, successfully or not.
   void onUpgradeDialEnd(int us) => _upgradeDialEndUs = us;
+
+  /// How the latest upgrade attempt ended, over [candidates] TCP candidates.
+  /// An attempt that never dialled (no candidate) records its outcome here
+  /// without a dial start.
+  void onUpgradeOutcome(String outcome, {required int candidates}) {
+    _upgradeOutcome = outcome;
+    _upgradeCandidateCount = candidates;
+  }
 
   /// Clears the marks and the dial-attempt count an episode owns, so the
   /// episode that opens now starts its own. The stall stays: a fresh
@@ -212,8 +274,15 @@ class LinkTimelineRecorder {
     _upgradeDialStartUs = null;
     _upgradeDialEndUs = null;
     _firstTcpRecordUs = null;
+    _firstTcpRecordSession = null;
+    _firstTcpRecordWallUs = null;
     _firstUpgradeDialStartUs = null;
     _upgradeDialAttempts = 0;
+    _failoverOutcome = null;
+    _failoverReason = null;
+    _failoverCandidateCount = null;
+    _upgradeOutcome = null;
+    _upgradeCandidateCount = null;
   }
 
   /// Freezes the standing marks as one finished episode, oldest dropped
@@ -231,6 +300,13 @@ class LinkTimelineRecorder {
         firstUpgradeDialStartUs: _firstUpgradeDialStartUs,
         upgradeDialAttempts: _upgradeDialAttempts,
         firstTcpRecordUs: _firstTcpRecordUs,
+        firstTcpRecordSession: _firstTcpRecordSession,
+        firstTcpRecordWallUs: _firstTcpRecordWallUs,
+        failoverOutcome: _failoverOutcome,
+        failoverReason: _failoverReason,
+        failoverCandidateCount: _failoverCandidateCount,
+        upgradeOutcome: _upgradeOutcome,
+        upgradeCandidateCount: _upgradeCandidateCount,
       ),
     );
     if (_episodes.length > episodeHistoryCapacity) {
@@ -252,6 +328,13 @@ class LinkTimelineRecorder {
     firstUpgradeDialStartUs: _firstUpgradeDialStartUs,
     upgradeDialAttempts: _upgradeDialAttempts,
     firstTcpRecordUs: _firstTcpRecordUs,
+    firstTcpRecordSession: _firstTcpRecordSession,
+    firstTcpRecordWallUs: _firstTcpRecordWallUs,
+    failoverOutcome: _failoverOutcome,
+    failoverReason: _failoverReason,
+    failoverCandidateCount: _failoverCandidateCount,
+    upgradeOutcome: _upgradeOutcome,
+    upgradeCandidateCount: _upgradeCandidateCount,
   );
 
   /// The shape hosts read through `CompositeBleTransport.linkTimelineFor`:
