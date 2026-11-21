@@ -57,6 +57,14 @@ class LinkStatusView extends StatelessWidget {
           '${fault == null ? '' : '  fault ${fault.kind.name}: ${fault.message}'}',
           style: style,
         ),
+        if (link.stalled && link.silentFor != null)
+          Text(
+            'no data for '
+            '${(link.silentFor!.inMilliseconds / 1000).toStringAsFixed(1)} s',
+            style: (style ?? const TextStyle()).copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
         Text(
           'firmware ${_firmware(protocol)}  '
           'features ${features.isEmpty ? '-' : features.join(' ')}',

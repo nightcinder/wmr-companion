@@ -32,6 +32,18 @@ WMR controller (L / R)                ESP32 (BTstack)                         Ph
 
 ## Current state
 
+### Unreleased: silent-stream warning (2026-11-20)
+
+`WmrCompanion.link` now forwards `ControllerService`'s `stalled` and
+`silentFor` fields through the existing one-second link polling. The reusable
+`LinkStatusView` and the reference app's per-bridge debug rows display
+`no data for N s` only while the subscribed, connected stream is stalled.
+The reference app keeps its existing two-second bridge polling. Resumed
+records and disconnects clear the warning; no reconnect policy or stall
+threshold changes. Host tests cover the facade lifecycle and both widget
+paths. Hardware validation of the three-second threshold against a real wedge
+and an idle power-off (#199) remains open.
+
 ### Current release (v0.3.26, 2026-11-16)
 
 | Item | Value |

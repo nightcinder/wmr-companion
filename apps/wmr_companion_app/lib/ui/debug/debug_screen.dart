@@ -519,7 +519,7 @@ class BridgeLinkTable extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final bridge in bridges)
+        for (final bridge in bridges) ...[
           Text(
             '${_kindLabel(bridge.bridgeId)}${bridge.bridgeId}  '
             '${bridge.mode.name}  '
@@ -528,6 +528,15 @@ class BridgeLinkTable extends StatelessWidget {
             '${_hand(bridge, 0)}  ${_hand(bridge, 1)}',
             style: style,
           ),
+          if (bridge.stalled && bridge.silentFor != null)
+            Text(
+              '${_kindLabel(bridge.bridgeId)}${bridge.bridgeId}: no data for '
+              '${(bridge.silentFor!.inMilliseconds / 1000).toStringAsFixed(1)} s',
+              style: (style ?? const TextStyle()).copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+        ],
       ],
     );
   }
