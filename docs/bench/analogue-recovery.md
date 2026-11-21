@@ -20,7 +20,7 @@ the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1
 Those two marks bound the takeover.
 
 T2 is the app's `first_tcp_record_us` mark. The app sets it on the first TCP
-record after an upgrade dial ends (`packages/wmr_companion/lib/src/link_timeline.dart:116-121`).
+record after an upgrade dial ends (`packages/wmr_companion/lib/src/link_timeline.dart:84-85`).
 
 T2−T1 and T2−T0 need one clock. T0 and T1 are Pi shell times, and the app mark
 is on the phone clock. Record T2 from the first
@@ -50,11 +50,34 @@ subtract a phone mark from a Pi time.
 | Check | Gate | Source |
 | --- | --- | --- |
 | Step-4 takeover | at most 2500 ms | `docs/TEST_PLAN_PI_WMR.md:157` |
-| T2 − T1 | at most 5 s | ONY-1508 plan, Option A |
+| T2 − T1 | at most 5 s | `docs/TEST_PLAN_PI_WMR.md:158` |
 | T2 − T0 | at most 15 s | ONY-1508 plan, Option A |
 
-`docs/TEST_PLAN_PI_WMR.md:158` (M4-H3) still gives 10 s for the upgrade to TCP.
-The approved bench gate is 5 s.
+M4-H3 sets the upgrade gate at 5 s (`docs/TEST_PLAN_PI_WMR.md:158`). The
+gate is T2 − T1: the first TCP record after the TCP route returns, less
+the moment `wlan0` has an address.
+
+## Split the upgrade delay
+
+Two phone-clock intervals show where the time went. Read them from the
+bundle's `link_timeline` entry. The Debug row shows `dial` and
+`first TCP +` (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:631-634`).
+Their sum is the landing attempt.
+
+| Interval | Calculation | Means |
+| --- | --- | --- |
+| Wait to first attempt | `first_upgrade_dial_start_us − failover_end_us` | BLE active to the first dial attempt |
+| Landing attempt | `first_tcp_record_us − upgrade_dial_start_us` | Start of the last attempt to the first TCP record |
+
+`upgrade_dial_attempts` counts every attempt in the episode. The landing
+attempt is the last one, so the failed attempts before it number
+`upgrade_dial_attempts − 1` when `first_tcp_record_us` is present. Every
+attempt moves `upgrade_dial_start_us`, while
+`first_upgrade_dial_start_us` keeps the first attempt's start
+(`packages/wmr_companion/lib/src/link_timeline.dart:75-82`, `:192-197`).
+
+Never subtract these phone marks from T1. Pair the two intervals with the
+journal T2 to explain the gate result.
 
 ## Before the run
 
@@ -130,6 +153,9 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 `wmr-ext-<yyyyMMdd>.zip` in the app documents `exports` folder
 (`apps/wmr_companion_app/lib/services/test_bundle.dart:426`,
 `apps/wmr_companion_app/lib/services/test_bundle_export.dart:85-88`).
+The exported `link_timeline` carries the marks that split the upgrade delay.
+Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
+`upgrade_dial_start_us` and `first_tcp_record_us`.
 
 **11. Start the next run only after the route is back on TCP.**
 
@@ -140,10 +166,12 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 | T0 | Pi shell | `date -u '+%F %T.%3N'` right after the down command |
 | T1 | Pi shell | `date -u '+%F %T.%3N'` right after the `ip` poll |
 | T2 | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
-| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:634`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:116-121`), and an attached export carries it in `link_timeline` (see below) |
-| Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:77-78`) |
-| Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:79-80`) |
-| First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:81`) |
+| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:634`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:84-85`), and an attached export carries it in `link_timeline` (see below) |
+| Wait to first attempt | Bundle `link_timeline` | `first_upgrade_dial_start_us − failover_end_us`, both phone marks. BLE activation to the first dial attempt (`:65`, `:78`) |
+| Landing attempt | Bundle `link_timeline` | `first_tcp_record_us − upgrade_dial_start_us`, both phone marks. Start of the last attempt to the first TCP record (`:72`, `:85`) |
+| Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:56`, `:60`) |
+| Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:64-65`) |
+| First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:68`) |
 | Takeover | Debug row `takeover` | `first_ble_record_us − last_tcp_record_us` (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:629`) |
 | Dropped | Pi journal | `dropped=` in the 5 s status line (`WMR_Bridge` `pi/wmr_bridge/__main__.py:943-953`) |
 
@@ -186,16 +214,24 @@ The two gate intervals use the journal T2, so both are lower bounds. Record
 A run passes when all three gates hold. A run that fails one gate fails the
 step.
 
+The split is diagnostic, not a gate. Record it from the bundle for each run:
+
+| Run | Wait to first attempt | Attempts | Landing attempt |
+| --- | --- | --- | --- |
+| 1 | | | |
+| 2 | | | |
+| 3 | | | |
+
 ## The bundle's copy of the timeline
 
 `diagnostics.json` carries the marks under `link_timeline`
 (`apps/wmr_companion_app/lib/services/test_bundle.dart:605`). The top-level
-keys are the marks of the most recent episode — its first dial attempt's
-start and its dial-attempt count among them
-(`packages/wmr_companion/lib/src/link_timeline.dart`, `LinkTimeline.toJson`)
-plus `episode_last_tcp_record_us`, the anchor that episode's own stall
-froze; the `episodes` key lists the same marks for the last finished
-episodes, so a stall a later switch superseded stays readable in the zip.
+keys are the marks of the most recent episode. They include
+`first_upgrade_dial_start_us` and `upgrade_dial_attempts`
+(`packages/wmr_companion/lib/src/link_timeline.dart:98-99`) and
+`episode_last_tcp_record_us`, the anchor that episode's own stall froze.
+The `episodes` key lists the same marks for the last finished episodes.
+A stall a later switch superseded stays readable in the zip.
 
 The export builder passes the live transport's marks into the bundle
 (`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the
