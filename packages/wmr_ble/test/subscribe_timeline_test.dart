@@ -209,5 +209,52 @@ void main() {
         expect(marks['first_ff14_notification_us'], isNull);
       },
     );
+
+    test(
+      'a redial that fails after a good dial reports no stale marks',
+      () async {
+        await connectSubscribed();
+        adapter.emitNotification(wmrBridgeBatchedCharUuid, [1]);
+        await pump();
+        final before = t.subscribeTimelineFor(id)!;
+
+        // The link drops and the app's redial dies before the GATT link:
+        // the good dial's steps must not survive to make the failed dial
+        // look subscribed.
+        adapter.dropLink();
+        await pump();
+        adapter.connectError = StateError('no route to host');
+        await settle();
+        await expectLater(
+          t.connect(id),
+          throwsA(
+            isA<BleTransportException>().having(
+              (e) => e.phase,
+              'phase',
+              BleLinkPhase.connectFailed,
+            ),
+          ),
+        );
+
+        final failed = t.subscribeTimelineFor(id)!;
+        final failedStart = _mark(failed, 'gatt_connect_start_us');
+        // The redial began after every mark the good dial left; its
+        // discovery, CCCD and first notification never landed.
+        expect(
+          failedStart,
+          greaterThan(before['first_ff14_notification_us']! as int),
+        );
+        expect(failed['service_discovery_done_us'], isNull);
+        expect(failed['ff14_cccd_write_us'], isNull);
+        expect(failed['first_ff14_notification_us'], isNull);
+        // The failed dial owned the device, so its end re-marked the
+        // disconnect; the catch that records it can share the start's
+        // microsecond tick.
+        expect(
+          _mark(failed, 'disconnect_us'),
+          greaterThanOrEqualTo(failedStart),
+        );
+      },
+    );
   });
 }

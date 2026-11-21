@@ -24,11 +24,16 @@ class SubscribeTimeline {
   int? _firstFf14NotificationUs;
   int? _disconnectUs;
 
-  /// A GATT dial began. The first-notification mark of the episode before
-  /// it is cleared: the notification that will open this dial's mark has
-  /// not arrived yet.
+  /// A GATT dial began. The per-dial marks of the episode before it —
+  /// discovery, the CCCD write, the first notification — are cleared: the
+  /// steps that will open this dial's marks have not landed yet. The last
+  /// disconnect stands: it already happened, and this dial's marks follow
+  /// it, so a dial that dies before the link cannot borrow the marks of
+  /// the episode before it.
   void onGattConnectStart(int us) {
     _gattConnectStartUs = us;
+    _serviceDiscoveryDoneUs = null;
+    _ff14CccdWriteUs = null;
     _firstFf14NotificationUs = null;
   }
 
