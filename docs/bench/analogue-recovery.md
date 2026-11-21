@@ -59,23 +59,25 @@ gate is T2 − T1: the first TCP record after the TCP route returns, less
 the moment `wlan0` has an address.
 
 The landing row is a gate on the last dial. It runs from
-`upgrade_dial_start_us` to `first_tcp_record_us`
-(`packages/wmr_companion/lib/src/link_timeline.dart:72`, `:85`). ONY-1606's
-plan sets the 750 ms bound. ONY-1615 applies it to the last dial. The split
-table below uses the same figures. It is diagnostic and not a second gate.
+`upgrade_dial_start_us` to `upgrade_dial_end_us`
+(`packages/wmr_companion/lib/src/link_timeline.dart:72-73`). The dial ends
+before the first TCP record arrives, so the gate leaves out the record delay.
+ONY-1606's plan sets the 750 ms bound. ONY-1615 applies it to the last dial.
+The split table below uses the same figures. It is diagnostic and not a
+second gate.
 
 ## Split the upgrade delay
 
-Two phone-clock intervals show where the time went. Read them from the
+The split has three parts. They show where the time went. Read them from the
 bundle's `link_timeline` entry. The Debug row shows `dial` and
 `first TCP +` (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:640-643`).
-The first interval ends where the attempts start. The second covers the
-last attempt. Mean spacing covers the time between attempt starts.
+The first part ends where the attempts start. The second covers the last
+dial. The third is the mean time between attempt starts.
 
 | Interval | Calculation | Means |
 | --- | --- | --- |
 | Wait to first attempt | `first_upgrade_dial_start_us − failover_end_us` | BLE active to the first dial attempt |
-| Landing attempt | `first_tcp_record_us − upgrade_dial_start_us` | Start of the last attempt to the first TCP record |
+| Landing attempt | `upgrade_dial_end_us − upgrade_dial_start_us` | Start of the last attempt to the dial's end |
 | Mean attempt spacing | `(upgrade_dial_start_us − first_upgrade_dial_start_us) / (upgrade_dial_attempts − 1)` | Mean start-to-start gap between attempts |
 
 `upgrade_dial_attempts` counts every attempt in the episode. The landing
@@ -177,7 +179,7 @@ lower bound for T2. Read the Debug row's `first TCP +` in the same run.
 `apps/wmr_companion_app/lib/services/test_bundle_export.dart:85-88`).
 The exported `link_timeline` carries the marks that split the upgrade delay.
 Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
-`upgrade_dial_start_us` and `first_tcp_record_us`.
+`upgrade_dial_start_us`, `upgrade_dial_end_us` and `first_tcp_record_us`.
 
 **11. Start the next run only after the route is back on TCP.**
 
@@ -190,7 +192,7 @@ Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
 | T2 | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
 | T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:643`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:84-85`), and an attached export carries it in `link_timeline` (see below) |
 | Wait to first attempt | Bundle `link_timeline` | `first_upgrade_dial_start_us − failover_end_us`, both phone marks. BLE activation to the first dial attempt (`:65`, `:78`) |
-| Landing attempt | Bundle `link_timeline` | `first_tcp_record_us − upgrade_dial_start_us`, both phone marks. Start of the last attempt to the first TCP record (`:72`, `:85`) |
+| Landing attempt | Bundle `link_timeline` | `upgrade_dial_end_us − upgrade_dial_start_us`, both phone marks. Start of the last attempt to the dial's end (`:72-73`) |
 | Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:56`, `:60`) |
 | Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:64-65`) |
 | First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:68`) |
