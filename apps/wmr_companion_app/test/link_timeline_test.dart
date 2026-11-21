@@ -180,7 +180,7 @@ void main() {
         ..onTcpRecord(1000000)
         ..onStallDetected(1100000)
         ..onFailoverBegin(1105000)
-        ..onFailoverEnd(1180000)
+        ..onFailoverEnd(1180000, candidates: 1)
         ..onBleRecord(1200000)
         ..onUpgradeDialStart(2000000)
         ..onUpgradeDialEnd(2100000);
