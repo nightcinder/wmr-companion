@@ -217,6 +217,11 @@ class CompositeBleTransport implements BleTransport {
   onTokenLearned;
 
   final Map<String, _Route> _routes = {};
+
+  /// The timeline of each route that was torn down, so an attempt still in
+  /// flight at teardown can record its outcome and a host can read it. A new
+  /// route for the device replaces it.
+  final Map<String, LinkTimelineRecorder> _closedTimelines = {};
   final Map<String, String> _bridgeIds = {};
   final Map<String, _ScanHit> _scanHits = {};
   bool _disposed = false;
@@ -260,7 +265,7 @@ class CompositeBleTransport implements BleTransport {
   /// verbatim. Hosts only sample: the composite keeps recording.
   Map<String, Object?>? linkTimelineFor(String deviceId) {
     final route = _routes[deviceId];
-    if (route == null) return null;
+    if (route == null) return _closedTimelines[deviceId]?.snapshot;
     final bleId = route.bleDeviceId;
     // A pattern rather than an `is` test: the interface sits outside the
     // [BleTransport] hierarchy, so a type test alone does not promote the
@@ -444,6 +449,7 @@ class CompositeBleTransport implements BleTransport {
   Future<void> disconnect(String deviceId) async {
     final route = _routes.remove(deviceId);
     if (route == null) return;
+    _closedTimelines[deviceId] = route.timeline;
     route.intentional = true;
     try {
       _stopUpgrade(route);
@@ -630,6 +636,9 @@ class CompositeBleTransport implements BleTransport {
     if (_disposed) return;
     _disposed = true;
     final routes = _routes.values.toList();
+    for (final entry in _routes.entries) {
+      _closedTimelines[entry.key] = entry.value.timeline;
+    }
     _routes.clear();
     for (final route in routes) {
       route.intentional = true;

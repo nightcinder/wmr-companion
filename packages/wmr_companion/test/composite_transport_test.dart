@@ -3754,6 +3754,70 @@ void main() {
     expect(transport.activeLegFor(_tcpDeviceId), isNull);
   });
 
+  test('an upgrade dial the LAN gate skips records dial_skipped', () async {
+    tcp.failConnect = true;
+    var lan = true;
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      lanAvailable: () async => lan,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+    lan = false;
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'] ==
+          'dial_skipped',
+      reason: 'the skipped dial never recorded its outcome',
+    );
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+  });
+
+  test('an explicit disconnect during an upgrade dial records route_moved'
+      ' and keeps the timeline readable', () async {
+    await tcp.dispose();
+    final held = _HoldableTcp()
+      ..failConnect = true
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      )
+      ..scanResults.add(tcpScanResult());
+    tcp = held;
+    final transport = CompositeBleTransport(
+      tcp: held,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    held.failConnect = false;
+    held.holdDials = Completer<void>();
+    await _waitFor(
+      () => held.heldDials > 0,
+      reason: 'the upgrade probe never dialled',
+    );
+    await transport.disconnect(_tcpDeviceId);
+    held.holdDials!.complete();
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)?['upgrade_outcome'] ==
+          'route_moved',
+      reason: 'the in-flight attempt never recorded its terminal outcome',
+    );
+  });
+
   test(
     'releases a BLE link whose connect fails in the initial candidate loop',
     () async {
