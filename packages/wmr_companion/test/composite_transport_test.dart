@@ -520,7 +520,16 @@ class _DarkPortTcp extends _FakeTcp {
 
   bool _dark = false;
 
+  /// A chosen stopwatch reading (µs): a dial that starts before it fails
+  /// even though [goDark] was called, and one that starts at or after it
+  /// answers as if the port had come back. Null keeps the port dark until
+  /// [comeUp].
+  int? failUntilUs;
+
   final Stopwatch _clock = Stopwatch()..start();
+
+  /// The fake's stopwatch reading now, in the same units as [dialAt].
+  int get nowUs => _clock.elapsedMicroseconds;
 
   /// Stopwatch reading (µs) when each dial started, oldest first.
   final List<int> dialAt = [];
@@ -535,9 +544,11 @@ class _DarkPortTcp extends _FakeTcp {
 
   final Set<String> _inFlight = {};
 
-  /// The port stops answering: every later dial hangs or is refused.
+  /// The port stops answering: every later dial fails until [comeUp] (or
+  /// past [failUntilUs]).
   void goDark() {
     _dark = true;
+    failUntilUs = null;
     darkFrom = dialAt.length;
   }
 
@@ -546,8 +557,11 @@ class _DarkPortTcp extends _FakeTcp {
 
   @override
   Future<void> connect(String deviceId) async {
-    dialAt.add(_clock.elapsedMicroseconds);
-    if (!_dark) {
+    final startedAt = _clock.elapsedMicroseconds;
+    dialAt.add(startedAt);
+    final until = failUntilUs;
+    final dark = _dark && (until == null || startedAt < until);
+    if (!dark) {
       await super.connect(deviceId);
       return;
     }
@@ -877,7 +891,7 @@ void main() {
     bool hang = true,
     Duration tcpProbeBudget = const Duration(seconds: 3),
     Duration upgradeInterval = const Duration(seconds: 2),
-    Duration upgradeRetryDelay = const Duration(milliseconds: 500),
+    Duration upgradeRetryDelay = const Duration(milliseconds: 100),
     Duration upgradeRetryWindow = const Duration(seconds: 30),
   }) async {
     await tcp.dispose();
@@ -2299,8 +2313,8 @@ void main() {
 
     expect(
       transport.upgradeRetryDelay,
-      lessThanOrEqualTo(const Duration(milliseconds: 500)),
-      reason: 'a failed attempt must retry within 500 ms',
+      lessThanOrEqualTo(const Duration(milliseconds: 100)),
+      reason: 'a failed attempt must retry within 100 ms',
     );
     expect(
       transport.upgradeRetryWindow,
@@ -2315,7 +2329,7 @@ void main() {
   });
 
   test('a failed upgrade attempt ends fast, closes its socket, and retries '
-      'within 500 ms', () async {
+      'within 100 ms', () async {
     final (dark, transport) = await bootDarkRoute();
 
     // The upgrade failures must stay contained: the route keeps reporting
@@ -2349,7 +2363,8 @@ void main() {
       );
     }
 
-    // The next attempt starts within 500 ms of the last one's failure.
+    // The next attempt starts within 100 ms of the last one's failure,
+    // plus scheduler jitter.
     for (var pass = 0; pass + 1 < passes; pass++) {
       expect(
         Duration(
@@ -2357,8 +2372,8 @@ void main() {
               dark.dialAt[dark.darkFrom + (pass + 1) * 2] -
               dark.closedAt[pass * 2 + 1],
         ),
-        lessThan(const Duration(milliseconds: 700)),
-        reason: 'the next attempt started more than 500 ms later',
+        lessThan(const Duration(milliseconds: 250)),
+        reason: 'the next attempt started more than 100 ms later',
       );
     }
 
@@ -2637,7 +2652,7 @@ void main() {
 
       // The early dial is the FF16 kick, not a tick, and the refusal does
       // not consume the next attempt's slot: the retry follows within
-      // 500 ms, not a whole tick later.
+      // 100 ms, not a whole tick later.
       await _waitFor(
         () => dark.dialAt.length - dark.darkFrom >= 4,
         timeout: const Duration(seconds: 4),
@@ -2664,7 +2679,7 @@ void main() {
           microseconds:
               dark.dialAt[dark.darkFrom + 2] - dark.dialAt[dark.darkFrom + 1],
         ),
-        lessThan(const Duration(milliseconds: 700)),
+        lessThan(const Duration(milliseconds: 250)),
         reason: 'the early failure consumed the next attempt slot',
       );
 
@@ -2689,6 +2704,49 @@ void main() {
       );
     },
   );
+
+  test('a dial failing until a chosen instant lands within 400 ms and re-arms '
+      'within 100 ms', () async {
+    // No LAN or Pi reachability callback is installed: the cadence must
+    // depend only on the failed dial ending, not on a reachability probe.
+    final (dark, transport) = await bootDarkRoute();
+
+    // The kick's dial is in flight and failing. Choose the instant the
+    // port comes back: inside the first dial's 300 ms probe, so that
+    // dial still has to expire before the next attempt can land.
+    await _waitFor(
+      () => dark.dialAt.length - dark.darkFrom >= 1,
+      reason: 'the upgrade probe never dialled',
+    );
+    final instant =
+        dark.nowUs + const Duration(milliseconds: 200).inMicroseconds;
+    dark.failUntilUs = instant;
+
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      timeout: const Duration(seconds: 3),
+      reason: 'a dial started after the port came back never landed',
+    );
+
+    final landedStart = dark.dialAt.last;
+    expect(
+      landedStart,
+      greaterThanOrEqualTo(instant),
+      reason: 'the landed dial started before the port came back',
+    );
+    // The in-flight dial burns its 300 ms probe, then the 100 ms re-arm
+    // opens the attempt that lands: 400 ms after the port answered.
+    expect(
+      Duration(microseconds: landedStart - instant),
+      lessThanOrEqualTo(const Duration(milliseconds: 400)),
+      reason: 'the port was not reached within 400 ms of coming back',
+    );
+    expect(
+      Duration(microseconds: landedStart - dark.closedAt.last),
+      lessThan(const Duration(milliseconds: 250)),
+      reason: 'the re-arm waited longer than the 100 ms cadence',
+    );
+  });
 
   test('an upgrade dial cuts a refusing candidate short and lands on the '
       'answering one', () async {
