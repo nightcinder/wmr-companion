@@ -483,7 +483,7 @@ class CompositeBleTransport implements BleTransport {
       unawaited(bleSub?.cancel());
       route.cancelBleTeardowns();
       route.cancelEchoDrain();
-      await _disableBleNotifications(route);
+      await _disableBleNotifications(route, timeout: bleUnsubscribeTimeout);
 
       final channels = List<_Channel>.of(route.channels);
       route.channels.clear();
@@ -533,7 +533,7 @@ class CompositeBleTransport implements BleTransport {
     unawaited(tcpSub?.cancel());
     route.cancelBleTeardowns();
     route.cancelEchoDrain();
-    await _disableBleNotifications(route);
+    await _disableBleNotifications(route, timeout: bleUnsubscribeTimeout);
 
     final channels = List<_Channel>.of(route.channels);
     for (final channel in channels) {
@@ -674,7 +674,7 @@ class CompositeBleTransport implements BleTransport {
       unawaited(bleSub?.cancel());
       route.cancelBleTeardowns();
       route.cancelEchoDrain();
-      await _disableBleNotifications(route);
+      await _disableBleNotifications(route, timeout: bleUnsubscribeTimeout);
       final channels = List<_Channel>.of(route.channels);
       route.channels.clear();
       for (final channel in channels) {
@@ -1054,6 +1054,7 @@ class CompositeBleTransport implements BleTransport {
   Future<void> _disableBleNotifications(
     _Route route, {
     Set<String> keep = const {},
+    Duration? timeout,
   }) async {
     final bleId = route.bleDeviceId;
     final keys = route.bleRefs.keys.toList();
@@ -1067,7 +1068,6 @@ class CompositeBleTransport implements BleTransport {
     if (bleId == null || toDisable.isEmpty) return;
 
     final epoch = route.bleTeardownEpoch;
-    final timeout = bleUnsubscribeTimeout;
     final done = Completer<void>();
     Timer? timer;
     void cancelTeardown() {
@@ -1077,13 +1077,15 @@ class CompositeBleTransport implements BleTransport {
     }
 
     route.bleTeardownCancels.add(cancelTeardown);
-    if (timeout > Duration.zero) {
-      timer = Timer(timeout, () {
-        timer = null;
-        if (!done.isCompleted) done.complete();
-      });
-    } else {
-      done.complete();
+    if (timeout != null) {
+      if (timeout > Duration.zero) {
+        timer = Timer(timeout, () {
+          timer = null;
+          if (!done.isCompleted) done.complete();
+        });
+      } else {
+        done.complete();
+      }
     }
 
     unawaited(() async {

@@ -5101,10 +5101,14 @@ void main() {
     final batchedSub = transport
         .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
         .listen((_) {});
+    final decodedSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeDecodedCharUuid)
+        .listen((_) {});
     final streamSub = transport
         .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid)
         .listen((_) {});
     addTearDown(batchedSub.cancel);
+    addTearDown(decodedSub.cancel);
     addTearDown(streamSub.cancel);
 
     tcp.failConnect = false;
@@ -5119,6 +5123,7 @@ void main() {
     // TCP activation must not wait on the 180 ms BLE GATT unsubscribe writes.
     expect(sw.elapsedMilliseconds, lessThan(150));
     expect(ble.isSubscribed(_bleDeviceId, wmrBridgeBatchedCharUuid), isFalse);
+    expect(ble.isSubscribed(_bleDeviceId, wmrBridgeDecodedCharUuid), isFalse);
     expect(ble.isSubscribed(_bleDeviceId, wmrBridgeStreamCharUuid), isFalse);
 
     tcp.emit(
@@ -5135,10 +5140,12 @@ void main() {
     final timeline = transport.linkTimelineFor(_tcpDeviceId)!;
     expect(timeline['upgrade_outcome'], 'landed');
 
-    // Once the slow BLE GATT writes complete, all non-echo CCCDs are off.
+    // Once the slow BLE GATT writes complete (3 * 180 ms > 250 ms default
+    // bleUnsubscribeTimeout), all non-echo CCCDs are off without truncation.
     await _waitFor(
       () =>
           ble.cccLog.contains('off $wmrBridgeBatchedCharUuid') &&
+          ble.cccLog.contains('off $wmrBridgeDecodedCharUuid') &&
           ble.cccLog.contains('off $wmrBridgeStreamCharUuid'),
       reason: 'slow BLE unsubscribe did not turn off non-echo CCCDs',
     );
@@ -5469,7 +5476,6 @@ void main() {
       tcp: tcp,
       ble: ble,
       upgradeInterval: const Duration(milliseconds: 10),
-      bleUnsubscribeTimeout: const Duration(seconds: 2),
     );
     addTearDown(transport.dispose);
 
