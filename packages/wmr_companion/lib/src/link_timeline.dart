@@ -54,6 +54,8 @@ class LinkTimeline {
     this.failoverCandidateCount,
     this.upgradeOutcome,
     this.upgradeCandidateCount,
+    this.recoveryLane,
+    this.recoveryUs,
   });
 
   /// Newest record delivered while the TCP leg carried the route. During a
@@ -110,6 +112,14 @@ class LinkTimeline {
   final String? upgradeOutcome;
   final int? upgradeCandidateCount;
 
+  /// How a failover that never landed was closed: `redial` when the app's
+  /// reconnect delivered a TCP session afterwards, and when that happened.
+  /// A recovery is not an upgrade attempt and not a landing: it leaves the
+  /// attempt count and the dial marks as the dials made, so it never
+  /// satisfies the landing gate.
+  final String? recoveryLane;
+  final int? recoveryUs;
+
   /// The marks under the keys the diagnostics bundle carries: one
   /// `<mark>_us` entry per mark field, null before the mark landed, plus
   /// the attempt count, the receipt anchor and the terminal outcomes.
@@ -131,6 +141,8 @@ class LinkTimeline {
     'failover_candidate_count': failoverCandidateCount,
     'upgrade_outcome': upgradeOutcome,
     'upgrade_candidate_count': upgradeCandidateCount,
+    'recovery_lane': recoveryLane,
+    'recovery_us': recoveryUs,
   };
 }
 
@@ -155,6 +167,8 @@ class LinkTimelineRecorder {
   int? _failoverCandidateCount;
   String? _upgradeOutcome;
   int? _upgradeCandidateCount;
+  String? _recoveryLane;
+  int? _recoveryUs;
 
   /// The episode's first dial attempt's start, and how many attempts it
   /// has made: a retried dial overwrites only the latest-attempt marks.
@@ -248,6 +262,8 @@ class LinkTimelineRecorder {
     _firstTcpRecordWallUs = null;
     _upgradeOutcome = null;
     _upgradeCandidateCount = null;
+    _recoveryLane = null;
+    _recoveryUs = null;
   }
 
   /// The upgrade dial finished, successfully or not.
@@ -260,6 +276,20 @@ class LinkTimelineRecorder {
     _upgradeOutcome = outcome;
     _upgradeCandidateCount = candidates;
   }
+
+  /// The app's reconnect delivered a TCP session after a failover that
+  /// never landed: the episode closes on [lane] at [us]. Only the first
+  /// recovery of an episode counts, and it adds no attempt: a dial made
+  /// during the recovery was counted by its own start.
+  void onRecovery(int us, {required String lane}) {
+    if (_recoveryLane != null) return;
+    _recoveryLane = lane;
+    _recoveryUs = us;
+  }
+
+  /// Whether the episode ended lost and no recovery has closed it yet.
+  bool get awaitsRecovery =>
+      _failoverOutcome == 'lost' && _recoveryLane == null;
 
   /// Clears the marks and the dial-attempt count an episode owns, so the
   /// episode that opens now starts its own. The stall stays: a fresh
@@ -307,6 +337,8 @@ class LinkTimelineRecorder {
         failoverCandidateCount: _failoverCandidateCount,
         upgradeOutcome: _upgradeOutcome,
         upgradeCandidateCount: _upgradeCandidateCount,
+        recoveryLane: _recoveryLane,
+        recoveryUs: _recoveryUs,
       ),
     );
     if (_episodes.length > episodeHistoryCapacity) {
@@ -335,6 +367,8 @@ class LinkTimelineRecorder {
     failoverCandidateCount: _failoverCandidateCount,
     upgradeOutcome: _upgradeOutcome,
     upgradeCandidateCount: _upgradeCandidateCount,
+    recoveryLane: _recoveryLane,
+    recoveryUs: _recoveryUs,
   );
 
   /// The shape hosts read through `CompositeBleTransport.linkTimelineFor`:

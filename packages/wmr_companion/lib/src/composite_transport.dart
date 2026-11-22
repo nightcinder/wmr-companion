@@ -393,7 +393,13 @@ class CompositeBleTransport implements BleTransport {
         try {
           final id = await _tryTcp(route, tcpCandidates);
           if (id != null) {
+            // A redial after a failover that never landed closes that
+            // episode: a recovery on the redial lane, not an attempt.
+            final recovering = route.timeline.awaitsRecovery;
             await _activateTcp(route, id);
+            if (recovering) {
+              route.timeline.onRecovery(clock.nowUs, lane: 'redial');
+            }
             return;
           }
         } catch (error) {

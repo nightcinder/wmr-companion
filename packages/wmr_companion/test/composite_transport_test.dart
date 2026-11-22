@@ -83,6 +83,8 @@ const _timelineKeys = [
   'failover_candidate_count',
   'upgrade_outcome',
   'upgrade_candidate_count',
+  'recovery_lane',
+  'recovery_us',
   'episodes',
 ];
 
@@ -4048,6 +4050,39 @@ void main() {
       expect(marks['failover_outcome'], 'lost');
       expect(marks['failover_reason'], 'no_candidate');
       expect(marks['failover_candidate_count'], 0);
+    },
+  );
+
+  test(
+    'an app redial after a lost failover is a recovery, not an attempt',
+    () async {
+      ble.dispose();
+      ble = _RecordingBle(devices: const []);
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == null,
+        reason: 'the failover with no BLE bridge did not release the route',
+      );
+      expect(transport.linkTimelineFor(_tcpDeviceId)!['recovery_lane'], isNull);
+
+      await transport.connect(_tcpDeviceId);
+
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      expect(marks['recovery_lane'], 'redial');
+      expect(marks['recovery_us'], isNotNull);
+      expect(marks['upgrade_dial_attempts'], 0);
+      expect(marks['failover_end_us'], isNull);
+      expect(marks['upgrade_outcome'], isNull);
     },
   );
 
