@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
@@ -566,5 +567,291 @@ void main() {
       reason: 'expected a disconnected state, saw $states',
     );
     expect(() => transport.statsFor(id), returnsNormally);
+  });
+
+  group('connect cancellation and session fencing', () {
+    test('abandoned connect() resolving after disconnect() closes late socket '
+        'silently without reviving session or emitting disconnected', () async {
+      await start();
+      final pendingSocket = Completer<WebSocket>();
+      var connectorCalls = 0;
+      final fenced = WmrWsTransport(
+        endpoints: [endpoint],
+        connectTimeout: const Duration(seconds: 5),
+        connector: (uri) {
+          connectorCalls++;
+          return pendingSocket.future;
+        },
+      );
+      addTearDown(fenced.dispose);
+
+      final states = <BleConnectionState>[];
+      final stateSub = fenced.connectionState(id).listen(states.add);
+      addTearDown(stateSub.cancel);
+      await pump();
+
+      final connectFuture = fenced.connect(id);
+      final connectError = expectLater(
+        connectFuture,
+        throwsA(isA<WmrWsClosedException>()),
+      );
+      await waitFor(() => connectorCalls == 1);
+
+      await fenced.disconnect(id);
+      await connectError;
+      await pump();
+
+      final statesAfterDisconnect = List<BleConnectionState>.of(states);
+      expect(statesAfterDisconnect.last, BleConnectionState.disconnected);
+
+      // Now resolve the abandoned connect with a real WebSocket to FakePiServer.
+      final lateSocket = await WebSocket.connect(
+        server.url,
+        protocols: const [wmrWsSubprotocol],
+      );
+      pendingSocket.complete(lateSocket);
+
+      await waitFor(
+        () =>
+            lateSocket.readyState == WebSocket.closed && server.clients.isEmpty,
+        reason: 'late socket must be closed silently',
+      );
+      await pump();
+
+      expect(fenced.helloFor(id), isNull);
+      expect(server.messages, isEmpty);
+      expect(
+        states,
+        statesAfterDisconnect,
+        reason: 'no extra disconnected event should fire',
+      );
+    });
+
+    test('stale connect() resolving or failing after a newer session is ready '
+        'leaves live session connected and subscribed', () async {
+      for (final failLate in [false, true]) {
+        await start();
+        final staleCompleter = Completer<WebSocket>();
+        var attempt = 0;
+        final fenced = WmrWsTransport(
+          endpoints: [endpoint],
+          connectTimeout: const Duration(seconds: 5),
+          connector: (uri) {
+            attempt++;
+            if (attempt == 1) return staleCompleter.future;
+            return WebSocket.connect(
+              uri.toString(),
+              protocols: const [wmrWsSubprotocol],
+            );
+          },
+        );
+        addTearDown(fenced.dispose);
+
+        final staleConnect = fenced.connect(id);
+        final staleExpect = expectLater(
+          staleConnect,
+          throwsA(isA<WmrWsException>()),
+        );
+        await waitFor(() => attempt == 1);
+
+        await fenced.disconnect(id);
+        await staleExpect;
+
+        // Start a fresh session and subscribe.
+        await fenced.connect(id);
+        final notifications = <BleNotification>[];
+        final streamSub = fenced
+            .subscribe(id, wmrBridgeServiceUuid, wmrBridgeDecodedCharUuid)
+            .listen(notifications.add);
+        addTearDown(streamSub.cancel);
+        await waitFor(() => server.activeStream == 'decoded');
+
+        final statesAfterReady = <BleConnectionState>[];
+        final stateSub = fenced
+            .connectionState(id)
+            .listen(statesAfterReady.add);
+        addTearDown(stateSub.cancel);
+        await pump();
+        expect(statesAfterReady, [BleConnectionState.connected]);
+
+        if (failLate) {
+          staleCompleter.completeError(
+            const SocketException('late network failure'),
+          );
+        } else {
+          final lateSocket = await WebSocket.connect(
+            server.url,
+            protocols: const [wmrWsSubprotocol],
+          );
+          staleCompleter.complete(lateSocket);
+          await waitFor(() => lateSocket.readyState == WebSocket.closed);
+        }
+        await pump();
+
+        expect(
+          statesAfterReady,
+          [BleConnectionState.connected],
+          reason:
+              'stale completion (failLate=$failLate) must not emit disconnected',
+        );
+        expect(
+          await fenced.connectionState(id).first,
+          BleConnectionState.connected,
+        );
+
+        server.sendBinary([1, 2, 3, 4]);
+        await waitFor(() => notifications.isNotEmpty);
+
+        await fenced.dispose();
+        await server.stop();
+      }
+    });
+
+    test('in-flight OS connect/HTTP task is cancelled on disconnect(), timeout, '
+        'and dispose() without waiting for full connectTimeout', () async {
+      // 1. disconnect() aborts hanging HTTP upgrade immediately.
+      final hangingServer = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(hangingServer.close);
+      final accepted = <Socket>[];
+      final serverClosed = Completer<void>();
+      hangingServer.listen((socket) {
+        accepted.add(socket);
+        socket.listen(
+          (_) {},
+          onDone: () {
+            if (!serverClosed.isCompleted) serverClosed.complete();
+          },
+          onError: (_) {
+            if (!serverClosed.isCompleted) serverClosed.complete();
+          },
+        );
+      });
+
+      final ep = WmrWsEndpoint(host: '127.0.0.1', port: hangingServer.port);
+      final devId = ep.resolvedDeviceId;
+      final t1 = WmrWsTransport(
+        endpoints: [ep],
+        connectTimeout: const Duration(seconds: 30),
+      );
+      addTearDown(t1.dispose);
+
+      final sw = Stopwatch()..start();
+      final c1 = t1.connect(devId);
+      final c1Expect = expectLater(c1, throwsA(isA<WmrWsClosedException>()));
+      await waitFor(() => accepted.isNotEmpty);
+
+      await t1.disconnect(devId);
+      await c1Expect;
+      expect(sw.elapsedMilliseconds, lessThan(2000));
+      await serverClosed.future.timeout(const Duration(seconds: 2));
+
+      // 2. dispose() aborts hanging HTTP upgrade immediately.
+      final serverClosed2 = Completer<void>();
+      final hangingServer2 = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(hangingServer2.close);
+      final accepted2 = <Socket>[];
+      hangingServer2.listen((socket) {
+        accepted2.add(socket);
+        socket.listen(
+          (_) {},
+          onDone: () {
+            if (!serverClosed2.isCompleted) serverClosed2.complete();
+          },
+          onError: (_) {
+            if (!serverClosed2.isCompleted) serverClosed2.complete();
+          },
+        );
+      });
+      final ep2 = WmrWsEndpoint(host: '127.0.0.1', port: hangingServer2.port);
+      final t2 = WmrWsTransport(
+        endpoints: [ep2],
+        connectTimeout: const Duration(seconds: 30),
+      );
+      final sw2 = Stopwatch()..start();
+      final c2 = t2.connect(ep2.resolvedDeviceId);
+      final c2Expect = expectLater(c2, throwsA(isA<WmrWsClosedException>()));
+      await waitFor(() => accepted2.isNotEmpty);
+
+      await t2.dispose();
+      await c2Expect;
+      expect(sw2.elapsedMilliseconds, lessThan(2000));
+      await serverClosed2.future.timeout(const Duration(seconds: 2));
+
+      // 3. connectTimeout aborts hanging HTTP upgrade and closes the OS socket.
+      final serverClosed3 = Completer<void>();
+      final hangingServer3 = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(hangingServer3.close);
+      final accepted3 = <Socket>[];
+      hangingServer3.listen((socket) {
+        accepted3.add(socket);
+        socket.listen(
+          (_) {},
+          onDone: () {
+            if (!serverClosed3.isCompleted) serverClosed3.complete();
+          },
+          onError: (_) {
+            if (!serverClosed3.isCompleted) serverClosed3.complete();
+          },
+        );
+      });
+      final ep3 = WmrWsEndpoint(host: '127.0.0.1', port: hangingServer3.port);
+      final t3 = WmrWsTransport(
+        endpoints: [ep3],
+        connectTimeout: const Duration(milliseconds: 80),
+      );
+      addTearDown(t3.dispose);
+      await expectLater(
+        t3.connect(ep3.resolvedDeviceId),
+        throwsA(isA<WmrWsException>()),
+      );
+      await serverClosed3.future.timeout(const Duration(seconds: 2));
+    });
+
+    test('multi-host connect() cancelled mid-loop stops immediately without '
+        'dialing remaining candidateHosts', () async {
+      await start();
+      final grouped = WmrWsEndpoint(
+        host: '127.0.0.2',
+        port: server.port,
+        candidateHosts: ['127.0.0.1', '127.0.0.3'],
+      );
+      final dialedHosts = <String>[];
+      final firstHostCompleter = Completer<WebSocket>();
+      final t = WmrWsTransport(
+        endpoints: [grouped],
+        connectTimeout: const Duration(seconds: 5),
+        connector: (uri) {
+          dialedHosts.add(uri.host);
+          if (uri.host == '127.0.0.2') return firstHostCompleter.future;
+          return WebSocket.connect(
+            uri.toString(),
+            protocols: const [wmrWsSubprotocol],
+          );
+        },
+      );
+      addTearDown(t.dispose);
+
+      final connectFuture = t.connect(grouped.resolvedDeviceId);
+      final connectExpect = expectLater(
+        connectFuture,
+        throwsA(isA<WmrWsClosedException>()),
+      );
+      await waitFor(() => dialedHosts.length == 1);
+
+      await t.disconnect(grouped.resolvedDeviceId);
+      await connectExpect;
+
+      expect(dialedHosts, ['127.0.0.2']);
+      expect(server.clients, isEmpty);
+    });
   });
 }
