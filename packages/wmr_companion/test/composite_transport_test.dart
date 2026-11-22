@@ -3971,6 +3971,57 @@ void main() {
   );
 
   test(
+    'a failover whose first candidate refuses lands on the next one',
+    () async {
+      ble.dispose();
+      const otherId = 'AA:BB:CC:DD:EE:02';
+      final two = _RecordingBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+          FakeDevice(
+            id: otherId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+      );
+      two.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _endpointDocument();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = two;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      two.refusedConnects.add(_bleDeviceId);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us'] != null,
+        reason: 'the failover did not land on the second candidate',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(marks['failover_outcome'], isNot('lost'));
+      expect(marks['failover_candidate_count'], 2);
+      expect(two.disconnectCalls, contains(_bleDeviceId));
+    },
+  );
+
+  test(
     'a failover with no BLE bridge to dial ends lost with no candidate',
     () async {
       ble.dispose();
