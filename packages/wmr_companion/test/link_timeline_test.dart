@@ -63,4 +63,44 @@ void main() {
     expect(marks['first_tcp_record_wall_us'], isNull);
     expect(marks['upgrade_dial_attempts'], 2);
   });
+
+  test('a redial after a lost failover closes the episode with no attempt '
+      'and no landing', () {
+    final recorder = LinkTimelineRecorder();
+    recorder.onStallDetected(90);
+    recorder.onFailoverBegin(100);
+    recorder.onFailoverLost(candidates: 0, reason: 'no_candidate');
+    expect(recorder.awaitsRecovery, isTrue);
+
+    recorder.onRecovery(900, lane: 'redial');
+    recorder.onRecovery(950, lane: 'redial');
+
+    final marks = recorder.snapshot;
+    expect(marks['recovery_lane'], 'redial');
+    expect(marks['recovery_us'], 900);
+    expect(marks['upgrade_dial_attempts'], 0);
+    expect(marks['failover_end_us'], isNull);
+    expect(marks['first_tcp_record_us'], isNull);
+    expect(recorder.awaitsRecovery, isFalse);
+  });
+
+  test('a recovery that also dialled counts that dial once', () {
+    final recorder = LinkTimelineRecorder();
+    recorder.onFailoverBegin(100);
+    recorder.onFailoverLost(candidates: 1, reason: 'connect_threw');
+    recorder.onUpgradeDialStart(300);
+    recorder.onUpgradeDialEnd(400);
+    recorder.onRecovery(500, lane: 'redial');
+
+    final marks = recorder.snapshot;
+    expect(marks['recovery_lane'], 'redial');
+    expect(marks['upgrade_dial_attempts'], 1);
+  });
+
+  test('a landed failover does not await a recovery', () {
+    final recorder = LinkTimelineRecorder();
+    recorder.onFailoverBegin(100);
+    recorder.onFailoverEnd(200, candidates: 1);
+    expect(recorder.awaitsRecovery, isFalse);
+  });
 }
