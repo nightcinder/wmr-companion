@@ -26,6 +26,12 @@ class FakeBleAdapter implements BleAdapter {
   /// When set, [availability] waits for this completer before answering.
   Completer<void>? availabilityGate;
 
+  /// When set, [connect] waits for this completer before answering.
+  Completer<void>? connectGate;
+
+  /// When set, [discoverServices] waits for this completer before answering.
+  Completer<void>? discoveryGate;
+
   /// When set, [requestMtu] waits for this completer before answering.
   Completer<void>? mtuGate;
 
@@ -139,6 +145,7 @@ class FakeBleAdapter implements BleAdapter {
   Future<void> connect(String deviceId) async {
     calls.add('connect');
     _enabled.clear();
+    await connectGate?.future;
     if (connectFailureCount > 0) {
       connectFailureCount--;
       throw connectError ?? StateError('connect failed');
@@ -173,7 +180,9 @@ class FakeBleAdapter implements BleAdapter {
   @override
   Future<List<BleServiceInfo>> discoverServices(String deviceId) async {
     calls.add('discoverServices');
-    return services;
+    final result = services;
+    await discoveryGate?.future;
+    return result;
   }
 
   /// Mirrors the firmware: while one of FF11/FF12/FF14 is enabled, enabling

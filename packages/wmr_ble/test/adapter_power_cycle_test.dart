@@ -9,6 +9,8 @@ import 'package:wmr_core/protocol/gatt.dart';
 
 const id = fakeBridgeDeviceId;
 
+const settleBound = Duration(seconds: 1);
+
 Future<void> pump() => Future<void>.delayed(Duration.zero);
 
 Future<Object?> throwsBluetoothOff(Future<void> future) => expectLater(
@@ -68,20 +70,119 @@ void main() {
       expect(adapter.ccc, hasLength(cccAtReady));
     });
 
+    Future<void> expectOffAndRedial(
+      Future<Object?> failed,
+      List<String> callsBeforeOff,
+    ) async {
+      await failed.timeout(settleBound);
+      expect(t.statusFor(id).phase, BleLinkPhase.bluetoothOff);
+      expect(
+        await t.connectionState(id).first,
+        BleConnectionState.disconnected,
+      );
+      expect(t.negotiatedMtu(id), isNull);
+      expect(
+        () => t.subscribe(id, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid),
+        throwsStateError,
+      );
+      expect(
+        adapter.calls.skip(callsBeforeOff.length),
+        isNot(contains('disconnect')),
+      );
+
+      final callsBeforeRedial = adapter.calls.length;
+      adapter.emitAvailability(BleAvailability.poweredOn);
+      await t.connect(id).timeout(settleBound);
+      expect(
+        adapter.calls.skip(callsBeforeRedial),
+        containsAllInOrder(['connect', 'requestMtu 517', 'discoverServices']),
+      );
+      expect(t.statusFor(id).phase, BleLinkPhase.ready);
+    }
+
+    test('off releases a connect that never resolves', () async {
+      adapter.connectGate = Completer<void>();
+      final failed = throwsBluetoothOff(t.connect(id));
+      await pump();
+      expect(adapter.calls, ['connect']);
+
+      final beforeOff = adapter.calls.toList();
+      adapter.emitAvailability(BleAvailability.poweredOff);
+      adapter.connectGate = null;
+      await expectOffAndRedial(failed, beforeOff);
+    });
+
     test(
-      'off mid-connect reports Bluetooth off and skips the teardown',
+      'a connect that throws during radio loss reports Bluetooth off',
       () async {
-        adapter.mtuGate = Completer<void>();
-        final connecting = t.connect(id);
+        final gate = adapter.connectGate = Completer<void>();
+        final failed = throwsBluetoothOff(t.connect(id));
         await pump();
-        expect(adapter.calls, contains('requestMtu 517'));
+        expect(adapter.calls, ['connect']);
 
+        final beforeOff = adapter.calls.toList();
         adapter.emitAvailability(BleAvailability.poweredOff);
-        await pump();
-        adapter.mtuGate!.complete();
+        gate.completeError(StateError('stack closed during connect'));
+        adapter.connectGate = null;
+        await expectOffAndRedial(failed, beforeOff);
+      },
+    );
 
-        await throwsBluetoothOff(connecting);
-        expect(t.statusFor(id).phase, BleLinkPhase.bluetoothOff);
+    test('off releases an MTU request that never resolves', () async {
+      adapter.mtuGate = Completer<void>();
+      final failed = throwsBluetoothOff(t.connect(id));
+      await pump();
+      expect(adapter.calls, ['connect', 'requestMtu 517']);
+
+      final beforeOff = adapter.calls.toList();
+      adapter.emitAvailability(BleAvailability.poweredOff);
+      adapter.mtuGate = null;
+      await expectOffAndRedial(failed, beforeOff);
+    });
+
+    test('off before discovery prevents calling the dead stack', () async {
+      final beforeOff = Completer<List<String>>();
+      final sub = t.statusChanges.listen((status) {
+        if (status.phase != BleLinkPhase.negotiatingMtu ||
+            beforeOff.isCompleted) {
+          return;
+        }
+        beforeOff.complete(adapter.calls.toList());
+        adapter.emitAvailability(BleAvailability.poweredOff);
+      });
+      addTearDown(sub.cancel);
+      final failed = throwsBluetoothOff(t.connect(id));
+      final calls = await beforeOff.future.timeout(settleBound);
+      expect(calls, ['connect', 'requestMtu 517']);
+      await failed.timeout(settleBound);
+      expect(adapter.calls, isNot(contains('discoverServices')));
+      await expectOffAndRedial(failed, calls);
+    });
+
+    test(
+      'off releases discovery even after a platform link-loss event',
+      () async {
+        final services = adapter.services;
+        adapter.services = [];
+        final gate = adapter.discoveryGate = Completer<void>();
+        final failed = throwsBluetoothOff(t.connect(id));
+        await pump();
+        expect(adapter.calls.last, 'discoverServices');
+
+        adapter.dropLink();
+        await pump();
+        expect(t.statusFor(id).phase, BleLinkPhase.connectionLost);
+        final beforeOff = adapter.calls.toList();
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        adapter.discoveryGate = null;
+        adapter.services = services;
+        await expectOffAndRedial(failed, beforeOff);
+
+        final ready = t.statusFor(id);
+        gate.complete(); // The old empty service table cannot replace the new one.
+        await pump();
+        expect(t.statusFor(id), same(ready));
+        expect(await t.discoverServices(id), services);
         expect(adapter.calls, isNot(contains('disconnect')));
       },
     );
@@ -141,35 +242,28 @@ void main() {
       },
     );
 
-    test(
-      'a rapid cycle supersedes the stale dial and it never publishes',
-      () async {
-        adapter.mtuGate = Completer<void>();
-        final first = t.connect(id);
-        await pump();
-        expect(adapter.calls, contains('requestMtu 517'));
+    test('a rapid cycle preserves the new dial after a late error', () async {
+      final gate = adapter.connectGate = Completer<void>();
+      final failed = throwsBluetoothOff(t.connect(id));
+      await pump();
+      expect(adapter.calls, ['connect']);
 
-        adapter.emitAvailability(BleAvailability.poweredOff);
-        // The redial supersedes the one stuck at the MTU request; it is
-        // queued behind it.
-        final second = t.connect(id);
-        adapter.mtuGate!.complete();
-        await throwsBluetoothOff(first);
+      adapter.emitAvailability(BleAvailability.poweredOff);
+      adapter.emitAvailability(BleAvailability.poweredOn);
+      adapter.connectGate = null;
+      final second = t.connect(id);
+      await failed.timeout(settleBound);
+      await second.timeout(settleBound);
+      expect(adapter.calls.where((c) => c == 'connect'), hasLength(2));
+      expect(adapter.calls.where((c) => c == 'discoverServices'), hasLength(1));
+      final ready = t.statusFor(id);
+      expect(ready.phase, BleLinkPhase.ready);
 
-        adapter.emitAvailability(BleAvailability.poweredOn);
-        await second;
-        await pump();
-
-        // The stale attempt published nothing past its abort point: only the
-        // dial that owned the cycle reached the later steps.
-        expect(adapter.calls.where((c) => c == 'connect'), hasLength(2));
-        expect(adapter.calls.where((c) => c == 'priorityHigh'), hasLength(1));
-        expect(
-          adapter.calls.where((c) => c == 'discoverServices'),
-          hasLength(1),
-        );
-        expect(t.statusFor(id).phase, BleLinkPhase.ready);
-      },
-    );
+      gate.completeError(StateError('abandoned connect later failed'));
+      await pump();
+      expect(t.statusFor(id), same(ready));
+      expect(await t.connectionState(id).first, BleConnectionState.connected);
+      expect(adapter.calls, isNot(contains('disconnect')));
+    });
   });
 }
