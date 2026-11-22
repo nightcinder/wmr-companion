@@ -71,10 +71,25 @@ class BleLinkStatus {
   bool get isFailure => phase.index >= BleLinkPhase.bluetoothOff.index;
 }
 
+const _bluetoothOff = BleTransportException(
+  BleLinkPhase.bluetoothOff,
+  'Bluetooth is turned off',
+);
+
 class _Session {
   _Session(this.deviceId);
 
   final String deviceId;
+  final radioLost = Completer<void>();
+
+  Future<T> untilRadioOff<T>(Future<T> operation) {
+    // Future.any observes the platform future even after the radio wins.
+    return Future.any([
+      operation,
+      radioLost.future.then<T>((_) => throw _bluetoothOff),
+    ]);
+  }
+
   int? mtu;
   bool? priorityRequested;
   final List<String> warnings = [];
@@ -163,7 +178,8 @@ class UniversalBleTransport
   Future<void> _tail = Future.value();
   final Map<String, _Session> _sessions = {};
   final Map<String, BleLinkStatus> _deviceStatuses = {};
-  final Set<String> _connecting = {};
+  final Map<String, Object> _connecting = {};
+  _Session? _settingUp;
   final Map<String, BleConnectionState> _states = {};
   final Map<String, StreamController<BleConnectionState>> _stateCtls = {};
   final Map<String, StreamSubscription<AdapterConnectionEvent>> _linkSubs = {};
@@ -223,10 +239,20 @@ class UniversalBleTransport
   /// subscriptions are kept for the redial, and every bridge reports
   /// [BleLinkPhase.bluetoothOff]. The host redials when the radio returns.
   void _loseLinksToRadioOff() {
-    for (final deviceId in _sessions.keys.toList()) {
-      _sessions.remove(deviceId);
+    final setup = _settingUp;
+    if (setup != null && !setup.radioLost.isCompleted) {
+      setup.radioLost.complete();
+    }
+    // A platform link-loss event can arrive before the radio event and
+    // already have removed the session whose GATT call is still pending.
+    for (final deviceId in {
+      ..._sessions.keys,
+      if (setup != null) setup.deviceId,
+    }) {
+      if (_sessions.remove(deviceId) != null) {
+        _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
+      }
       _linkSubs.remove(deviceId)?.cancel();
-      _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
       _setState(deviceId, BleConnectionState.disconnected);
       _emit(
         BleLinkPhase.bluetoothOff,
@@ -604,33 +630,32 @@ class UniversalBleTransport
     if (_sessions[deviceId]?.ready == true) {
       return Future.value();
     }
-    _connecting.add(deviceId);
-    return _serial(() => _setup(deviceId))
-        .whenComplete(() => _connecting.remove(deviceId));
+    final dial = _connecting[deviceId] = Object();
+    return _serial(() => _setup(deviceId)).whenComplete(() {
+      if (_connecting[deviceId] == dial) _connecting.remove(deviceId);
+    });
   }
 
-  /// A setup step that lost its session aborts without publishing: the dial
-  /// that superseded it, or the radio handler that cleared the session,
-  /// owns the device's status. The exception still classifies so its caller
-  /// knows what happened — the radio when its going off is the cause, an
-  /// ordinary disconnect otherwise.
-  BleTransportException _setupSuperseded(String deviceId) =>
-      BleTransportException(
-        _radioOff ? BleLinkPhase.bluetoothOff : BleLinkPhase.connectionLost,
-        _radioOff ? 'Bluetooth is turned off' : 'Disconnected during setup',
+  void _checkSetup(_Session session) {
+    if (session.radioLost.isCompleted || _radioOff) throw _bluetoothOff;
+    if (_sessions[session.deviceId] != session) {
+      throw const BleTransportException(
+        BleLinkPhase.connectionLost,
+        'Disconnected during setup',
       );
+    }
+  }
 
   Future<void> _setup(String deviceId) async {
-    final session = _sessions[deviceId] = _Session(deviceId);
+    final session = _sessions[deviceId] = _settingUp = _Session(deviceId);
     _setState(deviceId, BleConnectionState.connecting);
     _emit(BleLinkPhase.connecting, deviceId: deviceId);
     var linkAttempted = false;
     try {
       await _preflight(deviceId: deviceId);
-      if (_sessions[deviceId] != session) {
-        throw _setupSuperseded(deviceId);
-      }
+      _checkSetup(session);
       await _linkSubs[deviceId]?.cancel();
+      _checkSetup(session);
       _linkSubs[deviceId] = _adapter
           .connectionEvents(deviceId)
           .listen((e) => _onLinkEvent(session, e));
@@ -638,57 +663,59 @@ class UniversalBleTransport
       linkAttempted = true;
       _timelineFor(deviceId).onGattConnectStart(clock.nowUs);
       try {
-        await _adapter.connect(deviceId);
+        await session.untilRadioOff(_adapter.connect(deviceId));
       } catch (e) {
-        if (_radioOff) throw _setupSuperseded(deviceId);
+        _checkSetup(session);
         throw _fail(
           BleLinkPhase.connectFailed,
           'Connect failed: $e',
           deviceId: deviceId,
         );
       }
-      if (_sessions[deviceId] != session) {
-        throw _setupSuperseded(deviceId);
-      }
+
+      _checkSetup(session);
 
       _emit(BleLinkPhase.negotiatingMtu, deviceId: deviceId);
       try {
-        session.mtu = await _adapter.requestMtu(deviceId, requestedMtu);
+        session.mtu = await session.untilRadioOff(
+          _adapter.requestMtu(deviceId, requestedMtu),
+        );
       } catch (e) {
+        _checkSetup(session);
         session.warnings.add('MTU request failed: $e');
       }
-      if (_sessions[deviceId] != session) {
-        throw _setupSuperseded(deviceId);
-      }
+
+      _checkSetup(session);
 
       if (_adapter.supportsConnectionPriority) {
         try {
-          await _adapter.requestHighConnectionPriority(deviceId);
+          await session.untilRadioOff(
+            _adapter.requestHighConnectionPriority(deviceId),
+          );
           session.priorityRequested = true;
         } catch (e) {
+          _checkSetup(session);
           session.priorityRequested = false;
           session.warnings.add('Connection priority request failed: $e');
         }
-        if (_sessions[deviceId] != session) {
-          throw _setupSuperseded(deviceId);
-        }
+        _checkSetup(session);
       }
 
       _emit(BleLinkPhase.discovering, deviceId: deviceId);
       final List<BleServiceInfo> services;
       try {
-        services = await _adapter.discoverServices(deviceId);
+        services = await session.untilRadioOff(
+          _adapter.discoverServices(deviceId),
+        );
       } catch (e) {
-        if (_radioOff) throw _setupSuperseded(deviceId);
+        _checkSetup(session);
         throw _fail(
           BleLinkPhase.connectFailed,
           'Service discovery failed: $e',
           deviceId: deviceId,
         );
       }
-      if (_sessions[deviceId] != session) {
-        throw _setupSuperseded(deviceId);
-      }
+      _checkSetup(session);
       _timelineFor(deviceId).onServiceDiscoveryDone(clock.nowUs);
       final hasStream = services.any(
         (s) =>
@@ -713,39 +740,37 @@ class UniversalBleTransport
         try {
           await _enable(session, key, w);
         } on BleAdapterException catch (e) {
+          _checkSetup(session);
           // A refused second stream is reported on that stream, not as a
           // failed connection. Anything else keeps failing the setup.
           if (e.attError != attErrorOtherStreamActive) rethrow;
           _streams[key]?.addError(_streamFault(w, e));
         }
-        if (_sessions[deviceId] != session) {
-          throw _setupSuperseded(deviceId);
-        }
+        _checkSetup(session);
       }
       _setState(deviceId, BleConnectionState.connected);
       _emit(BleLinkPhase.ready, deviceId: deviceId);
     } catch (e) {
-      if (_sessions[deviceId] == session) {
-        _sessions.remove(deviceId);
-        // The dial owned the device, so its end is a disconnect: the next
-        // dial's marks follow it on the timeline. A dial that died at
-        // preflight never opened the link — nothing went down — so the
-        // last episode's end stands instead of a second disconnect.
-        if (linkAttempted) {
-          _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
-        }
+      if (session.radioLost.isCompleted) throw _bluetoothOff;
+      if (_sessions[deviceId] != session) rethrow;
+
+      _sessions.remove(deviceId);
+      _linkSubs.remove(deviceId)?.cancel();
+      // Only a dial that reached the stack has an episode to close.
+      if (linkAttempted) {
+        _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
       }
       _setState(deviceId, BleConnectionState.disconnected);
       if (linkAttempted && !_radioOff) {
-        // The platform already dropped the link when the radio went, and a
-        // GATT call into the dead stack is what wedges the client.
         try {
-          await _adapter.disconnect(deviceId);
+          await session.untilRadioOff(_adapter.disconnect(deviceId));
         } catch (_) {}
       }
+      if (session.radioLost.isCompleted) throw _bluetoothOff;
       if (e is BleTransportException) rethrow;
-      if (_radioOff) throw _setupSuperseded(deviceId);
       throw _fail(BleLinkPhase.connectFailed, '$e', deviceId: deviceId);
+    } finally {
+      _settingUp = null;
     }
   }
 
@@ -755,9 +780,8 @@ class UniversalBleTransport
     _linkSubs.remove(session.deviceId)?.cancel();
     _subscribeTimelines[session.deviceId]?.onDisconnect(clock.nowUs);
     _setState(session.deviceId, BleConnectionState.disconnected);
-    // This is the only publisher for a link that died mid-setup: the
-    // failing step aborts silently, superseded by this report. Only a drop
-    // after setup is an unexpected disconnect of a ready link.
+    // The setup step defers to this report for an ordinary link loss.
+    // A subsequent radio-off event may classify an in-flight dial as off.
     _emit(
       BleLinkPhase.connectionLost,
       deviceId: session.deviceId,
@@ -894,7 +918,7 @@ class UniversalBleTransport
   ) {
     final session = _sessions[deviceId];
     final active = session != null && session.ready;
-    if (!active && !_connecting.contains(deviceId)) {
+    if (!active && !_connecting.containsKey(deviceId)) {
       throw StateError('Device $deviceId is not connected');
     }
     final key = '$deviceId|${characteristicUuid.toLowerCase()}';
