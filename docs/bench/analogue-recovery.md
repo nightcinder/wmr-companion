@@ -1,7 +1,7 @@
 # Bench run sheet: steps 4 and 5, TCP to BLE recovery
 
 This sheet covers step 4 (BLE takeover) and step 5 (TCP recovery) of the Pi
-bench. The base checklist is `WMR_Bridge` `docs/runs/sheets/bench.md:10,21-24`.
+bench. The base checklist is `WMR_Bridge` `docs/runs/sheets/bench.md:7,11,23-26`.
 
 Citations without a repository name resolve in this repository. Citations that
 start with `WMR_Bridge` resolve in the sibling WMR_Bridge repository.
@@ -17,7 +17,7 @@ start with `WMR_Bridge` resolve in the sibling WMR_Bridge repository.
 | Step-4 takeover | First BLE record minus last TCP record. |
 
 Step 4 is measured on the phone. The composite stamps the last TCP record and
-the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1730-1744`).
+the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1823-1839`).
 Those two marks bound the takeover.
 
 T2 is the app's `first_tcp_record_us` mark. The app sets it on the first TCP
@@ -34,7 +34,7 @@ line.
 
 The composite emits the route ID on `tcpReceipts` as soon as
 `first_tcp_record_us` is stamped
-(`packages/wmr_companion/lib/src/composite_transport.dart:224`, `:701-703`). In
+(`packages/wmr_companion/lib/src/composite_transport.dart:230`, `:713-715`). In
 debug builds, the app listens to `tcpReceipts` and writes the line immediately
 (`apps/wmr_companion_app/lib/app.dart:34-40`, `:58-66`). USB, buffering, and
 scheduling delay can only make the stamp later. That stamp is a conservative
@@ -111,17 +111,17 @@ attempt moves `upgrade_dial_start_us`, while
 
 A failed dial re-arms after 100 ms while the 30 s post-failover window is
 open (`packages/wmr_companion/lib/src/composite_transport.dart:76-77`,
-`:1344-1353`). The probe budget caps one dial at 300 ms (`:78`). The worst
+`:1412`, `:1426-1439`). The probe budget caps one dial at 300 ms (`:78`). The worst
 wait from a route return to the next dial is 400 ms. The dial result is the
 probe, so no Pi reachability signal is involved (ONY-1631 plan rev 3,
 Child 1).
 
 Upgrade and BLE-drop recovery dials put the last-working TCP candidate first
-(`packages/wmr_companion/lib/src/composite_transport.dart:734-744`, `:943`,
-`:1227`, `:1311`). Each non-last candidate gets up to 250 ms when the
-remaining budget exceeds that cap (`:81`, `:768-777`). Otherwise, the
-remaining candidates share the remaining budget evenly (`:770-776`). The last
-candidate keeps the full remaining budget (`:768-769`).
+(`packages/wmr_companion/lib/src/composite_transport.dart:746-756`, `:955`,
+`:1287`, `:1371`). Each non-last candidate gets up to 250 ms when the
+remaining budget exceeds that cap (`:81`, `:781-785`). Otherwise, the
+remaining candidates share the remaining budget evenly (`:785-788`). The last
+candidate keeps the full remaining budget (`:780-781`).
 
 Mean attempt spacing uses the two dial-start marks and the attempt count
 (`packages/wmr_companion/lib/src/link_timeline.dart:81`, `:87`, `:91`). It is
@@ -141,9 +141,17 @@ receipt T2 and the journal lower bound to explain the gate result.
   (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:80-83`). It sits
   under **Stream** in the Debug screen (`:217-229`).
 - Before the first switch the row reads `Last link switch none yet` (`:645`).
+- On the Pi 3B+, run on a `btusb` `hci0` adapter with `dtoverlay=disable-bt`
+  for Option B (`WMR_Bridge` `docs/runs/sheets/bench.md:7`). Do not use an
+  `hci_uart*` or `serial` adapter, because `wmr-bridge` auto-gates serial
+  adapters to TCP-only (`WMR_Bridge` `pi/wmr_bridge/__main__.py:801-816`,
+  `pi/wmr_bridge/bluez.py:90-148`). Make sure that the `wmr-bridge` log prints
+  `BLE GATT: FF10 on ...` (`WMR_Bridge` `pi/wmr_bridge/__main__.py:843-847`).
+  Make sure that `wmr-bridge status` prints `powered=yes` (`WMR_Bridge`
+  `pi/wmr_bridge/__main__.py:608-610`).
 - On the Pi, `wmr-bridge` runs and both controllers stream. Isolate or unplug
   `eth0`, and confirm that `wlan0` is the uplink (`WMR_Bridge`
-  `docs/runs/sheets/bench.md:10`). With `eth0` still connected, the outage may
+  `docs/runs/sheets/bench.md:11`). With `eth0` still connected, the outage may
   never start.
 
 ## Clock proof and receipt capture
@@ -403,19 +411,26 @@ fresh export by `session` and `first_tcp_record_us`. Use the event's
 the Debug row's `first TCP +` in the same run.
 
 **10. Read `dropped=` from the last status line.** The bridge prints one every
-5 s (`WMR_Bridge` `pi/wmr_bridge/__main__.py:943-953`).
+5 s (`WMR_Bridge` `pi/wmr_bridge/__main__.py:988-1003`).
 
-**11. Export the bundle.** Tap **Export test bundle** on the Connect screen
-(`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1189`). The file is
-`wmr-ext-<yyyyMMdd>.zip` in the app documents `exports` folder
+**11. Export the bundle outside the timing window.** Run this step after step 9
+stops `clock-proof.py` and captures T2, and after step 10 reads `dropped=`.
+Never export during `[T0, stop(clock-proof)]`. Tap **Export test bundle** on
+the Connect screen (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1156-1190`).
+The app writes `wmr-ext-<yyyyMMdd>.zip` in the app documents `exports` folder
 (`apps/wmr_companion_app/lib/services/test_bundle.dart:426`,
-`apps/wmr_companion_app/lib/services/test_bundle_export.dart:85-88`).
-The exported `link_timeline` carries the marks that split the upgrade delay.
-Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
-`upgrade_dial_start_us`, `upgrade_dial_end_us`, `first_tcp_record_us`,
-`first_tcp_record_session`, `first_tcp_record_wall_us`, `failover_outcome`,
-`failover_reason`, `failover_candidate_count`, `upgrade_outcome`,
-`upgrade_candidate_count`, `recovery_lane`, and `recovery_us`.
+`apps/wmr_companion_app/lib/services/test_bundle_export.dart:85-88`), then
+opens Android's share sheet (`SharePlus.instance.share(...)`,
+`apps/wmr_companion_app/lib/services/test_bundle_export.dart:225-246`). Keep a
+copy of each per-run bundle before the next export overwrites
+`wmr-ext-<yyyyMMdd>.zip`. Dismiss Android's share sheet with Back before
+step 12 and before the next run's T0. The exported `link_timeline` carries the
+marks that split the upgrade delay. Read `first_upgrade_dial_start_us`,
+`upgrade_dial_attempts`, `upgrade_dial_start_us`, `upgrade_dial_end_us`,
+`first_tcp_record_us`, `first_tcp_record_session`, `first_tcp_record_wall_us`,
+`failover_outcome`, `failover_reason`, `failover_candidate_count`,
+`upgrade_outcome`, `upgrade_candidate_count`, `recovery_lane`, and
+`recovery_us`.
 
 **12. Start the next run only after the route is back on TCP.**
 
@@ -425,7 +440,7 @@ Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
 | --- | --- | --- |
 | T0 | Pi shell | `date -u '+%F %T.%3N'` right after the down command |
 | T1 | Pi shell | `date -u '+%F %T.%3N'` right after the `ip` poll |
-| T2 upper bound | Pi USB capture | `realtime_us` on the matching `WmrBenchReceipt` event. Pi-clock upper bound, stamped immediately after the app records the receipt (`apps/wmr_companion_app/lib/services/bench_receipt_log.dart:38-40`, `packages/wmr_companion/lib/src/composite_transport.dart:224,701-703`, `apps/wmr_companion_app/lib/app.dart:34-40,58-66`) |
+| T2 upper bound | Pi USB capture | `realtime_us` on the matching `WmrBenchReceipt` event. Pi-clock upper bound, stamped immediately after the app records the receipt (`apps/wmr_companion_app/lib/services/bench_receipt_log.dart:38-40`, `packages/wmr_companion/lib/src/composite_transport.dart:226,230,713-715`, `apps/wmr_companion_app/lib/app.dart:34-40,58-66`) |
 | T2 lower bound | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
 | T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:643`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:94`, `:196-204`), and an attached export carries it in `link_timeline` (see below) |
 | Wait to first attempt | Bundle `link_timeline` | `first_upgrade_dial_start_us − failover_end_us`, both phone marks. BLE activation to the first dial attempt (`:74`, `:87`) |
@@ -434,7 +449,7 @@ Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
 | Failover | Debug row `failover` | `failover_end_us − failover_begin_us` (`:73-74`) |
 | First BLE | Debug row `first BLE +` | `first_ble_record_us − failover_end_us` (`:77`) |
 | Takeover | Debug row `takeover` | `first_ble_record_us − last_tcp_record_us` (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:638`) |
-| Dropped | Pi journal | `dropped=` in the 5 s status line (`WMR_Bridge` `pi/wmr_bridge/__main__.py:943-953`) |
+| Dropped | Pi journal | `dropped=` in the 5 s status line (`WMR_Bridge` `pi/wmr_bridge/__main__.py:988-1003`) |
 
 The row prints the takeover itself, as `takeover`: first BLE record minus
 last TCP record, the figure the gate reads, with `stall +`, `failover` and
@@ -446,7 +461,7 @@ the Takeover column.
 
 The parts leave out the gap between the stall mark and the failover
 begin. Both stamps land in the same event-loop turn
-(`packages/wmr_companion/lib/src/composite_transport.dart:1083`, `:1123`).
+(`packages/wmr_companion/lib/src/composite_transport.dart:1138`, `:1181`).
 The parts are enough to cross-check the takeover unless it lands within a
 few milliseconds of 2500 ms.
 
@@ -507,6 +522,10 @@ keys are the marks of the most recent episode. They include
 The `episodes` key lists the same marks for the last finished episodes.
 A stall a later switch superseded stays readable in the zip.
 
+Do not rely on a single export after Run 3. `LinkTimelineRecorder.episodeHistoryCapacity`
+retains only 3 finished episodes (`packages/wmr_companion/lib/src/link_timeline.dart:158`),
+so a preflight plus 3 runs drops the oldest episode from `episodes`.
+
 The same entry carries how the episode ended
 (`packages/wmr_companion/lib/src/link_timeline.dart:102-121`, `:126-146`):
 
@@ -523,18 +542,18 @@ The same entry carries how the episode ended
 | `recovery_us` | integer | When that recovery happened. |
 
 The failover acquires a candidate before it declares loss
-(`packages/wmr_companion/lib/src/composite_transport.dart:1142-1158`). It
-skips a refused candidate and tries the next one (`:1162-1179`).
+(`packages/wmr_companion/lib/src/composite_transport.dart:1200-1216`). It
+skips a refused candidate and tries the next one (`:1220-1237`).
 
 Both dial sites write the same fields: the upgrade probe
-(`packages/wmr_companion/lib/src/composite_transport.dart:1295-1353`) and the
-BLE-drop recovery (`:1217-1244`). A dial counts once.
+(`packages/wmr_companion/lib/src/composite_transport.dart:1355-1413`) and the
+BLE-drop recovery (`:1272-1305`). A dial counts once.
 
 A recovery is not a landing. When the app redial delivers TCP after a failover
 that never landed, the episode records `recovery_lane: redial` and
 `recovery_us`. It leaves the attempt count and dial marks unchanged
 (`packages/wmr_companion/lib/src/link_timeline.dart:115-121`,
-`packages/wmr_companion/lib/src/composite_transport.dart:400-408`).
+`packages/wmr_companion/lib/src/composite_transport.dart:409-413`).
 
 The export builder passes the live transport's marks into the bundle
 (`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the
