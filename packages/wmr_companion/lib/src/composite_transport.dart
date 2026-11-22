@@ -1098,11 +1098,23 @@ class CompositeBleTransport implements BleTransport {
           // A link that already dropped needs no further teardown.
         }
       }
-      final bleCandidates = _bleCandidatesFor(
+      var bleCandidates = _bleCandidatesFor(
         route,
         route.deviceId,
         allowDeviceId: false,
       );
+      if (bleCandidates.isEmpty && _scanning && bleScanWait > Duration.zero) {
+        // A scan still in flight may yet report a bridge: wait a bounded
+        // time for it before declaring the session lost, as an explicit
+        // connect does.
+        await _awaitBleScanHit(bleScanWait);
+        if (_disposed || route.intentional) return;
+        bleCandidates = _bleCandidatesFor(
+          route,
+          route.deviceId,
+          allowDeviceId: false,
+        );
+      }
       final requireIdentity =
           route.bridgeId != null && bleCandidates.length > 1;
       var reason = 'no_candidate';
