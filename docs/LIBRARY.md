@@ -639,6 +639,60 @@ BLE notifications are re-stamped onto the TCP transport's clock as the
 composite receives them. A failover does not move the timeline seen by
 `ControllerService`.
 
+### Episode outcomes and the bench receipt
+
+Each link episode records how its failover and its latest dial ended. The
+episode serializer writes the fields in
+`packages/wmr_companion/lib/src/link_timeline.dart:126-146`. The diagnostics
+bundle carries them under `link_timeline`
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:605`). The line
+citations below resolve in `packages/wmr_companion/lib/src/link_timeline.dart`
+unless another path is given.
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `failover_outcome` | `landed`, `lost` | How the failover to BLE ended (`:102-107`). |
+| `failover_reason` | `no_candidate`, `connect_threw`, `activation_threw` | Why the last BLE candidate failed, when the outcome is `lost`. |
+| `failover_candidate_count` | integer | BLE candidates the failover tried. |
+| `upgrade_outcome` | `landed`, `no_candidate`, `dial_skipped`, `connect_threw`, `activation_threw`, `route_moved` | How the latest dial ended (`:109-113`). |
+| `upgrade_candidate_count` | integer | TCP candidates in that dial. |
+| `first_tcp_record_session` | string | TCP session that delivered the first TCP record (`:96-100`). |
+| `first_tcp_record_wall_us` | integer | Phone wall clock at that record. |
+| `recovery_lane` | `redial` | Lane that closed a failover with no landing (`:115-121`). |
+| `recovery_us` | integer | When that recovery happened. |
+
+The failover acquires a candidate before it declares loss. It uses the last
+known bridge or waits for an in-flight scan
+(`packages/wmr_companion/lib/src/composite_transport.dart:1107-1123`). It skips
+a refused candidate and tries the next one (`:1126-1144`).
+
+Both dial sites write the same fields. The upgrade probe
+(`packages/wmr_companion/lib/src/composite_transport.dart:1248-1319`) and the
+BLE-drop recovery (`:1177-1219`) call the same start, end, and outcome
+methods, so one dial counts once.
+
+A recovery is not a landing. When the app redial delivers TCP after a failover
+that never landed, the episode records `recovery_lane: redial` and
+`recovery_us`. It leaves the attempt count and the dial marks unchanged
+(`packages/wmr_companion/lib/src/link_timeline.dart:115-121`,
+`packages/wmr_companion/lib/src/composite_transport.dart:395-402`). A recovery
+never satisfies the landing gate.
+
+The landing gate is the first TCP record minus the dial start, both on the
+phone clock, at most 750 ms
+(`packages/wmr_companion/lib/src/link_timeline.dart:81-94`). A run without a
+landing has no `first_tcp_record_us`. Its landing is unavailable, and the
+bench records a failure row with the episode path.
+
+In debug builds the app writes one line per receipt under Android tag
+`WmrBenchReceipt`
+(`apps/wmr_companion_app/lib/services/bench_receipt_log.dart:17`). The line is
+`session=<session> first_tcp_record_us=<us> first_tcp_record_wall_us=<wall>`
+(`:38-40`). The bench reads it with
+`adb logcat -v raw -s WmrBenchReceipt:I` (`:4-6`). Release builds emit
+nothing (`:9-10`,
+`apps/wmr_companion_app/android/app/src/main/kotlin/com/onyxlens/wmr_companion/MainActivity.kt:48-55`).
+
 ### Library initialization snippet
 
 ```dart
