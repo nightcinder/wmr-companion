@@ -80,6 +80,7 @@ class CompositeBleTransport implements BleTransport {
     this.tcpProbeBudget = const Duration(seconds: 3),
     this.tcpCandidateShareCap = const Duration(milliseconds: 250),
     this.echoDrainTimeout = const Duration(milliseconds: 1200),
+    this.bleUnsubscribeTimeout = const Duration(milliseconds: 250),
     this.lanAvailable,
     this.disposeBle = true,
     this.onTokenLearned,
@@ -185,6 +186,11 @@ class CompositeBleTransport implements BleTransport {
   /// is cancelled and the CCCD turned off. A non-positive duration cancels it
   /// at once.
   final Duration echoDrainTimeout;
+
+  /// Longest time [_disableBleNotifications] waits for pending `ble.unsubscribe`
+  /// GATT writes before returning, so a wedged BLE adapter cannot hang
+  /// [disconnect], [suspendBleStreams], or [dispose].
+  final Duration bleUnsubscribeTimeout;
 
   /// Whether a LAN interface is currently up, checked before any TCP probe.
   ///
@@ -475,6 +481,8 @@ class CompositeBleTransport implements BleTransport {
       route.bleStateId = null;
       unawaited(tcpSub?.cancel());
       unawaited(bleSub?.cancel());
+      route.cancelBleTeardowns();
+      route.cancelEchoDrain();
       await _disableBleNotifications(route);
 
       final channels = List<_Channel>.of(route.channels);
@@ -523,6 +531,8 @@ class CompositeBleTransport implements BleTransport {
     route.tcpStateSub = null;
     route.tcpStateId = null;
     unawaited(tcpSub?.cancel());
+    route.cancelBleTeardowns();
+    route.cancelEchoDrain();
     await _disableBleNotifications(route);
 
     final channels = List<_Channel>.of(route.channels);
@@ -662,6 +672,8 @@ class CompositeBleTransport implements BleTransport {
       route.bleStateId = null;
       unawaited(tcpSub?.cancel());
       unawaited(bleSub?.cancel());
+      route.cancelBleTeardowns();
+      route.cancelEchoDrain();
       await _disableBleNotifications(route);
       final channels = List<_Channel>.of(route.channels);
       route.channels.clear();
@@ -1002,9 +1014,11 @@ class CompositeBleTransport implements BleTransport {
       }
     }
     if (to == _Lane.tcp) {
-      await _disableBleNotifications(
-        route,
-        keep: draining.map((channel) => channel.refKey).toSet(),
+      unawaited(
+        _disableBleNotifications(
+          route,
+          keep: draining.map((channel) => channel.refKey).toSet(),
+        ),
       );
     }
     final handedOff = <_Channel, StreamSubscription<BleNotification>>{};
@@ -1043,22 +1057,60 @@ class CompositeBleTransport implements BleTransport {
   }) async {
     final bleId = route.bleDeviceId;
     final keys = route.bleRefs.keys.toList();
+    final toDisable = <String>[];
     for (final key in keys) {
-      if (!keep.contains(key)) route.bleRefs.remove(key);
-    }
-    if (bleId == null) return;
-    for (final key in keys) {
-      if (keep.contains(key)) continue;
-      final separator = key.indexOf('|');
-      if (separator < 0) continue;
-      final service = key.substring(0, separator);
-      final characteristic = key.substring(separator + 1);
-      try {
-        await ble.unsubscribe(bleId, service, characteristic);
-      } catch (_) {
-        // The BLE link may already be gone; its CCC went with it.
+      if (!keep.contains(key)) {
+        route.bleRefs.remove(key);
+        toDisable.add(key);
       }
     }
+    if (bleId == null || toDisable.isEmpty) return;
+
+    final epoch = route.bleTeardownEpoch;
+    final timeout = bleUnsubscribeTimeout;
+    final done = Completer<void>();
+    Timer? timer;
+    void cancelTeardown() {
+      timer?.cancel();
+      timer = null;
+      if (!done.isCompleted) done.complete();
+    }
+
+    route.bleTeardownCancels.add(cancelTeardown);
+    if (timeout > Duration.zero) {
+      timer = Timer(timeout, () {
+        timer = null;
+        if (!done.isCompleted) done.complete();
+      });
+    } else {
+      done.complete();
+    }
+
+    unawaited(() async {
+      try {
+        for (final key in toDisable) {
+          if (done.isCompleted || _disposed) break;
+          if (route.bleTeardownEpoch != epoch) break;
+          if ((route.bleRefs[key] ?? 0) > 0) continue;
+          final separator = key.indexOf('|');
+          if (separator < 0) continue;
+          final service = key.substring(0, separator);
+          final characteristic = key.substring(separator + 1);
+          try {
+            final unsub = ble.unsubscribe(bleId, service, characteristic);
+            unawaited(unsub.catchError((Object _) {}));
+            await Future.any([unsub, done.future]);
+          } catch (_) {
+            // The BLE link may already be gone; its CCC went with it.
+          }
+        }
+      } finally {
+        route.bleTeardownCancels.remove(cancelTeardown);
+        cancelTeardown();
+      }
+    }());
+
+    await done.future;
   }
 
   void _watchTcp(_Route route) {
@@ -1075,15 +1127,19 @@ class CompositeBleTransport implements BleTransport {
       // the loss so the switch can retry the failover when it releases the
       // route.
       final lost = state == BleConnectionState.disconnected;
-      // The first report outside a switch is the detection. While a switch
-      // holds the route the composite may be closing the stalled leg
-      // itself, and that echo must not move the mark past the failover it
-      // began.
-      if (lost && !route.tcpLost && !route.switching) {
+      // The first report outside a switch or upgrade is the detection. While a
+      // switch or upgrade activation holds the route, the composite may be
+      // closing the stalled leg itself or still activating TCP, and that echo
+      // must not move the mark past the failover it began or prematurely
+      // archive the active episode before `onUpgradeOutcome` runs.
+      if (lost && !route.tcpLost && !route.switching && !route.upgrading) {
         route.timeline.onStallDetected(clock.nowUs);
       }
       route.tcpLost = lost;
-      if (route.tcpLost && route.active == _Lane.tcp) {
+      if (route.tcpLost &&
+          route.active == _Lane.tcp &&
+          !route.switching &&
+          !route.upgrading) {
         unawaited(_fallbackToBle(route));
       } else if (route.tcpLost && !route.switching && !route.upgrading) {
         // The named session died while the route was neither live on it
@@ -1200,7 +1256,9 @@ class CompositeBleTransport implements BleTransport {
   /// on subscribe). [_fallbackToBle] cannot take the route then, so the loss
   /// is remembered and retried once the switch releases it.
   void _kickFallback(_Route route) {
-    if (!route.tcpLost || route.switching || _disposed) return;
+    if (!route.tcpLost || route.switching || route.upgrading || _disposed) {
+      return;
+    }
     if (route.active != _Lane.tcp) {
       route.tcpLost = false;
       return;
@@ -1603,6 +1661,31 @@ class _Route {
   /// moves the anchor with it.
   int? fastRetryUntilUs;
 
+  /// Monotonic generation of BLE notification attachments. Incremented when a
+  /// channel attaches on [_Lane.ble], so a decoupled [_disableBleNotifications]
+  /// from an earlier TCP switch stops instead of turning off newly
+  /// re-attached CCCDs.
+  int bleTeardownEpoch = 0;
+
+  /// Active cancellation callbacks for in-flight [_disableBleNotifications]
+  /// calls on this route, so teardown/suspend/dispose can cancel their timers
+  /// immediately without waiting for the bound.
+  final Set<void Function()> bleTeardownCancels = {};
+
+  void cancelBleTeardowns() {
+    for (final cancel in bleTeardownCancels.toList()) {
+      cancel();
+    }
+    bleTeardownCancels.clear();
+  }
+
+  void cancelEchoDrain() {
+    echoRequestsInFlight = 0;
+    final done = echoDrained;
+    echoDrained = null;
+    if (done != null && !done.isCompleted) done.complete();
+  }
+
   /// FF15 pings written on BLE whose answer has not arrived yet.
   int echoRequestsInFlight = 0;
 
@@ -1713,14 +1796,22 @@ class _Channel {
     if (lane == null || transport == null || deviceId == null) return;
     final seq = lane == _Lane.ble ? ++_bleListenerSeq : 0;
     try {
-      _subscription = transport
+      late final StreamSubscription<BleNotification> subscription;
+      subscription = transport
           .subscribe(deviceId, serviceUuid, characteristicUuid)
           .listen(
             (notification) {
               // A kept drain may still be listening next to the BLE
               // subscription that replaced it. Forward and count the answer
-              // once, from the newest BLE listener only.
-              if (lane == _Lane.ble && seq != _bleListenerSeq) return;
+              // once, from the newest BLE listener only. Also drop any late
+              // notification on a superseded/detached BLE subscription.
+              if (lane == _Lane.ble) {
+                if (seq != _bleListenerSeq) return;
+                final isActive = identical(_subscription, subscription);
+                final isDrain = _bleDrains.contains(subscription);
+                if (!isActive && !isDrain) return;
+                if (!isDrain && route.active != _Lane.ble) return;
+              }
               // Only a BLE-lane answer proves the kept BLE subscription has
               // drained; a TCP answer must not cancel it early.
               if (isEcho && lane == _Lane.ble) route.echoAnswerReceived();
@@ -1728,7 +1819,9 @@ class _Channel {
               // it: the TCP stamp is the transport's own, a BLE record is
               // re-stamped below like the notification itself.
               if (lane == _Lane.ble) {
-                route.timeline.onBleRecord(route.clock.nowUs);
+                if (route.active == _Lane.ble) {
+                  route.timeline.onBleRecord(route.clock.nowUs);
+                }
               } else {
                 // The wall anchor is the receipt instant, not the moment this
                 // listener runs: back-date it by the delivery delay on the
@@ -1758,8 +1851,10 @@ class _Channel {
               }
             },
           );
+      _subscription = subscription;
       _subscriptionLane = lane;
       if (lane == _Lane.ble) {
+        route.bleTeardownEpoch++;
         route.addBleRef(serviceUuid, characteristicUuid);
       }
     } catch (error, stackTrace) {
@@ -1773,6 +1868,7 @@ class _Channel {
     _subscription = null;
     _subscriptionLane = null;
     if (subscription != null && lane == _Lane.ble) {
+      _bleListenerSeq++;
       route.removeBleRef(serviceUuid, characteristicUuid);
     }
     await subscription?.cancel();
