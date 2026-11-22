@@ -1501,6 +1501,74 @@ void main() {
       expect(installer.installed, isEmpty);
     });
   });
+
+  test(
+    'Transition 10: realLinkTransportProvider rebinds when connectWifi swaps '
+    '_wifiTransport on same-host reconnect and bleFallback toggle',
+    () async {
+      final createdComposite = <FakeTransport>[];
+      final createdDirect = <FakeTransport>[];
+      final container = makeContainer(
+        compositeFactory: (endpoint) {
+          final t = wifiWithDevice(endpoint.resolvedDeviceId);
+          createdComposite.add(t);
+          return WifiLink(t);
+        },
+        wifiFactory: (endpoint) {
+          final t = wifiWithDevice(endpoint.resolvedDeviceId);
+          createdDirect.add(t);
+          return t;
+        },
+      );
+
+      final seen = <BleTransport>[];
+      final sub = container.listen(
+        realLinkTransportProvider,
+        (_, next) => seen.add(next),
+        fireImmediately: true,
+      );
+      addTearDown(sub.close);
+
+      final notifier = container.read(realDeviceProvider.notifier);
+
+      // 1. Initial Wi-Fi connect with bleFallback: true.
+      await notifier.connectWifi(host: '192.168.1.10', port: 8765);
+      expect(createdComposite, hasLength(1));
+      expect(
+        identical(
+          container.read(realLinkTransportProvider),
+          createdComposite[0],
+        ),
+        isTrue,
+      );
+
+      // 2. Same-host reconnect with bleFallback: true (unchanged
+      // activeTransport and wifiDeviceId).
+      await notifier.connectWifi(host: '192.168.1.10', port: 8765);
+      expect(createdComposite, hasLength(2));
+      expect(
+        identical(
+          container.read(realLinkTransportProvider),
+          createdComposite[1],
+        ),
+        isTrue,
+      );
+
+      // 3. Toggle bleFallback: false on the same host.
+      await notifier.connectWifi(
+        host: '192.168.1.10',
+        port: 8765,
+        bleFallback: false,
+      );
+      expect(createdDirect, hasLength(1));
+      expect(
+        identical(container.read(realLinkTransportProvider), createdDirect[0]),
+        isTrue,
+      );
+      expect(seen.where((t) => identical(t, createdComposite[1])), isNotEmpty);
+      expect(seen.where((t) => identical(t, createdDirect[0])), isNotEmpty);
+    },
+  );
 }
 
 /// Records what the platform installer was asked to do.

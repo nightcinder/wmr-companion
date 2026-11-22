@@ -217,6 +217,11 @@ class CompositeBleTransport implements BleTransport {
   onTokenLearned;
 
   final Map<String, _Route> _routes = {};
+  final StreamController<String> _tcpReceipts = StreamController.broadcast();
+
+  /// Emits a route's device ID as soon as `first_tcp_record_us` is stamped on
+  /// its link timeline after an upgrade or recovery dial.
+  Stream<String> get tcpReceipts => _tcpReceipts.stream;
 
   /// The timeline of each route that was torn down, so an attempt still in
   /// flight at teardown can record its outcome and a host can read it. A new
@@ -677,6 +682,7 @@ class CompositeBleTransport implements BleTransport {
       }
       if (!route.states.isClosed) await route.states.close();
     }
+    if (!_tcpReceipts.isClosed) await _tcpReceipts.close();
     await tcp.dispose();
     if (disposeBle) await ble.dispose();
   }
@@ -685,8 +691,18 @@ class CompositeBleTransport implements BleTransport {
     if (_disposed) throw StateError('CompositeBleTransport is disposed');
   }
 
-  _Route _ensureRoute(String deviceId) =>
-      _routes.putIfAbsent(deviceId, () => _Route(deviceId, tcp, ble, clock));
+  _Route _ensureRoute(String deviceId) => _routes.putIfAbsent(
+    deviceId,
+    () => _Route(
+      deviceId,
+      tcp,
+      ble,
+      clock,
+      onFirstTcpRecord: () {
+        if (!_disposed && !_tcpReceipts.isClosed) _tcpReceipts.add(deviceId);
+      },
+    ),
+  );
 
   ({BleTransport transport, String deviceId}) _requireActive(String deviceId) {
     final route = _routes[deviceId];
@@ -706,9 +722,25 @@ class CompositeBleTransport implements BleTransport {
     final ids = <String>{};
     final current = route.tcpDeviceId;
     if (current != null) ids.add(current);
+    final lastWorking = route.lastWorkingTcpDeviceId;
+    if (lastWorking != null && route.tcpCandidates.contains(lastWorking)) {
+      ids.add(lastWorking);
+    }
     ids.addAll(route.tcpCandidates);
     if (tcp.endpointFor(deviceId) != null) ids.add(deviceId);
     return ids.toList();
+  }
+
+  List<String> _orderedTcpCandidates(_Route route) {
+    final primary = route.lastWorkingTcpDeviceId;
+    if (primary == null || !route.tcpCandidates.contains(primary)) {
+      return route.tcpCandidates.toList();
+    }
+    return [
+      primary,
+      for (final id in route.tcpCandidates)
+        if (id != primary) id,
+    ];
   }
 
   Future<String?> _tryTcp(
@@ -726,20 +758,22 @@ class CompositeBleTransport implements BleTransport {
     for (final id in candidates) {
       final remaining = probeBudget - stopwatch.elapsed;
       if (remaining <= Duration.zero) break;
-      // Share what is left evenly, so one unresponsive address cannot use the
-      // whole budget and hide a reachable candidate behind it — and cut the
-      // share to the per-candidate cap, so a candidate that cannot answer
-      // holds the attempt for at most that long before the next candidate is
-      // dialled: the one that answers is reached within the cap of the
-      // attempt's start instead of after a full equal share. The last
-      // candidate is exempt: no live candidate hides behind it, so it keeps
-      // the whole remaining budget and a handshake slower than the cap still
-      // lands.
-      var slice = remaining ~/ left;
-      if (left > 1 &&
-          tcpCandidateShareCap > Duration.zero &&
-          slice > tcpCandidateShareCap) {
-        slice = tcpCandidateShareCap;
+      // Give each non-last candidate up to [tcpCandidateShareCap] when enough
+      // budget remains, so a slow-but-healthy primary is not starved to an
+      // equal sub-slice (e.g. 150 ms of a 300 ms upgrade budget with two
+      // candidates) while a dead primary is still cut short so secondary
+      // candidates remain reachable. When [remaining] is at or below the cap
+      // (or the cap is non-positive), share evenly. The last candidate is
+      // exempt and keeps the whole remaining budget.
+      var slice = remaining;
+      if (left > 1) {
+        if (tcpCandidateShareCap > Duration.zero) {
+          slice = remaining > tcpCandidateShareCap
+              ? tcpCandidateShareCap
+              : remaining ~/ left;
+        } else {
+          slice = remaining ~/ left;
+        }
       }
       left--;
       route.tcpCandidates.add(id);
@@ -906,6 +940,7 @@ class CompositeBleTransport implements BleTransport {
       route.tcpDeviceId = null;
       rethrow;
     }
+    route.lastWorkingTcpDeviceId = tcpId;
     _stopUpgrade(route);
     _setState(route, BleConnectionState.connected);
   }
@@ -1189,7 +1224,7 @@ class CompositeBleTransport implements BleTransport {
           route.timeline.onUpgradeDialStart(clock.nowUs);
           String? id;
           try {
-            id = await _tryTcp(route, route.tcpCandidates.toList());
+            id = await _tryTcp(route, _orderedTcpCandidates(route));
           } finally {
             route.timeline.onUpgradeDialEnd(clock.nowUs);
           }
@@ -1273,7 +1308,7 @@ class CompositeBleTransport implements BleTransport {
       try {
         id = await _tryTcp(
           route,
-          route.tcpCandidates.toList(),
+          _orderedTcpCandidates(route),
           budget: dialBudget,
         );
       } finally {
@@ -1502,7 +1537,13 @@ class CompositeBleTransport implements BleTransport {
 enum _Lane { tcp, ble }
 
 class _Route {
-  _Route(this.deviceId, this.tcp, this.ble, this.clock);
+  _Route(
+    this.deviceId,
+    this.tcp,
+    this.ble,
+    this.clock, {
+    void Function()? onFirstTcpRecord,
+  }) : timeline = LinkTimelineRecorder(onFirstTcpRecord: onFirstTcpRecord);
 
   final String deviceId;
   final WmrWsTransport tcp;
@@ -1515,11 +1556,12 @@ class _Route {
 
   /// Recovery-path marks of this route's link switches: the most recent
   /// episode, plus the last finished episodes before it.
-  final LinkTimelineRecorder timeline = LinkTimelineRecorder();
+  final LinkTimelineRecorder timeline;
 
   String? bridgeId;
   String? bleDeviceId;
   String? tcpDeviceId;
+  String? lastWorkingTcpDeviceId;
   final Set<String> tcpCandidates = {};
 
   /// The dial attempt that currently owns each TCP candidate, so a probe that

@@ -4699,4 +4699,367 @@ void main() {
       );
     },
   );
+
+  test('Transition 6: multi-candidate upgrade and BLE-drop recovery dial the '
+      'previously active TCP candidate first', () async {
+    const deadHost = '192.168.1.50';
+    const liveHost = '127.0.0.1';
+    final deadId = '$deadHost:$wmrWsDefaultPort';
+    final liveId = '$liveHost:$wmrWsDefaultPort';
+    await tcp.dispose();
+    final refusing = _RefusingTcp({deadId})..scanResults.add(tcpScanResult());
+    tcp = refusing;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument(hosts: const [deadHost, liveHost]));
+
+    var lan = true;
+    final transport = CompositeBleTransport(
+      tcp: refusing,
+      ble: ble,
+      lanAvailable: () async => lan,
+      upgradeInterval: const Duration(milliseconds: 20),
+      upgradeRetryDelay: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'initial upgrade to liveId did not land',
+    );
+
+    // Failover to BLE clears route.tcpDeviceId; hold LAN gate while failing
+    // over so no upgrade dial starts before we clear dialAt.
+    lan = false;
+    refusing.refusing.add(liveId);
+    refusing.drop(liveId);
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+      reason: 'route did not fail over to BLE',
+    );
+
+    refusing.dialAt.clear();
+    refusing.refusing.remove(liveId);
+    lan = true;
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'upgrade did not land back on TCP',
+    );
+    expect(refusing.dialAt.map((e) => e.key), [
+      liveId,
+    ], reason: '_attemptUpgrade did not prioritize lastWorkingTcpDeviceId');
+
+    // Failover to BLE again, then drop BLE so _recoverFromBleDrop runs:
+    // it must also dial liveId first without touching deadId.
+    lan = false;
+    refusing.refusing.add(liveId);
+    refusing.drop(liveId);
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+      reason: 'second failover to BLE did not land',
+    );
+
+    refusing.dialAt.clear();
+    refusing.refusing.remove(liveId);
+    lan = true;
+    unawaited(ble.disconnect(_bleDeviceId));
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'BLE-drop recovery did not land on TCP',
+    );
+    expect(refusing.dialAt.map((e) => e.key), [
+      liveId,
+    ], reason: '_recoverFromBleDrop did not prioritize lastWorkingTcpDeviceId');
+  });
+
+  test('Transition 7: secondary candidate lands when primary stays down, and '
+      'outage holds BLE continuity with zero leaked channels', () async {
+    const hostA = '192.168.1.50';
+    const hostB = '127.0.0.1';
+    final idA = '$hostA:$wmrWsDefaultPort';
+    final idB = '$hostB:$wmrWsDefaultPort';
+    await tcp.dispose();
+    final refusing = _RefusingTcp({idA})..scanResults.add(tcpScanResult());
+    tcp = refusing;
+    ble.dispose();
+    ble = newBle(ff16: _endpointDocument(hosts: const [hostA, hostB]));
+
+    var lan = true;
+    final transport = CompositeBleTransport(
+      tcp: refusing,
+      ble: ble,
+      lanAvailable: () async => lan,
+      upgradeInterval: const Duration(milliseconds: 20),
+      upgradeRetryDelay: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_bleDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'initial upgrade to idB did not land',
+    );
+
+    // Keep a live channel subscribed across failovers.
+    final received = <BleNotification>[];
+    final sub = transport
+        .subscribe(_bleDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(received.add);
+    addTearDown(sub.cancel);
+
+    // Drop primary (idB) and keep both down: BLE continuity holds.
+    refusing.refusing.addAll([idA, idB]);
+    refusing.drop(idB);
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+      reason: 'route did not fail over to BLE',
+    );
+    await _waitFor(
+      () =>
+          (transport.linkTimelineFor(_bleDeviceId)?['upgrade_dial_attempts']
+                  as int? ??
+              0) >=
+          1,
+      reason: 'no upgrade attempt was counted',
+    );
+    expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+    // Pause LAN gate, bring secondary (idA) up while primary (idB) stays
+    // down, then re-open LAN gate so the next pass records [idB, idA].
+    lan = false;
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_bleDeviceId)?['upgrade_outcome'] ==
+          'dial_skipped',
+      reason: 'in-flight dial did not settle',
+    );
+    refusing.dialAt.clear();
+    refusing.refusing.remove(idA);
+    lan = true;
+    await _waitFor(
+      () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+      reason: 'secondary candidate idA never landed while primary was down',
+    );
+    expect(refusing.dialAt.map((e) => e.key), containsAll([idB, idA]));
+
+    // Verify channel still delivers on the landed TCP leg.
+    tcp.emit(idA, wmrBridgeBatchedCharUuid, Uint8List.fromList([7, 8]));
+    await _waitFor(() => received.isNotEmpty);
+    expect(received.last.value, [7, 8]);
+  });
+
+  test(
+    'Transition 8: slow-but-healthy primary (160 ms) with 2 candidates lands '
+    'in 1 pass inside 300 ms upgradeProbeBudget',
+    () async {
+      const deadHost = '192.168.1.50';
+      const slowHost = '127.0.0.1';
+      final slowId = '$slowHost:$wmrWsDefaultPort';
+      await tcp.dispose();
+      final slow = _SlowDialTcp(const Duration(milliseconds: 160))
+        ..scanResults.add(tcpScanResult());
+      tcp = slow;
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument(hosts: const [slowHost, deadHost]));
+
+      final transport = CompositeBleTransport(
+        tcp: slow,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 20),
+        upgradeProbeBudget: const Duration(milliseconds: 300),
+        tcpCandidateShareCap: const Duration(milliseconds: 250),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_bleDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+        reason: 'initial upgrade to slowId did not land',
+      );
+
+      slow.failConnect = true;
+      slow.drop(slowId);
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+        reason: 'route did not fail over to BLE',
+      );
+
+      slow.connectCalls.clear();
+      slow.failConnect = false;
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+        reason: 'slow primary (160 ms) was starved and failed to upgrade',
+      );
+      expect(slow.connectCalls, [
+        slowId,
+      ], reason: 'primary candidate did not land in 1 pass');
+    },
+  );
+
+  test(
+    'Transition 9: activation failure mid-dial rolls back to BLE and preserves '
+    'remembered primary-candidate order',
+    () async {
+      const secondaryHost = '192.168.1.50';
+      const primaryHost = '127.0.0.1';
+      final secondaryId = '$secondaryHost:$wmrWsDefaultPort';
+      final primaryId = '$primaryHost:$wmrWsDefaultPort';
+      await tcp.dispose();
+      final refusing = _RefusingTcp({secondaryId})
+        ..scanResults.add(tcpScanResult());
+      tcp = refusing;
+      ble.dispose();
+      final stuck = _StuckDetachBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+        characteristic: wmrBridgeBatchedCharUuid,
+      );
+      stuck.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _endpointDocument(hosts: const [secondaryHost, primaryHost]);
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = stuck;
+
+      var lan = true;
+      final transport = CompositeBleTransport(
+        tcp: refusing,
+        ble: stuck,
+        lanAvailable: () async => lan,
+        upgradeInterval: const Duration(milliseconds: 20),
+        upgradeRetryDelay: const Duration(milliseconds: 10),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_bleDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.tcp,
+        reason: 'initial upgrade to primaryId did not land',
+      );
+
+      // Fail over to BLE while LAN is gated.
+      lan = false;
+      refusing.refusing.add(primaryId);
+      refusing.drop(primaryId);
+      await _waitFor(
+        () => transport.activeLegFor(_bleDeviceId) == CompositeLeg.ble,
+        reason: 'route did not fail over to BLE',
+      );
+
+      // Subscribe a channel on _StuckDetachBle; its detach throws on cancel,
+      // causing _activateTcp to throw activation_threw and roll back to BLE.
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _bleDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add, onError: (_) {});
+      addTearDown(sub.cancel);
+      expect(stuck.deliverStuck([9]), isTrue);
+      await _settle();
+      expect(received.last.value, [9]);
+
+      stuck.failCancel = true;
+      refusing.refusing.remove(primaryId);
+      refusing.dialAt.clear();
+      lan = true;
+
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_bleDeviceId)?['upgrade_outcome'] ==
+            'activation_threw',
+        reason: 'activation failure never recorded activation_threw',
+      );
+      expect(transport.activeLegFor(_bleDeviceId), CompositeLeg.ble);
+
+      // BLE lane still delivers after rollback, and primaryId is still tried
+      // first on the subsequent attempt.
+      expect(stuck.deliverStuck([10]), isTrue);
+      await _waitFor(() => received.length >= 2);
+      expect(received.last.value, [10]);
+      expect(
+        refusing.dialAt.first.key,
+        primaryId,
+        reason: 'primary-candidate order was lost after activation failure',
+      );
+      stuck.failCancel = false;
+    },
+  );
+
+  test(
+    'tcpReceipts emits immediately when first_tcp_record_us is stamped',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      ble = newBle(ff16: _endpointDocument());
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+      );
+      addTearDown(transport.dispose);
+
+      final receiptEvents = <String>[];
+      final receiptSub = transport.tcpReceipts.listen(receiptEvents.add);
+      addTearDown(receiptSub.cancel);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+      addTearDown(sub.cancel);
+
+      tcp.failConnect = false;
+      tcp.endpoints.remove(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'upgrade did not land on TCP',
+      );
+      expect(receiptEvents, isEmpty);
+
+      tcp.emit(
+        _lanDeviceId,
+        wmrBridgeBatchedCharUuid,
+        Uint8List.fromList([1, 2]),
+      );
+      await _waitFor(
+        () => receiptEvents.isNotEmpty,
+        reason: 'tcpReceipts did not emit when first_tcp_record_us was stamped',
+      );
+      expect(receiptEvents, [_tcpDeviceId]);
+      final timeline = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(timeline['first_tcp_record_us'], isA<int>());
+      expect(timeline['first_tcp_record_session'], _lanDeviceId);
+
+      // A second TCP record in the same episode does not re-emit.
+      tcp.emit(
+        _lanDeviceId,
+        wmrBridgeBatchedCharUuid,
+        Uint8List.fromList([3, 4]),
+      );
+      await _settle(20);
+      expect(receiptEvents, [_tcpDeviceId]);
+    },
+  );
 }
