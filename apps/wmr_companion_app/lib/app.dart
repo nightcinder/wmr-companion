@@ -11,7 +11,9 @@ import 'ui/connect/connect_screen.dart';
 import 'ui/input/neckband_buttons.dart';
 
 class WmrCompanionApp extends ConsumerStatefulWidget {
-  const WmrCompanionApp({super.key});
+  const WmrCompanionApp({super.key, this.receiptLog});
+
+  final BenchReceiptLog? receiptLog;
 
   @override
   ConsumerState<WmrCompanionApp> createState() => _WmrCompanionAppState();
@@ -19,32 +21,49 @@ class WmrCompanionApp extends ConsumerStatefulWidget {
 
 class _WmrCompanionAppState extends ConsumerState<WmrCompanionApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  final BenchReceiptLog _receiptLog = BenchReceiptLog();
-  Timer? _receiptTimer;
+  late final BenchReceiptLog _receiptLog =
+      widget.receiptLog ?? BenchReceiptLog();
+  ProviderSubscription<BleTransport>? _transportSub;
+  StreamSubscription<String>? _receiptSub;
+  BleTransport? _boundTransport;
 
   @override
   void initState() {
     super.initState();
-    // Debug builds only: sample the link timeline for new TCP receipts.
+    // Debug builds only: log TCP receipts as soon as the composite stamps them.
     if (_receiptLog.enabled) {
-      _receiptTimer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => _logReceipts(),
+      _transportSub = ref.listenManual(
+        realLinkTransportProvider,
+        (_, next) => _bindReceipts(next),
+        fireImmediately: true,
       );
     }
   }
 
   @override
   void dispose() {
-    _receiptTimer?.cancel();
+    unawaited(_receiptSub?.cancel());
+    _receiptSub = null;
+    _boundTransport = null;
+    _transportSub?.close();
+    _transportSub = null;
     super.dispose();
   }
 
-  void _logReceipts() {
-    final transport = ref.read(realLinkTransportProvider);
+  void _bindReceipts(BleTransport transport) {
+    if (identical(_boundTransport, transport)) return;
+    _boundTransport = transport;
+    unawaited(_receiptSub?.cancel());
+    _receiptSub = null;
+    if (transport is! CompositeBleTransport) return;
+    _receiptSub = transport.tcpReceipts.listen(
+      (deviceId) =>
+          unawaited(_receiptLog.report(transport.linkTimelineFor(deviceId))),
+    );
     final deviceId = ref.read(realDeviceProvider).deviceId;
-    if (transport is! CompositeBleTransport || deviceId == null) return;
-    unawaited(_receiptLog.report(transport.linkTimelineFor(deviceId)));
+    if (deviceId != null) {
+      unawaited(_receiptLog.report(transport.linkTimelineFor(deviceId)));
+    }
   }
 
   @override

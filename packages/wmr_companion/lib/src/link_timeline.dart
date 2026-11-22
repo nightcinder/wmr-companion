@@ -149,6 +149,11 @@ class LinkTimeline {
 /// Records [LinkTimeline] marks as the composite moves a route between its
 /// legs, keeping the last finished episodes beside the most recent one.
 class LinkTimelineRecorder {
+  LinkTimelineRecorder({this.onFirstTcpRecord});
+
+  /// Called once per episode when [LinkTimeline.firstTcpRecordUs] is stamped.
+  final void Function()? onFirstTcpRecord;
+
   /// How many finished episodes the history keeps; older ones drop.
   static const int episodeHistoryCapacity = 3;
 
@@ -194,6 +199,7 @@ class LinkTimelineRecorder {
       _firstTcpRecordUs = us;
       _firstTcpRecordSession = session;
       _firstTcpRecordWallUs = wallUs;
+      onFirstTcpRecord?.call();
     }
   }
 

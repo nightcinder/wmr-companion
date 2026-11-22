@@ -344,6 +344,7 @@ final realLinkTransportProvider = Provider<BleTransport>((ref) {
   final wifiDeviceId = ref.watch(
     realDeviceProvider.select((s) => s.wifiDeviceId),
   );
+  ref.watch(realDeviceProvider.select((s) => s.wifiTransportEpoch));
   if (kind == BridgeTransportKind.wifi && wifiDeviceId != null) {
     return ref.read(realDeviceProvider.notifier).wifiTransport ??
         ref.read(realTransportProvider);
@@ -369,6 +370,7 @@ class RealDeviceState {
     this.disconnectEpoch = 0,
     this.activeTransport = BridgeTransportKind.ble,
     this.wifiDeviceId,
+    this.wifiTransportEpoch = 0,
     this.wifiFallback = false,
     this.wifiLeg,
     this.lanEndpoints = const [],
@@ -387,6 +389,11 @@ class RealDeviceState {
 
   /// The Wi-Fi bridge id, once a Wi-Fi transport exists. Null in BLE mode.
   final String? wifiDeviceId;
+
+  /// Increments whenever the Wi-Fi transport instance is replaced or disposed,
+  /// so [realLinkTransportProvider] rebinds even on a same-host reconnect or
+  /// fallback toggle.
+  final int wifiTransportEpoch;
 
   /// Whether the current Wi-Fi link is the opt-in TCP/BLE composite.
   final bool wifiFallback;
@@ -611,6 +618,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
 
   WifiLink? _wifiLink;
   BleTransport? _wifiTransport;
+  int _wifiTransportEpoch = 0;
   StreamSubscription<BleConnectionState>? _wifiStateSub;
   StreamSubscription<BleScanResult>? _fallbackScanSub;
   StreamSubscription<BleConnectionState>? _bleCompositeStateSub;
@@ -1169,6 +1177,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       disconnectEpoch: _disconnectEpoch,
       activeTransport: nextTransport,
       wifiDeviceId: _wifiDeviceId,
+      wifiTransportEpoch: _wifiTransportEpoch,
       wifiFallback:
           nextTransport == BridgeTransportKind.wifi &&
           (wifiFallback ?? state.wifiFallback),
@@ -1438,6 +1447,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _fallbackScanSub = null;
     final transport = _wifiTransport;
     _wifiTransport = null;
+    if (transport != null) _wifiTransportEpoch++;
     _wifiLink = null;
     _radioOffWifiBleCarried = false;
     if (id != null) {
@@ -1896,6 +1906,7 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     // exists; this link has not met the radio yet.
     _radioOffWifiBleCarried = false;
     final transport = _wifiTransport = link.transport;
+    _wifiTransportEpoch++;
     _wifiStateSub = transport
         .connectionState(id)
         .listen((s) => _onWifiConnectionState(id, s));

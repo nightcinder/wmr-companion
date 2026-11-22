@@ -103,4 +103,33 @@ void main() {
     recorder.onFailoverEnd(200, candidates: 1);
     expect(recorder.awaitsRecovery, isFalse);
   });
+
+  test('onFirstTcpRecord fires once per episode when first_tcp_record_us '
+      'is stamped', () {
+    var notifications = 0;
+    final recorder = LinkTimelineRecorder(
+      onFirstTcpRecord: () => notifications++,
+    );
+    // Before an upgrade dial finishes, TCP records only move last_tcp_record_us.
+    recorder.onTcpRecord(50, wallUs: 1000, session: 's0');
+    expect(notifications, 0);
+
+    recorder.onFailoverBegin(100);
+    recorder.onFailoverEnd(200, candidates: 1);
+    recorder.onUpgradeDialStart(300);
+    recorder.onUpgradeDialEnd(400);
+
+    recorder.onTcpRecord(500, wallUs: 2000, session: 's1');
+    recorder.onTcpRecord(600, wallUs: 2100, session: 's1');
+    expect(notifications, 1);
+
+    // A later episode stamps and notifies again.
+    recorder.onStallDetected(700);
+    recorder.onFailoverBegin(800);
+    recorder.onFailoverEnd(900, candidates: 1);
+    recorder.onUpgradeDialStart(1000);
+    recorder.onUpgradeDialEnd(1100);
+    recorder.onTcpRecord(1200, wallUs: 3000, session: 's2');
+    expect(notifications, 2);
+  });
 }
