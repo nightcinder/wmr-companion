@@ -1417,6 +1417,62 @@ void main() {
     expect(firstBle - lastTcp, greaterThan(0));
   });
 
+  for (final timeout in [false, true]) {
+    test('a BLE-drop recovery dial that ${timeout ? 'times out' : 'throws'} '
+        'counts once and records its outcome', () async {
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(hours: 1),
+        tcpProbeBudget: const Duration(milliseconds: 100),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+      addTearDown(sub.cancel);
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+      await _settle();
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'the stalled TCP leg did not fail over to BLE',
+      );
+      await _settle();
+      final before =
+          transport.linkTimelineFor(_tcpDeviceId)!['upgrade_dial_attempts']!
+              as int;
+      final dialsBefore = tcp.connectCalls.length;
+
+      if (timeout) {
+        tcp.hangConnect = true;
+      } else {
+        tcp.failConnect = true;
+      }
+      unawaited(ble.disconnect(_bleDeviceId));
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == null,
+        reason: 'the failed recovery never reported the loss',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(marks['upgrade_dial_attempts'], before + 1);
+      expect(marks['upgrade_outcome'], 'connect_threw');
+      expect(marks['upgrade_candidate_count'], 1);
+      // One dial, and nothing re-arms a second after the route is lost.
+      final dials = tcp.connectCalls.length - dialsBefore;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(tcp.connectCalls.length - dialsBefore, dials);
+      expect(dials, 1);
+    });
+  }
+
   test('a BLE drop recovered over TCP records the dial, and a later failover clears it', () async {
     final transport = CompositeBleTransport(
       tcp: tcp,

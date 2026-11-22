@@ -1162,10 +1162,12 @@ class CompositeBleTransport implements BleTransport {
     final switchingDone = route.switchingDone = Completer<void>();
     try {
       if (route.tcpCandidates.isNotEmpty) {
+        final candidates = route.tcpCandidates.length;
+        var outcome = 'connect_threw';
         try {
           // Recovering the dropped BLE link over TCP is a dial back to TCP:
-          // it leaves the same marks an upgrade dial leaves, so the row
-          // reports the switch that actually landed.
+          // it counts once and writes the same terminal outcome an upgrade
+          // dial writes, so the row reports the switch that actually landed.
           route.timeline.onUpgradeDialStart(clock.nowUs);
           String? id;
           try {
@@ -1173,12 +1175,18 @@ class CompositeBleTransport implements BleTransport {
           } finally {
             route.timeline.onUpgradeDialEnd(clock.nowUs);
           }
-          if (id != null) {
+          if (id == null) {
+            outcome = 'dial_skipped';
+          } else {
+            outcome = 'activation_threw';
             await _activateTcp(route, id);
+            outcome = 'landed';
             return;
           }
         } catch (_) {
           // Both paths are down; report the loss below.
+        } finally {
+          route.timeline.onUpgradeOutcome(outcome, candidates: candidates);
         }
       }
       await _lose(route);
