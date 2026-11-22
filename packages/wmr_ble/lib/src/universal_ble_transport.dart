@@ -137,6 +137,8 @@ class UniversalBleTransport
     MonotonicClock? clock,
     this.scanTimeout = const Duration(seconds: 15),
     this.availabilityWait = const Duration(seconds: 3),
+    this.mtuTimeout = const Duration(seconds: 5),
+    this.discoveryTimeout = const Duration(seconds: 10),
     this.requestedMtu = wmrRequestedMtu,
     this.enableRetries = 2,
     this.enableRetryDelay = const Duration(milliseconds: 250),
@@ -153,6 +155,8 @@ class UniversalBleTransport
   final BleAdapter _adapter;
   final Duration scanTimeout;
   final Duration availabilityWait;
+  final Duration mtuTimeout;
+  final Duration discoveryTimeout;
   final int requestedMtu;
 
   /// Extra `enableNotifications` attempts after the platform reports
@@ -678,7 +682,16 @@ class UniversalBleTransport
       _emit(BleLinkPhase.negotiatingMtu, deviceId: deviceId);
       try {
         session.mtu = await session.untilRadioOff(
-          _adapter.requestMtu(deviceId, requestedMtu),
+          _adapter
+              .requestMtu(deviceId, requestedMtu, timeout: mtuTimeout)
+              .timeout(mtuTimeout),
+        );
+      } on TimeoutException catch (e) {
+        _checkSetup(session);
+        throw _fail(
+          BleLinkPhase.connectFailed,
+          'MTU request timed out: $e',
+          deviceId: deviceId,
         );
       } catch (e) {
         _checkSetup(session);
@@ -705,7 +718,9 @@ class UniversalBleTransport
       final List<BleServiceInfo> services;
       try {
         services = await session.untilRadioOff(
-          _adapter.discoverServices(deviceId),
+          _adapter
+              .discoverServices(deviceId, timeout: discoveryTimeout)
+              .timeout(discoveryTimeout),
         );
       } catch (e) {
         _checkSetup(session);
@@ -907,7 +922,9 @@ class UniversalBleTransport
     // avoids a second platform discovery now that notifications are live.
     final cached = _sessions[deviceId]?.services;
     if (cached != null) return Future.value(cached);
-    return _serial(() => _adapter.discoverServices(deviceId));
+    return _serial(
+      () => _adapter.discoverServices(deviceId, timeout: discoveryTimeout),
+    );
   }
 
   @override

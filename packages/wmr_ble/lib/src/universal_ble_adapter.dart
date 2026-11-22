@@ -104,8 +104,8 @@ class UniversalBleAdapter implements BleAdapter {
       );
 
   @override
-  Future<int> requestMtu(String deviceId, int mtu) =>
-      ub.UniversalBle.requestMtu(deviceId, mtu);
+  Future<int> requestMtu(String deviceId, int mtu, {Duration? timeout}) =>
+      ub.UniversalBle.requestMtu(deviceId, mtu, timeout: timeout);
 
   @override
   Future<void> requestHighConnectionPriority(String deviceId) =>
@@ -115,8 +115,14 @@ class UniversalBleAdapter implements BleAdapter {
       );
 
   @override
-  Future<List<BleServiceInfo>> discoverServices(String deviceId) async {
-    final services = await ub.UniversalBle.discoverServices(deviceId);
+  Future<List<BleServiceInfo>> discoverServices(
+    String deviceId, {
+    Duration? timeout,
+  }) async {
+    final services = await ub.UniversalBle.discoverServices(
+      deviceId,
+      timeout: timeout,
+    );
     return [
       for (final s in services)
         BleServiceInfo(
