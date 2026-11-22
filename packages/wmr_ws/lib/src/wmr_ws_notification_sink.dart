@@ -36,6 +36,9 @@ class WmrWsNotificationSink {
         },
         onCancel: () {
           _paused = false;
+          _scheduled = false;
+          _deliverTimer?.cancel();
+          _deliverTimer = null;
           _queue.clear();
         },
       );
@@ -43,6 +46,7 @@ class WmrWsNotificationSink {
   bool _paused = false;
   bool _closed = false;
   bool _scheduled = false;
+  Timer? _deliverTimer;
   int _dropped = 0;
 
   /// Notifications discarded because [capacity] was already queued.
@@ -72,7 +76,7 @@ class WmrWsNotificationSink {
   /// Delivers an error to the consumer. Errors are never dropped: they are
   /// how a refused stream reaches `ControllerService.onError`.
   void addError(Object error, [StackTrace? stackTrace]) {
-    if (_closed) return;
+    if (_closed || _controller.isClosed) return;
     _controller.addError(error, stackTrace);
   }
 
@@ -87,11 +91,12 @@ class WmrWsNotificationSink {
     _scheduled = true;
     // A timer, not a microtask: it yields to socket reads, so a burst cannot
     // be transferred into the stream controller's internal buffer in one go.
-    Timer.run(_deliverOne);
+    _deliverTimer = Timer(Duration.zero, _deliverOne);
   }
 
   void _deliverOne() {
     _scheduled = false;
+    _deliverTimer = null;
     if (_paused || _closed || _queue.isEmpty || !_controller.hasListener) {
       return;
     }
@@ -104,6 +109,9 @@ class WmrWsNotificationSink {
   void close() {
     if (_closed) return;
     _closed = true;
+    _scheduled = false;
+    _deliverTimer?.cancel();
+    _deliverTimer = null;
     _queue.clear();
     unawaited(_controller.close());
   }

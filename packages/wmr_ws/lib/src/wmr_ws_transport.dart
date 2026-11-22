@@ -18,14 +18,6 @@ import 'wmr_ws_protocol_models.dart';
 /// tests that need a socket without a real server can inject their own.
 typedef WmrWsConnector = Future<WebSocket> Function(Uri uri);
 
-Future<WebSocket> _defaultConnector(Uri uri) => WebSocket.connect(
-  uri.toString(),
-  protocols: const [wmrWsSubprotocol],
-  // The latency campaign measures the frame path. Letting permessage-deflate
-  // buffer and compress would add a layer the BLE path does not have.
-  compression: CompressionOptions.compressionOff,
-);
-
 /// `BleTransport` over the WMR Bridge Linux/Raspberry Pi WebSocket daemon.
 ///
 /// The daemon ([WMR_Bridge PR #47](https://github.com/nightcinder/WMR_Bridge/pull/47))
@@ -96,7 +88,7 @@ class WmrWsTransport implements BleTransport {
     WmrWsDiscovery? discovery,
     bool enableDiscovery = false,
   }) : clock = clock ?? MonotonicClock(),
-       _connector = connector ?? _defaultConnector,
+       _customConnector = connector,
        _discovery = discovery ?? (enableDiscovery ? WmrWsDiscovery() : null),
        _endpoints = List.unmodifiable(endpoints) {
     for (final endpoint in _endpoints) {
@@ -150,7 +142,7 @@ class WmrWsTransport implements BleTransport {
   /// [statsFor].
   final int queueSize;
 
-  final WmrWsConnector _connector;
+  final WmrWsConnector? _customConnector;
   final WmrWsDiscovery? _discovery;
   final List<WmrWsEndpoint> _endpoints;
   final Map<String, WmrWsEndpoint> _byDeviceId = {};
@@ -226,7 +218,12 @@ class WmrWsTransport implements BleTransport {
     // order discovery reported; only the last failure is surfaced.
     Object? lastError;
     StackTrace? lastStackTrace;
+    var cancelledByCaller = false;
     for (final host in endpoint.hosts) {
+      if (_disposed) {
+        cancelledByCaller = true;
+        break;
+      }
       final candidate = endpoint.forHost(host);
       final session = _WmrWsSession(deviceId, candidate)
         // A failed attempt is not a disconnect while another host is waiting;
@@ -240,7 +237,17 @@ class WmrWsTransport implements BleTransport {
       // from being reported as unhandled.
       unawaited(ready.catchError((Object _) {}));
       try {
-        final socket = await _openSocket(candidate);
+        final socket = await _openSocket(candidate, session);
+        if (_disposed ||
+            session.isClosed ||
+            session.isClosing ||
+            session.cancelledByDisconnect ||
+            !identical(_sessions[deviceId], session)) {
+          unawaited(
+            socket.close(1000, 'connect cancelled').catchError((Object _) {}),
+          );
+          throw WmrWsClosedException('connection abandoned');
+        }
         session.socket = socket;
         session
           ..phase = _SessionPhase.awaitingHello
@@ -255,6 +262,14 @@ class WmrWsTransport implements BleTransport {
         );
         session.startHelloTimer(handshakeTimeout, _fail);
         await ready;
+        if (_disposed ||
+            session.isClosed ||
+            session.isClosing ||
+            session.cancelledByDisconnect ||
+            !identical(_sessions[deviceId], session)) {
+          session.teardown();
+          throw WmrWsClosedException('connection abandoned');
+        }
         session.cancelTimers();
         session.startLiveness(
           interval: livenessInterval,
@@ -269,14 +284,20 @@ class WmrWsTransport implements BleTransport {
       } catch (error, stackTrace) {
         lastError = error;
         lastStackTrace = stackTrace;
+        if (session.cancelledByDisconnect || _disposed) {
+          cancelledByCaller = true;
+        }
         session.teardown();
         if (identical(_sessions[deviceId], session)) {
           _sessions.remove(deviceId);
         }
+        if (cancelledByCaller) break;
       }
     }
 
-    _setState(deviceId, BleConnectionState.disconnected);
+    if (!_disposed && !cancelledByCaller && !_sessions.containsKey(deviceId)) {
+      _setState(deviceId, BleConnectionState.disconnected);
+    }
     final failure = lastError;
     if (failure is WmrWsException) {
       Error.throwWithStackTrace(failure, lastStackTrace!);
@@ -291,12 +312,17 @@ class WmrWsTransport implements BleTransport {
   Future<void> disconnect(String deviceId) async {
     final session = _sessions.remove(deviceId);
     if (session == null) {
-      _setState(deviceId, BleConnectionState.disconnected);
+      if (!_disposed) {
+        _setState(deviceId, BleConnectionState.disconnected);
+      }
       return;
     }
+    session.cancelConnect();
     _setState(deviceId, BleConnectionState.disconnecting);
     await session.close();
-    _setState(deviceId, BleConnectionState.disconnected);
+    if (!_disposed && !_sessions.containsKey(deviceId)) {
+      _setState(deviceId, BleConnectionState.disconnected);
+    }
   }
 
   @override
@@ -512,6 +538,7 @@ class WmrWsTransport implements BleTransport {
     final sessions = _sessions.values.toList();
     _sessions.clear();
     for (final session in sessions) {
+      session.cancelConnect();
       await session.close();
     }
     for (final controller in _stateControllers.values) {
@@ -520,36 +547,123 @@ class WmrWsTransport implements BleTransport {
     _stateControllers.clear();
   }
 
-  /// Opens the socket, and closes one that arrives after [connectTimeout].
-  ///
-  /// `Future.timeout` cannot cancel a pending `WebSocket.connect`, so a late
-  /// completion is closed here instead of leaking an idle client.
-  Future<WebSocket> _openSocket(WmrWsEndpoint endpoint) async {
-    final opening = _connector(endpoint.uri);
-    var timedOut = false;
-    try {
-      return await opening.timeout(
-        connectTimeout,
-        onTimeout: () {
-          timedOut = true;
-          throw WmrWsException(
-            'no WebSocket connection to ${endpoint.uri} within '
-            '${connectTimeout.inSeconds}s',
-          );
-        },
+  /// Opens the socket, cancelling in-flight OS connect/HTTP tasks on timeout,
+  /// `disconnect()`, or `dispose()`, and closing any late socket silently.
+  Future<WebSocket> _openSocket(WmrWsEndpoint endpoint, _WmrWsSession session) {
+    if (_disposed ||
+        session.isClosed ||
+        session.isClosing ||
+        session.cancelledByDisconnect) {
+      return Future<WebSocket>.error(
+        WmrWsClosedException('connection abandoned'),
       );
-    } catch (_) {
-      if (timedOut) {
-        unawaited(
-          opening
-              .then<void>((socket) {
-                unawaited(socket.close(1000, 'connect timed out'));
-              })
-              .catchError((Object _) {}),
-        );
-      }
-      rethrow;
     }
+
+    final completer = Completer<WebSocket>();
+    var aborted = false;
+    var closeReason = 'connect timed out';
+
+    HttpClient? client;
+    ConnectionTask<Socket>? activeTask;
+    late final Timer timer;
+
+    void abort(Object error, StackTrace stackTrace, String reason) {
+      if (aborted || completer.isCompleted) return;
+      aborted = true;
+      closeReason = reason;
+      timer.cancel();
+      session.onCancelConnect = null;
+      activeTask?.cancel();
+      client?.close(force: true);
+      completer.completeError(error, stackTrace);
+    }
+
+    timer = Timer(connectTimeout, () {
+      abort(
+        WmrWsException(
+          'no WebSocket connection to ${endpoint.uri} within '
+          '${connectTimeout.inSeconds}s',
+        ),
+        StackTrace.current,
+        'connect timed out',
+      );
+    });
+
+    session.onCancelConnect = () {
+      abort(
+        WmrWsClosedException('connection abandoned'),
+        StackTrace.current,
+        'connect cancelled',
+      );
+    };
+
+    final Future<WebSocket> opening;
+    final customConnector = _customConnector;
+    if (customConnector != null) {
+      opening = customConnector(endpoint.uri);
+    } else {
+      final httpClient = HttpClient()..connectionTimeout = connectTimeout;
+      client = httpClient;
+      httpClient.connectionFactory =
+          (Uri url, String? proxyHost, int? proxyPort) async {
+            if (aborted) {
+              throw WmrWsClosedException('connect cancelled');
+            }
+            final host = proxyHost ?? url.host;
+            final port =
+                proxyPort ??
+                (url.hasPort ? url.port : (url.scheme == 'https' ? 443 : 80));
+            final task = await Socket.startConnect(host, port);
+            if (aborted) {
+              task.cancel();
+              throw WmrWsClosedException('connect cancelled');
+            }
+            activeTask = task;
+            return task;
+          };
+      opening = WebSocket.connect(
+        endpoint.uri.toString(),
+        protocols: const [wmrWsSubprotocol],
+        // The latency campaign measures the frame path. Letting
+        // permessage-deflate buffer and compress would add a layer the BLE
+        // path does not have.
+        compression: CompressionOptions.compressionOff,
+        customClient: httpClient,
+      );
+    }
+
+    opening.then<void>(
+      (socket) {
+        timer.cancel();
+        session.onCancelConnect = null;
+        if (aborted ||
+            _disposed ||
+            session.isClosed ||
+            session.isClosing ||
+            session.cancelledByDisconnect) {
+          client?.close(force: true);
+          unawaited(socket.close(1000, closeReason).catchError((Object _) {}));
+          if (!completer.isCompleted) {
+            completer.completeError(
+              WmrWsClosedException('connection abandoned'),
+            );
+          }
+          return;
+        }
+        client?.close();
+        completer.complete(socket);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        timer.cancel();
+        session.onCancelConnect = null;
+        client?.close(force: true);
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      },
+    );
+
+    return completer.future;
   }
 
   WmrWsEndpoint _endpointsFor(String deviceId) {
@@ -616,11 +730,12 @@ class WmrWsTransport implements BleTransport {
 
   void _fail(_WmrWsSession session, WmrWsException error) {
     if (session.isClosed) return;
+    final wasCurrent = identical(_sessions[session.deviceId], session);
     session.fail(error);
-    if (identical(_sessions[session.deviceId], session)) {
+    if (wasCurrent) {
       _sessions.remove(session.deviceId);
     }
-    if (!session.suppressDisconnectState) {
+    if (!session.suppressDisconnectState && wasCurrent && !_disposed) {
       _setState(session.deviceId, BleConnectionState.disconnected);
     }
   }
@@ -659,6 +774,9 @@ class _WmrWsSession {
   WmrWsHello? hello;
 
   _SessionPhase phase = _SessionPhase.connecting;
+  bool _closing = false;
+  bool cancelledByDisconnect = false;
+  void Function()? onCancelConnect;
   Timer? _helloTimer;
   Timer? _authTimer;
   _PendingControl? _pending;
@@ -693,14 +811,26 @@ class _WmrWsSession {
   int unexpectedMessages = 0;
   int controlErrors = 0;
 
-  bool get isReady => phase == _SessionPhase.ready;
+  bool get isReady => phase == _SessionPhase.ready && !_closing;
 
   bool get isConnecting =>
-      phase == _SessionPhase.connecting ||
-      phase == _SessionPhase.awaitingHello ||
-      phase == _SessionPhase.awaitingAuth;
+      !_closing &&
+      (phase == _SessionPhase.connecting ||
+          phase == _SessionPhase.awaitingHello ||
+          phase == _SessionPhase.awaitingAuth);
 
   bool get isClosed => phase == _SessionPhase.closed;
+
+  bool get isClosing => _closing;
+
+  bool get isClosedOrClosing => isClosed || _closing;
+
+  void cancelConnect() {
+    cancelledByDisconnect = true;
+    final cancel = onCancelConnect;
+    onCancelConnect = null;
+    cancel?.call();
+  }
 
   /// Suppresses the `disconnected` state of a failed candidate while
   /// `connect()` still has other hosts to try.
@@ -1023,7 +1153,7 @@ class _WmrWsSession {
     Map<String, Object?> message,
     String expectedType,
   ) {
-    if (!isReady) {
+    if (!isReady || isClosedOrClosing) {
       return Future<Map<String, Object?>>.error(
         WmrWsClosedException('the socket is not connected'),
       );
@@ -1049,7 +1179,11 @@ class _WmrWsSession {
 
   void _sendJson(Map<String, Object?> message) {
     final socket = this.socket;
-    if (socket == null) return;
+    if (socket == null ||
+        isClosedOrClosing ||
+        socket.readyState != WebSocket.open) {
+      return;
+    }
     socket.add(jsonEncode(message));
   }
 
@@ -1087,7 +1221,13 @@ class _WmrWsSession {
 
     unawaited(
       _enqueue(() async {
-        if (isClosed) return;
+        if (isClosedOrClosing) {
+          if (identical(_payloadSinks[characteristic], sink)) {
+            _payloadSinks.remove(characteristic);
+          }
+          sink.close();
+          return;
+        }
         try {
           // The daemon allows one payload stream per connection. Switching
           // means `unsubscribe` first, exactly like zeroing the old CCC.
@@ -1112,7 +1252,13 @@ class _WmrWsSession {
               }
             }
           }
-          if (_payloadSinks[characteristic] != sink || isClosed) return;
+          if (_payloadSinks[characteristic] != sink || isClosedOrClosing) {
+            if (identical(_payloadSinks[characteristic], sink)) {
+              _payloadSinks.remove(characteristic);
+            }
+            sink.close();
+            return;
+          }
           // Set before writing so frames racing the reply are routed.
           dispatchingCharacteristic = characteristic;
           _activeSink = sink;
@@ -1125,7 +1271,9 @@ class _WmrWsSession {
             dispatchingCharacteristic = null;
             _activeSink = null;
           }
-          sink.addError(_streamFault(characteristic, error));
+          if (!isClosedOrClosing) {
+            sink.addError(_streamFault(characteristic, error));
+          }
           sink.close();
         }
       }),
@@ -1146,13 +1294,15 @@ class _WmrWsSession {
           ? _activeSink
           : expected;
       if (dispatchingCharacteristic == characteristic) {
-        try {
-          // Keep dispatching until the daemon confirms: frames already in the
-          // socket before this message are real payloads, not strays.
-          await _request({'type': 'unsubscribe'}, 'unsubscribed');
-        } catch (_) {
-          // The daemon may already have cleared it; local state is what we
-          // control, and it is cleared below.
+        if (!isClosedOrClosing) {
+          try {
+            // Keep dispatching until the daemon confirms: frames already in the
+            // socket before this message are real payloads, not strays.
+            await _request({'type': 'unsubscribe'}, 'unsubscribed');
+          } catch (_) {
+            // The daemon may already have cleared it; local state is what we
+            // control, and it is cleared below.
+          }
         }
         if (dispatchingCharacteristic == characteristic) {
           dispatchingCharacteristic = null;
@@ -1239,7 +1389,17 @@ class _WmrWsSession {
   }
 
   Future<void> close() async {
-    if (isClosed) return;
+    cancelConnect();
+    if (isClosed || _closing) return;
+    _closing = true;
+    cancelTimers();
+    final pending = _pending;
+    _pending = null;
+    if (pending != null && !pending.completer.isCompleted) {
+      pending.completer.completeError(
+        WmrWsClosedException('the client closed the socket'),
+      );
+    }
     final ws = socket;
     if (ws != null && ws.readyState == WebSocket.open) {
       try {

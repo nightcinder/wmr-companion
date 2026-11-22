@@ -326,4 +326,53 @@ void main() {
     expect(sample.rttUs, sample.endToEndUs);
     expect(echo.answered, 1);
   });
+
+  test('disconnect() racing with queued subscribe/unsubscribe never throws '
+      'StreamSink is closed', () async {
+    await start(const FakePiOptions());
+    final uncaught = <Object>[];
+    await runZonedGuarded(
+      () async {
+        final streamErrors = <Object>[];
+        final sub1 = transport
+            .subscribe(id, wmrBridgeServiceUuid, wmrBridgeDecodedCharUuid)
+            .listen((_) {}, onError: streamErrors.add);
+        addTearDown(sub1.cancel);
+
+        // Queue a second subscribe (switch) and an unsubscribe behind it,
+        // then immediately close the session via disconnect().
+        final sub2 = transport
+            .subscribe(id, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+            .listen((_) {}, onError: streamErrors.add);
+        addTearDown(sub2.cancel);
+        final unsubFuture = transport.unsubscribe(
+          id,
+          wmrBridgeServiceUuid,
+          wmrBridgeBatchedCharUuid,
+        );
+
+        await transport.disconnect(id);
+        await unsubFuture;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(
+          streamErrors.whereType<StateError>(),
+          isEmpty,
+          reason: 'must not emit StreamSink is closed: $streamErrors',
+        );
+        expect(
+          streamErrors.where((e) => '$e'.contains('StreamSink is closed')),
+          isEmpty,
+        );
+      },
+      (error, stack) {
+        uncaught.add(error);
+      },
+    );
+    expect(uncaught, isEmpty);
+    expect(
+      await transport.connectionState(id).first,
+      BleConnectionState.disconnected,
+    );
+  });
 }

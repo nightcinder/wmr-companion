@@ -139,4 +139,24 @@ void main() {
       BleConnectionState.disconnected,
     );
   });
+
+  test('slow disconnect() completion does not emit disconnected over a newer connect()', () async {
+    await transport.connect(id);
+    final states = <BleConnectionState>[];
+    final sub = transport.connectionState(id).listen(states.add);
+    addTearDown(sub.cancel);
+    await Future<void>.delayed(Duration.zero);
+
+    // Start disconnect without awaiting it, then immediately reconnect.
+    final disconnectFuture = transport.disconnect(id);
+    await transport.connect(id);
+    await disconnectFuture;
+    await Future<void>.delayed(Duration.zero);
+
+    expect(states.last, BleConnectionState.connected);
+    expect(
+      await transport.connectionState(id).first,
+      BleConnectionState.connected,
+    );
+  });
 }
