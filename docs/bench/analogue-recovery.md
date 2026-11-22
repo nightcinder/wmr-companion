@@ -17,12 +17,12 @@ start with `WMR_Bridge` resolve in the sibling WMR_Bridge repository.
 | Step-4 takeover | First BLE record minus last TCP record. |
 
 Step 4 is measured on the phone. The composite stamps the last TCP record and
-the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1688-1702`).
+the first BLE record (`packages/wmr_companion/lib/src/composite_transport.dart:1730-1744`).
 Those two marks bound the takeover.
 
 T2 is the app's `first_tcp_record_us` mark. The app sets it on the first TCP
 record after an upgrade dial ends
-(`packages/wmr_companion/lib/src/link_timeline.dart:94`, `:191-197`).
+(`packages/wmr_companion/lib/src/link_timeline.dart:94`, `:196-204`).
 
 T2−T1 and T2−T0 need one clock. T0 and T1 are Pi times, and the app mark is on
 the phone clock. Do not subtract the app mark from a Pi time. The debug app
@@ -30,10 +30,15 @@ logs each receipt under Android tag `WmrBenchReceipt`
 (`apps/wmr_companion_app/lib/services/bench_receipt_log.dart:17`). The line
 carries `session`, `first_tcp_record_us` and `first_tcp_record_wall_us`
 (`:38-40`). The USB capture stamps the line on the Pi right after it reads the
-line. The app samples the timeline once a second and writes the line after it
-records the receipt (`apps/wmr_companion_app/lib/app.dart:30-33,47`). USB,
-buffering, and scheduling delay can only make the stamp later. That stamp is a
-conservative Pi-clock upper bound for T2.
+line.
+
+The composite emits the route ID on `tcpReceipts` as soon as
+`first_tcp_record_us` is stamped
+(`packages/wmr_companion/lib/src/composite_transport.dart:224`, `:701-703`). In
+debug builds, the app listens to `tcpReceipts` and writes the line immediately
+(`apps/wmr_companion_app/lib/app.dart:34-40`, `:58-66`). USB, buffering, and
+scheduling delay can only make the stamp later. That stamp is a conservative
+Pi-clock upper bound for T2.
 
 Match the line to the fresh export by `session` and `first_tcp_record_us`. A
 missing or ambiguous match rejects the run.
@@ -102,14 +107,21 @@ the last attempt's start, so the failed attempts before it number
 `upgrade_dial_attempts − 1` when `first_tcp_record_us` is present. Every
 attempt moves `upgrade_dial_start_us`, while
 `first_upgrade_dial_start_us` keeps the first attempt's start
-(`packages/wmr_companion/lib/src/link_timeline.dart:84-91`, `:256-267`).
+(`packages/wmr_companion/lib/src/link_timeline.dart:84-91`, `:258-273`).
 
 A failed dial re-arms after 100 ms while the 30 s post-failover window is
 open (`packages/wmr_companion/lib/src/composite_transport.dart:76-77`,
-`:1331-1344`). The probe budget caps one dial at 300 ms (`:78`). The worst
+`:1344-1353`). The probe budget caps one dial at 300 ms (`:78`). The worst
 wait from a route return to the next dial is 400 ms. The dial result is the
 probe, so no Pi reachability signal is involved (ONY-1631 plan rev 3,
 Child 1).
+
+Upgrade and BLE-drop recovery dials put the last-working TCP candidate first
+(`packages/wmr_companion/lib/src/composite_transport.dart:734-744`, `:943`,
+`:1227`, `:1311`). Each non-last candidate gets up to 250 ms when the
+remaining budget exceeds that cap (`:81`, `:768-777`). Otherwise, the
+remaining candidates share the remaining budget evenly (`:770-776`). The last
+candidate keeps the full remaining budget (`:768-769`).
 
 Mean attempt spacing uses the two dial-start marks and the attempt count
 (`packages/wmr_companion/lib/src/link_timeline.dart:81`, `:87`, `:91`). It is
@@ -413,9 +425,9 @@ Read `first_upgrade_dial_start_us`, `upgrade_dial_attempts`,
 | --- | --- | --- |
 | T0 | Pi shell | `date -u '+%F %T.%3N'` right after the down command |
 | T1 | Pi shell | `date -u '+%F %T.%3N'` right after the `ip` poll |
-| T2 upper bound | Pi USB capture | `realtime_us` on the matching `WmrBenchReceipt` event. Pi-clock upper bound, stamped after the app records the receipt (`apps/wmr_companion_app/lib/services/bench_receipt_log.dart:38-40`, `apps/wmr_companion_app/lib/app.dart:30-33,47`) |
+| T2 upper bound | Pi USB capture | `realtime_us` on the matching `WmrBenchReceipt` event. Pi-clock upper bound, stamped immediately after the app records the receipt (`apps/wmr_companion_app/lib/services/bench_receipt_log.dart:38-40`, `packages/wmr_companion/lib/src/composite_transport.dart:224,701-703`, `apps/wmr_companion_app/lib/app.dart:34-40,58-66`) |
 | T2 lower bound | Pi journal | `client <address>:<port> subscribed to batched` line (`WMR_Bridge` `pi/wmr_bridge/bridge.py:984`). Pi-clock lower bound, logged before the first record |
-| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:643`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:94`, `:191-197`), and an attached export carries it in `link_timeline` (see below) |
+| T2, app copy | Debug row `BLE→TCP` | `first TCP +` is first TCP record minus dial end, both on the phone clock (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:643`). The absolute mark is `first_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:94`, `:196-204`), and an attached export carries it in `link_timeline` (see below) |
 | Wait to first attempt | Bundle `link_timeline` | `first_upgrade_dial_start_us − failover_end_us`, both phone marks. BLE activation to the first dial attempt (`:74`, `:87`) |
 | Landing | Bundle `link_timeline` | `first_tcp_record_us − upgrade_dial_start_us`, both phone marks. Start of the last attempt to the first TCP record (`:81-94`) |
 | Detect | Debug row `stall +` | `stall_detected_us − last_tcp_record_us` (`packages/wmr_companion/lib/src/link_timeline.dart:69`, `:65`) |
@@ -434,13 +446,13 @@ the Takeover column.
 
 The parts leave out the gap between the stall mark and the failover
 begin. Both stamps land in the same event-loop turn
-(`packages/wmr_companion/lib/src/composite_transport.dart:1048`, `:1088`).
+(`packages/wmr_companion/lib/src/composite_transport.dart:1083`, `:1123`).
 The parts are enough to cross-check the takeover unless it lands within a
 few milliseconds of 2500 ms.
 
 The stall mark lands after the liveness probe gives up. The defaults are a
 500 ms probe interval and a 1000 ms timeout
-(`packages/wmr_ws/lib/src/wmr_ws_transport.dart:93-94`). A `stall +` near
+(`packages/wmr_ws/lib/src/wmr_ws_transport.dart:85-86`). A `stall +` near
 1500 ms is the probe, not the failover.
 
 ## Fill-in table
@@ -511,18 +523,18 @@ The same entry carries how the episode ended
 | `recovery_us` | integer | When that recovery happened. |
 
 The failover acquires a candidate before it declares loss
-(`packages/wmr_companion/lib/src/composite_transport.dart:1107-1123`). It
-skips a refused candidate and tries the next one (`:1126-1144`).
+(`packages/wmr_companion/lib/src/composite_transport.dart:1142-1158`). It
+skips a refused candidate and tries the next one (`:1162-1179`).
 
 Both dial sites write the same fields: the upgrade probe
-(`packages/wmr_companion/lib/src/composite_transport.dart:1248-1319`) and the
-BLE-drop recovery (`:1177-1219`). A dial counts once.
+(`packages/wmr_companion/lib/src/composite_transport.dart:1295-1353`) and the
+BLE-drop recovery (`:1217-1244`). A dial counts once.
 
 A recovery is not a landing. When the app redial delivers TCP after a failover
 that never landed, the episode records `recovery_lane: redial` and
 `recovery_us`. It leaves the attempt count and dial marks unchanged
 (`packages/wmr_companion/lib/src/link_timeline.dart:115-121`,
-`packages/wmr_companion/lib/src/composite_transport.dart:395-402`).
+`packages/wmr_companion/lib/src/composite_transport.dart:400-408`).
 
 The export builder passes the live transport's marks into the bundle
 (`apps/wmr_companion_app/lib/services/test_bundle_export.dart`), so the
