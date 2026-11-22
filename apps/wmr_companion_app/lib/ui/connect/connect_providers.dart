@@ -583,6 +583,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// be told apart and must not publish its result or tear down what the
   /// newer dial built.
   final Map<String, int> _connectGenerations = {};
+
+  /// Bridges whose new dial has not yet seen the composite stream emit
+  /// `connecting` or `connected`, so a stale `disconnected` from the teardown
+  /// of an earlier failed failover cannot dispose the new dial's service.
+  final Set<String> _awaitingDialStreamReset = {};
   AppLifecycleListener? _lifecycle;
   ControllerService? _service;
   Timer? _statsTimer;
@@ -740,6 +745,17 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// frame stream (the capture screen). Null before the first connect.
   ControllerService? get service => _service;
 
+  /// Whether [composite] currently has a TCP->BLE failover dial in flight for
+  /// [routeId] while still naming TCP active.
+  bool _isFailoverInFlight(CompositeBleTransport composite, String routeId) {
+    if (composite.activeLegFor(routeId) != CompositeLeg.tcp) return false;
+    final timeline = composite.linkTimelineFor(routeId);
+    if (timeline == null) return false;
+    return timeline['failover_begin_us'] != null &&
+        timeline['failover_end_us'] == null &&
+        timeline['failover_outcome'] == null;
+  }
+
   /// One place for a link status, whether it came from the BLE stack or was
   /// synthesized from a Wi-Fi connection state.
   ///
@@ -747,13 +763,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// GATT link open as a fallback after it upgrades the session to TCP. A raw
   /// BLE event for that device therefore only describes the fallback leg, not
   /// the session: a radio drop while TCP carries it must not tear the session
-  /// down.
+  /// down. When TCP has already dropped and a TCP->BLE failover dial is in
+  /// flight, however, the composite still names TCP active until BLE
+  /// activates; a radio-off then leaves both legs dead and must be recorded
+  /// immediately so radio-on redials.
   void _handleBleLinkStatus(BleLinkStatus s) {
     final id = s.deviceId;
     final active = transport;
     if (id != null &&
         active is CompositeBleTransport &&
         active.activeLegFor(id) == CompositeLeg.tcp) {
+      if (s.phase == BleLinkPhase.bluetoothOff &&
+          _isFailoverInFlight(active, id)) {
+        _handleLinkStatus(s);
+      }
       return;
     }
     _handleLinkStatus(s);
@@ -818,6 +841,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
             // The radio took the link: remember the bridge for the redial
             // when the radio returns. No campaign is scheduled here; one
             // against a powered-off stack can only burn its attempts.
+            _reconnectTimers.remove(id)?.cancel();
+            _reconnectAttempts.remove(id);
+            _reconnecting.remove(id);
             if (!_userDisconnectedDeviceIds.contains(id)) {
               _droppedDeviceIds.add(id);
             }
@@ -874,14 +900,26 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     switch (s) {
       case BleConnectionState.connected:
       case BleConnectionState.connecting:
+        _awaitingDialStreamReset.remove(id);
         // The raw BLE stream owns the connect phases and the ready status.
         return;
       case BleConnectionState.disconnecting:
+        if (!_connectedDeviceIds.contains(id) &&
+            _awaitingDialStreamReset.contains(id)) {
+          return;
+        }
         _handleLinkStatus(
           BleLinkStatus(BleLinkPhase.disconnecting, deviceId: id),
         );
       case BleConnectionState.disconnected:
+        if (!_connectedDeviceIds.contains(id) &&
+            _awaitingDialStreamReset.contains(id)) {
+          return;
+        }
         final wasReady = _connectedDeviceIds.contains(id);
+        if (!wasReady && (_deviceStatuses[id]?.isFailure ?? false)) {
+          return;
+        }
         _handleLinkStatus(
           BleLinkStatus(
             wasReady ? BleLinkPhase.connectionLost : BleLinkPhase.disconnected,
@@ -895,17 +933,30 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     if (_wifiDeviceId != id) return;
     switch (s) {
       case BleConnectionState.connected:
+        _awaitingDialStreamReset.remove(id);
         // [connect] promotes to ready after the stream subscription succeeds,
         // exactly as the BLE transport's status does.
         return;
       case BleConnectionState.connecting:
+        _awaitingDialStreamReset.remove(id);
         _handleLinkStatus(BleLinkStatus(BleLinkPhase.connecting, deviceId: id));
       case BleConnectionState.disconnecting:
+        if (!_connectedDeviceIds.contains(id) &&
+            _awaitingDialStreamReset.contains(id)) {
+          return;
+        }
         _handleLinkStatus(
           BleLinkStatus(BleLinkPhase.disconnecting, deviceId: id),
         );
       case BleConnectionState.disconnected:
+        if (!_connectedDeviceIds.contains(id) &&
+            _awaitingDialStreamReset.contains(id)) {
+          return;
+        }
         final wasReady = _connectedDeviceIds.contains(id);
+        if (!wasReady && (_deviceStatuses[id]?.isFailure ?? false)) {
+          return;
+        }
         _handleLinkStatus(
           BleLinkStatus(
             wasReady ? BleLinkPhase.connectionLost : BleLinkPhase.disconnected,
@@ -992,9 +1043,53 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         // still named at this instant — the composite unwinds its route only
         // after this event — so freeze it here: once the loss lands, the leg
         // reads as gone and a radio loss could not be told from a Wi-Fi one.
+        //
+        // The same holds when a TCP->BLE failover dial is already in flight
+        // on the composite: TCP has dropped and the composite still names TCP
+        // active only until BLE activates, so record the bridge for redial
+        // and drop the connected state now.
+        final wifiId = _wifiDeviceId;
+        final wifiTransport = _wifiTransport;
+        final wifiFailoverInFlight =
+            this.state.activeTransport == BridgeTransportKind.wifi &&
+            wifiId != null &&
+            wifiTransport is CompositeBleTransport &&
+            _isFailoverInFlight(wifiTransport, wifiId);
         _radioOffWifiBleCarried =
             this.state.activeTransport == BridgeTransportKind.wifi &&
-            _wifiLink?.activeLeg?.call() == WifiLinkLeg.ble;
+            (_wifiLink?.activeLeg?.call() == WifiLinkLeg.ble ||
+                wifiFailoverInFlight);
+        if (this.state.activeTransport == BridgeTransportKind.wifi &&
+            _radioOffWifiBleCarried &&
+            wifiId != null &&
+            (_connectedDeviceIds.contains(wifiId) ||
+                _connectingDeviceIds.contains(wifiId))) {
+          _handleLinkStatus(
+            BleLinkStatus(
+              BleLinkPhase.bluetoothOff,
+              deviceId: wifiId,
+              message: 'Bluetooth is turned off',
+            ),
+          );
+        } else if (this.state.activeTransport == BridgeTransportKind.ble) {
+          final bleTransport = _bleHandoffTransport;
+          if (bleTransport is CompositeBleTransport) {
+            for (final id in {
+              ..._connectedDeviceIds,
+              ..._connectingDeviceIds,
+            }) {
+              if (_isFailoverInFlight(bleTransport, id)) {
+                _handleLinkStatus(
+                  BleLinkStatus(
+                    BleLinkPhase.bluetoothOff,
+                    deviceId: id,
+                    message: 'Bluetooth is turned off',
+                  ),
+                );
+              }
+            }
+          }
+        }
       case BleAvailability.poweredOn:
         // Only a return from off redials; an initial poweredOn event must
         // not.
@@ -1077,7 +1172,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       wifiFallback:
           nextTransport == BridgeTransportKind.wifi &&
           (wifiFallback ?? state.wifiFallback),
-      wifiLeg: nextTransport == BridgeTransportKind.wifi
+      wifiLeg:
+          nextTransport == BridgeTransportKind.wifi &&
+              _connectedDeviceIds.isNotEmpty
           ? _wifiLink?.activeLeg?.call()
           : null,
       lanEndpoints: lanEndpoints ?? state.lanEndpoints,
@@ -1177,25 +1274,27 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       return;
     }
     _parkedBleDeviceIds.remove(deviceId);
-    // A Wi-Fi composite may be scanning to learn its BLE fallback candidate;
-    // that scan must outlive the dial. BLE mode still stops its scan here.
-    if (state.activeTransport != BridgeTransportKind.wifi) {
-      await stopScan();
-    }
-    final deviceDisconnectGen = _deviceDisconnectGenerations[deviceId] ?? 0;
-    final globalDisconnectGen = _globalDisconnectGeneration;
     // Dials are numbered per bridge. A superseded dial still in flight must
     // not publish its result, dispose the newer dial's service, or unpublish
     // its bookkeeping.
     final generation = _connectGenerations[deviceId] =
         (_connectGenerations[deviceId] ?? 0) + 1;
     bool stale() => (_connectGenerations[deviceId] ?? 0) != generation;
-    _connectingDeviceIds.add(deviceId);
-    ref
-        .read(bridgeTransportKindsProvider.notifier)
-        .set(deviceId, state.activeTransport);
-    _update(deviceId: deviceId);
+    _awaitingDialStreamReset.add(deviceId);
     try {
+      // A Wi-Fi composite may be scanning to learn its BLE fallback candidate;
+      // that scan must outlive the dial. BLE mode still stops its scan here.
+      if (state.activeTransport != BridgeTransportKind.wifi) {
+        await stopScan();
+      }
+      if (!ref.mounted || stale()) return;
+      final deviceDisconnectGen = _deviceDisconnectGenerations[deviceId] ?? 0;
+      final globalDisconnectGen = _globalDisconnectGeneration;
+      _connectingDeviceIds.add(deviceId);
+      ref
+          .read(bridgeTransportKindsProvider.notifier)
+          .set(deviceId, state.activeTransport);
+      _update(deviceId: deviceId);
       if (_service == null) {
         final settings = ref.read(stickSettingsProvider);
         final service = _service = ControllerService(
@@ -1214,13 +1313,23 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         applyFf13Settings(service, ref.read(ff13SettingsProvider));
         try {
           await service.start();
-        } on BleTransportException {
+        } on BleTransportException catch (error) {
           if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
           _service?.dispose();
           _service = null;
-          _update();
-          return; // already in the status
+          if (_deviceStatuses[deviceId]?.phase != error.phase) {
+            _handleLinkStatus(
+              BleLinkStatus(
+                error.phase,
+                deviceId: deviceId,
+                message: error.message,
+              ),
+            );
+          } else {
+            _update();
+          }
+          return;
         } catch (error) {
           if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
@@ -1233,10 +1342,20 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       } else {
         try {
           await _service!.addDevice(deviceId);
-        } on BleTransportException {
+        } on BleTransportException catch (error) {
           if (stale()) return;
           _connectedDeviceIds.remove(deviceId);
-          _update();
+          if (_deviceStatuses[deviceId]?.phase != error.phase) {
+            _handleLinkStatus(
+              BleLinkStatus(
+                error.phase,
+                deviceId: deviceId,
+                message: error.message,
+              ),
+            );
+          } else {
+            _update();
+          }
           return;
         } catch (error) {
           if (stale()) return;
@@ -1265,8 +1384,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       // A superseded dial no longer owns the bridge's bookkeeping; the newer
       // dial publishes through its own completion.
       if (!stale()) {
+        _awaitingDialStreamReset.remove(deviceId);
         _connectingDeviceIds.remove(deviceId);
-        _update();
+        if (ref.mounted) _update();
       }
     }
 
