@@ -5062,4 +5062,759 @@ void main() {
       expect(receiptEvents, [_tcpDeviceId]);
     },
   );
+
+  test('T1: healthy BLE -> TCP upgrade activates TCP without waiting on slow BLE unsubscribe', () async {
+    tcp.failConnect = true;
+    ble.dispose();
+    final slowBle =
+        _HookedUnsubscribeBle(
+            devices: const [
+              FakeDevice(
+                id: _bleDeviceId,
+                name: 'WMR Bridge',
+                services: fakeBridgeDeviceServices,
+              ),
+            ],
+            onUnsubscribe: (deviceId, serviceUuid, characteristicUuid) async {
+              await Future<void>.delayed(const Duration(milliseconds: 180));
+            },
+          )
+          ..onRead = (deviceId, characteristicUuid) {
+            if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _endpointDocument();
+            }
+            throw StateError('unexpected read $characteristicUuid');
+          };
+    ble = slowBle;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final batchedSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen((_) {});
+    final decodedSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeDecodedCharUuid)
+        .listen((_) {});
+    final streamSub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid)
+        .listen((_) {});
+    addTearDown(batchedSub.cancel);
+    addTearDown(decodedSub.cancel);
+    addTearDown(streamSub.cancel);
+
+    tcp.failConnect = false;
+    tcp.endpoints.remove(_tcpDeviceId);
+    final sw = Stopwatch()..start();
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'upgrade did not land on TCP',
+    );
+    sw.stop();
+
+    // TCP activation must not wait on the 180 ms BLE GATT unsubscribe writes.
+    expect(sw.elapsedMilliseconds, lessThan(150));
+    expect(ble.isSubscribed(_bleDeviceId, wmrBridgeBatchedCharUuid), isFalse);
+    expect(ble.isSubscribed(_bleDeviceId, wmrBridgeDecodedCharUuid), isFalse);
+    expect(ble.isSubscribed(_bleDeviceId, wmrBridgeStreamCharUuid), isFalse);
+
+    tcp.emit(
+      _lanDeviceId,
+      wmrBridgeBatchedCharUuid,
+      Uint8List.fromList([7, 8]),
+    );
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+          null,
+      reason: 'first_tcp_record_us was not stamped',
+    );
+    final timeline = transport.linkTimelineFor(_tcpDeviceId)!;
+    expect(timeline['upgrade_outcome'], 'landed');
+
+    // Once the slow BLE GATT writes complete (3 * 180 ms > 250 ms default
+    // bleUnsubscribeTimeout), all non-echo CCCDs are off without truncation.
+    await _waitFor(
+      () =>
+          ble.cccLog.contains('off $wmrBridgeBatchedCharUuid') &&
+          ble.cccLog.contains('off $wmrBridgeDecodedCharUuid') &&
+          ble.cccLog.contains('off $wmrBridgeStreamCharUuid'),
+      reason: 'slow BLE unsubscribe did not turn off non-echo CCCDs',
+    );
+  });
+
+  test('T2: never-completing ble.unsubscribe does not stall TCP upgrade or retries', () async {
+    tcp.failConnect = true;
+    ble.dispose();
+    final hungBle =
+        _HookedUnsubscribeBle(
+            devices: const [
+              FakeDevice(
+                id: _bleDeviceId,
+                name: 'WMR Bridge',
+                services: fakeBridgeDeviceServices,
+              ),
+            ],
+            onUnsubscribe: (deviceId, serviceUuid, characteristicUuid) =>
+                Completer<void>().future,
+          )
+          ..onRead = (deviceId, characteristicUuid) {
+            if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _endpointDocument();
+            }
+            throw StateError('unexpected read $characteristicUuid');
+          };
+    ble = hungBle;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final received = <BleNotification>[];
+    final sub = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(received.add);
+    addTearDown(sub.cancel);
+
+    tcp.failConnect = false;
+    tcp.endpoints.remove(_tcpDeviceId);
+    final sw = Stopwatch()..start();
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'upgrade did not land on TCP under hung ble.unsubscribe',
+    );
+    sw.stop();
+
+    expect(sw.elapsedMilliseconds, lessThan(500));
+    final connectsAtLand = tcp.connectCalls
+        .where((id) => id == _lanDeviceId)
+        .length;
+
+    tcp.emit(
+      _lanDeviceId,
+      wmrBridgeBatchedCharUuid,
+      Uint8List.fromList([9, 10]),
+    );
+    await _waitFor(
+      () =>
+          transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+          null,
+      reason: 'first_tcp_record_us was not stamped',
+    );
+    expect(received, hasLength(1));
+    expect(
+      transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'],
+      'landed',
+    );
+
+    await _settle(50);
+    expect(
+      tcp.connectCalls.where((id) => id == _lanDeviceId).length,
+      connectsAtLand,
+      reason: 'upgrade retries continued after landing',
+    );
+  });
+
+  test('T3: synchronous or asynchronous throw from ble.unsubscribe still lands TCP upgrade', () async {
+    for (final syncThrow in [true, false]) {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..scanResults.add(tcpScanResult())
+        ..failConnect = true;
+      ble.dispose();
+      ble =
+          _HookedUnsubscribeBle(
+              devices: const [
+                FakeDevice(
+                  id: _bleDeviceId,
+                  name: 'WMR Bridge',
+                  services: fakeBridgeDeviceServices,
+                ),
+              ],
+              onUnsubscribe: (deviceId, serviceUuid, characteristicUuid) {
+                if (syncThrow) throw StateError('sync unsubscribe failure');
+                return Future<void>.error(
+                  StateError('async unsubscribe failure'),
+                );
+              },
+            )
+            ..onRead = (deviceId, characteristicUuid) {
+              if (characteristicUuid.toLowerCase() ==
+                  wmrBridgeVersionCharUuid) {
+                return _endpointDocument();
+              }
+              throw StateError('unexpected read $characteristicUuid');
+            };
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 10),
+      );
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+      final received = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(received.add);
+
+      tcp.failConnect = false;
+      tcp.endpoints.remove(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+        reason: 'upgrade did not land when syncThrow=$syncThrow',
+      );
+
+      tcp.emit(
+        _lanDeviceId,
+        wmrBridgeBatchedCharUuid,
+        Uint8List.fromList([11, 12]),
+      );
+      await _waitFor(
+        () =>
+            transport.linkTimelineFor(_tcpDeviceId)!['first_tcp_record_us'] !=
+            null,
+        reason: 'first_tcp_record_us not stamped when syncThrow=$syncThrow',
+      );
+      expect(received, hasLength(1));
+      expect(
+        transport.linkTimelineFor(_tcpDeviceId)!['upgrade_outcome'],
+        'landed',
+      );
+
+      await sub.cancel();
+      await transport.dispose();
+    }
+  });
+
+  test('T4a: TCP drop during _activateTcp under route.upgrading does not split episode with null outcome', () async {
+    // Drop TCP mid-activation: once before route.active becomes TCP (during
+    // BLE detach), and once after route.active becomes TCP (during TCP
+    // subscribe while route.upgrading is still true).
+    for (final dropDuringSubscribe in [false, true]) {
+      await tcp.dispose();
+      var dropArmed = false;
+      late final _HookedTcp hookedTcp;
+      hookedTcp =
+          _HookedTcp(
+              onSubscribe: (deviceId) {
+                if (dropDuringSubscribe &&
+                    dropArmed &&
+                    deviceId == _lanDeviceId) {
+                  dropArmed = false;
+                  hookedTcp.failConnect = true;
+                  hookedTcp.drop(_lanDeviceId);
+                }
+              },
+            )
+            ..registerEndpoint(
+              WmrWsEndpoint(
+                host: '127.0.0.1',
+                port: 8765,
+                deviceId: _tcpDeviceId,
+                bridgeId: _bridgeId,
+              ),
+            )
+            ..scanResults.add(tcpScanResult());
+      tcp = hookedTcp;
+
+      ble.dispose();
+      var bleDetachDropArmed = !dropDuringSubscribe;
+      ble =
+          _HookedCancelBle(
+              devices: const [
+                FakeDevice(
+                  id: _bleDeviceId,
+                  name: 'WMR Bridge',
+                  services: fakeBridgeDeviceServices,
+                ),
+              ],
+              onCancel: () async {
+                await Future<void>.delayed(const Duration(milliseconds: 10));
+                if (!dropDuringSubscribe && bleDetachDropArmed) {
+                  bleDetachDropArmed = false;
+                  hookedTcp.failConnect = true;
+                  hookedTcp.drop(_lanDeviceId);
+                }
+              },
+            )
+            ..onRead = (deviceId, characteristicUuid) {
+              if (characteristicUuid.toLowerCase() ==
+                  wmrBridgeVersionCharUuid) {
+                return _endpointDocument();
+              }
+              throw StateError('unexpected read $characteristicUuid');
+            };
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: const Duration(milliseconds: 200),
+        upgradeRetryDelay: Duration.zero,
+      );
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+
+      // Episode 1: initial TCP stalls and fails over to BLE while TCP is down.
+      expect(tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1]), isTrue);
+      await _settle();
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+        reason: 'initial failover to BLE did not land',
+      );
+      final failoverEndOne =
+          transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us']! as int;
+
+      // Now arm the mid-activation TCP drop and let the upgrade dial succeed.
+      // After the drop, keep TCP down so the recovery back to BLE settles.
+      dropArmed = true;
+      bleDetachDropArmed = !dropDuringSubscribe;
+      tcp.failConnect = false;
+      tcp.endpoints.remove(_tcpDeviceId);
+      await _waitFor(
+        () =>
+            transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble &&
+            (transport.linkTimelineFor(_tcpDeviceId)!['failover_end_us']!
+                    as int) >
+                failoverEndOne,
+        reason: 'mid-activation TCP drop did not recover back to BLE',
+      );
+
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      final episodes = marks['episodes']! as List<Object?>;
+      expect(episodes, hasLength(1));
+      final episodeOne = episodes.single as Map<String, Object?>;
+      expect(
+        episodeOne['upgrade_outcome'],
+        'landed',
+        reason: 'episode 1 must not be archived with upgrade_outcome: null',
+      );
+      expect(
+        marks['upgrade_outcome'],
+        isNot('landed'),
+        reason: 'landed must not leak into the successor episode',
+      );
+
+      await sub.cancel();
+      await transport.dispose();
+    }
+  });
+
+  test('T4b: TCP drop + _fallbackToBle fences stale ble.unsubscribe and late BLE records', () async {
+    tcp.failConnect = true;
+    ble.dispose();
+    final unsubGate = Completer<void>();
+    var gateFirstUnsub = true;
+    final lateBle =
+        _LateRecordAndGatedUnsubBle(
+            devices: const [
+              FakeDevice(
+                id: _bleDeviceId,
+                name: 'WMR Bridge',
+                services: fakeBridgeDeviceServices,
+              ),
+            ],
+            onUnsubscribe: (deviceId, serviceUuid, characteristicUuid) {
+              if (gateFirstUnsub) {
+                gateFirstUnsub = false;
+                return unsubGate.future;
+              }
+              return Future<void>.value();
+            },
+          )
+          ..onRead = (deviceId, characteristicUuid) {
+            if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _endpointDocument();
+            }
+            throw StateError('unexpected read $characteristicUuid');
+          };
+    ble = lateBle;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 10),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    final batchedReceived = <BleNotification>[];
+    final streamReceived = <BleNotification>[];
+    final subBatched = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid)
+        .listen(batchedReceived.add);
+    final subStream = transport
+        .subscribe(_tcpDeviceId, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid)
+        .listen(streamReceived.add);
+    addTearDown(subBatched.cancel);
+    addTearDown(subStream.cancel);
+
+    // Upgrade to TCP while the first ble.unsubscribe is still pending.
+    tcp.failConnect = false;
+    tcp.endpoints.remove(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      reason: 'upgrade did not land on TCP',
+    );
+    expect(lateBle.cccLog.where((e) => e.startsWith('off ')), hasLength(1));
+
+    // Late BLE record on the superseded BLE subscription while TCP is active
+    // must neither stamp first_ble_record_us nor emit to the subscriber.
+    lateBle.emitOnSuperseded(wmrBridgeBatchedCharUuid, [99]);
+    await _settle();
+    expect(batchedReceived, isEmpty);
+    expect(
+      transport.linkTimelineFor(_tcpDeviceId)!['first_ble_record_us'],
+      isNull,
+    );
+
+    // TCP drops and _fallbackToBle re-activates BLE while the earlier
+    // ble.unsubscribe is still pending.
+    tcp.failConnect = true;
+    tcp.drop(_lanDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'fallback to BLE did not land',
+    );
+
+    // Unblock the pending earlier ble.unsubscribe: the stale teardown must
+    // NOT fire ble.unsubscribe for the second characteristic.
+    unsubGate.complete();
+    await _settle(30);
+    expect(
+      lateBle.cccLog.where((e) => e.startsWith('off ')),
+      hasLength(1),
+      reason: 'stale teardown fired ble.unsubscribe after fallback to BLE',
+    );
+
+    // A late record on the superseded BLE subscription after fallback must be
+    // dropped; only the newly re-attached BLE subscription delivers records.
+    lateBle.emitOnSuperseded(wmrBridgeBatchedCharUuid, [88]);
+    await _settle();
+    expect(batchedReceived, isEmpty);
+
+    expect(ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [7]), isTrue);
+    expect(ble.emit(_bleDeviceId, wmrBridgeStreamCharUuid, [8]), isTrue);
+    await _waitFor(
+      () => batchedReceived.length == 1 && streamReceived.length == 1,
+      reason: 're-attached BLE subscriptions did not deliver records',
+    );
+    expect(batchedReceived.single.value, orderedEquals([7]));
+    expect(streamReceived.single.value, orderedEquals([8]));
+  });
+
+  test('T6: disconnect, suspendBleStreams, and dispose are bounded under hung ble.unsubscribe with zero leaked timers', () async {
+    Future<void> verifyBoundedWithZeroTimers(
+      String label,
+      Future<void> Function(CompositeBleTransport transport) action,
+    ) async {
+      final activeTimers = <_TrackedTimer>[];
+      await runZoned(
+        () async {
+          final localTcp = _FakeTcp()
+            ..registerEndpoint(
+              WmrWsEndpoint(
+                host: '127.0.0.1',
+                port: 8765,
+                deviceId: _tcpDeviceId,
+                bridgeId: _bridgeId,
+              ),
+            )
+            ..scanResults.add(tcpScanResult())
+            ..failConnect = true;
+          final localBle =
+              _HookedUnsubscribeBle(
+                  devices: const [
+                    FakeDevice(
+                      id: _bleDeviceId,
+                      name: 'WMR Bridge',
+                      services: fakeBridgeDeviceServices,
+                    ),
+                  ],
+                  onUnsubscribe: (deviceId, serviceUuid, characteristicUuid) =>
+                      Completer<void>().future,
+                )
+                ..onRead = (deviceId, characteristicUuid) {
+                  if (characteristicUuid.toLowerCase() ==
+                      wmrBridgeVersionCharUuid) {
+                    return _versionString();
+                  }
+                  throw StateError('unexpected read $characteristicUuid');
+                };
+
+          final transport = CompositeBleTransport(
+            tcp: localTcp,
+            ble: localBle,
+            upgradeInterval: const Duration(hours: 1),
+          );
+
+          await transport.scan().toList();
+          await transport.connect(_tcpDeviceId);
+          final sub = transport
+              .subscribe(
+                _tcpDeviceId,
+                wmrBridgeServiceUuid,
+                wmrBridgeBatchedCharUuid,
+              )
+              .listen((_) {});
+
+          final sw = Stopwatch()..start();
+          await action(transport);
+          sw.stop();
+          expect(
+            sw.elapsedMilliseconds,
+            lessThan(1000),
+            reason: '$label took too long under hung ble.unsubscribe',
+          );
+
+          await sub.cancel();
+          await transport.dispose();
+          await localTcp.dispose();
+          localBle.dispose();
+          await _settle(20);
+
+          expect(
+            activeTimers.where((t) => t.isActive),
+            isEmpty,
+            reason: '$label leaked active timers',
+          );
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, f) {
+            late final _TrackedTimer tracked;
+            final inner = parent.createTimer(zone, duration, () {
+              tracked.markDone();
+              f();
+            });
+            tracked = _TrackedTimer(inner);
+            activeTimers.add(tracked);
+            return tracked;
+          },
+          createPeriodicTimer: (self, parent, zone, period, f) {
+            late final _TrackedTimer tracked;
+            final inner = parent.createPeriodicTimer(zone, period, (t) {
+              f(t);
+            });
+            tracked = _TrackedTimer(inner);
+            activeTimers.add(tracked);
+            return tracked;
+          },
+        ),
+      );
+    }
+
+    await verifyBoundedWithZeroTimers(
+      'disconnect',
+      (t) => t.disconnect(_tcpDeviceId),
+    );
+    await verifyBoundedWithZeroTimers(
+      'suspendBleStreams',
+      (t) => t.suspendBleStreams(_tcpDeviceId),
+    );
+    await verifyBoundedWithZeroTimers('dispose', (t) => t.dispose());
+  });
+}
+
+class _TrackedTimer implements Timer {
+  _TrackedTimer(this._inner);
+
+  final Timer _inner;
+  bool _done = false;
+
+  void markDone() => _done = true;
+
+  @override
+  void cancel() {
+    _done = true;
+    _inner.cancel();
+  }
+
+  @override
+  bool get isActive => !_done && _inner.isActive;
+
+  @override
+  int get tick => _inner.tick;
+}
+
+class _HookedUnsubscribeBle extends FakeTransport {
+  _HookedUnsubscribeBle({required super.devices, required this.onUnsubscribe});
+
+  final Future<void> Function(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  )
+  onUnsubscribe;
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    cccLog.add('off ${characteristicUuid.toLowerCase()}');
+    await onUnsubscribe(deviceId, serviceUuid, characteristicUuid);
+  }
+}
+
+class _HookedTcp extends _FakeTcp {
+  _HookedTcp({required this.onSubscribe});
+
+  final void Function(String deviceId) onSubscribe;
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    onSubscribe(deviceId);
+    return super.subscribe(deviceId, serviceUuid, characteristicUuid);
+  }
+}
+
+class _HookedCancelBle extends FakeTransport {
+  _HookedCancelBle({required super.devices, required this.onCancel});
+
+  final Future<void> Function() onCancel;
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final upstream = super.subscribe(deviceId, serviceUuid, characteristicUuid);
+    late final StreamController<BleNotification> controller;
+    StreamSubscription<BleNotification>? sub;
+    controller = StreamController<BleNotification>(
+      onListen: () {
+        sub = upstream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+      },
+      onCancel: () async {
+        await onCancel();
+        await sub?.cancel();
+      },
+    );
+    return controller.stream;
+  }
+}
+
+class _LateRecordAndGatedUnsubBle extends FakeTransport {
+  _LateRecordAndGatedUnsubBle({
+    required super.devices,
+    required this.onUnsubscribe,
+  });
+
+  final Future<void> Function(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  )
+  onUnsubscribe;
+
+  final Map<String, List<StreamController<BleNotification>>> _controllers = {};
+
+  @override
+  Stream<BleNotification> subscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) {
+    final key = characteristicUuid.toLowerCase();
+    final upstream = super.subscribe(deviceId, serviceUuid, characteristicUuid);
+    // Keep a controller whose onCancel does not stop forwarding from the
+    // superseded listener until we test late-record delivery, simulating a
+    // deferred/async platform cancel.
+    late final StreamController<BleNotification> controller;
+    StreamSubscription<BleNotification>? sub;
+    controller = StreamController<BleNotification>(
+      onListen: () {
+        sub = upstream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+      },
+      onCancel: () async {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        await sub?.cancel();
+      },
+    );
+    _controllers.putIfAbsent(key, () => []).add(controller);
+    return controller.stream;
+  }
+
+  void emitOnSuperseded(String characteristicUuid, List<int> bytes) {
+    final list = _controllers[characteristicUuid.toLowerCase()];
+    if (list == null || list.isEmpty) return;
+    final first = list.first;
+    if (!first.isClosed && first.hasListener) {
+      first.add(
+        BleNotification(
+          value: Uint8List.fromList(bytes),
+          receivedAtUs: clock.nowUs,
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<void> unsubscribe(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    cccLog.add('off ${characteristicUuid.toLowerCase()}');
+    await onUnsubscribe(deviceId, serviceUuid, characteristicUuid);
+  }
 }
