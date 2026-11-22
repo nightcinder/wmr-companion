@@ -148,11 +148,14 @@ abstract class BleAdapter {
 
   /// Requests [mtu] and returns the value the stack reports afterwards,
   /// which may differ from what was asked for.
-  Future<int> requestMtu(String deviceId, int mtu);
+  Future<int> requestMtu(String deviceId, int mtu, {Duration? timeout});
 
   Future<void> requestHighConnectionPriority(String deviceId);
 
-  Future<List<BleServiceInfo>> discoverServices(String deviceId);
+  Future<List<BleServiceInfo>> discoverServices(
+    String deviceId, {
+    Duration? timeout,
+  });
 
   /// Writes the CCC descriptor to enable notifications. Throws a
   /// [BleAdapterException] with the ATT error where the platform gives one.

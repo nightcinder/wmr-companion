@@ -38,6 +38,17 @@ class FakeBleAdapter implements BleAdapter {
   /// Object? set to make [requestMtu] throw.
   Object? mtuError;
 
+  /// Object? set to make [discoverServices] throw.
+  Object? discoveryError;
+
+  /// Forwarded `timeout` arguments from [requestMtu] and [discoverServices].
+  final List<Duration?> mtuTimeouts = [];
+  final List<Duration?> discoveryTimeouts = [];
+
+  Duration? get lastMtuTimeout => mtuTimeouts.isEmpty ? null : mtuTimeouts.last;
+  Duration? get lastDiscoveryTimeout =>
+      discoveryTimeouts.isEmpty ? null : discoveryTimeouts.last;
+
   // Sync, like a platform callback: the transport must stamp in the callback.
   final _values = StreamController<(String?, String, Uint8List)>.broadcast(
     sync: true,
@@ -165,8 +176,9 @@ class FakeBleAdapter implements BleAdapter {
       _links.stream.where((e) => e.deviceId == null || e.deviceId == deviceId);
 
   @override
-  Future<int> requestMtu(String deviceId, int mtu) async {
+  Future<int> requestMtu(String deviceId, int mtu, {Duration? timeout}) async {
     calls.add('requestMtu $mtu');
+    mtuTimeouts.add(timeout);
     await mtuGate?.future;
     if (mtuError != null) throw mtuError!;
     calls.add('mtuResult $negotiatedMtu');
@@ -178,10 +190,15 @@ class FakeBleAdapter implements BleAdapter {
       calls.add('priorityHigh');
 
   @override
-  Future<List<BleServiceInfo>> discoverServices(String deviceId) async {
+  Future<List<BleServiceInfo>> discoverServices(
+    String deviceId, {
+    Duration? timeout,
+  }) async {
     calls.add('discoverServices');
+    discoveryTimeouts.add(timeout);
     final result = services;
     await discoveryGate?.future;
+    if (discoveryError != null) throw discoveryError!;
     return result;
   }
 

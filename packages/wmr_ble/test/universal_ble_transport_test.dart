@@ -61,6 +61,8 @@ void main() {
         await connectAndSubscribe();
 
         expect(adapter.calls, sequence);
+        expect(adapter.lastMtuTimeout, const Duration(seconds: 5));
+        expect(adapter.lastDiscoveryTimeout, const Duration(seconds: 10));
         expect(t.status.phase, BleLinkPhase.ready);
         expect(t.status.mtu, 185);
         expect(t.negotiatedMtu(id), 185);
@@ -103,6 +105,147 @@ void main() {
       expect(t.status.mtu, isNull);
       expect(t.status.warnings.single, contains('MTU request failed'));
       expect(t.status.phase, BleLinkPhase.ready);
+      expect(adapter.calls, [
+        'connect',
+        'requestMtu 517',
+        'priorityHigh',
+        'discoverServices',
+        'enableNotifications',
+      ]);
+    });
+
+    test('MTU TimeoutException from unresponsive peer fails fast, skips priority and discovery, and disconnects', () async {
+      const bounded = Duration(milliseconds: 20);
+      final timed = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(milliseconds: 30),
+        mtuTimeout: bounded,
+      );
+      addTearDown(timed.dispose);
+
+      adapter.mtuGate = Completer<void>();
+
+      await expectLater(
+        timed.connect(id),
+        throwsA(
+          isA<BleTransportException>().having(
+            (e) => e.phase,
+            'phase',
+            BleLinkPhase.connectFailed,
+          ),
+        ),
+      );
+
+      expect(adapter.lastMtuTimeout, bounded);
+      expect(adapter.calls, ['connect', 'requestMtu 517', 'disconnect']);
+      expect(adapter.calls, isNot(contains('priorityHigh')));
+      expect(adapter.calls, isNot(contains('discoverServices')));
+      expect(timed.statusFor(id).phase, BleLinkPhase.connectFailed);
+      expect(timed.negotiatedMtu(id), isNull);
+      expect(
+        await timed.connectionState(id).first,
+        BleConnectionState.disconnected,
+      );
+
+      // Session state is cleared so a subsequent connect succeeds.
+      adapter.calls.clear();
+      adapter.mtuGate = null;
+      await timed.connect(id);
+      expect(timed.statusFor(id).phase, BleLinkPhase.ready);
+    });
+
+    test('adapter-thrown MTU TimeoutException fails fast with connectFailed and disconnects', () async {
+      adapter.mtuError = TimeoutException('mtu timed out');
+
+      await expectLater(
+        t.connect(id),
+        throwsA(
+          isA<BleTransportException>().having(
+            (e) => e.phase,
+            'phase',
+            BleLinkPhase.connectFailed,
+          ),
+        ),
+      );
+
+      expect(adapter.lastMtuTimeout, const Duration(seconds: 5));
+      expect(adapter.calls, ['connect', 'requestMtu 517', 'disconnect']);
+      expect(adapter.calls, isNot(contains('priorityHigh')));
+      expect(adapter.calls, isNot(contains('discoverServices')));
+      expect(t.statusFor(id).phase, BleLinkPhase.connectFailed);
+    });
+
+    test('discoverServices TimeoutException fails with connectFailed and disconnects', () async {
+      const bounded = Duration(milliseconds: 20);
+      final timed = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(milliseconds: 30),
+        discoveryTimeout: bounded,
+      );
+      addTearDown(timed.dispose);
+
+      adapter.discoveryGate = Completer<void>();
+
+      await expectLater(
+        timed.connect(id),
+        throwsA(
+          isA<BleTransportException>().having(
+            (e) => e.phase,
+            'phase',
+            BleLinkPhase.connectFailed,
+          ),
+        ),
+      );
+
+      expect(adapter.lastDiscoveryTimeout, bounded);
+      expect(adapter.calls, [
+        'connect',
+        'requestMtu 517',
+        'mtuResult 185',
+        'priorityHigh',
+        'discoverServices',
+        'disconnect',
+      ]);
+      expect(timed.statusFor(id).phase, BleLinkPhase.connectFailed);
+      expect(timed.negotiatedMtu(id), isNull);
+      expect(
+        await timed.connectionState(id).first,
+        BleConnectionState.disconnected,
+      );
+
+      // Session state is cleared so a subsequent connect succeeds.
+      adapter.calls.clear();
+      adapter.discoveryGate = null;
+      await timed.connect(id);
+      expect(timed.statusFor(id).phase, BleLinkPhase.ready);
+    });
+
+    test('adapter-thrown discoverServices TimeoutException fails with connectFailed and disconnects', () async {
+      adapter.discoveryError = TimeoutException('discovery timed out');
+
+      await expectLater(
+        t.connect(id),
+        throwsA(
+          isA<BleTransportException>().having(
+            (e) => e.phase,
+            'phase',
+            BleLinkPhase.connectFailed,
+          ),
+        ),
+      );
+
+      expect(adapter.lastDiscoveryTimeout, const Duration(seconds: 10));
+      expect(adapter.calls, [
+        'connect',
+        'requestMtu 517',
+        'mtuResult 185',
+        'priorityHigh',
+        'discoverServices',
+        'disconnect',
+      ]);
+      expect(t.statusFor(id).phase, BleLinkPhase.connectFailed);
     });
 
     test('does not read the status characteristic on its own', () async {

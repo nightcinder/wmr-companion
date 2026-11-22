@@ -140,6 +140,24 @@ void main() {
       await expectOffAndRedial(failed, beforeOff);
     });
 
+    test('off releases a discovery request that never resolves', () async {
+      adapter.discoveryGate = Completer<void>();
+      final failed = throwsBluetoothOff(t.connect(id));
+      await pump();
+      expect(adapter.calls, [
+        'connect',
+        'requestMtu 517',
+        'mtuResult 185',
+        'priorityHigh',
+        'discoverServices',
+      ]);
+
+      final beforeOff = adapter.calls.toList();
+      adapter.emitAvailability(BleAvailability.poweredOff);
+      adapter.discoveryGate = null;
+      await expectOffAndRedial(failed, beforeOff);
+    });
+
     test('off before discovery prevents calling the dead stack', () async {
       final beforeOff = Completer<List<String>>();
       final sub = t.statusChanges.listen((status) {
