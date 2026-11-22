@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:wmr_core/protocol/bridge_status.dart';
+import 'package:wmr_core/protocol/firmware_version.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 
 import 'ble_adapter.dart';
@@ -139,7 +141,9 @@ class UniversalBleTransport
     this.availabilityWait = const Duration(seconds: 3),
     this.mtuTimeout = const Duration(seconds: 5),
     this.discoveryTimeout = const Duration(seconds: 10),
+    this.versionReadTimeout = const Duration(seconds: 5),
     this.requestedMtu = wmrRequestedMtu,
+    this.skipHighPriorityForPiEndpoints = true,
     this.enableRetries = 2,
     this.enableRetryDelay = const Duration(milliseconds: 250),
   }) : _adapter = adapter,
@@ -157,7 +161,9 @@ class UniversalBleTransport
   final Duration availabilityWait;
   final Duration mtuTimeout;
   final Duration discoveryTimeout;
+  final Duration versionReadTimeout;
   final int requestedMtu;
+  final bool skipHighPriorityForPiEndpoints;
 
   /// Extra `enableNotifications` attempts after the platform reports
   /// `WRITE_REQUEST_BUSY`.
@@ -700,20 +706,6 @@ class UniversalBleTransport
 
       _checkSetup(session);
 
-      if (_adapter.supportsConnectionPriority) {
-        try {
-          await session.untilRadioOff(
-            _adapter.requestHighConnectionPriority(deviceId),
-          );
-          session.priorityRequested = true;
-        } catch (e) {
-          _checkSetup(session);
-          session.priorityRequested = false;
-          session.warnings.add('Connection priority request failed: $e');
-        }
-        _checkSetup(session);
-      }
-
       _emit(BleLinkPhase.discovering, deviceId: deviceId);
       final List<BleServiceInfo> services;
       try {
@@ -748,6 +740,59 @@ class UniversalBleTransport
       }
 
       session.services = List.unmodifiable(services);
+
+      var isPiEndpoint = false;
+      if (skipHighPriorityForPiEndpoints &&
+          _adapter.supportsConnectionPriority) {
+        final hasVersion = services.any(
+          (s) =>
+              s.uuid.toLowerCase() == wmrBridgeServiceUuid &&
+              s.characteristicUuids.any(
+                (c) => c.toLowerCase() == wmrBridgeVersionCharUuid,
+              ),
+        );
+        if (hasVersion) {
+          try {
+            final bytes = await session.untilRadioOff(
+              _adapter
+                  .read(
+                    deviceId,
+                    wmrBridgeServiceUuid,
+                    wmrBridgeVersionCharUuid,
+                    timeout: versionReadTimeout,
+                  )
+                  .timeout(versionReadTimeout),
+            );
+            isPiEndpoint = _isPiBleEndpoint(bytes);
+          } on TimeoutException catch (e) {
+            _checkSetup(session);
+            throw _fail(
+              BleLinkPhase.connectFailed,
+              'Version read timed out: $e',
+              deviceId: deviceId,
+            );
+          } catch (e) {
+            _checkSetup(session);
+            session.warnings.add('Version read failed: $e');
+          }
+          _checkSetup(session);
+        }
+      }
+
+      if (_adapter.supportsConnectionPriority && !isPiEndpoint) {
+        try {
+          await session.untilRadioOff(
+            _adapter.requestHighConnectionPriority(deviceId),
+          );
+          session.priorityRequested = true;
+        } catch (e) {
+          _checkSetup(session);
+          session.priorityRequested = false;
+          session.warnings.add('Connection priority request failed: $e');
+        }
+        _checkSetup(session);
+      }
+
       session.ready = true;
       for (final key in _wanted.keys.toList()) {
         final w = _wanted[key]!;
@@ -874,6 +919,27 @@ class UniversalBleTransport
       key.endsWith('|$wmrBridgeStreamCharUuid') ||
       key.endsWith('|$wmrBridgeDecodedCharUuid') ||
       key.endsWith('|$wmrBridgeBatchedCharUuid');
+
+  static bool _isPiBleEndpoint(Uint8List value) {
+    var bytes = value;
+    if (bytes.isNotEmpty && bytes.last == 0) {
+      bytes = Uint8List.sublistView(bytes, 0, bytes.length - 1);
+    }
+    int? first;
+    for (final byte in bytes) {
+      if (byte != 0x20 && byte != 0x09 && byte != 0x0a && byte != 0x0d) {
+        first = byte;
+        break;
+      }
+    }
+    if (first != 0x7b) return false;
+    try {
+      final decoded = jsonDecode(utf8.decode(bytes, allowMalformed: false));
+      return decoded is Map && decoded['type'] == wmrBleEndpointDocumentType;
+    } on FormatException {
+      return false;
+    }
+  }
 
   @override
   Future<void> disconnect(String deviceId) {

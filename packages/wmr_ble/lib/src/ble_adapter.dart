@@ -178,8 +178,9 @@ abstract class BleAdapter {
   Future<Uint8List> read(
     String deviceId,
     String serviceUuid,
-    String characteristicUuid,
-  );
+    String characteristicUuid, {
+    Duration? timeout,
+  });
 
   Future<void> write(
     String deviceId,
