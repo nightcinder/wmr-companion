@@ -66,10 +66,16 @@ the exact notifications the ESP32 sends.
 - **Sequence accounting** (`ControllerService`), per hand, using modular
   `sequenceDelta`: delta > 1 adds `delta - 1` to `gaps`; delta <= 0 counts as
   `outOfOrder` (duplicate, reorder, or ESP32 reboot). The first frame after
-  subscribing sets the baseline and is not counted as a gap.
+  subscribing sets the baseline and is not counted as a gap. On a decimated Pi
+  BLE `FF14` stream (Option C profile, `50–100 Hz`), `sequence` advances by
+  stride `N`, so `sequenceGaps` increments by `delta - 1` per stride while
+  `TickTimer` (`window = 256`) settles `missingFromTicks` to `0` at steady
+  state after the 256-delta rollover.
 - **Requested MTU** 517 (`wmrRequestedMtu`), on every connect. The app must
   use the negotiated value it gets back. Not verified on hardware: Android 14+
-  drives the MTU itself, so the result can differ from the request.
+  drives the MTU itself, so the result can differ from the request. On a Pi
+  bridge with Option C load cuts active, the peripheral caps the negotiated
+  MTU at `247` (at most 4 records per `FF14` notification).
 - **Reconnects.** `ControllerService.start()` must run again after every
   reconnect (the bridge forgets subscription, MTU and priority).
 - **Frame payload.** FF11 frames stay undecoded and feed the Capture screen
@@ -124,7 +130,7 @@ value updates without subscribers are no longer errors.
 | Need | API | Notes |
 | --- | --- | --- |
 | MTU | `requestMtu(deviceId, mtu)` | Returns the value the stack reports afterwards; the transport records that, never the request. Android 13 and older: one request per connection; Android 14+: the stack drives the MTU, later requests are ignored. iOS/macOS: the app cannot request an MTU, the OS value comes back (and is only meaningful after service discovery, which the package does on demand). Windows/Linux: query only. Web: unsupported. |
-| Connection priority | `requestConnectionPriority(.., highPerformance)` | Android only; throws `notSupported` elsewhere, so the transport skips the call when `BleCapabilities.supportsConnectionPriorityApi` is false and `priorityRequested` stays null. |
+| Connection priority | `requestConnectionPriority(.., highPerformance)` | Android only; throws `notSupported` elsewhere, so the transport skips the call when `BleCapabilities.supportsConnectionPriorityApi` is false and `priorityRequested` stays null. When `skipHighPriorityForPiEndpoints` is true and `FF16` returns a `wmr_ble_endpoint` JSON document, the transport also skips this call so a Pi bridge keeps a `15–30 ms` interval (`priorityRequested` stays null). |
 | RSSI | `readRssi` | Read on demand in `connectionInfo`. |
 | Notifications | `subscribeNotifications`, `characteristicValueStream` | The value stream carries no timestamp; the transport stamps in its own listener. `onValueChange` has a platform timestamp, unused (not comparable across platforms, and the rule is to use our monotonic clock). 3.2.0 keeps each characteristic's subscription independent on Android, so the FF11–FF15 subscriptions do not disturb each other. |
 | Permissions | `hasPermissions`, `requestPermissions` | Handled by the plugin: Android 12+ BLUETOOTH_SCAN/BLUETOOTH_CONNECT (and older location) are requested from the activity, based on what the manifest declares; iOS via CoreBluetooth authorization. `permission_handler` is not needed and not added. Needs an activity in the foreground; denial throws `UniversalBleException`. |
@@ -144,12 +150,19 @@ callback) have no separate hardware record.
 - `BleAdapter` (`lib/ble/ble_adapter.dart`) is the thin interface over the
   package; `UniversalBleAdapter` is the only file that imports
   `universal_ble`.
-- `connect()` runs: permissions, radio state, link, `requestMtu(517)` (record
-  the result), high priority if supported, service discovery, check for
-  FF10/FF11. `subscribe()` then enables notifications; it is queued behind
-  the setup, so it cannot run before the MTU result. All steps go through one
-  serial queue. A failed MTU or priority request is a warning in
-  `BleLinkStatus.warnings`; missing FF10/FF11 or a failed link is an error.
+- `connect()` runs: permissions, radio state, link, `requestMtu(517)` (bounded
+  by `mtuTimeout`, 5 s; record the result), `discoverServices` (bounded by
+  `discoveryTimeout`, 10 s), check for FF10/FF11, bounded `FF16` read
+  (`versionReadTimeout`, 5 s) when `skipHighPriorityForPiEndpoints` is true,
+  the adapter supports the connection-priority API (Android), and FF16 is
+  present, and `highPerformance` priority if supported and FF16 is not
+  a `wmr_ble_endpoint` Pi bridge (Pi endpoints keep a `15–30 ms` interval).
+  `subscribe()` then enables notifications; it is queued behind the setup, so
+  it cannot run before the MTU result. All steps go through one serial queue.
+  A failed MTU, non-timeout FF16 read, or priority request is a warning in
+  `BleLinkStatus.warnings`. A timed-out MTU request, timed-out or failed
+  service discovery, timed-out FF16 read, missing FF10/FF11, or failed link
+  transitions to `connectFailed` or `serviceNotFound`.
 - The sequence runs again on every `connect()`. After an unexpected drop the
   transport reports `connectionLost` and does nothing else; the UI offers
   Reconnect, which calls `ControllerService.start()` again. `start()` also
@@ -167,8 +180,10 @@ callback) have no separate hardware record.
 - Failure states exposed to the UI: `bluetoothOff`, `bluetoothUnavailable`,
   `permissionDenied`, `scanTimeout`, `connectFailed`, `serviceNotFound`,
   `connectionLost`.
-- Open question: the package's connect has its own 60 s default timeout and
-  the command queue a 10 s default for other steps; neither was tuned.
+- Setup timeouts: `mtuTimeout` (5 s), `discoveryTimeout` (10 s), and
+  `versionReadTimeout` (5 s) bound `requestMtu`, `discoverServices`, and the
+  `FF16` endpoint check (`UniversalBleTransport` defaults, `#372` and
+  ONY-1731). The package's `connect` call keeps its 60 s default timeout.
 
 ## FF12 decoded stream
 
@@ -719,6 +734,14 @@ and docs/PI_BRIDGE.md. Summary of what the app must not assume:
   does not read the FF13 calibration block from the controller yet, so a
   calibration read returns `NOT_READ`.
 - On the WebSocket the same FF11/FF12/FF14 values arrive as binary messages,
-  and `ping`/`pong` replaces FF15.
+  and `ping`/`pong` replaces FF15. TCP stays unthrottled at `200 Hz` nominal.
+- On `hci_uart` and `serial` Pi adapters, BLE `FF14` fallback uses the Option C
+  lower-rate profile (WMR_Bridge `docs/PROTOCOL.md`, "Batched stream pacing
+  and Option C BLE profile on the Pi"): `50–100 Hz` per hand (`50 Hz` default),
+  `MTU <= 247` (at most 4 records per notification), and a `15–30 ms`
+  connection interval (the app skips `highPerformance` priority). Because
+  `sequence` tracks controller frames, `sequenceGaps` increments by stride on
+  decimated BLE `FF14` streams while `TickTimer` (`window = 256`) settles
+  `missingFromTicks` to `0` at steady state after the 256-delta rollover.
 
 Test plan for this target: [TEST_PLAN_PI_WMR.md](TEST_PLAN_PI_WMR.md).

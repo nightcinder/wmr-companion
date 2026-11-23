@@ -141,14 +141,16 @@ receipt T2 and the journal lower bound to explain the gate result.
   (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:80-83`). It sits
   under **Stream** in the Debug screen (`:217-229`).
 - Before the first switch the row reads `Last link switch none yet` (`:645`).
-- On the Pi 3B+, run on a `btusb` `hci0` adapter with `dtoverlay=disable-bt`
-  for Option B (`WMR_Bridge` `docs/runs/sheets/bench.md:7`). Do not use an
-  `hci_uart*` or `serial` adapter, because `wmr-bridge` auto-gates serial
-  adapters to TCP-only (`WMR_Bridge` `pi/wmr_bridge/__main__.py:801-816`,
-  `pi/wmr_bridge/bluez.py:90-148`). Make sure that the `wmr-bridge` log prints
-  `BLE GATT: FF10 on ...` (`WMR_Bridge` `pi/wmr_bridge/__main__.py:843-847`).
-  Make sure that `wmr-bridge status` prints `powered=yes` (`WMR_Bridge`
-  `pi/wmr_bridge/__main__.py:608-610`).
+- On the Pi 3B+, run on the onboard `BCM4345C0` (`hci_uart_bcm`) `hci0` adapter
+  with Option C BLE load cuts enabled by default (`WMR_Bridge`
+  `docs/runs/sheets/bench.md:7`). Capture `btmon` during the single BLE
+  failover bench. If `hardware error 0x00`, `-84`, or `-110` returns once, set
+  `WMR_BRIDGE_ARGS="--no-ble"` in `/etc/wmr-bridge/wmr-bridge.env` (`WMR_Bridge`
+  `docs/runs/sheets/bench.md:7`) so the Pi 3B+ ships TCP-only on the `#281`
+  degraded path, and do not retry on the onboard chip. Make sure that the
+  `wmr-bridge` log prints `BLE GATT: FF10 on ...` (`WMR_Bridge`
+  `pi/wmr_bridge/__main__.py:870-873`). Make sure that `wmr-bridge status`
+  prints `powered=yes` (`WMR_Bridge` `pi/wmr_bridge/__main__.py:638-642`).
 - On the Pi, `wmr-bridge` runs and both controllers stream. Isolate or unplug
   `eth0`, and confirm that `wlan0` is the uplink (`WMR_Bridge`
   `docs/runs/sheets/bench.md:11`). With `eth0` still connected, the outage may
