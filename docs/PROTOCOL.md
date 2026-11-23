@@ -153,8 +153,9 @@ callback) have no separate hardware record.
 - `connect()` runs: permissions, radio state, link, `requestMtu(517)` (bounded
   by `mtuTimeout`, 5 s; record the result), `discoverServices` (bounded by
   `discoveryTimeout`, 10 s), check for FF10/FF11, bounded `FF16` read
-  (`versionReadTimeout`, 5 s) when `skipHighPriorityForPiEndpoints` is true and
-  FF16 is present, and `highPerformance` priority if supported and FF16 is not
+  (`versionReadTimeout`, 5 s) when `skipHighPriorityForPiEndpoints` is true,
+  the adapter supports the connection-priority API (Android), and FF16 is
+  present, and `highPerformance` priority if supported and FF16 is not
   a `wmr_ble_endpoint` Pi bridge (Pi endpoints keep a `15–30 ms` interval).
   `subscribe()` then enables notifications; it is queued behind the setup, so
   it cannot run before the MTU result. All steps go through one serial queue.
