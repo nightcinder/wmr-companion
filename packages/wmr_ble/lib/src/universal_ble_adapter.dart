@@ -176,8 +176,14 @@ class UniversalBleAdapter implements BleAdapter {
   Future<Uint8List> read(
     String deviceId,
     String serviceUuid,
-    String characteristicUuid,
-  ) => ub.UniversalBle.read(deviceId, serviceUuid, characteristicUuid);
+    String characteristicUuid, {
+    Duration? timeout,
+  }) => ub.UniversalBle.read(
+    deviceId,
+    serviceUuid,
+    characteristicUuid,
+    timeout: timeout,
+  );
 
   @override
   Future<void> write(

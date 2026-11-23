@@ -35,19 +35,34 @@ class FakeBleAdapter implements BleAdapter {
   /// When set, [requestMtu] waits for this completer before answering.
   Completer<void>? mtuGate;
 
+  /// When set, [read] waits for this completer before answering.
+  Completer<void>? readGate;
+
   /// Object? set to make [requestMtu] throw.
   Object? mtuError;
 
   /// Object? set to make [discoverServices] throw.
   Object? discoveryError;
 
-  /// Forwarded `timeout` arguments from [requestMtu] and [discoverServices].
+  /// Object? set to make [read] throw.
+  Object? readError;
+
+  /// Canned payloads returned by [read], keyed by lower-case characteristic UUID.
+  final Map<String, Uint8List> readValues = {};
+
+  /// Characteristic UUIDs passed to [read] in order.
+  final List<String> readCharacteristics = [];
+
+  /// Forwarded `timeout` arguments from [requestMtu], [discoverServices], and [read].
   final List<Duration?> mtuTimeouts = [];
   final List<Duration?> discoveryTimeouts = [];
+  final List<Duration?> readTimeouts = [];
 
   Duration? get lastMtuTimeout => mtuTimeouts.isEmpty ? null : mtuTimeouts.last;
   Duration? get lastDiscoveryTimeout =>
       discoveryTimeouts.isEmpty ? null : discoveryTimeouts.last;
+  Duration? get lastReadTimeout =>
+      readTimeouts.isEmpty ? null : readTimeouts.last;
 
   // Sync, like a platform callback: the transport must stamp in the callback.
   final _values = StreamController<(String?, String, Uint8List)>.broadcast(
@@ -291,10 +306,15 @@ class FakeBleAdapter implements BleAdapter {
   Future<Uint8List> read(
     String deviceId,
     String serviceUuid,
-    String characteristicUuid,
-  ) async {
+    String characteristicUuid, {
+    Duration? timeout,
+  }) async {
     calls.add('read');
-    return Uint8List(16);
+    readCharacteristics.add(characteristicUuid);
+    readTimeouts.add(timeout);
+    await readGate?.future;
+    if (readError != null) throw readError!;
+    return readValues[characteristicUuid.toLowerCase()] ?? Uint8List(16);
   }
 
   @override

@@ -148,7 +148,6 @@ void main() {
         'connect',
         'requestMtu 517',
         'mtuResult 185',
-        'priorityHigh',
         'discoverServices',
       ]);
 
@@ -158,7 +157,29 @@ void main() {
       await expectOffAndRedial(failed, beforeOff);
     });
 
+    test(
+      'P4: off releases a post-discovery FF16 read that never resolves',
+      () async {
+        adapter.readGate = Completer<void>();
+        final failed = throwsBluetoothOff(t.connect(id));
+        await pump();
+        expect(adapter.calls, [
+          'connect',
+          'requestMtu 517',
+          'mtuResult 185',
+          'discoverServices',
+          'read',
+        ]);
+
+        final beforeOff = adapter.calls.toList();
+        adapter.emitAvailability(BleAvailability.poweredOff);
+        adapter.readGate = null;
+        await expectOffAndRedial(failed, beforeOff);
+      },
+    );
+
     test('off before discovery prevents calling the dead stack', () async {
+      adapter.mtuGate = Completer<void>();
       final beforeOff = Completer<List<String>>();
       final sub = t.statusChanges.listen((status) {
         if (status.phase != BleLinkPhase.negotiatingMtu ||
@@ -167,6 +188,7 @@ void main() {
         }
         beforeOff.complete(adapter.calls.toList());
         adapter.emitAvailability(BleAvailability.poweredOff);
+        adapter.mtuGate = null;
       });
       addTearDown(sub.cancel);
       final failed = throwsBluetoothOff(t.connect(id));

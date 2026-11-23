@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -24,8 +25,9 @@ const sequence = [
   'connect',
   'requestMtu 517',
   'mtuResult 185',
-  'priorityHigh',
   'discoverServices',
+  'read',
+  'priorityHigh',
   'enableNotifications',
 ];
 
@@ -108,8 +110,9 @@ void main() {
       expect(adapter.calls, [
         'connect',
         'requestMtu 517',
-        'priorityHigh',
         'discoverServices',
+        'read',
+        'priorityHigh',
         'enableNotifications',
       ]);
     });
@@ -204,7 +207,6 @@ void main() {
         'connect',
         'requestMtu 517',
         'mtuResult 185',
-        'priorityHigh',
         'discoverServices',
         'disconnect',
       ]);
@@ -241,8 +243,199 @@ void main() {
         'connect',
         'requestMtu 517',
         'mtuResult 185',
-        'priorityHigh',
         'discoverServices',
+        'disconnect',
+      ]);
+      expect(t.statusFor(id).phase, BleLinkPhase.connectFailed);
+    });
+
+    test(
+      'P1: skips high connection priority on Pi wmr_ble_endpoint bridges',
+      () async {
+        adapter.readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': 'pi-bridge',
+              'version': '0.2.4',
+            }),
+          ),
+        );
+
+        await connectAndSubscribe();
+
+        expect(adapter.calls, [
+          'connect',
+          'requestMtu 517',
+          'mtuResult 185',
+          'discoverServices',
+          'read',
+          'enableNotifications',
+        ]);
+        expect(adapter.calls, isNot(contains('priorityHigh')));
+        expect(adapter.lastReadTimeout, const Duration(seconds: 5));
+        expect(t.status.phase, BleLinkPhase.ready);
+        expect(t.status.priorityRequested, isNull);
+      },
+    );
+
+    test(
+      'P2: requests high connection priority on ESP32 plain version FF16',
+      () async {
+        adapter.readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode('0.3.19'),
+        );
+
+        await connectAndSubscribe();
+
+        expect(adapter.calls, sequence);
+        expect(adapter.lastReadTimeout, const Duration(seconds: 5));
+        expect(t.status.phase, BleLinkPhase.ready);
+        expect(t.status.priorityRequested, isTrue);
+      },
+    );
+
+    test('P2: requests high connection priority on Pi endpoint when config gate is off', () async {
+      final unGated = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(milliseconds: 30),
+        skipHighPriorityForPiEndpoints: false,
+      );
+      addTearDown(unGated.dispose);
+
+      adapter.readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+        utf8.encode(
+          jsonEncode({
+            'type': 'wmr_ble_endpoint',
+            'protocol': 1,
+            'bridge_id': 'pi-bridge',
+            'version': '0.2.4',
+          }),
+        ),
+      );
+
+      await unGated.connect(id);
+      unGated.subscribe(id, wmrBridgeServiceUuid, wmrBridgeStreamCharUuid);
+      await pump();
+
+      expect(adapter.calls, contains('priorityHigh'));
+      expect(unGated.status.phase, BleLinkPhase.ready);
+      expect(unGated.status.priorityRequested, isTrue);
+    });
+
+    test(
+      'P3: absent FF16 skips read and keeps non-Pi high priority behavior',
+      () async {
+        adapter.services = const [
+          BleServiceInfo(
+            uuid: wmrBridgeServiceUuid,
+            characteristicUuids: [
+              wmrBridgeStreamCharUuid,
+              wmrBridgeDecodedCharUuid,
+              wmrBridgeBatchedCharUuid,
+            ],
+          ),
+        ];
+
+        await connectAndSubscribe();
+
+        expect(adapter.calls, isNot(contains('read')));
+        expect(adapter.calls, [
+          'connect',
+          'requestMtu 517',
+          'mtuResult 185',
+          'discoverServices',
+          'priorityHigh',
+          'enableNotifications',
+        ]);
+        expect(t.status.phase, BleLinkPhase.ready);
+        expect(t.status.priorityRequested, isTrue);
+      },
+    );
+
+    test(
+      'P3: non-timeout FF16 read error records warning and proceeds to ready',
+      () async {
+        adapter.readError = StateError('gatt read failed');
+
+        await connectAndSubscribe();
+
+        expect(t.status.phase, BleLinkPhase.ready);
+        expect(t.status.warnings, contains(contains('Version read failed')));
+        expect(adapter.calls, sequence);
+        expect(t.status.priorityRequested, isTrue);
+      },
+    );
+
+    test('P3: FF16 read TimeoutException fails fast with connectFailed and disconnects', () async {
+      const bounded = Duration(milliseconds: 20);
+      final timed = UniversalBleTransport(
+        adapter: adapter,
+        clock: clock,
+        scanTimeout: const Duration(milliseconds: 30),
+        versionReadTimeout: bounded,
+      );
+      addTearDown(timed.dispose);
+
+      adapter.readGate = Completer<void>();
+
+      await expectLater(
+        timed.connect(id),
+        throwsA(
+          isA<BleTransportException>().having(
+            (e) => e.phase,
+            'phase',
+            BleLinkPhase.connectFailed,
+          ),
+        ),
+      );
+
+      expect(adapter.lastReadTimeout, bounded);
+      expect(adapter.calls, [
+        'connect',
+        'requestMtu 517',
+        'mtuResult 185',
+        'discoverServices',
+        'read',
+        'disconnect',
+      ]);
+      expect(adapter.calls, isNot(contains('priorityHigh')));
+      expect(timed.statusFor(id).phase, BleLinkPhase.connectFailed);
+      expect(
+        await timed.connectionState(id).first,
+        BleConnectionState.disconnected,
+      );
+
+      // Session state is cleared so a subsequent connect succeeds.
+      adapter.calls.clear();
+      adapter.readGate = null;
+      await timed.connect(id);
+      expect(timed.statusFor(id).phase, BleLinkPhase.ready);
+    });
+
+    test('P3: adapter-thrown FF16 read TimeoutException fails fast with connectFailed and disconnects', () async {
+      adapter.readError = TimeoutException('version read timed out');
+
+      await expectLater(
+        t.connect(id),
+        throwsA(
+          isA<BleTransportException>().having(
+            (e) => e.phase,
+            'phase',
+            BleLinkPhase.connectFailed,
+          ),
+        ),
+      );
+
+      expect(adapter.lastReadTimeout, const Duration(seconds: 5));
+      expect(adapter.calls, [
+        'connect',
+        'requestMtu 517',
+        'mtuResult 185',
+        'discoverServices',
+        'read',
         'disconnect',
       ]);
       expect(t.statusFor(id).phase, BleLinkPhase.connectFailed);
@@ -250,11 +443,17 @@ void main() {
 
     test('does not read the status characteristic on its own', () async {
       await connectAndSubscribe();
-      expect(adapter.calls, isNot(contains('read')));
+      expect(
+        adapter.readCharacteristics,
+        isNot(contains(wmrBridgeStreamCharUuid)),
+      );
 
       final status = await t.readBridgeStatus(id);
       expect(status, isNotNull);
-      expect(adapter.calls.where((c) => c == 'read'), hasLength(1));
+      expect(
+        adapter.readCharacteristics.where((c) => c == wmrBridgeStreamCharUuid),
+        hasLength(1),
+      );
     });
 
     test('reports the interval only once the platform provides it', () async {
@@ -299,8 +498,9 @@ void main() {
         'connect',
         'requestMtu 517',
         'mtuResult 247',
-        'priorityHigh',
         'discoverServices',
+        'read',
+        'priorityHigh',
         'enableNotifications',
       ]);
       expect(t.status.mtu, 247);

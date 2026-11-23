@@ -1634,8 +1634,9 @@ class _EndpointAdapter extends FakeBleAdapter {
   Future<Uint8List> read(
     String deviceId,
     String serviceUuid,
-    String characteristicUuid,
-  ) async {
+    String characteristicUuid, {
+    Duration? timeout,
+  }) async {
     if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
       return Uint8List.fromList(
         utf8.encode(
@@ -1653,7 +1654,12 @@ class _EndpointAdapter extends FakeBleAdapter {
         ),
       );
     }
-    return super.read(deviceId, serviceUuid, characteristicUuid);
+    return super.read(
+      deviceId,
+      serviceUuid,
+      characteristicUuid,
+      timeout: timeout,
+    );
   }
 }
 
