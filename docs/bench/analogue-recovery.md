@@ -420,7 +420,7 @@ stops `clock-proof.py` and captures T2, and after step 10 reads `dropped=`.
 Never export during `[T0, stop(clock-proof)]`. Tap **Export test bundle** on
 the Connect screen (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1156-1190`).
 The app writes `wmr-ext-<yyyyMMdd>.zip` in the app documents `exports` folder
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:426`,
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:437`,
 `apps/wmr_companion_app/lib/services/test_bundle_export.dart:85-88`), then
 opens Android's share sheet (`SharePlus.instance.share(...)`,
 `apps/wmr_companion_app/lib/services/test_bundle_export.dart:225-246`). Keep a
@@ -516,7 +516,7 @@ columns use those marks and the calculations above.
 ## The bundle's copy of the timeline
 
 `diagnostics.json` carries the marks under `link_timeline`
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:605`). The top-level
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:616`). The top-level
 keys are the marks of the most recent episode. They include
 `first_upgrade_dial_start_us` and `upgrade_dial_attempts`
 (`packages/wmr_companion/lib/src/link_timeline.dart:134-135`) and
@@ -586,3 +586,41 @@ The takeover this gives is the figure the row printed live, and it stays
 at least zero after the route has moved on. T2 itself stays the USB receipt
 upper bound: the episode's `first_tcp_record_us` is the phone-clock
 cross-check, information only, never a substitute.
+
+## Pre-pull bundle freshness, provenance, and redaction gates
+
+Check every exported `diagnostics.json` before pulling or scoring a run:
+
+1. **Freshness (`generated_at`):** Confirm `generated_at`
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:595`) falls inside
+   the current run window (after the run's T2 and before the next run's T0).
+2. **Build provenance (`app.commit`):** Confirm `app.commit`
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:596-600`,
+   `apps/wmr_companion_app/lib/services/test_bundle_export.dart:80-83,194`)
+   matches the installed build under test (never accept a stale or `unknown`
+   build on a scored run).
+3. **Not stalled (`stalled`):** Confirm every connected entry in `bridges[]`
+   reports `stream.stalled: false`
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:188-194`,
+   `apps/wmr_companion_app/lib/services/test_bundle_export.dart:144-145`). A
+   connected link with `stalled: true` (and non-null `silent_for_ms`) is a
+   silent/stalled stream, not healthy streaming.
+4. **Active streaming (`records` / `rate_hz`):** Confirm `bridges[].stream.rate_hz`
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:190`,
+   `apps/wmr_companion_app/lib/services/test_bundle_export.dart:142`) and
+   `stream.decoded.records`
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:602-607`,
+   `apps/wmr_companion_app/lib/services/test_bundle_export.dart:329-333`) are
+   non-zero. Zero `rate_hz` and unchanged cumulative `records` fail sustained
+   streaming confirmation.
+5. **Redaction (`bridges[].id`):** Redact raw Bluetooth MAC addresses in
+   `bridges[].id` (`apps/wmr_companion_app/lib/services/test_bundle.dart:171`,
+   `apps/wmr_companion_app/lib/services/test_bundle_export.dart:123`) and any
+   raw MACs, link keys, or tokens before sharing or attaching captures.
+6. **Per-run archive retention:** `writeTestBundle` always writes to
+   `wmr-ext-<yyyyMMdd>.zip`
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:437`,
+   `apps/wmr_companion_app/lib/services/test_bundle_export.dart:86-89`), so
+   same-day exports overwrite the previous zip. Copy or rename each run's
+   archive to a per-run path (such as `run-1.zip`, `run-2.zip`, `run-3.zip`)
+   immediately after export and before starting the next run.

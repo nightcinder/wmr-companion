@@ -141,6 +141,8 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
             mode: link.mode.name,
             rateHz: link.rateHz,
             loss: link.loss,
+            stalled: link.stalled,
+            silentForMs: link.silentFor?.inMilliseconds,
           ),
         );
       }

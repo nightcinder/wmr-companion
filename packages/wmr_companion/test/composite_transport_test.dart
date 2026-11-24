@@ -3912,7 +3912,7 @@ void main() {
           isA<StateError>().having(
             (error) => error.message,
             'message',
-            'tcp down',
+            'ble connect refused',
           ),
         ),
       );
@@ -5657,6 +5657,106 @@ void main() {
       (t) => t.suspendBleStreams(_tcpDeviceId),
     );
     await verifyBoundedWithZeroTimers('dispose', (t) => t.dispose());
+  });
+
+  test(
+    'connect() prefers bleError over tcpError when BLE fallback fails',
+    () async {
+      tcp.failConnect = true;
+      ble.dispose();
+      final refusing = _RecordingBle(
+        devices: const [
+          FakeDevice(
+            id: _bleDeviceId,
+            name: 'WMR Bridge',
+            services: fakeBridgeDeviceServices,
+          ),
+        ],
+      )..refusedConnects.add(_bleDeviceId);
+      refusing.onRead = (deviceId, characteristicUuid) {
+        if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+          return _versionString();
+        }
+        throw StateError('unexpected read $characteristicUuid');
+      };
+      ble = refusing;
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+      await transport.scan().toList();
+
+      await expectLater(
+        transport.connect(_tcpDeviceId),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'ble connect refused',
+          ),
+        ),
+      );
+    },
+  );
+
+  test('_bleCandidatesFor falls through to fresh _scanHits when cached bleDeviceId fails', () async {
+    const staleBleId = 'ble-stale';
+    const freshBleId = 'ble-fresh';
+    tcp.failConnect = true;
+    ble.dispose();
+    final multi = _RecordingBle(
+      devices: const [
+        FakeDevice(
+          id: staleBleId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+        FakeDevice(
+          id: freshBleId,
+          name: 'WMR Bridge',
+          services: fakeBridgeDeviceServices,
+        ),
+      ],
+    );
+    multi.onRead = (deviceId, characteristicUuid) {
+      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+        return _endpointDocument();
+      }
+      throw StateError('unexpected read $characteristicUuid');
+    };
+    ble = multi;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: const Duration(milliseconds: 20),
+    );
+    addTearDown(transport.dispose);
+
+    // Learn staleBleId first, then let it upgrade to TCP so route.bleDeviceId
+    // stays cached as staleBleId.
+    await transport.scan().toList();
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.ble);
+
+    tcp.failConnect = false;
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+    );
+
+    // Now staleBleId drops and refuses connect while TCP drops: failover must
+    // try staleBleId first and then fall through to freshBleId from _scanHits.
+    multi.refusedConnects.add(staleBleId);
+    await multi.disconnect(staleBleId);
+    tcp.failConnect = true;
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+    );
+    expect(transport.bleDeviceIdFor(_tcpDeviceId), freshBleId);
   });
 }
 

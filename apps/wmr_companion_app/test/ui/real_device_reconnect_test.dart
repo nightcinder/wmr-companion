@@ -1346,7 +1346,9 @@ void main() {
 
         state = container.read(realDeviceProvider);
         expect(state.wifiLeg, WifiLinkLeg.ble);
-        expect(countingAdapter.availabilityReads, readsBefore + 1);
+        // One availability read for the re-armed fallback scan preflight and
+        // one for the redial connect preflight.
+        expect(countingAdapter.availabilityReads, readsBefore + 2);
         expect(connectCalls(), connectsBefore + 1);
       },
     );
@@ -1982,5 +1984,216 @@ void main() {
       expect(state.wifiLeg, WifiLinkLeg.ble);
       expect(countingAdapter.ccc.where((c) => c == 'on ff14'), hasLength(1));
     });
+
+    test('Wi-Fi bleFallback with TCP down parks retry on poweredOff and recovers via re-armed fallback scan on poweredOn', () async {
+      const bridgeId = 'pi-1';
+      const bleDeviceId = 'ble-pi-1';
+      final endpoint = WmrWsEndpoint(
+        host: '192.168.1.42',
+        port: 8765,
+        bridgeId: bridgeId,
+      );
+      final countingAdapter = _CountingAdapter();
+      final ble = UniversalBleTransport(
+        adapter: countingAdapter,
+        scanTimeout: const Duration(minutes: 5),
+      );
+      addTearDown(ble.dispose);
+      final tcpInner = FakeTransport(
+        devices: [FakeDevice(id: endpoint.resolvedDeviceId)],
+      );
+      final tcp = _SwitchableTcp(tcpInner, endpoint: endpoint);
+      final composite = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        disposeBle: false,
+        lanAvailable: () async => true,
+        upgradeInterval: Duration.zero,
+        bleScanWait: const Duration(milliseconds: 50),
+      );
+      addTearDown(composite.dispose);
+      final wifiLink = WifiLink(
+        composite,
+        activeLeg: () =>
+            switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+              CompositeLeg.tcp => WifiLinkLeg.tcp,
+              CompositeLeg.ble => WifiLinkLeg.ble,
+              null => null,
+            },
+      );
+      const policy = ReconnectPolicy(
+        baseDelay: Duration(milliseconds: 120),
+        maxDelay: Duration(milliseconds: 120),
+        maxAttempts: 4,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          realTransportProvider.overrideWithValue(ble),
+          compositeWifiTransportFactoryProvider.overrideWithValue(
+            (_) => wifiLink,
+          ),
+          lanInterfaceProbeProvider.overrideWithValue(() async => true),
+          bridgeTokenStoreProvider.overrideWithValue(
+            BridgeTokenStore(MemorySecureTokenBackend()),
+          ),
+          knownBridgeStoreProvider.overrideWithValue(MemoryKnownBridgeStore()),
+          streamModeProvider.overrideWith(
+            () => TestModeNotifier(StreamMode.batched),
+          ),
+          reconnectPolicyProvider.overrideWithValue(policy),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(realDeviceProvider.notifier);
+      await controller.connectWifi(
+        host: endpoint.host,
+        port: endpoint.port,
+        bridgeId: bridgeId,
+        bleFallback: true,
+      );
+      expect(container.read(realDeviceProvider).wifiLeg, WifiLinkLeg.tcp);
+
+      // TCP drops with no BLE hit yet -> failover loses -> reconnect timer is
+      // armed in backoff.
+      tcp.failConnect = true;
+      unawaited(tcpInner.disconnect(endpoint.resolvedDeviceId));
+      await until(() => !container.read(realDeviceProvider).connected);
+
+      // Radio turns off while TCP is down / redial backoff is armed: must
+      // park in _droppedDeviceIds and burn zero attempts while off.
+      final readsAtOff = countingAdapter.availabilityReads;
+      final scansAtOff = countingAdapter.calls
+          .where((c) => c.startsWith('startScan'))
+          .length;
+      countingAdapter.emitAvailability(BleAvailability.poweredOff);
+      await wait(300);
+
+      var state = container.read(realDeviceProvider);
+      expect(state.status.phase, BleLinkPhase.bluetoothOff);
+      expect(countingAdapter.availabilityReads, readsAtOff);
+
+      // Radio returns: _startFallbackScan is re-armed before recovery dial,
+      // so a fresh scan hit lands the BLE leg.
+      countingAdapter.emitAvailability(BleAvailability.poweredOn);
+      await until(
+        () =>
+            countingAdapter.calls
+                .where((c) => c.startsWith('startScan'))
+                .length >
+            scansAtOff,
+      );
+      countingAdapter.emitScanResult(
+        BleScanResult(deviceId: bleDeviceId, name: 'WMR Bridge', rssi: -50),
+      );
+      await until(() => container.read(realDeviceProvider).connected);
+
+      state = container.read(realDeviceProvider);
+      expect(state.wifiLeg, WifiLinkLeg.ble);
+      expect(state.status.phase, BleLinkPhase.ready);
+    });
+
+    test(
+      'Wi-Fi bleFallback poweredOn with dead BLE peer surfaces connectFailed',
+      () async {
+        const bridgeId = 'pi-1';
+        const bleDeviceId = 'ble-pi-1';
+        final endpoint = WmrWsEndpoint(
+          host: '192.168.1.42',
+          port: 8765,
+          bridgeId: bridgeId,
+        );
+        final countingAdapter = _CountingAdapter();
+        final ble = UniversalBleTransport(
+          adapter: countingAdapter,
+          scanTimeout: const Duration(minutes: 5),
+        );
+        addTearDown(ble.dispose);
+        final tcpInner = FakeTransport(
+          devices: [FakeDevice(id: endpoint.resolvedDeviceId)],
+        );
+        final tcp = _SwitchableTcp(tcpInner, endpoint: endpoint)
+          ..failConnect = true;
+        final composite = CompositeBleTransport(
+          tcp: tcp,
+          ble: ble,
+          disposeBle: false,
+          lanAvailable: () async => true,
+          upgradeInterval: Duration.zero,
+          bleScanWait: const Duration(milliseconds: 50),
+        );
+        addTearDown(composite.dispose);
+        final wifiLink = WifiLink(
+          composite,
+          activeLeg: () =>
+              switch (composite.activeLegFor(endpoint.resolvedDeviceId)) {
+                CompositeLeg.tcp => WifiLinkLeg.tcp,
+                CompositeLeg.ble => WifiLinkLeg.ble,
+                null => null,
+              },
+        );
+        final container = ProviderContainer(
+          overrides: [
+            realTransportProvider.overrideWithValue(ble),
+            compositeWifiTransportFactoryProvider.overrideWithValue(
+              (_) => wifiLink,
+            ),
+            lanInterfaceProbeProvider.overrideWithValue(() async => true),
+            bridgeTokenStoreProvider.overrideWithValue(
+              BridgeTokenStore(MemorySecureTokenBackend()),
+            ),
+            knownBridgeStoreProvider.overrideWithValue(
+              MemoryKnownBridgeStore(),
+            ),
+            streamModeProvider.overrideWith(
+              () => TestModeNotifier(StreamMode.batched),
+            ),
+            reconnectPolicyProvider.overrideWithValue(
+              const ReconnectPolicy(
+                baseDelay: Duration(seconds: 5),
+                maxDelay: Duration(seconds: 5),
+                maxAttempts: 1,
+              ),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        final controller = container.read(realDeviceProvider.notifier);
+        final dial = controller.connectWifi(
+          host: endpoint.host,
+          port: endpoint.port,
+          bridgeId: bridgeId,
+          bleFallback: true,
+        );
+        await wait(50);
+        countingAdapter.emitScanResult(
+          BleScanResult(deviceId: bleDeviceId, name: 'WMR Bridge', rssi: -50),
+        );
+        await dial;
+        expect(container.read(realDeviceProvider).wifiLeg, WifiLinkLeg.ble);
+
+        countingAdapter.emitAvailability(BleAvailability.poweredOff);
+        await wait(50);
+        expect(
+          container.read(realDeviceProvider).status.phase,
+          BleLinkPhase.bluetoothOff,
+        );
+
+        // BLE peer is now dead: connect throws on poweredOn recovery.
+        countingAdapter.connectError = StateError('peer unreachable');
+        countingAdapter.emitAvailability(BleAvailability.poweredOn);
+        await wait(50);
+        countingAdapter.emitScanResult(
+          BleScanResult(deviceId: bleDeviceId, name: 'WMR Bridge', rssi: -50),
+        );
+        await until(
+          () =>
+              container.read(realDeviceProvider).status.phase ==
+              BleLinkPhase.connectFailed,
+        );
+        expect(container.read(realDeviceProvider).connected, isFalse);
+      },
+    );
   });
 }
