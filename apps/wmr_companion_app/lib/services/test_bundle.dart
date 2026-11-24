@@ -129,6 +129,8 @@ class BundleBridge {
     this.mode,
     this.rateHz = const [],
     this.loss = const [],
+    this.stalled = false,
+    this.silentForMs,
   });
 
   final String id;
@@ -158,6 +160,13 @@ class BundleBridge {
   final List<double> rateHz;
   final List<double?> loss;
 
+  /// True when [BridgeLinkSnapshot.stalled] reported the connected link silent.
+  final bool stalled;
+
+  /// Milliseconds since the last accepted record when known, from
+  /// [BridgeLinkSnapshot.silentFor].
+  final int? silentForMs;
+
   Map<String, Object?> toJson() => {
     'id': id,
     if (transport != null) 'transport': transport,
@@ -180,6 +189,8 @@ class BundleBridge {
       'mode': mode,
       'rate_hz': [for (final rate in rateHz) _finite(rate)],
       'loss': [for (final value in loss) _finite(value)],
+      'stalled': stalled,
+      'silent_for_ms': silentForMs,
     },
   };
 }

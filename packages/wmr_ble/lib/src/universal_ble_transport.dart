@@ -742,44 +742,42 @@ class UniversalBleTransport
       session.services = List.unmodifiable(services);
 
       var isPiEndpoint = false;
-      if (skipHighPriorityForPiEndpoints &&
-          _adapter.supportsConnectionPriority) {
-        final hasVersion = services.any(
-          (s) =>
-              s.uuid.toLowerCase() == wmrBridgeServiceUuid &&
-              s.characteristicUuids.any(
-                (c) => c.toLowerCase() == wmrBridgeVersionCharUuid,
-              ),
-        );
-        if (hasVersion) {
-          try {
-            final bytes = await session.untilRadioOff(
-              _adapter
-                  .read(
-                    deviceId,
-                    wmrBridgeServiceUuid,
-                    wmrBridgeVersionCharUuid,
-                    timeout: versionReadTimeout,
-                  )
-                  .timeout(versionReadTimeout),
-            );
-            isPiEndpoint = _isPiBleEndpoint(bytes);
-          } on TimeoutException catch (e) {
-            _checkSetup(session);
-            throw _fail(
-              BleLinkPhase.connectFailed,
-              'Version read timed out: $e',
-              deviceId: deviceId,
-            );
-          } catch (e) {
-            _checkSetup(session);
-            session.warnings.add('Version read failed: $e');
-          }
+      final hasVersion = services.any(
+        (s) =>
+            s.uuid.toLowerCase() == wmrBridgeServiceUuid &&
+            s.characteristicUuids.any(
+              (c) => c.toLowerCase() == wmrBridgeVersionCharUuid,
+            ),
+      );
+      if (hasVersion) {
+        try {
+          final bytes = await session.untilRadioOff(
+            _adapter
+                .read(
+                  deviceId,
+                  wmrBridgeServiceUuid,
+                  wmrBridgeVersionCharUuid,
+                  timeout: versionReadTimeout,
+                )
+                .timeout(versionReadTimeout),
+          );
+          isPiEndpoint = _isPiBleEndpoint(bytes);
+        } on TimeoutException catch (e) {
           _checkSetup(session);
+          throw _fail(
+            BleLinkPhase.connectFailed,
+            'Version read timed out: $e',
+            deviceId: deviceId,
+          );
+        } catch (e) {
+          _checkSetup(session);
+          session.warnings.add('Version read failed: $e');
         }
+        _checkSetup(session);
       }
 
-      if (_adapter.supportsConnectionPriority && !isPiEndpoint) {
+      if (_adapter.supportsConnectionPriority &&
+          !(skipHighPriorityForPiEndpoints && isPiEndpoint)) {
         try {
           await session.untilRadioOff(
             _adapter.requestHighConnectionPriority(deviceId),

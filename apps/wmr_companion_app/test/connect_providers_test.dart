@@ -540,7 +540,81 @@ void main() {
       composite.tcpProbeBudget,
       lessThanOrEqualTo(const Duration(seconds: 3)),
     );
+    expect(composite.disposeBle, isFalse);
+    expect(
+      identical(composite.ble, container.read(realTransportProvider)),
+      isTrue,
+    );
+
+    // Disposing the Wi-Fi composite (e.g. on a tab switch) must leave the
+    // shared BLE transport alive.
+    await composite.dispose();
+    expect(
+      () =>
+          container.read(realTransportProvider).scan().listen((_) {}).cancel(),
+      returnsNormally,
+    );
   });
+
+  test(
+    'Wi-Fi BLE-leg statusChanges surface mtu and phase on realDeviceProvider',
+    () async {
+      final adapter = FakeBleAdapter();
+      final endpoint = WmrWsEndpoint(
+        host: '192.0.2.99',
+        port: 8765,
+        bridgeId: 'pi-1',
+      );
+      final tcp = _FailingTcp(endpoint);
+      late CompositeBleTransport composite;
+      late ProviderContainer container;
+      container = makeContainer(
+        adapter: adapter,
+        compositeFactory: (ep) {
+          composite = CompositeBleTransport(
+            tcp: tcp,
+            ble: container.read(realTransportProvider),
+            disposeBle: false,
+            lanAvailable: () async => false,
+            upgradeInterval: Duration.zero,
+          );
+          return WifiLink(
+            composite,
+            activeLeg: () =>
+                switch (composite.activeLegFor(ep.resolvedDeviceId)) {
+                  CompositeLeg.tcp => WifiLinkLeg.tcp,
+                  CompositeLeg.ble => WifiLinkLeg.ble,
+                  null => null,
+                },
+          );
+        },
+      );
+
+      final dial = container
+          .read(realDeviceProvider.notifier)
+          .connectWifi(
+            host: endpoint.host,
+            port: endpoint.port,
+            bridgeId: 'pi-1',
+            bleFallback: true,
+          );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      adapter.emitScanResult(
+        const BleScanResult(
+          deviceId: 'ble-pi-1',
+          name: 'WMR Bridge',
+          rssi: -45,
+        ),
+      );
+      await dial;
+
+      final state = container.read(realDeviceProvider);
+      expect(state.connected, isTrue);
+      expect(state.wifiLeg, WifiLinkLeg.ble);
+      expect(state.status.phase, BleLinkPhase.ready);
+      expect(state.status.mtu, 185);
+    },
+  );
 
   test(
     'fallback connects through the composite and reports its active leg',

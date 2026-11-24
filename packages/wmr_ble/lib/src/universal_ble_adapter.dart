@@ -13,17 +13,46 @@ import 'package:wmr_core/ble/ble_transport.dart';
 /// in `UniversalBleTransport`.
 class UniversalBleAdapter implements BleAdapter {
   UniversalBleAdapter() {
-    // Global setter: the last assignment wins, so only one adapter should
-    // be alive. Android only (API 26+); never fires elsewhere.
+    // Global setter: dispatch to every live adapter so creating a second
+    // adapter never silently drops connection-interval updates on an earlier
+    // one. Android only (API 26+); never fires elsewhere.
+    _ensureConnectionParamsHook();
+    _instances.add(WeakReference(this));
+  }
+
+  static final List<WeakReference<UniversalBleAdapter>> _instances = [];
+  static bool _hookInstalled = false;
+
+  static void _ensureConnectionParamsHook() {
+    if (_hookInstalled) return;
+    _hookInstalled = true;
     ub.UniversalBle.onConnectionParametersChange = (update) {
-      if (_params.isClosed) return;
-      _params.add(
-        AdapterConnectionParams(
-          deviceId: update.deviceId,
-          intervalUs: (update.interval * 1250),
-        ),
-      );
+      _dispatchConnectionParams(update.deviceId, update.interval * 1250);
     };
+  }
+
+  static void _dispatchConnectionParams(String deviceId, int intervalUs) {
+    final params = AdapterConnectionParams(
+      deviceId: deviceId,
+      intervalUs: intervalUs,
+    );
+    _instances.removeWhere((ref) {
+      final adapter = ref.target;
+      if (adapter == null) return true;
+      if (!adapter._params.isClosed) {
+        adapter._params.add(params);
+      }
+      return false;
+    });
+  }
+
+  /// Dispatches a synthetic connection-parameters event through the shared
+  /// callback for tests.
+  static void dispatchConnectionParametersForTest(
+    String deviceId,
+    int intervalUnits,
+  ) {
+    _dispatchConnectionParams(deviceId, intervalUnits * 1250);
   }
 
   final StreamController<AdapterConnectionParams> _params =

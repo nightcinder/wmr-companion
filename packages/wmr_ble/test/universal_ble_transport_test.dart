@@ -326,6 +326,45 @@ void main() {
     });
 
     test(
+      'reads FF16 when hasVersion is true even with priority checks disabled',
+      () async {
+        adapter.supportsPriority = false;
+        final unGated = UniversalBleTransport(
+          adapter: adapter,
+          clock: clock,
+          scanTimeout: const Duration(milliseconds: 30),
+          skipHighPriorityForPiEndpoints: false,
+        );
+        addTearDown(unGated.dispose);
+
+        adapter.readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': 'pi-bridge',
+              'version': '0.2.4',
+            }),
+          ),
+        );
+
+        await unGated.connect(id);
+        unGated.subscribe(id, wmrBridgeServiceUuid, wmrBridgeBatchedCharUuid);
+        await pump();
+
+        expect(adapter.calls, [
+          'connect',
+          'requestMtu 517',
+          'mtuResult 185',
+          'discoverServices',
+          'read',
+          'enableNotifications',
+        ]);
+        expect(unGated.status.phase, BleLinkPhase.ready);
+      },
+    );
+
+    test(
       'P3: absent FF16 skips read and keeps non-Pi high priority behavior',
       () async {
         adapter.services = const [
@@ -1125,6 +1164,32 @@ void main() {
         BleLinkPhase.bluetoothOff,
       );
       await sub.cancel();
+    });
+  });
+
+  group('UniversalBleAdapter', () {
+    test('dispatches connection parameters to multiple adapters', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final first = UniversalBleAdapter();
+      final second = UniversalBleAdapter();
+      final firstEvents = <AdapterConnectionParams>[];
+      final secondEvents = <AdapterConnectionParams>[];
+      final sub1 = first.connectionParams.listen(firstEvents.add);
+      final sub2 = second.connectionParams.listen(secondEvents.add);
+      addTearDown(() async {
+        await sub1.cancel();
+        await sub2.cancel();
+      });
+
+      UniversalBleAdapter.dispatchConnectionParametersForTest('bridge-1', 12);
+      await pump();
+
+      expect(firstEvents, hasLength(1));
+      expect(firstEvents.single.deviceId, 'bridge-1');
+      expect(firstEvents.single.intervalUs, 12 * 1250);
+      expect(secondEvents, hasLength(1));
+      expect(secondEvents.single.deviceId, 'bridge-1');
+      expect(secondEvents.single.intervalUs, 12 * 1250);
     });
   });
 }

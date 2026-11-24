@@ -241,8 +241,66 @@ void main() {
       expect(bridgeJson['mtu'], 185);
       expect((bridgeJson['link'] as Map)['rssi_dbm'], -48);
       expect((bridgeJson['stream'] as Map)['rate_hz'], [99.4, 98.8]);
+      expect((bridgeJson['stream'] as Map)['stalled'], isFalse);
+      expect((bridgeJson['stream'] as Map)['silent_for_ms'], isNull);
     },
   );
+
+  test('diagnostics exports BundleBridge stalled and silent_for_ms for stalled vs active links', () async {
+    final bundle = await writeTestBundle(
+      TestBundleInput(
+        now: DateTime(2026, 11, 23, 10, 0),
+        appVersion: '0.3.27+35',
+        appCommit: 'abc1234',
+        phone: 'Google Pixel 8',
+        androidVersion: 'Android 14 (API 34)',
+        streamMode: 'batched',
+        bridges: const [
+          BundleBridge(
+            id: 'bridge-stalled',
+            transport: 'BLE',
+            linkState: 'connected',
+            mode: 'batched',
+            rateHz: [0, 0],
+            loss: [0, 0],
+            stalled: true,
+            silentForMs: 4250,
+          ),
+          BundleBridge(
+            id: 'bridge-active',
+            transport: 'Wi-Fi',
+            linkState: 'connected',
+            mode: 'batched',
+            rateHz: [200, 200],
+            loss: [0, 0],
+            stalled: false,
+            silentForMs: 5,
+          ),
+        ],
+      ),
+      Directory('${dir.path}/out'),
+    );
+
+    final archive = ZipDecoder().decodeBytes(
+      await File(bundle.path).readAsBytes(),
+    );
+    final diagnostics =
+        jsonDecode(text(archive, 'diagnostics.json')) as Map<String, Object?>;
+    final bridges = diagnostics['bridges']! as List<Object?>;
+    expect(bridges, hasLength(2));
+
+    final stalledBridge = bridges[0]! as Map<String, Object?>;
+    final stalledStream = stalledBridge['stream']! as Map<String, Object?>;
+    expect(stalledStream['rate_hz'], [0, 0]);
+    expect(stalledStream['stalled'], isTrue);
+    expect(stalledStream['silent_for_ms'], 4250);
+
+    final activeBridge = bridges[1]! as Map<String, Object?>;
+    final activeStream = activeBridge['stream']! as Map<String, Object?>;
+    expect(activeStream['rate_hz'], [200, 200]);
+    expect(activeStream['stalled'], isFalse);
+    expect(activeStream['silent_for_ms'], 5);
+  });
 
   test('diagnostics records the composite leg and stick settings', () async {
     final bundle = await writeTestBundle(

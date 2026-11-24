@@ -257,6 +257,10 @@ class CompositeBleTransport implements BleTransport {
         null => null,
       };
 
+  /// The BLE device id currently associated with [deviceId]'s route, or null
+  /// when no BLE leg is active or being dialled.
+  String? bleDeviceIdFor(String deviceId) => _routes[deviceId]?.bleDeviceId;
+
   /// The link-switch timeline of [deviceId]'s route, or null before the
   /// bridge has been connected through this composite.
   ///
@@ -459,7 +463,7 @@ class CompositeBleTransport implements BleTransport {
     }
 
     _setState(route, BleConnectionState.disconnected);
-    throw tcpError ?? bleError ?? StateError('No transport for $deviceId');
+    throw bleError ?? tcpError ?? StateError('No transport for $deviceId');
   }
 
   @override
@@ -857,8 +861,7 @@ class CompositeBleTransport implements BleTransport {
 
     final current = route.bleDeviceId;
     if (current != null) {
-      candidates.add(current);
-      return candidates;
+      add(current);
     }
     if (allowDeviceId) add(deviceId);
     final hits = _scanHits.values.where((hit) => hit.fromBle).toList()

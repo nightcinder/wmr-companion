@@ -155,18 +155,24 @@ class WifiLink {
 
 /// Builds the TCP-first link with a BLE GATT fallback.
 ///
-/// Production gives the composite its own BLE transport: the composite owns
-/// and disposes it, so it cannot tear down the Bluetooth screen's transport.
-/// Tests override this factory with a fake link.
+/// Shares [realTransportProvider] (`disposeBle: false`, matching
+/// [bleHandoffTransportFactoryProvider]) so switching tabs never overwrites
+/// `connection_interval_us` or prematurely disposes the shared BLE transport,
+/// while Wi-Fi BLE-leg status and radio-state events flow through
+/// [RealDeviceController]. Tests override this factory with a fake link.
 final compositeWifiTransportFactoryProvider =
     Provider<WifiLink Function(WmrWsEndpoint)>((ref) {
+      final ble = ref.watch(realTransportProvider);
       return (endpoint) {
         final composite = CompositeBleTransport(
           tcp: WmrWsTransport(endpoints: [endpoint]),
-          ble: UniversalBleTransport(adapter: UniversalBleAdapter()),
+          ble: ble,
           // No Wi-Fi: skip the TCP probe so the BLE leg is dialled at once
           // instead of waiting out the remembered LAN address.
           lanAvailable: () => ref.read(lanInterfaceProbeProvider)(),
+          // The shared BLE transport outlives the composite and is disposed
+          // by [realTransportProvider].
+          disposeBle: false,
           onTokenLearned: (bridgeId, hosts, port, token) {
             unawaited(
               ref
@@ -778,6 +784,42 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   void _handleBleLinkStatus(BleLinkStatus s) {
     final id = s.deviceId;
     final active = transport;
+    if (state.activeTransport == BridgeTransportKind.wifi) {
+      final wifiId = _wifiDeviceId;
+      if (active is CompositeBleTransport && wifiId != null) {
+        if (id != null) {
+          if (id != wifiId && id != active.bleDeviceIdFor(wifiId)) {
+            return;
+          }
+          final mapped = id == wifiId
+              ? s
+              : BleLinkStatus(
+                  s.phase,
+                  deviceId: wifiId,
+                  message: s.message,
+                  mtu: s.mtu,
+                  priorityRequested: s.priorityRequested,
+                  warnings: s.warnings,
+                );
+          if (active.activeLegFor(wifiId) == CompositeLeg.tcp) {
+            if (mapped.phase == BleLinkPhase.bluetoothOff &&
+                _isFailoverInFlight(active, wifiId)) {
+              _handleLinkStatus(mapped);
+            }
+            return;
+          }
+          _handleLinkStatus(mapped);
+          return;
+        }
+        if (s.phase == BleLinkPhase.scanTimeout &&
+            (_connectedDeviceIds.isNotEmpty ||
+                _connectingDeviceIds.isNotEmpty)) {
+          return;
+        }
+      }
+      _handleLinkStatus(s);
+      return;
+    }
     if (id != null &&
         active is CompositeBleTransport &&
         active.activeLegFor(id) == CompositeLeg.tcp) {
@@ -1058,20 +1100,26 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         // and drop the connected state now.
         final wifiId = _wifiDeviceId;
         final wifiTransport = _wifiTransport;
+        final wifiActive =
+            this.state.activeTransport == BridgeTransportKind.wifi &&
+            wifiId != null &&
+            wifiTransport is CompositeBleTransport;
         final wifiFailoverInFlight =
-            this.state.activeTransport == BridgeTransportKind.wifi &&
-            wifiId != null &&
-            wifiTransport is CompositeBleTransport &&
-            _isFailoverInFlight(wifiTransport, wifiId);
-        _radioOffWifiBleCarried =
-            this.state.activeTransport == BridgeTransportKind.wifi &&
-            (_wifiLink?.activeLeg?.call() == WifiLinkLeg.ble ||
-                wifiFailoverInFlight);
-        if (this.state.activeTransport == BridgeTransportKind.wifi &&
+            wifiActive && _isFailoverInFlight(wifiTransport, wifiId);
+        final wifiOnTcp =
+            wifiActive &&
+            _wifiLink?.activeLeg?.call() == WifiLinkLeg.tcp &&
+            !wifiFailoverInFlight &&
+            !_connectingDeviceIds.contains(wifiId) &&
+            !_reconnecting.contains(wifiId) &&
+            !_reconnectTimers.containsKey(wifiId);
+        _radioOffWifiBleCarried = wifiActive && !wifiOnTcp;
+        if (wifiActive &&
             _radioOffWifiBleCarried &&
-            wifiId != null &&
             (_connectedDeviceIds.contains(wifiId) ||
-                _connectingDeviceIds.contains(wifiId))) {
+                _connectingDeviceIds.contains(wifiId) ||
+                _reconnecting.contains(wifiId) ||
+                _reconnectTimers.containsKey(wifiId))) {
           _handleLinkStatus(
             BleLinkStatus(
               BleLinkPhase.bluetoothOff,
@@ -1104,6 +1152,11 @@ class RealDeviceController extends Notifier<RealDeviceState> {
         if (!_radioOff) return;
         _radioOff = false;
         _radioOffWifiBleCarried = false;
+        if (this.state.activeTransport == BridgeTransportKind.wifi &&
+            this.state.wifiFallback &&
+            _wifiTransport != null) {
+          _startFallbackScan(_wifiTransport!);
+        }
         unawaited(_recoverAfterRadioOn());
       default:
         break;
