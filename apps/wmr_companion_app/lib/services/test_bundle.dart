@@ -328,6 +328,9 @@ class TestBundleInput {
     this.firmwareSha,
     this.wifiFallback = false,
     this.activeLeg,
+    this.bleFallbackState = 'disabled',
+    this.bleFallbackCandidateCount,
+    this.bleFallbackReason,
     this.linkTimeline,
     this.stickSettings = const StickSettings(),
     this.handTrackingDiagnostics = const HandTrackingDiagnostics(),
@@ -386,6 +389,17 @@ class TestBundleInput {
 
   /// `TCP` or `BLE` while a [wifiFallback] link is up, null otherwise.
   final String? activeLeg;
+
+  /// Readiness state of the BLE fallback (`disabled`, `scanning`,
+  /// `candidate_unverified`, `ready`, `active`, `permission_denied`,
+  /// `bluetooth_off`, `bluetooth_unavailable`, `no_candidate`).
+  final String bleFallbackState;
+
+  /// Number of BLE fallback candidates currently known, or null when disabled.
+  final int? bleFallbackCandidateCount;
+
+  /// Sanitized reason for the current [bleFallbackState], if any.
+  final String? bleFallbackReason;
 
   /// The composite link's switch marks, as
   /// `CompositeBleTransport.linkTimelineFor` recorded them: the
@@ -613,6 +627,9 @@ Future<TestBundle> writeTestBundle(
     'firmware_sha': input.firmwareSha,
     'ble_fallback': input.wifiFallback,
     'active_leg': input.activeLeg,
+    'ble_fallback_state': input.bleFallbackState,
+    'ble_fallback_candidate_count': input.bleFallbackCandidateCount,
+    'ble_fallback_reason': input.bleFallbackReason,
     'link_timeline': input.linkTimeline,
     'hand_tracking_diagnostics': input.handTrackingDiagnostics.toJson(),
     'stick': {

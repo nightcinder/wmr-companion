@@ -25,6 +25,13 @@ class _FakeCompositeTransport extends FakeTransport
   @override
   Stream<String> get tcpReceipts => _receipts.stream;
 
+  @override
+  Stream<String> get fallbackReadinessChanges => const Stream.empty();
+
+  @override
+  BleFallbackReadiness fallbackReadinessFor(String deviceId) =>
+      const BleFallbackReadiness(verifiedCount: 0, unverifiedCount: 0);
+
   void emitReceipt(String deviceId, Map<String, Object?> timeline) {
     timelines[deviceId] = timeline;
     if (!_receipts.isClosed) _receipts.add(deviceId);

@@ -83,6 +83,7 @@ class UniversalBleAdapter implements BleAdapter {
       name: d.name,
       rssi: d.rssi,
       serviceUuids: d.services,
+      serviceData: d.serviceData,
     ),
   );
 
@@ -115,6 +116,7 @@ class UniversalBleAdapter implements BleAdapter {
           name: d.name,
           rssi: d.rssi,
           serviceUuids: d.services,
+          serviceData: d.serviceData,
         ),
     ];
   }

@@ -8,12 +8,14 @@ class BleScanResult {
     required this.name,
     required this.rssi,
     this.serviceUuids = const [],
+    this.serviceData = const {},
   });
 
   final String deviceId;
   final String? name;
   final int? rssi;
   final List<String> serviceUuids;
+  final Map<String, Uint8List> serviceData;
 }
 
 /// A discovered GATT service and the UUIDs of its characteristics.

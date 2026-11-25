@@ -397,6 +397,7 @@ void main() {
         tcp: tcp,
         ble: ble,
         upgradeInterval: const Duration(hours: 1),
+        bleScanWait: Duration.zero,
       ),
     );
 

@@ -923,7 +923,12 @@ void main() {
 
     test('does not list an unrelated system device', () async {
       adapter.systemDeviceResults = const [
-        BleScanResult(deviceId: 'bb', name: 'Headphones', rssi: null),
+        BleScanResult(
+          deviceId: 'bb',
+          name: 'Headphones',
+          rssi: null,
+          serviceUuids: ['0000180f-0000-1000-8000-00805f9b34fb'],
+        ),
       ];
       final results = <BleScanResult>[];
       final sub = t.scan().listen(results.add, onError: (_) {});
@@ -932,6 +937,20 @@ void main() {
 
       expect(results, isEmpty);
       await sub.cancel();
+    });
+
+    test('retains an FF10-filtered system device with empty serviceUuids and a BlueZ alias', () async {
+      adapter.systemDeviceResults = const [
+        BleScanResult(deviceId: 'pi-1', name: 'wmrpi', rssi: null),
+      ];
+      final results = <BleScanResult>[];
+      final done = Completer<void>();
+      t.scan().listen(results.add, onError: (_) {}, onDone: done.complete);
+      await done.future;
+
+      expect(results, hasLength(1));
+      expect(results.single.deviceId, 'pi-1');
+      expect(results.single.name, 'wmrpi');
     });
 
     test(
@@ -1165,6 +1184,67 @@ void main() {
       );
       await sub.cancel();
     });
+
+    test('coalesces concurrent preflight requestPermissions calls', () async {
+      final gate = Completer<void>();
+      final coalescingAdapter = _GatedPermissionAdapter(gate);
+      final transport = UniversalBleTransport(
+        adapter: coalescingAdapter,
+        clock: clock,
+        scanTimeout: const Duration(minutes: 1),
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {}, onError: (_) {});
+      final connectFuture = transport.connect('bridge-1');
+      await pump();
+
+      expect(
+        coalescingAdapter.calls.where((c) => c == 'requestPermissions'),
+        hasLength(1),
+      );
+
+      gate.complete();
+      await connectFuture;
+      await scanSub.cancel();
+    });
+
+    test(
+      'cancelling an older scan stream is a no-op after a newer scan starts',
+      () async {
+        final slow = UniversalBleTransport(
+          adapter: adapter,
+          clock: clock,
+          scanTimeout: const Duration(minutes: 1),
+        );
+        addTearDown(slow.dispose);
+
+        final oldResults = <BleScanResult>[];
+        final newResults = <BleScanResult>[];
+        final oldSub = slow.scan().listen(oldResults.add, onError: (_) {});
+        await pump();
+        final newSub = slow.scan().listen(newResults.add, onError: (_) {});
+        await pump();
+
+        await oldSub.cancel();
+        await pump();
+
+        adapter.emitScanResult(
+          const BleScanResult(
+            deviceId: 'bridge-2',
+            name: 'WMR Bridge',
+            rssi: -45,
+          ),
+        );
+        await pump();
+
+        expect(oldResults, isEmpty);
+        expect(newResults, hasLength(1));
+        expect(newResults.single.deviceId, 'bridge-2');
+        expect(adapter.calls.where((c) => c == 'stopScan'), isEmpty);
+        await newSub.cancel();
+      },
+    );
   });
 
   group('UniversalBleAdapter', () {
@@ -1192,4 +1272,28 @@ void main() {
       expect(secondEvents.single.intervalUs, 12 * 1250);
     });
   });
+}
+
+class _GatedPermissionAdapter extends FakeBleAdapter {
+  _GatedPermissionAdapter(this.gate) {
+    permissionsGranted = false;
+  }
+
+  final Completer<void> gate;
+  int _inFlight = 0;
+
+  @override
+  Future<void> requestPermissions() async {
+    calls.add('requestPermissions');
+    _inFlight++;
+    if (_inFlight > 1) {
+      throw StateError('OPERATION_IN_PROGRESS');
+    }
+    try {
+      await gate.future;
+      permissionsGranted = true;
+    } finally {
+      _inFlight--;
+    }
+  }
 }

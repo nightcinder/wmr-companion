@@ -346,12 +346,28 @@ class RealPanel extends ConsumerWidget {
           _BridgeUpdateBanner(connected: s.protocol),
         if (link == BridgeTransportKind.wifi && s.wifiDeviceId != null) ...[
           Text('Endpoint: ${s.wifiDeviceId}', style: mono),
-          if (s.wifiFallback)
+          if (s.wifiFallback) ...[
             Text(
               'Active leg: ${s.connected ? (s.wifiLeg?.label ?? '-') : '-'}',
               key: const Key('wifi-active-leg'),
               style: mono,
             ),
+            Text(
+              'BLE fallback: ${_describeFallbackState(s.bleFallbackState, s.bleFallbackCandidateCount)}',
+              key: const Key('wifi-ble-fallback-status'),
+              style: mono?.copyWith(
+                color: s.bleFallbackState.isFailure
+                    ? theme.colorScheme.error
+                    : null,
+              ),
+            ),
+            if (s.bleFallbackState.isFailure)
+              TextButton(
+                key: const Key('wifi-ble-fallback-retry'),
+                onPressed: controller.retryBleFallback,
+                child: const Text('Retry BLE fallback'),
+              ),
+          ],
         ],
         if (s.connectedDeviceIds.length <= 1) ...[
           Text('MTU (negotiated): ${status.mtu ?? '-'}', style: mono),
@@ -533,7 +549,21 @@ class RealPanel extends ConsumerWidget {
   }
 
   /// Human label for a link phase.
-  static String _describe(BleLinkPhase p) => switch (p) {
+  static String _describeFallbackState(BleFallbackState state, int? count) =>
+      switch (state) {
+        BleFallbackState.disabled => 'Disabled',
+        BleFallbackState.scanning => 'Scanning for bridge…',
+        BleFallbackState.candidateUnverified =>
+          'Unverified candidate (${count ?? 1})',
+        BleFallbackState.ready => 'Ready (${count ?? 1})',
+        BleFallbackState.active => 'Active',
+        BleFallbackState.permissionDenied => 'Permission denied',
+        BleFallbackState.bluetoothOff => 'Bluetooth is off',
+        BleFallbackState.bluetoothUnavailable => 'Bluetooth unavailable',
+        BleFallbackState.noCandidate => 'No candidate found',
+      };
+
+  String _describe(BleLinkPhase p) => switch (p) {
     BleLinkPhase.idle => 'idle',
     BleLinkPhase.scanning => 'scanning',
     BleLinkPhase.connecting => 'connecting',

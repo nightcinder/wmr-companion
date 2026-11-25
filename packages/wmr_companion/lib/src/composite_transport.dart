@@ -11,6 +11,25 @@ import 'link_timeline.dart';
 /// Which leg of a [CompositeBleTransport] currently carries a bridge.
 enum CompositeLeg { tcp, ble }
 
+/// Snapshot of a route's BLE fallback candidate readiness.
+class BleFallbackReadiness {
+  const BleFallbackReadiness({
+    required this.verifiedCount,
+    required this.unverifiedCount,
+    this.bridgeId,
+    this.activeLeg,
+  });
+
+  final int verifiedCount;
+  final int unverifiedCount;
+  final String? bridgeId;
+  final CompositeLeg? activeLeg;
+
+  int get totalCount => verifiedCount + unverifiedCount;
+  bool get hasVerified => verifiedCount > 0;
+  bool get hasCandidate => totalCount > 0;
+}
+
 /// A [BleTransport] that prefers the Pi's WebSocket (TCP) link and falls back
 /// to BLE GATT, keeping one logical connection across the switch.
 ///
@@ -234,10 +253,88 @@ class CompositeBleTransport implements BleTransport {
   /// route for the device replaces it.
   final Map<String, LinkTimelineRecorder> _closedTimelines = {};
   final Map<String, String> _bridgeIds = {};
+  final Map<String, String> _ff16VerifiedBridgeIds = {};
   final Map<String, _ScanHit> _scanHits = {};
+  final StreamController<String> _readinessChanges =
+      StreamController.broadcast();
   bool _disposed = false;
   bool _scanning = false;
   Completer<void>? _scanWake;
+
+  /// Emits a route's device ID when its BLE fallback candidate readiness may
+  /// have changed (scan hit, bridge identity learned, or leg switch).
+  Stream<String> get fallbackReadinessChanges => _readinessChanges.stream;
+
+  /// Current BLE fallback candidate readiness for [deviceId].
+  BleFallbackReadiness fallbackReadinessFor(String deviceId) {
+    final route = _routes[deviceId];
+    if (route == null) {
+      return const BleFallbackReadiness(verifiedCount: 0, unverifiedCount: 0);
+    }
+    final candidates = _bleCandidatesFor(route, deviceId, allowDeviceId: false);
+    var verified = 0;
+    var unverified = 0;
+    for (final bleId in candidates) {
+      if (_isBleCandidateVerified(route, bleId)) {
+        verified++;
+      } else {
+        unverified++;
+      }
+    }
+    return BleFallbackReadiness(
+      verifiedCount: verified,
+      unverifiedCount: unverified,
+      bridgeId: route.bridgeId,
+      activeLeg: activeLegFor(deviceId),
+    );
+  }
+
+  bool _isBleCandidateVerified(_Route route, String bleId) {
+    final knownId = route.bridgeId;
+    if (knownId == null || knownId.isEmpty) return false;
+    if (_ff16VerifiedBridgeIds[bleId] == knownId) return true;
+    final hit = _scanHits[bleId];
+    if (hit != null &&
+        hit.fromBle &&
+        _matchesBridgeServiceData(hit.result, knownId)) {
+      return true;
+    }
+    return false;
+  }
+
+  static bool _matchesBridgeServiceData(BleScanResult result, String bridgeId) {
+    if (result.serviceData.isEmpty || bridgeId.isEmpty) return false;
+    final prefix = bridgeId.length >= 8 ? bridgeId.substring(0, 8) : bridgeId;
+    final expected = utf8.encode('WMB1$prefix');
+    for (final entry in result.serviceData.entries) {
+      final key = entry.key.toLowerCase();
+      if (key != wmrBridgeServiceUuid && key != 'ff10' && key != '0xff10') {
+        continue;
+      }
+      final bytes = entry.value;
+      if (bytes.length < expected.length) continue;
+      var matches = true;
+      for (var i = 0; i < expected.length; i++) {
+        if (bytes[i] != expected[i]) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) return true;
+    }
+    return false;
+  }
+
+  void _notifyReadiness([String? deviceId]) {
+    if (_disposed || _readinessChanges.isClosed) return;
+    if (deviceId != null) {
+      _readinessChanges.add(deviceId);
+      return;
+    }
+    for (final id in _routes.keys) {
+      _readinessChanges.add(id);
+    }
+  }
 
   /// The stable bridge id learned for [deviceId], when one is known.
   ///
@@ -305,7 +402,10 @@ class CompositeBleTransport implements BleTransport {
 
     void add(BleScanResult result, {required bool fromBle}) {
       _scanHits[result.deviceId] = _ScanHit(result, fromBle: fromBle);
-      if (fromBle) _wakeScanWaiters();
+      if (fromBle) {
+        _wakeScanWaiters();
+        _notifyReadiness();
+      }
       final bridgeId = _bridgeIdForDevice(result.deviceId);
       if (bridgeId != null && !seenBridgeIds.add(bridgeId)) return;
       if (!seenIds.add(result.deviceId)) return;
@@ -440,9 +540,10 @@ class CompositeBleTransport implements BleTransport {
           allowDeviceId: false,
         );
       }
-      final requireIdentity =
-          route.bridgeId != null && bleCandidates.length > 1;
       for (final bleId in bleCandidates) {
+        final requireIdentity =
+            route.bridgeId != null &&
+            _ff16VerifiedBridgeIds[bleId] != route.bridgeId;
         try {
           await _connectBle(route, bleId, requireIdentity: requireIdentity);
           await _activateBle(route);
@@ -472,6 +573,8 @@ class CompositeBleTransport implements BleTransport {
     if (route == null) return;
     _closedTimelines[deviceId] = route.timeline;
     route.intentional = true;
+    route.cancelFallbackScan();
+    _wakeScanWaiters();
     try {
       _stopUpgrade(route);
       // Do not await these cancels: a transport's connection-state stream can
@@ -667,6 +770,7 @@ class CompositeBleTransport implements BleTransport {
     _routes.clear();
     for (final route in routes) {
       route.intentional = true;
+      route.cancelFallbackScan();
       _stopUpgrade(route);
       final tcpSub = route.tcpStateSub;
       final bleSub = route.bleStateSub;
@@ -698,6 +802,8 @@ class CompositeBleTransport implements BleTransport {
       }
       if (!route.states.isClosed) await route.states.close();
     }
+    _wakeScanWaiters();
+    if (!_readinessChanges.isClosed) await _readinessChanges.close();
     if (!_tcpReceipts.isClosed) await _tcpReceipts.close();
     await tcp.dispose();
     if (disposeBle) await ble.dispose();
@@ -958,6 +1064,7 @@ class CompositeBleTransport implements BleTransport {
     route.lastWorkingTcpDeviceId = tcpId;
     _stopUpgrade(route);
     _setState(route, BleConnectionState.connected);
+    _notifyReadiness(route.deviceId);
   }
 
   /// Undoes a lane switch that failed partway: every live channel is
@@ -986,6 +1093,7 @@ class CompositeBleTransport implements BleTransport {
     await _switchChannels(route, _Lane.ble);
     _startUpgrade(route);
     _setState(route, BleConnectionState.connected);
+    _notifyReadiness(route.deviceId);
   }
 
   /// Runs the FF16-triggered upgrade kick once the switch that activated BLE
@@ -1200,47 +1308,71 @@ class CompositeBleTransport implements BleTransport {
           // A link that already dropped needs no further teardown.
         }
       }
+      final tried = <String>{};
+      var lastReason = 'no_candidate';
+
+      Future<bool> tryCandidates(List<String> candidates) async {
+        for (final bleId in candidates) {
+          if (_disposed || route.intentional) return false;
+          if (!tried.add(bleId)) continue;
+          lastReason = 'connect_threw';
+          final requireIdentity =
+              route.bridgeId != null &&
+              _ff16VerifiedBridgeIds[bleId] != route.bridgeId;
+          try {
+            await _connectBle(route, bleId, requireIdentity: requireIdentity);
+            lastReason = 'activation_threw';
+            await _activateBle(route);
+            final nowUs = clock.nowUs;
+            route.timeline.onFailoverEnd(nowUs, candidates: tried.length);
+            // BLE carries now, so the fast retry window is open: a failed
+            // upgrade dial retries within `upgradeRetryDelay` until this
+            // closes, then the periodic tick paces the retries again.
+            route.fastRetryUntilUs = nowUs + upgradeRetryWindow.inMicroseconds;
+            return true;
+          } catch (_) {
+            if (route.bleDeviceId == bleId) await _rejectBle(route);
+            // Try the next scanned bridge before giving up the session.
+          }
+        }
+        return false;
+      }
+
       var bleCandidates = _bleCandidatesFor(
         route,
         route.deviceId,
         allowDeviceId: false,
       );
-      if (bleCandidates.isEmpty && _scanning && bleScanWait > Duration.zero) {
-        // A scan still in flight may yet report a bridge: wait a bounded
-        // time for it before declaring the session lost, as an explicit
-        // connect does.
-        await _awaitBleScanHit(bleScanWait);
-        if (_disposed || route.intentional) return;
-        bleCandidates = _bleCandidatesFor(
-          route,
-          route.deviceId,
-          allowDeviceId: false,
-        );
-      }
-      final requireIdentity =
-          route.bridgeId != null && bleCandidates.length > 1;
-      var reason = 'no_candidate';
-      for (final bleId in bleCandidates) {
-        reason = 'connect_threw';
-        try {
-          await _connectBle(route, bleId, requireIdentity: requireIdentity);
-          reason = 'activation_threw';
-          await _activateBle(route);
-          final nowUs = clock.nowUs;
-          route.timeline.onFailoverEnd(nowUs, candidates: bleCandidates.length);
-          // BLE carries now, so the fast retry window is open: a failed
-          // upgrade dial retries within `upgradeRetryDelay` until this
-          // closes, then the periodic tick paces the retries again.
-          route.fastRetryUntilUs = nowUs + upgradeRetryWindow.inMicroseconds;
-          return;
-        } catch (_) {
-          if (route.bleDeviceId == bleId) await _rejectBle(route);
-          // Try the next scanned bridge before giving up the session.
+      if (await tryCandidates(bleCandidates)) return;
+
+      if (bleScanWait > Duration.zero && !_disposed && !route.intentional) {
+        final waitStopwatch = Stopwatch()..start();
+        while (!_disposed && !route.intentional) {
+          final remaining = bleScanWait - waitStopwatch.elapsed;
+          if (remaining <= Duration.zero) break;
+          if (_scanning) {
+            await _awaitBleScanHit(remaining);
+          } else {
+            await _boundedFallbackScan(route, remaining, tried);
+          }
+          if (_disposed || route.intentional) return;
+          bleCandidates = _bleCandidatesFor(
+            route,
+            route.deviceId,
+            allowDeviceId: false,
+          );
+          final untried = [
+            for (final id in bleCandidates)
+              if (!tried.contains(id)) id,
+          ];
+          if (untried.isEmpty) break;
+          if (await tryCandidates(untried)) return;
         }
       }
+
       route.timeline.onFailoverLost(
-        candidates: bleCandidates.length,
-        reason: reason,
+        candidates: tried.length,
+        reason: tried.isEmpty ? 'no_candidate' : lastReason,
       );
       await _lose(route);
     } finally {
@@ -1496,7 +1628,11 @@ class CompositeBleTransport implements BleTransport {
         wmrBridgeServiceUuid,
         wmrBridgeVersionCharUuid,
       );
-      return _LanEndpoint.parse(value);
+      final endpoint = _LanEndpoint.parse(value);
+      if (endpoint != null && endpoint.bridgeId.isNotEmpty) {
+        _ff16VerifiedBridgeIds[bleId] = endpoint.bridgeId;
+      }
+      return endpoint;
     } catch (_) {
       // FF16 is a plain version string on older bridges, not this document.
       return null;
@@ -1561,12 +1697,73 @@ class CompositeBleTransport implements BleTransport {
     if (bridgeId == null || bridgeId.isEmpty) return;
     final known = route.bridgeId;
     if (known != null && known != bridgeId) return;
+    final changed = known != bridgeId;
     route.bridgeId = bridgeId;
     _bridgeIds[route.deviceId] = bridgeId;
     final tcpId = route.tcpDeviceId;
     if (tcpId != null) _bridgeIds[tcpId] = bridgeId;
     final bleId = route.bleDeviceId;
     if (bleId != null) _bridgeIds[bleId] = bridgeId;
+    if (changed) _notifyReadiness(route.deviceId);
+  }
+
+  /// Starts a bounded [ble.scan] when `_fallbackToBle` has zero untried
+  /// candidates and no scan is currently running, waiting up to [timeout] for
+  /// a new hit or clean cancellation on disconnect/disposal.
+  Future<void> _boundedFallbackScan(
+    _Route route,
+    Duration timeout,
+    Set<String> tried,
+  ) async {
+    if (_disposed || route.intentional || timeout <= Duration.zero) return;
+    final done = Completer<void>();
+    Timer? timer;
+    StreamSubscription<BleScanResult>? sub;
+    var scanFailed = false;
+
+    void finish() {
+      timer?.cancel();
+      timer = null;
+      if (!done.isCompleted) done.complete();
+    }
+
+    route.fallbackScanCancel = finish;
+    timer = Timer(timeout, finish);
+    try {
+      sub = ble.scan().listen(
+        (result) {
+          _scanHits[result.deviceId] = _ScanHit(result, fromBle: true);
+          _notifyReadiness(route.deviceId);
+          if (!tried.contains(result.deviceId) &&
+              !_claimedByOtherRoute(result.deviceId, route)) {
+            finish();
+          }
+        },
+        onError: (Object _) {
+          scanFailed = true;
+          finish();
+        },
+        onDone: finish,
+      );
+    } catch (_) {
+      scanFailed = true;
+      finish();
+    }
+
+    try {
+      await done.future;
+    } finally {
+      timer?.cancel();
+      if (identical(route.fallbackScanCancel, finish)) {
+        route.fallbackScanCancel = null;
+      }
+      unawaited(sub?.cancel());
+      if (!scanFailed && !_scanning && !_disposed) {
+        try {
+          await ble.stopScan();
+        } catch (_) {}
+      }
+    }
   }
 
   String? _bridgeIdForDevice(String deviceId) =>
@@ -1671,6 +1868,15 @@ class _Route {
   /// from an earlier TCP switch stops instead of turning off newly
   /// re-attached CCCDs.
   int bleTeardownEpoch = 0;
+
+  void cancelFallbackScan() {
+    final cancel = fallbackScanCancel;
+    fallbackScanCancel = null;
+    cancel?.call();
+  }
+
+  /// Active cancellation callback for an in-flight bounded failover scan.
+  void Function()? fallbackScanCancel;
 
   /// Active cancellation callbacks for in-flight [_disableBleNotifications]
   /// calls on this route, so teardown/suspend/dispose can cancel their timers

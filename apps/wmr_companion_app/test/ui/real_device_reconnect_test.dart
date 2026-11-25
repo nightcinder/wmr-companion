@@ -1249,7 +1249,22 @@ void main() {
           port: 8765,
           bridgeId: bridgeId,
         );
-        final countingAdapter = _CountingAdapter();
+        final countingAdapter = _CountingAdapter()
+          ..readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+            utf8.encode(
+              jsonEncode({
+                'type': 'wmr_ble_endpoint',
+                'protocol': 1,
+                'bridge_id': bridgeId,
+                'name': 'WMR Bridge',
+                'version': '0.2.4',
+                'hosts': ['192.168.1.42'],
+                'port': 8765,
+                'path': '/wmr',
+                'authRequired': false,
+              }),
+            ),
+          );
         final bleTab = UniversalBleTransport(
           adapter: countingAdapter,
           scanTimeout: const Duration(minutes: 5),
@@ -1346,9 +1361,9 @@ void main() {
 
         state = container.read(realDeviceProvider);
         expect(state.wifiLeg, WifiLinkLeg.ble);
-        // One availability read for the re-armed fallback scan preflight and
-        // one for the redial connect preflight.
-        expect(countingAdapter.availabilityReads, readsBefore + 2);
+        // One availability read for the redial connect preflight; the already
+        // bridge-verified candidate avoids a redundant fallback scan.
+        expect(countingAdapter.availabilityReads, readsBefore + 1);
         expect(connectCalls(), connectsBefore + 1);
       },
     );
@@ -1425,7 +1440,22 @@ void main() {
         devices: [FakeDevice(id: endpoint.resolvedDeviceId, mtu: 4096)],
       );
       final tcp = _SwitchableTcp(tcpInner, endpoint: endpoint);
-      final countingAdapter = _CountingAdapter();
+      final countingAdapter = _CountingAdapter()
+        ..readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': bridgeId,
+              'name': 'WMR Bridge',
+              'version': '0.2.4',
+              'hosts': ['192.168.1.42'],
+              'port': 8765,
+              'path': '/wmr',
+              'authRequired': false,
+            }),
+          ),
+        );
       final bleTab = UniversalBleTransport(
         adapter: countingAdapter,
         scanTimeout: const Duration(minutes: 5),
@@ -1746,7 +1776,22 @@ void main() {
         devices: [FakeDevice(id: endpoint.resolvedDeviceId, mtu: 4096)],
       );
       final tcp = _SwitchableTcp(tcpInner, endpoint: endpoint);
-      final countingAdapter = _CountingAdapter();
+      final countingAdapter = _CountingAdapter()
+        ..readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': bridgeId,
+              'name': 'WMR Bridge',
+              'version': '0.2.4',
+              'hosts': ['192.168.1.42'],
+              'port': 8765,
+              'path': '/wmr',
+              'authRequired': false,
+            }),
+          ),
+        );
       final bleTab = UniversalBleTransport(
         adapter: countingAdapter,
         scanTimeout: const Duration(minutes: 5),
@@ -1874,7 +1919,22 @@ void main() {
         devices: [FakeDevice(id: endpoint.resolvedDeviceId, mtu: 4096)],
       );
       final tcp = _SwitchableTcp(tcpInner, endpoint: endpoint);
-      final countingAdapter = _CountingAdapter();
+      final countingAdapter = _CountingAdapter()
+        ..readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': bridgeId,
+              'name': 'WMR Bridge',
+              'version': '0.2.4',
+              'hosts': ['192.168.1.42'],
+              'port': 8765,
+              'path': '/wmr',
+              'authRequired': false,
+            }),
+          ),
+        );
       final bleTab = UniversalBleTransport(
         adapter: countingAdapter,
         scanTimeout: const Duration(minutes: 5),
@@ -1993,7 +2053,22 @@ void main() {
         port: 8765,
         bridgeId: bridgeId,
       );
-      final countingAdapter = _CountingAdapter();
+      final countingAdapter = _CountingAdapter()
+        ..readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'type': 'wmr_ble_endpoint',
+              'protocol': 1,
+              'bridge_id': bridgeId,
+              'name': 'WMR Bridge',
+              'version': '0.2.4',
+              'hosts': ['192.168.1.42'],
+              'port': 8765,
+              'path': '/wmr',
+              'authRequired': false,
+            }),
+          ),
+        );
       final ble = UniversalBleTransport(
         adapter: countingAdapter,
         scanTimeout: const Duration(minutes: 5),
@@ -2103,7 +2178,22 @@ void main() {
           port: 8765,
           bridgeId: bridgeId,
         );
-        final countingAdapter = _CountingAdapter();
+        final countingAdapter = _CountingAdapter()
+          ..readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+            utf8.encode(
+              jsonEncode({
+                'type': 'wmr_ble_endpoint',
+                'protocol': 1,
+                'bridge_id': bridgeId,
+                'name': 'WMR Bridge',
+                'version': '0.2.4',
+                'hosts': ['192.168.1.42'],
+                'port': 8765,
+                'path': '/wmr',
+                'authRequired': false,
+              }),
+            ),
+          );
         final ble = UniversalBleTransport(
           adapter: countingAdapter,
           scanTimeout: const Duration(minutes: 5),

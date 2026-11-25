@@ -124,6 +124,41 @@ final wifiTransportFactoryProvider =
 /// Which leg of an opt-in fallback link is carrying the bridge.
 enum WifiLinkLeg { tcp, ble }
 
+/// Complete 9-state readiness of the opt-in Wi-Fi BLE fallback.
+enum BleFallbackState {
+  disabled('disabled'),
+  scanning('scanning'),
+  candidateUnverified('candidate_unverified'),
+  ready('ready'),
+  active('active'),
+  permissionDenied('permission_denied'),
+  bluetoothOff('bluetooth_off'),
+  bluetoothUnavailable('bluetooth_unavailable'),
+  noCandidate('no_candidate');
+
+  const BleFallbackState(this.jsonValue);
+
+  final String jsonValue;
+
+  bool get isFailure =>
+      this == permissionDenied ||
+      this == bluetoothOff ||
+      this == bluetoothUnavailable ||
+      this == noCandidate;
+}
+
+/// Clock used by the proactive BLE fallback scan coordinator for the rolling
+/// 30 s SafeScanner cap. Tests override it for deterministic windowing.
+final proactiveScanClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
+/// Base backoff delay before re-arming a proactive BLE fallback scan after a
+/// `scanTimeout` or empty scan completion. Tests shorten it.
+final proactiveScanBackoffProvider = Provider<Duration>(
+  (ref) => const Duration(seconds: 2),
+);
+
 extension WifiLinkLegLabel on WifiLinkLeg {
   String get label => switch (this) {
     WifiLinkLeg.tcp => 'TCP',
@@ -379,6 +414,9 @@ class RealDeviceState {
     this.wifiTransportEpoch = 0,
     this.wifiFallback = false,
     this.wifiLeg,
+    this.bleFallbackState = BleFallbackState.disabled,
+    this.bleFallbackCandidateCount,
+    this.bleFallbackReason,
     this.lanEndpoints = const [],
     this.discoveringLan = false,
     this.lanError,
@@ -407,6 +445,15 @@ class RealDeviceState {
   /// Active leg of a [wifiFallback] link. Null otherwise, or while the
   /// composite is still choosing one.
   final WifiLinkLeg? wifiLeg;
+
+  /// Readiness state of the BLE fallback leg.
+  final BleFallbackState bleFallbackState;
+
+  /// Number of BLE fallback candidates currently known, or null when disabled.
+  final int? bleFallbackCandidateCount;
+
+  /// Sanitized reason for [bleFallbackState] (zero raw MACs or tokens).
+  final String? bleFallbackReason;
 
   /// Endpoints from the most recent LAN discovery pass.
   final List<WmrWsEndpoint> lanEndpoints;
@@ -627,10 +674,17 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   int _wifiTransportEpoch = 0;
   StreamSubscription<BleConnectionState>? _wifiStateSub;
   StreamSubscription<BleScanResult>? _fallbackScanSub;
+  StreamSubscription<String>? _fallbackReadinessSub;
   StreamSubscription<BleConnectionState>? _bleCompositeStateSub;
   String? _bleCompositeStateId;
   String? _wifiDeviceId;
   BleLinkStatus _lastStatus = const BleLinkStatus(BleLinkPhase.idle);
+  BleFallbackState _bleFallbackState = BleFallbackState.disabled;
+  int? _bleFallbackCandidateCount;
+  String? _bleFallbackReason;
+  final List<DateTime> _proactiveScanStarts = [];
+  Timer? _fallbackRearmTimer;
+  int _consecutiveFallbackTimeouts = 0;
 
   /// True between an accepted upgrade request and the daemon reconnecting.
   bool _upgradeAwaitingReconnect = false;
@@ -683,6 +737,8 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       _availabilitySub?.cancel();
       _wifiStateSub?.cancel();
       _fallbackScanSub?.cancel();
+      _fallbackReadinessSub?.cancel();
+      _fallbackRearmTimer?.cancel();
       _bleCompositeStateSub?.cancel();
       _statsTimer?.cancel();
       _upgradeWatchdog?.cancel();
@@ -811,12 +867,13 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           _handleLinkStatus(mapped);
           return;
         }
-        if (s.phase == BleLinkPhase.scanTimeout &&
-            (_connectedDeviceIds.isNotEmpty ||
-                _connectingDeviceIds.isNotEmpty)) {
+        if (id == null) {
+          // Fallback scan lifecycle/failures are surfaced through the dedicated
+          // BleFallbackState rather than clobbering the Wi-Fi link's status.
           return;
         }
       }
+      if (id == null && state.wifiFallback) return;
       _handleLinkStatus(s);
       return;
     }
@@ -1149,13 +1206,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
       case BleAvailability.poweredOn:
         // Only a return from off redials; an initial poweredOn event must
         // not.
-        if (!_radioOff) return;
+        final wasOff =
+            _radioOff || _bleFallbackState == BleFallbackState.bluetoothOff;
+        if (!wasOff) return;
         _radioOff = false;
         _radioOffWifiBleCarried = false;
         if (this.state.activeTransport == BridgeTransportKind.wifi &&
             this.state.wifiFallback &&
             _wifiTransport != null) {
-          _startFallbackScan(_wifiTransport!);
+          _syncFallbackReadiness(clearFailure: true, rearmIfNeeded: true);
         }
         unawaited(_recoverAfterRadioOn());
       default:
@@ -1238,6 +1297,21 @@ class RealDeviceController extends Notifier<RealDeviceState> {
           nextTransport == BridgeTransportKind.wifi &&
               _connectedDeviceIds.isNotEmpty
           ? _wifiLink?.activeLeg?.call()
+          : null,
+      bleFallbackState:
+          nextTransport == BridgeTransportKind.wifi &&
+              (wifiFallback ?? state.wifiFallback)
+          ? _bleFallbackState
+          : BleFallbackState.disabled,
+      bleFallbackCandidateCount:
+          nextTransport == BridgeTransportKind.wifi &&
+              (wifiFallback ?? state.wifiFallback)
+          ? _bleFallbackCandidateCount
+          : null,
+      bleFallbackReason:
+          nextTransport == BridgeTransportKind.wifi &&
+              (wifiFallback ?? state.wifiFallback)
+          ? _bleFallbackReason
           : null,
       lanEndpoints: lanEndpoints ?? state.lanEndpoints,
       discoveringLan: discoveringLan ?? state.discoveringLan,
@@ -1489,6 +1563,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _handleLinkStatus(
       BleLinkStatus(BleLinkPhase.ready, deviceId: deviceId, mtu: mtu),
     );
+    if (state.wifiFallback && _wifiTransport != null) {
+      _syncFallbackReadiness(rearmIfNeeded: true);
+    }
   }
 
   Future<void> _disposeWifiTransport() async {
@@ -1498,6 +1575,14 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _wifiStateSub = null;
     final scanSub = _fallbackScanSub;
     _fallbackScanSub = null;
+    final readinessSub = _fallbackReadinessSub;
+    _fallbackReadinessSub = null;
+    _fallbackRearmTimer?.cancel();
+    _fallbackRearmTimer = null;
+    _consecutiveFallbackTimeouts = 0;
+    _bleFallbackState = BleFallbackState.disabled;
+    _bleFallbackCandidateCount = null;
+    _bleFallbackReason = null;
     final transport = _wifiTransport;
     _wifiTransport = null;
     if (transport != null) _wifiTransportEpoch++;
@@ -1510,19 +1595,360 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     // turn; the id guard above already makes late events harmless.
     unawaited(sub?.cancel());
     unawaited(scanSub?.cancel());
+    unawaited(readinessSub?.cancel());
     await transport?.dispose();
   }
 
+  static const int _maxProactiveScansPerWindow = 3;
+  static const Duration _proactiveScanWindow = Duration(seconds: 30);
+
+  String? _sanitizeFallbackReason(String? message) {
+    if (message == null) return null;
+    final scrubbed = message
+        .replaceAll(
+          RegExp(r'\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b'),
+          '<mac>',
+        )
+        .replaceAll(
+          RegExp(r'token[=:\s]+\S+', caseSensitive: false),
+          'token=<redacted>',
+        )
+        .trim();
+    return scrubbed.isEmpty ? null : scrubbed;
+  }
+
+  void _setFallbackReadiness(
+    BleFallbackState nextState, {
+    int? candidateCount,
+    String? reason,
+  }) {
+    final changed =
+        _bleFallbackState != nextState ||
+        _bleFallbackCandidateCount != candidateCount ||
+        _bleFallbackReason != reason;
+    _bleFallbackState = nextState;
+    _bleFallbackCandidateCount = candidateCount;
+    _bleFallbackReason = reason;
+    if (changed && ref.mounted) _update();
+  }
+
+  void _syncFallbackReadiness({
+    bool clearFailure = false,
+    bool rearmIfNeeded = false,
+  }) {
+    if (!ref.mounted) return;
+    if (state.activeTransport != BridgeTransportKind.wifi ||
+        !state.wifiFallback) {
+      _setFallbackReadiness(BleFallbackState.disabled);
+      return;
+    }
+    final transport = _wifiTransport;
+    final wifiId = _wifiDeviceId;
+    if (transport == null || wifiId == null) return;
+
+    if (transport is CompositeBleTransport) {
+      final readiness = transport.fallbackReadinessFor(wifiId);
+      if (readiness.activeLeg == CompositeLeg.ble) {
+        _fallbackRearmTimer?.cancel();
+        _fallbackRearmTimer = null;
+        unawaited(_stopFallbackScan());
+        _setFallbackReadiness(
+          BleFallbackState.active,
+          candidateCount: readiness.totalCount > 0 ? readiness.totalCount : 1,
+        );
+        return;
+      }
+      if (readiness.hasVerified) {
+        _fallbackRearmTimer?.cancel();
+        _fallbackRearmTimer = null;
+        unawaited(_stopFallbackScan());
+        _setFallbackReadiness(
+          BleFallbackState.ready,
+          candidateCount: readiness.totalCount,
+        );
+        return;
+      }
+      if (!clearFailure &&
+          (_bleFallbackState == BleFallbackState.permissionDenied ||
+              _bleFallbackState == BleFallbackState.bluetoothOff ||
+              _bleFallbackState == BleFallbackState.bluetoothUnavailable)) {
+        return;
+      }
+      if (readiness.unverifiedCount > 0) {
+        _setFallbackReadiness(
+          BleFallbackState.candidateUnverified,
+          candidateCount: readiness.unverifiedCount,
+        );
+        if (rearmIfNeeded && _fallbackScanSub == null) {
+          _startFallbackScan(transport);
+        }
+        return;
+      }
+    }
+
+    if (!clearFailure &&
+        (_bleFallbackState == BleFallbackState.permissionDenied ||
+            _bleFallbackState == BleFallbackState.bluetoothOff ||
+            _bleFallbackState == BleFallbackState.bluetoothUnavailable)) {
+      return;
+    }
+
+    if (_fallbackScanSub != null) {
+      _setFallbackReadiness(BleFallbackState.scanning, candidateCount: 0);
+    } else if (rearmIfNeeded) {
+      _startFallbackScan(transport);
+    }
+  }
+
+  void _scheduleFallbackRearm(BleTransport transport) {
+    if (!ref.mounted || _intentionalDisconnect) return;
+    if (state.activeTransport != BridgeTransportKind.wifi ||
+        !state.wifiFallback) {
+      return;
+    }
+    if (_wifiTransport != transport) return;
+    if (_fallbackScanSub != null || _fallbackRearmTimer != null) return;
+    if (_radioOff ||
+        _bleFallbackState == BleFallbackState.permissionDenied ||
+        _bleFallbackState == BleFallbackState.bluetoothOff ||
+        _bleFallbackState == BleFallbackState.bluetoothUnavailable ||
+        _bleFallbackState == BleFallbackState.ready ||
+        _bleFallbackState == BleFallbackState.active) {
+      return;
+    }
+
+    final now = ref.read(proactiveScanClockProvider)();
+    _proactiveScanStarts.removeWhere(
+      (t) => now.difference(t) >= _proactiveScanWindow,
+    );
+    Duration delay;
+    if (_proactiveScanStarts.length >= _maxProactiveScansPerWindow) {
+      final oldest = _proactiveScanStarts.first;
+      final untilHeadroom = _proactiveScanWindow - now.difference(oldest);
+      delay = untilHeadroom.isNegative ? Duration.zero : untilHeadroom;
+    } else {
+      final base = ref.read(proactiveScanBackoffProvider);
+      final factor = 1 << _consecutiveFallbackTimeouts.clamp(0, 2);
+      delay = Duration(milliseconds: base.inMilliseconds * factor);
+    }
+    _consecutiveFallbackTimeouts++;
+    _fallbackRearmTimer = Timer(delay, () {
+      _fallbackRearmTimer = null;
+      if (!ref.mounted || _wifiTransport != transport) return;
+      _startFallbackScan(transport);
+    });
+  }
+
+  /// Explicitly retries BLE fallback permission/discovery when the user taps
+  /// Retry on the Connect screen.
+  Future<void> retryBleFallback() async {
+    final transport = _wifiTransport;
+    if (state.activeTransport != BridgeTransportKind.wifi ||
+        !state.wifiFallback ||
+        transport == null) {
+      return;
+    }
+    _fallbackRearmTimer?.cancel();
+    _fallbackRearmTimer = null;
+    _consecutiveFallbackTimeouts = 0;
+    await _stopFallbackScan();
+    _startFallbackScan(transport, userInitiated: true);
+  }
+
   /// Scans through the composite so its `_scanHits` hold the BLE bridge that
-  /// a TCP failure can fall back to. The scan keeps running after a successful
-  /// TCP dial (until the transport's own scan timeout), so a later drop has a
-  /// candidate; the composite keeps the hits after the scan stops.
-  void _startFallbackScan(BleTransport transport) {
-    unawaited(_fallbackScanSub?.cancel());
-    _fallbackScanSub = transport.scan().listen((_) {}, onError: (Object _) {});
+  /// a TCP failure can fall back to. Enforces a rolling 30 s cap of at most 3
+  /// proactive starts so Android SafeScanner headroom (5 / 30 s) is reserved
+  /// for an immediate T0 failover scan, and stops once a bridge-verified
+  /// candidate is associated.
+  void _startFallbackScan(
+    BleTransport transport, {
+    bool userInitiated = false,
+  }) {
+    if (!ref.mounted || _intentionalDisconnect) return;
+    if (state.activeTransport != BridgeTransportKind.wifi ||
+        !state.wifiFallback) {
+      return;
+    }
+    if (_wifiTransport != transport) return;
+    if (_fallbackScanSub != null) return;
+
+    final wifiId = _wifiDeviceId;
+    if (transport is CompositeBleTransport && wifiId != null) {
+      final readiness = transport.fallbackReadinessFor(wifiId);
+      if (readiness.activeLeg == CompositeLeg.ble) {
+        _setFallbackReadiness(
+          BleFallbackState.active,
+          candidateCount: readiness.totalCount > 0 ? readiness.totalCount : 1,
+        );
+        return;
+      }
+      if (readiness.hasVerified) {
+        _setFallbackReadiness(
+          BleFallbackState.ready,
+          candidateCount: readiness.totalCount,
+        );
+        return;
+      }
+    }
+
+    if (!userInitiated &&
+        _bleFallbackState == BleFallbackState.permissionDenied) {
+      return;
+    }
+    if (_radioOff) {
+      _setFallbackReadiness(
+        BleFallbackState.bluetoothOff,
+        candidateCount: 0,
+        reason: 'Bluetooth is turned off',
+      );
+      return;
+    }
+
+    final now = ref.read(proactiveScanClockProvider)();
+    _proactiveScanStarts.removeWhere(
+      (t) => now.difference(t) >= _proactiveScanWindow,
+    );
+    if (_proactiveScanStarts.length >= _maxProactiveScansPerWindow) {
+      _scheduleFallbackRearm(transport);
+      return;
+    }
+
+    _fallbackRearmTimer?.cancel();
+    _fallbackRearmTimer = null;
+    _proactiveScanStarts.add(now);
+
+    final initialUnverified =
+        transport is CompositeBleTransport && wifiId != null
+        ? transport.fallbackReadinessFor(wifiId).unverifiedCount
+        : 0;
+    _setFallbackReadiness(
+      initialUnverified > 0
+          ? BleFallbackState.candidateUnverified
+          : BleFallbackState.scanning,
+      candidateCount: initialUnverified,
+    );
+
+    var hadTerminalError = false;
+    _fallbackScanSub = transport.scan().listen(
+      (_) {
+        _consecutiveFallbackTimeouts = 0;
+        _syncFallbackReadiness(clearFailure: true);
+      },
+      onError: (Object error) {
+        hadTerminalError = true;
+        _fallbackScanSub = null;
+        if (_wifiTransport != transport || !ref.mounted) return;
+        if (error is BleTransportException) {
+          switch (error.phase) {
+            case BleLinkPhase.permissionDenied:
+              _setFallbackReadiness(
+                BleFallbackState.permissionDenied,
+                candidateCount: 0,
+                reason:
+                    _sanitizeFallbackReason(error.message) ??
+                    'Bluetooth permission denied',
+              );
+              return;
+            case BleLinkPhase.bluetoothOff:
+              _setFallbackReadiness(
+                BleFallbackState.bluetoothOff,
+                candidateCount: 0,
+                reason: 'Bluetooth is turned off',
+              );
+              return;
+            case BleLinkPhase.bluetoothUnavailable:
+              _setFallbackReadiness(
+                BleFallbackState.bluetoothUnavailable,
+                candidateCount: 0,
+                reason:
+                    _sanitizeFallbackReason(error.message) ??
+                    'Bluetooth is not available',
+              );
+              return;
+            case BleLinkPhase.scanTimeout:
+              if (transport is CompositeBleTransport && wifiId != null) {
+                final readiness = transport.fallbackReadinessFor(wifiId);
+                if (readiness.hasVerified) {
+                  _setFallbackReadiness(
+                    BleFallbackState.ready,
+                    candidateCount: readiness.totalCount,
+                  );
+                  return;
+                }
+                if (readiness.unverifiedCount > 0) {
+                  _setFallbackReadiness(
+                    BleFallbackState.candidateUnverified,
+                    candidateCount: readiness.unverifiedCount,
+                  );
+                  _scheduleFallbackRearm(transport);
+                  return;
+                }
+              }
+              _setFallbackReadiness(
+                BleFallbackState.noCandidate,
+                candidateCount: 0,
+                reason: 'scan_timeout',
+              );
+              _scheduleFallbackRearm(transport);
+              return;
+            default:
+              break;
+          }
+        }
+        _setFallbackReadiness(
+          BleFallbackState.noCandidate,
+          candidateCount: 0,
+          reason: _sanitizeFallbackReason('$error') ?? 'scan_failed',
+        );
+        _scheduleFallbackRearm(transport);
+      },
+      onDone: () {
+        _fallbackScanSub = null;
+        if (hadTerminalError || _wifiTransport != transport || !ref.mounted) {
+          return;
+        }
+        if (transport is CompositeBleTransport && wifiId != null) {
+          final readiness = transport.fallbackReadinessFor(wifiId);
+          if (readiness.activeLeg == CompositeLeg.ble) {
+            _setFallbackReadiness(
+              BleFallbackState.active,
+              candidateCount: readiness.totalCount > 0
+                  ? readiness.totalCount
+                  : 1,
+            );
+            return;
+          }
+          if (readiness.hasVerified) {
+            _setFallbackReadiness(
+              BleFallbackState.ready,
+              candidateCount: readiness.totalCount,
+            );
+            return;
+          }
+          if (readiness.unverifiedCount > 0) {
+            _setFallbackReadiness(
+              BleFallbackState.candidateUnverified,
+              candidateCount: readiness.unverifiedCount,
+            );
+            _scheduleFallbackRearm(transport);
+            return;
+          }
+        }
+        if (_bleFallbackState == BleFallbackState.scanning) {
+          _setFallbackReadiness(
+            BleFallbackState.noCandidate,
+            candidateCount: 0,
+            reason: 'no_candidate',
+          );
+          _scheduleFallbackRearm(transport);
+        }
+      },
+    );
   }
 
   Future<void> _stopFallbackScan() async {
+    _fallbackRearmTimer?.cancel();
+    _fallbackRearmTimer = null;
     final sub = _fallbackScanSub;
     _fallbackScanSub = null;
     // Cancelling can wait on a delivery turn; the scan is best-effort and the
@@ -1737,7 +2163,77 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// user connects again. An active manual scan or LAN discovery also keeps
   /// the automatic dial off while it runs: the user is browsing, not waiting
   /// to reconnect. Both clear that suppression when they finish.
+  Future<void> _refreshWifiFallbackOnResume() async {
+    final transport = _wifiTransport;
+    if (!ref.mounted ||
+        _intentionalDisconnect ||
+        state.activeTransport != BridgeTransportKind.wifi ||
+        !state.wifiFallback ||
+        transport == null) {
+      return;
+    }
+    if (transport is CompositeBleTransport) {
+      final ble = transport.ble;
+      if (ble is UniversalBleTransport) {
+        bool granted;
+        try {
+          granted = await ble.hasPermissions();
+        } catch (_) {
+          granted = false;
+        }
+        if (!ref.mounted || _wifiTransport != transport) return;
+        if (!granted) {
+          _setFallbackReadiness(
+            BleFallbackState.permissionDenied,
+            candidateCount: 0,
+            reason: _bleFallbackReason ?? 'Bluetooth permission denied',
+          );
+          return;
+        }
+        BleAvailability availability;
+        try {
+          availability = await ble.availability();
+        } catch (_) {
+          availability = BleAvailability.unknown;
+        }
+        if (!ref.mounted || _wifiTransport != transport) return;
+        if (availability == BleAvailability.poweredOff) {
+          _setFallbackReadiness(
+            BleFallbackState.bluetoothOff,
+            candidateCount: 0,
+            reason: 'Bluetooth is turned off',
+          );
+          return;
+        }
+        if (availability == BleAvailability.unauthorized) {
+          _setFallbackReadiness(
+            BleFallbackState.permissionDenied,
+            candidateCount: 0,
+            reason: 'Bluetooth access is not authorized',
+          );
+          return;
+        }
+        if (availability == BleAvailability.unsupported) {
+          _setFallbackReadiness(
+            BleFallbackState.bluetoothUnavailable,
+            candidateCount: 0,
+            reason: 'Bluetooth is not available (${availability.name})',
+          );
+          return;
+        }
+        if (_bleFallbackState == BleFallbackState.permissionDenied ||
+            _bleFallbackState == BleFallbackState.bluetoothOff ||
+            _bleFallbackState == BleFallbackState.bluetoothUnavailable) {
+          _syncFallbackReadiness(clearFailure: true, rearmIfNeeded: true);
+          return;
+        }
+      }
+    }
+    _syncFallbackReadiness(rearmIfNeeded: true);
+  }
+
   Future<void> _handleAppResume() async {
+    await _refreshWifiFallbackOnResume();
     if (state.connected || state.busy || _intentionalDisconnect) return;
     _reconnectAttempts.clear();
     _reconnecting.clear();
@@ -1963,6 +2459,15 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     _wifiStateSub = transport
         .connectionState(id)
         .listen((s) => _onWifiConnectionState(id, s));
+    if (bleFallback && transport is CompositeBleTransport) {
+      _fallbackReadinessSub = transport.fallbackReadinessChanges.listen((
+        changedId,
+      ) {
+        if (changedId == _wifiDeviceId) {
+          _syncFallbackReadiness();
+        }
+      });
+    }
     ref
         .read(bridgeTransportKindsProvider.notifier)
         .set(id, BridgeTransportKind.wifi);
@@ -1973,19 +2478,26 @@ class RealDeviceController extends Notifier<RealDeviceState> {
     if (bleFallback) _startFallbackScan(transport);
     await connect(id);
     if (state.connectedDeviceIds.contains(id)) {
+      final learnedBridgeId = _wsTransport?.helloFor(id)?.bridgeId;
+      final effectiveBridgeId = (bridgeId != null && bridgeId.isNotEmpty)
+          ? bridgeId
+          : (learnedBridgeId != null && learnedBridgeId.isNotEmpty
+                ? learnedBridgeId
+                : null);
       if (rememberToken && trimmedToken != null && trimmedToken.isNotEmpty) {
         await tokenStore.save(
-          bridgeId: bridgeId,
+          bridgeId: effectiveBridgeId,
           hosts: endpoint.hosts,
           token: trimmedToken,
         );
       }
       await _rememberBridge(
-        bridgeId: bridgeId,
+        bridgeId: effectiveBridgeId,
         hosts: endpoint.hosts,
         port: endpoint.port,
         bleFallback: bleFallback,
       );
+      if (bleFallback) _syncFallbackReadiness();
     }
   }
 
