@@ -368,11 +368,33 @@ class UniversalBleTransport
 
   /// Permissions first, then the radio. Throws a classified
   /// [BleTransportException].
+  Future<void>? _permissionRequestInFlight;
+
+  Future<bool> hasPermissions() => _adapter.hasPermissions();
+
+  Future<BleAvailability> availability() => _adapter.availability();
+
+  Future<void> _ensurePermissions() async {
+    if (await _adapter.hasPermissions()) return;
+    final inFlight = _permissionRequestInFlight;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+    final request = _adapter.requestPermissions();
+    _permissionRequestInFlight = request;
+    try {
+      await request;
+    } finally {
+      if (identical(_permissionRequestInFlight, request)) {
+        _permissionRequestInFlight = null;
+      }
+    }
+  }
+
   Future<void> _preflight({String? deviceId}) async {
     try {
-      if (!await _adapter.hasPermissions()) {
-        await _adapter.requestPermissions();
-      }
+      await _ensurePermissions();
     } catch (e) {
       throw _fail(
         BleLinkPhase.permissionDenied,
@@ -443,7 +465,10 @@ class UniversalBleTransport
         _scanCtl = ctl;
         unawaited(_enqueueScan(() => _startScan(ctl)));
       },
-      onCancel: stopScan,
+      onCancel: () {
+        if (!identical(ctl, _scanCtl)) return Future<void>.value();
+        return stopScan();
+      },
     );
     _scanCtl = ctl;
     return ctl.stream;
@@ -451,38 +476,44 @@ class UniversalBleTransport
 
   Future<void> _startScan(StreamController<BleScanResult> ctl) async {
     if (!_scanWanted || _scanPaused || ctl.isClosed) return;
-    if (_adapterScanning) return;
+    if (!identical(ctl, _scanCtl)) return;
     try {
       await _preflight();
     } on BleTransportException catch (e) {
       // A pause during preflight wins: the resume retries preflight and can
       // report the real cause instead of closing the stream here.
       if (!_scanWanted || _scanPaused || ctl.isClosed) return;
+      if (!identical(ctl, _scanCtl)) return;
       _scanWanted = false;
       ctl.addError(e);
       unawaited(ctl.close());
       return;
     } catch (e) {
       if (!_scanWanted || _scanPaused || ctl.isClosed) return;
+      if (!identical(ctl, _scanCtl)) return;
       _scanWanted = false;
       ctl.addError(_fail(BleLinkPhase.connectFailed, 'Scan failed: $e'));
       unawaited(ctl.close());
       return;
     }
     if (!_scanWanted || _scanPaused || ctl.isClosed) return;
-    if (_adapterScanning) return;
+    if (!identical(ctl, _scanCtl)) return;
 
     try {
       _scanSub ??= _adapter.scanResults.listen((r) {
+        final active = _scanCtl;
+        if (active == null || active.isClosed) return;
         _scanSeen++;
-        if (!ctl.isClosed) ctl.add(r);
+        active.add(r);
       });
       _scanSeen = 0;
-      await _adapter.startScan(
-        withServices: _scanServices,
-        withNamePrefixes: _scanNamePrefixes,
-      );
-      _adapterScanning = true;
+      if (!_adapterScanning) {
+        await _adapter.startScan(
+          withServices: _scanServices,
+          withNamePrefixes: _scanNamePrefixes,
+        );
+        _adapterScanning = true;
+      }
       _emit(BleLinkPhase.scanning);
       // A bridge the phone already holds (for example as a HID gamepad) does
       // not advertise, so startScan never sees it. Publish system-connected
@@ -540,19 +571,27 @@ class UniversalBleTransport
     }
   }
 
-  /// Drops a system device only when its metadata positively says it is not a
-  /// bridge. Name and service may both be missing on some platforms, and the
-  /// native call was already filtered by service, so unknown metadata passes.
+  /// Drops a system device only when its non-empty [serviceUuids] positively
+  /// say it is not a bridge.
+  ///
+  /// [BleAdapter.systemDevices] is natively filtered for FF10; Android often
+  /// omits `serviceUuids` (`[]`) and `serviceData` (`{}`) and exposes a BlueZ
+  /// alias (e.g. `wmr-bridge` / `wmrpi`) instead of `WMR Bridge`.
   bool _looksLikeBridge(BleScanResult device) {
-    final name = device.name;
-    final nameMatches = name != null && _scanNamePrefixes.any(name.startsWith);
-    final serviceMatches = device.serviceUuids.any(
+    final serviceDataMatches = device.serviceData.keys.any(
       (uuid) => _scanServices.any(
         (wanted) => wanted.toLowerCase() == uuid.toLowerCase(),
       ),
     );
-    final hasMetadata = name != null || device.serviceUuids.isNotEmpty;
-    return nameMatches || serviceMatches || !hasMetadata;
+    if (device.serviceUuids.isNotEmpty) {
+      final serviceMatches = device.serviceUuids.any(
+        (uuid) => _scanServices.any(
+          (wanted) => wanted.toLowerCase() == uuid.toLowerCase(),
+        ),
+      );
+      return serviceMatches || serviceDataMatches;
+    }
+    return true;
   }
 
   void _armScanTimer(StreamController<BleScanResult> ctl) {

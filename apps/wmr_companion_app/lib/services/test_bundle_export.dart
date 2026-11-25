@@ -210,6 +210,9 @@ final testBundleInputProvider = Provider<TestBundleInputBuilder>((ref) {
       firmwareSha: firmwareSha,
       wifiFallback: device.wifiFallback,
       activeLeg: device.wifiLeg?.label,
+      bleFallbackState: device.bleFallbackState.jsonValue,
+      bleFallbackCandidateCount: device.bleFallbackCandidateCount,
+      bleFallbackReason: device.bleFallbackReason,
       linkTimeline: linkTimeline,
       stickSettings: stickSettings,
       handTrackingDiagnostics: ref

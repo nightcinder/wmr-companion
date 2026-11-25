@@ -968,7 +968,7 @@ void main() {
         ),
       )
       ..scanResults.add(tcpScanResult());
-    ble = newBle();
+    ble = newBle(ff16: _endpointDocument());
   });
 
   tearDown(() async {
@@ -1325,6 +1325,7 @@ void main() {
       tcp: tcp,
       ble: ble,
       upgradeInterval: const Duration(hours: 1),
+      upgradeProbeBudget: Duration.zero,
     );
     addTearDown(transport.dispose);
 
@@ -1364,6 +1365,7 @@ void main() {
       tcp: tcp,
       ble: ble,
       upgradeInterval: const Duration(hours: 1),
+      upgradeProbeBudget: Duration.zero,
     );
     addTearDown(transport.dispose);
 
@@ -1422,10 +1424,31 @@ void main() {
   for (final timeout in [false, true]) {
     test('a BLE-drop recovery dial that ${timeout ? 'times out' : 'throws'} '
         'counts once and records its outcome', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(host: '127.0.0.1', port: 8765, deviceId: _tcpDeviceId),
+        )
+        ..scanResults.add(tcpScanResult());
+      tcp.hellos[_tcpDeviceId] = WmrWsHello(
+        protocol: 1,
+        transport: 'tcp',
+        device: _tcpDeviceId,
+        version: '0.2.4',
+        hostname: 'wmrpi',
+        authRequired: false,
+        streams: const {'raw', 'decoded', 'batched'},
+        recordSize: 56,
+        batchMax: 9,
+        fragmentCapacity: 46,
+      );
+      ble.dispose();
+      ble = newBle();
       final transport = CompositeBleTransport(
         tcp: tcp,
         ble: ble,
         upgradeInterval: const Duration(hours: 1),
+        upgradeProbeBudget: Duration.zero,
         tcpProbeBudget: const Duration(milliseconds: 100),
       );
       addTearDown(transport.dispose);
@@ -1480,6 +1503,7 @@ void main() {
       tcp: tcp,
       ble: ble,
       upgradeInterval: const Duration(hours: 1),
+      upgradeProbeBudget: Duration.zero,
     );
     addTearDown(transport.dispose);
 
@@ -1553,6 +1577,7 @@ void main() {
         tcp: tcp,
         ble: ble,
         upgradeInterval: const Duration(hours: 1),
+        upgradeProbeBudget: Duration.zero,
       );
       addTearDown(transport.dispose);
 
@@ -1721,7 +1746,7 @@ void main() {
           )
           ..onRead = (deviceId, characteristicUuid) {
             if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
-              return _versionString();
+              return _endpointDocument();
             }
             throw StateError('unexpected read $characteristicUuid');
           };
@@ -1731,6 +1756,7 @@ void main() {
       tcp: tcp,
       ble: ble,
       upgradeInterval: const Duration(hours: 1),
+      upgradeProbeBudget: Duration.zero,
     );
     addTearDown(transport.dispose);
 
@@ -2042,6 +2068,7 @@ void main() {
         tcp: tcp,
         ble: ble,
         upgradeInterval: const Duration(hours: 1),
+        upgradeProbeBudget: Duration.zero,
       );
       addTearDown(transport.dispose);
 
@@ -2128,7 +2155,15 @@ void main() {
   test(
     're-promotes a configured TCP endpoint when FF16 is a version string',
     () async {
-      tcp.failConnect = true;
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(host: '127.0.0.1', port: 8765, deviceId: _tcpDeviceId),
+        )
+        ..scanResults.add(tcpScanResult())
+        ..failConnect = true;
+      ble.dispose();
+      ble = newBle();
       final transport = CompositeBleTransport(
         tcp: tcp,
         ble: ble,
@@ -2185,7 +2220,7 @@ void main() {
             ..onRead = (deviceId, characteristicUuid) {
               if (characteristicUuid.toLowerCase() ==
                   wmrBridgeVersionCharUuid) {
-                return _versionString();
+                return _endpointDocument();
               }
               throw StateError('unexpected read $characteristicUuid');
             };
@@ -2195,6 +2230,7 @@ void main() {
         tcp: tcp,
         ble: ble,
         upgradeInterval: const Duration(hours: 1),
+        upgradeProbeBudget: Duration.zero,
       );
       addTearDown(transport.dispose);
       await transport.scan().toList();
@@ -3046,15 +3082,24 @@ void main() {
       await tcp.dispose();
       final held = _HeldDialTcp()
         ..registerEndpoint(
-          WmrWsEndpoint(
-            host: '127.0.0.1',
-            port: 8765,
-            deviceId: _tcpDeviceId,
-            bridgeId: _bridgeId,
-          ),
+          WmrWsEndpoint(host: '127.0.0.1', port: 8765, deviceId: _tcpDeviceId),
         )
         ..scanResults.add(tcpScanResult());
+      held.hellos[_tcpDeviceId] = WmrWsHello(
+        protocol: 1,
+        transport: 'tcp',
+        device: _tcpDeviceId,
+        version: '0.2.4',
+        hostname: 'wmrpi',
+        authRequired: false,
+        streams: const {'raw', 'decoded', 'batched'},
+        recordSize: 56,
+        batchMax: 9,
+        fragmentCapacity: 46,
+      );
       tcp = held;
+      ble.dispose();
+      ble = newBle();
 
       final transport = CompositeBleTransport(
         tcp: held,
@@ -3127,15 +3172,24 @@ void main() {
       await tcp.dispose();
       final held = _JoiningTcp()
         ..registerEndpoint(
-          WmrWsEndpoint(
-            host: '127.0.0.1',
-            port: 8765,
-            deviceId: _tcpDeviceId,
-            bridgeId: _bridgeId,
-          ),
+          WmrWsEndpoint(host: '127.0.0.1', port: 8765, deviceId: _tcpDeviceId),
         )
         ..scanResults.add(tcpScanResult());
+      held.hellos[_tcpDeviceId] = WmrWsHello(
+        protocol: 1,
+        transport: 'tcp',
+        device: _tcpDeviceId,
+        version: '0.2.4',
+        hostname: 'wmrpi',
+        authRequired: false,
+        streams: const {'raw', 'decoded', 'batched'},
+        recordSize: 56,
+        batchMax: 9,
+        fragmentCapacity: 46,
+      );
       tcp = held;
+      ble.dispose();
+      ble = newBle();
 
       final transport = CompositeBleTransport(
         tcp: held,
@@ -3184,14 +3238,21 @@ void main() {
     await tcp.dispose();
     final held = _JoiningTcp()
       ..registerEndpoint(
-        WmrWsEndpoint(
-          host: '127.0.0.1',
-          port: 8765,
-          deviceId: _tcpDeviceId,
-          bridgeId: _bridgeId,
-        ),
+        WmrWsEndpoint(host: '127.0.0.1', port: 8765, deviceId: _tcpDeviceId),
       )
       ..scanResults.add(tcpScanResult());
+    held.hellos[_tcpDeviceId] = WmrWsHello(
+      protocol: 1,
+      transport: 'tcp',
+      device: _tcpDeviceId,
+      version: '0.2.4',
+      hostname: 'wmrpi',
+      authRequired: false,
+      streams: const {'raw', 'decoded', 'batched'},
+      recordSize: 56,
+      batchMax: 9,
+      fragmentCapacity: 46,
+    );
     tcp = held;
 
     ble.dispose();
@@ -4112,7 +4173,7 @@ void main() {
         );
         gated.onRead = (deviceId, characteristicUuid) {
           if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
-            return _versionString();
+            return _endpointDocument();
           }
           throw StateError('unexpected read $characteristicUuid');
         };
@@ -4170,27 +4231,29 @@ void main() {
   test('a failover whose BLE activation throws ends lost with '
       'activation_threw', () async {
     ble.dispose();
-    final bridge = _RecordingBle(
-      devices: const [
-        FakeDevice(
-          id: _bleDeviceId,
-          name: 'WMR Bridge',
-          services: fakeBridgeDeviceServices,
-        ),
-      ],
-    );
-    bridge.onRead = (deviceId, characteristicUuid) {
-      if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
-        return _versionString();
-      }
-      throw StateError('unexpected read $characteristicUuid');
-    };
+    final bridge =
+        _RecordingBle(
+            devices: const [
+              FakeDevice(
+                id: _bleDeviceId,
+                name: 'WMR Bridge',
+                services: fakeBridgeDeviceServices,
+              ),
+            ],
+          )
+          ..onRead = (deviceId, characteristicUuid) {
+            if (characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _endpointDocument();
+            }
+            throw StateError('unexpected read $characteristicUuid');
+          };
     ble = bridge;
 
     final transport = CompositeBleTransport(
       tcp: tcp,
       ble: ble,
       upgradeInterval: Duration.zero,
+      bleScanWait: Duration.zero,
     );
     addTearDown(transport.dispose);
     await transport.scan().toList();
@@ -5758,6 +5821,234 @@ void main() {
     );
     expect(transport.bleDeviceIdFor(_tcpDeviceId), freshBleId);
   });
+
+  test('fallbackReadinessFor classifies WMB1 serviceData before and after hello, FF16-verified, and unverified hits', () async {
+    await tcp.dispose();
+    const manualId = '127.0.0.1:8765';
+    const bridgeId = 'abcdef1234567890';
+    tcp = _FakeTcp()
+      ..registerEndpoint(
+        WmrWsEndpoint(host: '127.0.0.1', port: 8765, deviceId: manualId),
+      );
+    tcp.hellos[manualId] = WmrWsHello(
+      protocol: 1,
+      transport: 'tcp',
+      device: manualId,
+      version: '0.2.4',
+      hostname: 'wmrpi',
+      authRequired: false,
+      streams: const {'raw', 'decoded', 'batched'},
+      recordSize: 56,
+      batchMax: 9,
+      fragmentCapacity: 46,
+    );
+    ble.dispose();
+    final unverifiedBle = _ServiceDataBle(
+      results: [
+        const BleScanResult(deviceId: 'unverified-1', name: 'wmrpi', rssi: -50),
+        BleScanResult(
+          deviceId: 'verified-1',
+          name: 'WMR Bridge',
+          rssi: -45,
+          serviceUuids: const [wmrBridgeServiceUuid],
+          serviceData: {
+            wmrBridgeServiceUuid: Uint8List.fromList(
+              utf8.encode('WMB1abcdef12'),
+            ),
+          },
+        ),
+      ],
+    );
+    ble = unverifiedBle;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: Duration.zero,
+    );
+    addTearDown(transport.dispose);
+
+    // Before hello supplies bridgeId, both hits are unverified.
+    final sub = transport.scan().listen((_) {});
+    addTearDown(sub.cancel);
+    await _settle();
+
+    await transport.connect(manualId);
+    var readiness = transport.fallbackReadinessFor(manualId);
+    expect(readiness.hasVerified, isFalse);
+    expect(readiness.unverifiedCount, 2);
+
+    // Simulate hello later supplying bridgeId -> re-evaluates WMB1 hit to verified.
+    await transport.disconnect(manualId);
+    tcp.hellos[manualId] = WmrWsHello(
+      protocol: 1,
+      transport: 'tcp',
+      device: manualId,
+      version: '0.2.4',
+      hostname: 'wmrpi',
+      bridgeId: bridgeId,
+      authRequired: false,
+      streams: const {'raw', 'decoded', 'batched'},
+      recordSize: 56,
+      batchMax: 9,
+      fragmentCapacity: 46,
+    );
+    await transport.connect(manualId);
+    readiness = transport.fallbackReadinessFor(manualId);
+    expect(readiness.hasVerified, isTrue);
+    expect(readiness.verifiedCount, 1);
+    expect(readiness.unverifiedCount, 1);
+  });
+
+  test('requireIdentity rejects a single unverified candidate with null, non-JSON, or mismatched FF16', () async {
+    for (final payload in <Uint8List?>[
+      null,
+      _versionString('0.3.0-pi'),
+      _endpointDocument(bridgeId: 'other-bridge'),
+    ]) {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        )
+        ..scanResults.add(tcpScanResult());
+      ble.dispose();
+      ble =
+          FakeTransport(
+              devices: const [
+                FakeDevice(
+                  id: _bleDeviceId,
+                  name: 'wmrpi',
+                  services: fakeBridgeDeviceServices,
+                ),
+              ],
+            )
+            ..onRead = (_, charUuid) {
+              if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+                if (payload == null) throw StateError('no FF16');
+                return payload;
+              }
+              throw StateError('unexpected read $charUuid');
+            };
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+        bleScanWait: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      await transport.scan().toList();
+      await transport.connect(_tcpDeviceId);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      await _settle();
+
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(() => transport.activeLegFor(_tcpDeviceId) == null);
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(marks['failover_outcome'], 'lost');
+      expect(marks['failover_reason'], 'connect_threw');
+      expect(marks['failover_candidate_count'], 1);
+    }
+  });
+
+  test('_fallbackToBle starts a bounded scan when !_scanning and zero candidates exist, and lands on matching FF16', () async {
+    await tcp.dispose();
+    tcp = _FakeTcp()
+      ..registerEndpoint(
+        WmrWsEndpoint(
+          host: '127.0.0.1',
+          port: 8765,
+          deviceId: _tcpDeviceId,
+          bridgeId: _bridgeId,
+        ),
+      );
+    ble.dispose();
+    final lateBle =
+        _ServiceDataBle(
+            results: [
+              const BleScanResult(
+                deviceId: _bleDeviceId,
+                name: 'wmrpi',
+                rssi: -45,
+              ),
+            ],
+            emitDelay: const Duration(milliseconds: 20),
+          )
+          ..onRead = (_, charUuid) {
+            if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+              return _endpointDocument(bridgeId: _bridgeId);
+            }
+            throw StateError('unexpected read $charUuid');
+          };
+    ble = lateBle;
+
+    final transport = CompositeBleTransport(
+      tcp: tcp,
+      ble: ble,
+      upgradeInterval: Duration.zero,
+      bleScanWait: const Duration(milliseconds: 500),
+    );
+    addTearDown(transport.dispose);
+
+    await transport.connect(_tcpDeviceId);
+    expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+    await _settle();
+
+    tcp.failConnect = true;
+    tcp.drop(_tcpDeviceId);
+    await _waitFor(
+      () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      reason: 'bounded failover scan did not land BLE',
+    );
+    expect(transport.bleDeviceIdFor(_tcpDeviceId), _bleDeviceId);
+    expect(
+      transport.linkTimelineFor(_tcpDeviceId)!['failover_outcome'],
+      'landed',
+    );
+  });
+
+  test(
+    '_fallbackToBle bounded scan cancels cleanly on intentional disconnect',
+    () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      ble = _ServiceDataBle(results: const []);
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        upgradeInterval: Duration.zero,
+        bleScanWait: const Duration(seconds: 5),
+      );
+      addTearDown(transport.dispose);
+
+      await transport.connect(_tcpDeviceId);
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _settle(30);
+
+      final sw = Stopwatch()..start();
+      await transport.disconnect(_tcpDeviceId);
+      expect(sw.elapsedMilliseconds, lessThan(500));
+    },
+  );
 }
 
 class _TrackedTimer implements Timer {
@@ -5916,5 +6207,47 @@ class _LateRecordAndGatedUnsubBle extends FakeTransport {
   ) async {
     cccLog.add('off ${characteristicUuid.toLowerCase()}');
     await onUnsubscribe(deviceId, serviceUuid, characteristicUuid);
+  }
+}
+
+class _ServiceDataBle extends FakeTransport {
+  _ServiceDataBle({required this.results, this.emitDelay = Duration.zero})
+    : super(
+        devices: [
+          for (final r in results)
+            FakeDevice(
+              id: r.deviceId,
+              name: r.name ?? 'WMR Bridge',
+              services: fakeBridgeDeviceServices,
+            ),
+        ],
+      );
+
+  final List<BleScanResult> results;
+  final Duration emitDelay;
+
+  @override
+  Stream<BleScanResult> scan({List<String> withServices = const []}) {
+    late final StreamController<BleScanResult> ctl;
+    Timer? timer;
+    ctl = StreamController<BleScanResult>(
+      onListen: () {
+        void emit() {
+          for (final r in results) {
+            if (!ctl.isClosed) ctl.add(r);
+          }
+        }
+
+        if (emitDelay > Duration.zero) {
+          timer = Timer(emitDelay, emit);
+        } else {
+          emit();
+        }
+      },
+      onCancel: () {
+        timer?.cancel();
+      },
+    );
+    return ctl.stream;
   }
 }

@@ -135,8 +135,59 @@ receipt T2 and the journal lower bound to explain the gate result.
 ## Before the run
 
 - Use the composite link. Turn on **BLE fallback** on the Connect screen
-  (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1124`). It is on
-  by default (`:61`).
+  (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1147-1158`). It is
+  on by default (`:61`). Confirm the **BLE fallback** readiness line
+  (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:356-369`) is not
+  in a failure state (`permission_denied`, `bluetooth_off`,
+  `bluetooth_unavailable`, or `no_candidate`).
+- **Clean-install Android BLE permission check:** On a clean install or fresh
+  APK stage, verify Android runtime permissions `BLUETOOTH_SCAN` and
+  `BLUETOOTH_CONNECT` are granted (`adb shell dumpsys package ...` or the
+  in-app prompt triggered by `connectWifi(bleFallback: true)`,
+  `apps/wmr_companion_app/lib/ui/connect/connect_providers.dart:2471-2472`,
+  `packages/wmr_ble/lib/src/universal_ble_transport.dart:371-405`). Never
+  proceed to preflight or scored runs while `ble_fallback_state` is
+  `permission_denied`.
+- **Pi Option C preflight (`WMR_Bridge`):** Run `bench_optionc.py preflight` on
+  `wmrpi` (`WMR_Bridge` `docs/runs/sheets/bench.md:7`) and confirm:
+  - `Powered: yes` (`wmr-bridge status`, `WMR_Bridge` `pi/wmr_bridge/__main__.py:638-642`)
+  - Option C load cuts enabled (`WMR_Bridge` `docs/runs/sheets/bench.md:7`)
+  - `ActiveInstances >= 1` (advertising `FF10` with `WMB1` service data) **or**
+    an active bonded LE link
+  - Zero current-boot `hardware error 0x00`, `-84`, or `0x0c03 -110` faults in
+    the Pi kernel and service journals.
+- **Pre-cut `diagnostics.json` readiness gate:** Export a pre-cut bundle
+  (`apps/wmr_companion_app/lib/ui/connect/connect_screen.dart:1215-1219`,
+  `apps/wmr_companion_app/lib/services/test_bundle.dart:441-451`,
+  `apps/wmr_companion_app/lib/services/test_bundle_export.dart:107-218,243-249`)
+  and confirm:
+  - `ble_fallback: true` (`apps/wmr_companion_app/lib/services/test_bundle.dart:628`)
+  - `ble_fallback_state == "ready"` (`apps/wmr_companion_app/lib/services/test_bundle.dart:630`,
+    `packages/wmr_companion/lib/src/composite_transport.dart:269-290`) when
+    `bench_optionc.py preflight` reports `ActiveInstances >= 1`
+  - `ble_fallback_state == "candidate_unverified"` is permitted **only** when
+    `bench_optionc.py preflight` explicitly reports `ActiveInstances == 0` with
+    an active bonded LE link (`packages/wmr_ble/lib/src/universal_ble_transport.dart:565-580`)
+  - Any other `ble_fallback_state` (`disabled`, `scanning`, `no_candidate`,
+    `permission_denied`, `bluetooth_off`, `bluetooth_unavailable`) is a
+    **hard stop**: do not start preflight or scored cuts.
+- **Unscored preflight `wlan-cycle 10` hard-stop gate:** Run one unscored
+  `wlan-cycle 10` preflight cut and export a fresh `diagnostics.json` right
+  after `clock-proof.py` stops. **Refuse scored Runs 1–3** unless **all** of
+  the following hold on the preflight cut:
+  - `clock-proof.jsonl` verdict is `ok` and matches the fresh preflight
+    `diagnostics.json` on **both**
+    `diagnostics.json#/link_timeline/first_tcp_record_session` (`session`)
+    **and** `diagnostics.json#/link_timeline/first_tcp_record_us`
+    (`first_tcp_record_us`)
+  - `failover_outcome == "landed"` (`packages/wmr_companion/lib/src/link_timeline.dart:102-107`)
+  - `upgrade_outcome == "landed"`
+  - `upgrade_dial_attempts >= 1` (`:91`)
+  - `recovery_lane != "redial"` (`:115-121`)
+  - Step-4 `takeover <= 2500 ms` (`docs/TEST_PLAN_PI_WMR.md:157`)
+  - `Upper T2 - T1 <= 5 s` (`docs/TEST_PLAN_PI_WMR.md:158`)
+  - `Upper T2 - T0 <= 15 s`
+  - `landing <= 750 ms` (`packages/wmr_companion/lib/src/link_timeline.dart:81-94`).
 - The row appears only for a `CompositeBleTransport` on the real source
   (`apps/wmr_companion_app/lib/ui/debug/debug_screen.dart:80-83`). It sits
   under **Stream** in the Debug screen (`:217-229`).
@@ -516,7 +567,10 @@ columns use those marks and the calculations above.
 ## The bundle's copy of the timeline
 
 `diagnostics.json` carries the marks under `link_timeline`
-(`apps/wmr_companion_app/lib/services/test_bundle.dart:616`). The top-level
+(`apps/wmr_companion_app/lib/services/test_bundle.dart:633`) and the BLE
+fallback readiness under `ble_fallback_state`, `ble_fallback_candidate_count`,
+and `ble_fallback_reason` (`:630-632`,
+`apps/wmr_companion_app/lib/services/test_bundle_export.dart:213-215`). The top-level
 keys are the marks of the most recent episode. They include
 `first_upgrade_dial_start_us` and `upgrade_dial_attempts`
 (`packages/wmr_companion/lib/src/link_timeline.dart:134-135`) and
@@ -619,7 +673,7 @@ Check every exported `diagnostics.json` before pulling or scoring a run:
    raw MACs, link keys, or tokens before sharing or attaching captures.
 6. **Per-run archive retention:** `writeTestBundle` always writes to
    `wmr-ext-<yyyyMMdd>.zip`
-   (`apps/wmr_companion_app/lib/services/test_bundle.dart:437`,
+   (`apps/wmr_companion_app/lib/services/test_bundle.dart:451`,
    `apps/wmr_companion_app/lib/services/test_bundle_export.dart:86-89`), so
    same-day exports overwrite the previous zip. Copy or rename each run's
    archive to a per-run path (such as `run-1.zip`, `run-2.zip`, `run-3.zip`)
