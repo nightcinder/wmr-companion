@@ -8,12 +8,12 @@ Gates: 1, 2, 6 (optional), 7, 8. See [GATES.md](../../tracking/GATES.md).
 |---|---|
 | Headset | Android XR device with an outward passthrough camera: Samsung Galaxy XR, Aura or similar, or a dev kit. Record model and Android version. |
 | Bridge | One board on `main`, flashed, powered, both controllers paired and awake. Record firmware SHA and boot banner. |
-| App | Signed v0.3.19 unified APK (versionCode 2024). It carries Android XR, VITURE, and XREAL tracking; no manual build flags are needed. Record the commit. |
+| App | Signed v0.3.27-rc.2 unified APK (`com.onyxlens.wmr_companion`, `versionCode` 2035, `versionName` 0.3.27). It carries Android XR, VITURE, and XREAL tracking; no manual build flags are needed. Record the commit. |
 | Permissions | `CAMERA`, `SCENE_UNDERSTANDING_COARSE`, `HAND_TRACKING`, `HEAD_TRACKING` declared. `SCENE_UNDERSTANDING_FINE` ("Precise movement and area data") must not be requested; its appearance is a regression. |
 | Tooling | `adb`, a terminal, logcat capture. |
 | Controllers | Both charged, connected and awake for the sitting. |
 
-Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.19/wmr-companion-0.3.19-unified-arm64-v8a.apk`. Install: `adb install -r wmr-companion-0.3.19-unified-arm64-v8a.apk`. The debug overlay shows "Attached androidXr tracking" when running on an Android XR device.
+Download: `https://github.com/nightcinder/wmr-companion/releases/download/v0.3.27-rc.2/wmr-companion-0.3.27-rc.2-unified-arm64-v8a.apk` (SHA-256 `473cf034cb9ca8ae29d3e439b76fffecedea572a136042bd2920c88f1ffbacd1`). Install: `adb install -r wmr-companion-0.3.27-rc.2-unified-arm64-v8a.apk`. The debug overlay shows "Attached androidXr tracking" when running on an Android XR device.
 
 ## 2. Setup, once per sitting
 1. Put the bridge in place, controllers on taped marks ~0.5 m away. Photo the setup.
@@ -138,3 +138,56 @@ Capture per gate: logcat `pose-androidxr-<gate>-<timestamp>.log`; exported JSON/
 - Gate 8: failure of `headRelative` recorded.
 - Guided speed checks pass (J <= 0.5 mm, J_D <= 0.75 mm, medium and fast lag <= 20 ms).
 - Android XR needs joints arriving while gripping. If gripping kills tracking, the path is "head-relative fallback only (grip kills tracking)".
+
+## 11. Aura combined sitting (pose and ONY-1338 DroidDeck)
+
+Run this sitting in order on an XREAL Aura headset with a Raspberry Pi 3B+ bridge (onboard Bluetooth only) and two WMR controllers.
+
+`needs counsel:` Aura-specific physical button bindings and system gestures are not in vendor docs in this repository. Use the on-screen Android and SteamVR controls, and record any Aura gesture you use.
+
+### 11.1 Pi 3B+ Option C setup
+
+1. On the Raspberry Pi 3B+ (64-bit Raspberry Pi OS Bookworm or Trixie), install `WMR_Bridge` `v0.3.28` (`wmr-bridge_0.3.28_all.deb`, SHA-256 `4b4b4f8b9d14f7c20b8bec55ff22dc199b50ccdb0694a4b4abeca8b8e7746c75`, or `install.sh` with `WMR_BRIDGE_TAG=v0.3.28` and `WMR_BRIDGE_VERSION=0.3.28`).
+2. Keep Option C BLE load cuts enabled. Onboard `hci_uart` and `serial` Bluetooth adapters (`BCM4345C0`) turn on Option C load cuts by default (`MTU <= 247`, at most 4 records per FF14 PDU, `50 Hz/hand` FF14 decimation, and `0x2A4D` paused while `FF1x` streams), while TCP stays unthrottled at 200 Hz nominal.
+3. Connect the Pi over Ethernet or 5 GHz Wi-Fi so Wi-Fi does not contend with 2.4 GHz Classic Bluetooth.
+4. Pair both WMR controllers via BlueZ and record the boot banner (`journalctl -u wmr-bridge -n 50`) and installed package version (`0.3.28`).
+
+### 11.2 Aura adb installs and DroidDeck check
+
+1. Install the companion APK on Aura from a computer over `adb`: `adb install -r wmr-companion-0.3.27-rc.2-unified-arm64-v8a.apk`.
+2. Make sure that the installed DroidDeck build on Aura is at or after `nightcinder/DroidDeck` `android-xr` commit `eb03e88`. Run `adb shell pm path <droiddeck-package>` and `adb shell dumpsys package <droiddeck-package> | grep -E "versionName|lastUpdateTime"`. If it predates `eb03e88`, rebuild and install from commit `dcbc017d`.
+3. Start logcat on the computer before starting the tests: `adb logcat -v threadtime > aura-sitting-<YYYYMMDD>.log`.
+
+### 11.3 6DoF pose gates and 6-run guided bench
+
+1. Run sections 2 through 8 of this sheet: setup, Gate 2 (plugin smoke test), Gate 7 (clock test), Gate 8 (fallback quality), and the guided speed checks.
+2. On the **Connect** screen, open **Guided bench run** and select **Combined** (or **6DoF only**).
+3. Complete the 6-run guided bench per [pose-filter.md](pose-filter.md) ("Capture protocol"): LEFT still (0 cm/s, forearm on table, 15 s), RIGHT held drifting (10-50 cm/s, 15 s), LEFT slow pan (10 cm/s, 18 s), RIGHT medium pan (50 cm/s, 15 s), LEFT fast flick (150 cm/s, 20 s), and RIGHT occlusion (15 s).
+4. Export the TestBundle zip and record its SHA-256.
+
+### 11.4 DroidDeck transport and M6-H1 through M6-H4
+
+1. Connect the companion app to the Pi bridge in FF12 or FF14 mode on the Debug screen and attach Android XR tracking.
+2. Start DroidDeck on Aura.
+3. Open the **Gamepad** screen in `wmr-companion`, expand **DroidDeck 6DoF streaming**, and press **Start streaming**.
+4. Record which transport connects. The app tries the abstract Unix domain socket (`droiddeck-ext-xr`) first. If that connect fails (for example, because SELinux blocks it), read the uint32 token from `droiddeck-ext-xr.token`, enter it in **Pairing token (optional)**, and press **Start streaming** again to use loopback UDP on `127.0.0.1:29842`.
+5. Run M6-H1 through M6-H4 from [TEST_PLAN_PI_WMR.md](../../TEST_PLAN_PI_WMR.md) (§M6):
+   - M6-H1: Stream both controllers from the Pi bridge to DroidDeck for 5 minutes and log packets on DroidDeck (`sampleTimeNs` non-zero, strictly monotonic per hand, trails receive time by under 100 ms median).
+   - M6-H2: Stop and restart the DroidDeck receiver during the run; output must resume within 2 s without restarting `wmr-companion`.
+   - M6-H3: Test buttons, trigger, stick, and orientation in DroidDeck on the correct hand.
+   - M6-H4: Turn Aura Wi-Fi off and back on during the run; DroidDeck input must continue across both switches with monotonic `sampleTimeNs`.
+
+### 11.5 ONY-1338 controls, HID-role restore, and OS key-leak check
+
+1. In SteamVR through DroidDeck, test each control on both hands and record pass or fail: trigger (analog), grip (squeeze), thumbstick X/Y, thumbstick click, trackpad X/Y, trackpad click, trackpad touch, and menu button.
+2. Check the Bluetooth HID role restore (R1). Before starting the stream, note whether the companion's Bluetooth HID peripheral role (Option A) is on. Make sure that the companion's HID role stays off during the DroidDeck stream (the **Start** button in the Bluetooth HID panel is disabled). Press **Stop streaming** and make sure that the HID role restores if it was on before the stream started.
+3. Check for OS key leaks. Press all controller buttons, thumbsticks, and trackpads while DroidDeck and SteamVR have focus, and record whether any Android OS key events leak to the system UI.
+
+### 11.6 What to post on ONY-1338
+
+Post the following artifacts and results on ONY-1338:
+
+1. Exported TestBundle zip and its SHA-256.
+2. Logcat capture (`aura-sitting-<YYYYMMDD>.log`).
+3. Pi bridge `0.3.28` boot banner, DroidDeck `pm path` and `dumpsys package` output, and the transport used (UDS or UDP with token).
+4. Pass or fail for every row: Gates 2, 7, and 8, guided speed checks, the 6-run guided bench, M6-H1 through M6-H4, each ONY-1338 control, the HID-role restore check, and the OS key-leak check.
