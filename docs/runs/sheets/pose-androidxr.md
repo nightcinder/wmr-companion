@@ -160,7 +160,7 @@ Run this sitting in order on an XREAL Aura headset with a Raspberry Pi 3B+ bridg
 
 ### 11.3 6DoF pose gates and 6-run guided bench
 
-1. Run sections 2 through 8 of this sheet: setup, Gate 2 (plugin smoke test), Gate 7 (clock test), Gate 8 (fallback quality), and the guided speed checks.
+1. Run sections 2 through 8 of this sheet: setup, Gate 1 (capture one frame), Gate 2 (plugin smoke test), optional Gate 6 (if RayNeo or Rokid hardware is on hand; otherwise mark "not run - no hardware"), Gate 7 (clock test), Gate 8 (fallback quality), and the guided speed checks.
 2. On the **Connect** screen, open **Guided bench run** and select **Combined** (or **6DoF only**).
 3. Complete the 6-run guided bench per [pose-filter.md](pose-filter.md) ("Capture protocol"): LEFT still (0 cm/s, forearm on table, 15 s), RIGHT held drifting (10-50 cm/s, 15 s), LEFT slow pan (10 cm/s, 18 s), RIGHT medium pan (50 cm/s, 15 s), LEFT fast flick (150 cm/s, 20 s), and RIGHT occlusion (15 s).
 4. Export the TestBundle zip and record its SHA-256.
@@ -170,7 +170,7 @@ Run this sitting in order on an XREAL Aura headset with a Raspberry Pi 3B+ bridg
 1. Connect the companion app to the Pi bridge in FF12 or FF14 mode on the Debug screen and attach Android XR tracking.
 2. Start DroidDeck on Aura.
 3. Open the **Gamepad** screen in `wmr-companion`, expand **DroidDeck 6DoF streaming**, and press **Start streaming**.
-4. Record which transport connects. The app tries the abstract Unix domain socket (`droiddeck-ext-xr`) first. If that connect fails (for example, because SELinux blocks it), read the uint32 token from `droiddeck-ext-xr.token`, enter it in **Pairing token (optional)**, and press **Start streaming** again to use loopback UDP on `127.0.0.1:29842`.
+4. Record which transport connects. The app tries the abstract Unix domain socket (`droiddeck-ext-xr`) first. If that connect fails (for example, because SELinux blocks it), read the decimal uint32 token (`parseDroidDeckToken`, radix 10) from `droiddeck-ext-xr.token` in DroidDeck's private files directory (for example, `adb shell run-as <droiddeck-package> cat files/droiddeck-ext-xr.token` on a debuggable build, or `adb shell su -c "cat /data/data/<droiddeck-package>/files/droiddeck-ext-xr.token"` on a rooted device), enter it in **Pairing token (optional)**, and press **Start streaming** again to use loopback UDP on `127.0.0.1:29842`.
 5. Run M6-H1 through M6-H4 from [TEST_PLAN_PI_WMR.md](../../TEST_PLAN_PI_WMR.md) (§M6):
    - M6-H1: Stream both controllers from the Pi bridge to DroidDeck for 5 minutes and log packets on DroidDeck (`sampleTimeNs` non-zero, strictly monotonic per hand, trails receive time by under 100 ms median).
    - M6-H2: Stop and restart the DroidDeck receiver during the run; output must resume within 2 s without restarting `wmr-companion`.
@@ -190,4 +190,4 @@ Post the following artifacts and results on ONY-1338:
 1. Exported TestBundle zip and its SHA-256.
 2. Logcat capture (`aura-sitting-<YYYYMMDD>.log`).
 3. Pi bridge `0.3.28` boot banner, DroidDeck `pm path` and `dumpsys package` output, and the transport used (UDS or UDP with token).
-4. Pass or fail for every row: Gates 2, 7, and 8, guided speed checks, the 6-run guided bench, M6-H1 through M6-H4, each ONY-1338 control, the HID-role restore check, and the OS key-leak check.
+4. Pass or fail for every row: Gates 1, 2, 6 (or "not run - no hardware"), 7, and 8, guided speed checks, the 6-run guided bench, M6-H1 through M6-H4, each ONY-1338 control, the HID-role restore check, and the OS key-leak check.

@@ -38,7 +38,7 @@ mirror `main` at `8f5921a`; see the FF14 section.
 | `wmr_batch_parse`, `wmr_batch_max_count` (`src/wmr_batch.c`) | `parseDecodedBatch`, `batchMaxCount` (`packages/wmr_core/lib/protocol/decoded_batch.dart`) |
 | `tests/test_batch.c` golden bytes and MTU table | `packages/wmr_core/test/protocol/decoded_batch_test.dart` |
 | `samples/controller_frames.txt` | `apps/wmr_companion_app/test/fixtures/controller_frames.txt` (copy) |
-| `tests/vectors/wmr_golden_v1.json` (shared golden vectors; WMR_Bridge PR #238, branch `docs/spec-patches`, not yet merged) | `packages/wmr_core/test/fixtures/wmr_golden_v1.json` (identical copy), read by `packages/wmr_core/test/golden_vectors_test.dart`; fields in `packages/wmr_core/test/fixtures/README_golden.md` |
+| `tests/vectors/wmr_golden_v1.json` (shared golden vectors; WMR_Bridge, merged in PR #238 at `b71cbb0`) | `packages/wmr_core/test/fixtures/wmr_golden_v1.json` (identical copy), read by `packages/wmr_core/test/golden_vectors_test.dart`; fields in `packages/wmr_core/test/fixtures/README_golden.md` |
 | FF16 firmware version, Pi endpoint document | `packages/wmr_core/lib/protocol/firmware_version.dart` |
 | FF15 echo | `packages/wmr_core/lib/protocol/echo.dart` |
 | FF17 control and status v2 | `packages/wmr_core/lib/protocol/controller_control.dart` |
@@ -116,8 +116,7 @@ stream exclusion and readable before pairing.
   token; `CompositeBleTransport` reads it over the bonded link
   (`_readBleToken`). It must never be logged or shown.
 
-Field tables: WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/PROTOCOL.md, "Linux/Pi host bridge
-differences".
+Field tables: WMR_Bridge `docs/PROTOCOL.md` ("Linux/Pi host bridge differences", merged in PR #238 at `b71cbb0`).
 
 ## universal_ble 3.2.0 coverage
 
@@ -375,7 +374,7 @@ are the `wmr_core` side of the Switch Joy-Con/Pro support
 `switch_burst.dart`); the firmware half is WMR_Bridge.
 
 Two known mismatches with the merged firmware, both to be closed by the
-spec in WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/SWITCH.md ("Timing contract" and "Calibration blob
+spec in WMR_Bridge `docs/SWITCH.md` (merged in PR #238 at `b71cbb0`; "Timing contract" and "Calibration blob
 version 1, 44 bytes"; specified, not implemented; secondary priority):
 
 - The firmware publishes a 42-byte blob (24 IMU + 18 stick bytes, no version
@@ -705,7 +704,7 @@ and the debug screen's "Controller control" panel.
 ## Protocol proposals (specified, not implemented)
 
 Status: **specified, not implemented**, on both sides. The wire text is in
-WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/PROTOCOL.md, "Proposals"; this is the app's side of each
+WMR_Bridge `docs/PROTOCOL.md` ("Proposals", merged in PR #238 at `b71cbb0`); this is the app's side of each
 item. None of it is in the Dart code today.
 
 | Item | Wire change | What the app will do |
@@ -721,7 +720,7 @@ app, and each side keeps working against the other's previous version.
 
 ## Pi host bridge: what differs for the app
 
-Wire text: WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged), docs/PROTOCOL.md, "Linux/Pi host bridge differences",
+Wire text: WMR_Bridge `docs/PROTOCOL.md` ("Linux/Pi host bridge differences", merged in PR #238 at `b71cbb0`),
 and docs/PI_BRIDGE.md. Summary of what the app must not assume:
 
 - FF16 is a JSON endpoint document, FF13 serves a session document until a
