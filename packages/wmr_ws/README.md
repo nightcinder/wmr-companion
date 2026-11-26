@@ -128,7 +128,9 @@ fall back to BLE instead of showing a connected link that carries nothing. When
 `silenceProbeDelay` is positive (default `Duration.zero`, disabled), an active
 payload stream that goes silent for `silenceProbeDelay` triggers an immediate
 liveness `ping` if no probe is already in flight, without extending any
-already-armed deadline. The probe ids start at `wmrWsLivenessPingIdBase`
+already-armed deadline. Because any incoming text frame (including `pong`)
+re-arms the silence timer while subscribed, a quiet but healthy stream probes
+roughly every `silenceProbeDelay` plus round-trip time. The probe ids start at `wmrWsLivenessPingIdBase`
 (0x10000), above the 16-bit FF15 id range, so a probe answer never reaches the
 echo sink. A non-positive `livenessInterval` disables the probes.
 
