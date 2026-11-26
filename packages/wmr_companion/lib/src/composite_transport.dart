@@ -100,6 +100,7 @@ class CompositeBleTransport implements BleTransport {
     this.tcpCandidateShareCap = const Duration(milliseconds: 250),
     this.echoDrainTimeout = const Duration(milliseconds: 1200),
     this.bleUnsubscribeTimeout = const Duration(milliseconds: 250),
+    this.prewarmBleStandby = false,
     this.lanAvailable,
     this.disposeBle = true,
     this.onTokenLearned,
@@ -210,6 +211,14 @@ class CompositeBleTransport implements BleTransport {
   /// GATT writes before returning, so a wedged BLE adapter cannot hang
   /// [disconnect], [suspendBleStreams], or [dispose].
   final Duration bleUnsubscribeTimeout;
+
+  /// Whether to pre-connect a standby BLE GATT link (`connect` -> `requestMtu`
+  /// -> `discoverServices` -> `FF16` verify, with stream CCCDs OFF) while TCP
+  /// is active, so a TCP->BLE failover activates `FF14` immediately.
+  ///
+  /// Opt-in (default `false`) so existing callers/tests keep their initial
+  /// `disconnected` BLE expectation.
+  final bool prewarmBleStandby;
 
   /// Whether a LAN interface is currently up, checked before any TCP probe.
   ///
@@ -405,6 +414,11 @@ class CompositeBleTransport implements BleTransport {
       if (fromBle) {
         _wakeScanWaiters();
         _notifyReadiness();
+        if (prewarmBleStandby) {
+          for (final route in _routes.values) {
+            _maybePrewarmBle(route);
+          }
+        }
       }
       final bridgeId = _bridgeIdForDevice(result.deviceId);
       if (bridgeId != null && !seenBridgeIds.add(bridgeId)) return;
@@ -561,6 +575,7 @@ class CompositeBleTransport implements BleTransport {
       }
       if (!switchingDone.isCompleted) switchingDone.complete();
       _kickFallback(route);
+      _maybePrewarmBle(route);
     }
 
     _setState(route, BleConnectionState.disconnected);
@@ -573,6 +588,7 @@ class CompositeBleTransport implements BleTransport {
     if (route == null) return;
     _closedTimelines[deviceId] = route.timeline;
     route.intentional = true;
+    route.prewarmCancelled = true;
     route.cancelFallbackScan();
     _wakeScanWaiters();
     try {
@@ -599,7 +615,7 @@ class CompositeBleTransport implements BleTransport {
       }
 
       final tcpId = route.tcpDeviceId;
-      final bleId = route.bleDeviceId;
+      final bleId = route.bleDeviceId ?? route.prewarmBleId;
       if (tcpId != null) {
         try {
           await tcp.disconnect(tcpId);
@@ -608,11 +624,7 @@ class CompositeBleTransport implements BleTransport {
         }
       }
       if (bleId != null) {
-        try {
-          await ble.disconnect(bleId);
-        } catch (_) {
-          // See above.
-        }
+        await _disconnectBleBounded(bleId);
       }
       route.active = null;
       _setState(route, BleConnectionState.disconnected);
@@ -633,6 +645,7 @@ class CompositeBleTransport implements BleTransport {
   Future<void> suspendBleStreams(String deviceId) async {
     final route = _routes[deviceId];
     if (route == null) return;
+    route.prewarmCancelled = true;
     _stopUpgrade(route);
     final tcpSub = route.tcpStateSub;
     route.tcpStateSub = null;
@@ -770,6 +783,7 @@ class CompositeBleTransport implements BleTransport {
     _routes.clear();
     for (final route in routes) {
       route.intentional = true;
+      route.prewarmCancelled = true;
       route.cancelFallbackScan();
       _stopUpgrade(route);
       final tcpSub = route.tcpStateSub;
@@ -789,16 +803,14 @@ class CompositeBleTransport implements BleTransport {
         await channel.close();
       }
       final tcpId = route.tcpDeviceId;
-      final bleId = route.bleDeviceId;
+      final bleId = route.bleDeviceId ?? route.prewarmBleId;
       if (tcpId != null) {
         try {
           await tcp.disconnect(tcpId);
         } catch (_) {}
       }
       if (bleId != null) {
-        try {
-          await ble.disconnect(bleId);
-        } catch (_) {}
+        await _disconnectBleBounded(bleId);
       }
       if (!route.states.isClosed) await route.states.close();
     }
@@ -961,13 +973,21 @@ class CompositeBleTransport implements BleTransport {
   }) {
     final candidates = <String>[];
     void add(String id) {
-      if (candidates.contains(id) || _claimedByOtherRoute(id, route)) return;
+      if (candidates.contains(id) ||
+          route.mismatchedBleIds.contains(id) ||
+          _claimedByOtherRoute(id, route)) {
+        return;
+      }
       candidates.add(id);
     }
 
     final current = route.bleDeviceId;
     if (current != null) {
       add(current);
+    }
+    final lastBle = route.lastBleDeviceId;
+    if (lastBle != null) {
+      add(lastBle);
     }
     if (allowDeviceId) add(deviceId);
     final hits = _scanHits.values.where((hit) => hit.fromBle).toList()
@@ -993,35 +1013,61 @@ class CompositeBleTransport implements BleTransport {
     _Route route,
     String bleId, {
     bool requireIdentity = false,
+    bool isPrewarm = false,
   }) async {
     route.bleDeviceId = bleId;
     // Some stacks refuse a GATT connect while a scan is running. The hits
-    // already seen stay in `_scanHits`.
-    await ble.stopScan();
+    // already seen stay in `_scanHits`. Skip stopScan when idle or prewarming
+    // (for prewarm, the readiness listener stops the proactive scan once FF16
+    // promotes to ready, and keeps scanning if FF16 mismatches).
+    if (!isPrewarm && _scanning) {
+      await ble.stopScan();
+    }
     final state = await ble.connectionState(bleId).first;
     if (state != BleConnectionState.connected) {
       await ble.connect(bleId);
     }
-    final endpoint = await _readBleEndpoint(bleId);
+    if (isPrewarm &&
+        (_disposed || route.intentional || route.prewarmCancelled)) {
+      return;
+    }
+    final endpoint = await _readBleEndpoint(bleId, route: route);
     final knownId = route.bridgeId;
     if (knownId != null) {
       if (endpoint != null && endpoint.bridgeId != knownId) {
+        route.mismatchedBleIds.add(bleId);
         await _rejectBle(route);
+        _notifyReadiness(route.deviceId);
         throw StateError(
           'BLE device $bleId is bridge ${endpoint.bridgeId}, expected $knownId',
         );
       }
       if (endpoint == null && requireIdentity) {
+        if (!_isBleCandidateVerified(route, bleId)) {
+          route.mismatchedBleIds.add(bleId);
+        }
         await _rejectBle(route);
+        _notifyReadiness(route.deviceId);
         throw StateError(
           'BLE device $bleId did not identify its bridge; refusing to switch',
         );
       }
     }
     _watchBle(route);
+    route.lastBleDeviceId = bleId;
     if (endpoint != null) {
-      await _learnBleEndpoint(route, endpoint);
-    } else {
+      _rememberBridge(route, endpoint.bridgeId);
+      if (isPrewarm || route.tcpCandidates.isNotEmpty) {
+        // Never block _activateBle / FF14 subscribe on FF13 token reads
+        // when TCP candidates already exist or during warm standby prewarm.
+        route.pendingBleEndpoint = endpoint;
+        if (!isPrewarm) {
+          _startUpgrade(route);
+        }
+      } else {
+        await _learnBleEndpoint(route, endpoint);
+      }
+    } else if (!isPrewarm) {
       _startUpgrade(route);
     }
   }
@@ -1034,10 +1080,89 @@ class CompositeBleTransport implements BleTransport {
     final bleId = route.bleDeviceId;
     route.bleDeviceId = null;
     if (bleId == null) return;
+    await _disconnectBleBounded(bleId);
+  }
+
+  Future<void> _disconnectBleBounded(String bleId) async {
     try {
-      await ble.disconnect(bleId);
+      final op = ble.disconnect(bleId);
+      unawaited(op.catchError((Object _) {}));
+      if (bleUnsubscribeTimeout > Duration.zero) {
+        await op.timeout(bleUnsubscribeTimeout, onTimeout: () {});
+      } else {
+        await op;
+      }
     } catch (_) {
-      // The failed probe needs no further teardown.
+      // The failed or stalled probe needs no further teardown.
+    }
+  }
+
+  void _maybePrewarmBle(_Route route) {
+    if (!prewarmBleStandby || _disposed || route.intentional) return;
+    if (route.active != _Lane.tcp || route.switching) return;
+    if (route.bleDeviceId != null || route.prewarmFuture != null) return;
+    final candidates = _bleCandidatesFor(
+      route,
+      route.deviceId,
+      allowDeviceId: false,
+    );
+    String? chosen;
+    for (final id in candidates) {
+      if (route.failedPrewarmBleIds.contains(id)) continue;
+      if (_isBleCandidateVerified(route, id)) {
+        chosen = id;
+        break;
+      }
+    }
+    if (chosen == null && route.bridgeId != null) {
+      for (final id in candidates) {
+        if (route.failedPrewarmBleIds.contains(id)) continue;
+        chosen = id;
+        break;
+      }
+    }
+    if (chosen == null) return;
+    route.prewarmCancelled = false;
+    route.prewarmBleId = chosen;
+    route.prewarmFuture = _runPrewarm(route, chosen);
+  }
+
+  Future<void> _runPrewarm(_Route route, String bleId) async {
+    try {
+      if (_disposed || route.intentional || route.prewarmCancelled) return;
+      final requireIdentity =
+          route.bridgeId != null &&
+          _ff16VerifiedBridgeIds[bleId] != route.bridgeId;
+      await _connectBle(
+        route,
+        bleId,
+        requireIdentity: requireIdentity,
+        isPrewarm: true,
+      );
+      if (_disposed || route.intentional || route.prewarmCancelled) {
+        if (route.bleDeviceId == bleId) {
+          await _rejectBle(route);
+        } else {
+          await _disconnectBleBounded(bleId);
+        }
+        return;
+      }
+    } catch (_) {
+      route.failedPrewarmBleIds.add(bleId);
+      if (route.bleDeviceId == bleId) await _rejectBle(route);
+    } finally {
+      if (route.prewarmBleId == bleId) {
+        route.prewarmBleId = null;
+        route.prewarmFuture = null;
+      }
+      if (!_disposed &&
+          !route.intentional &&
+          !route.prewarmCancelled &&
+          route.active == _Lane.tcp &&
+          route.bleDeviceId == null &&
+          !route.switching) {
+        _maybePrewarmBle(route);
+      }
     }
   }
 
@@ -1094,6 +1219,11 @@ class CompositeBleTransport implements BleTransport {
     _startUpgrade(route);
     _setState(route, BleConnectionState.connected);
     _notifyReadiness(route.deviceId);
+    final pending = route.pendingBleEndpoint;
+    if (pending != null && !_disposed && !route.intentional) {
+      route.pendingBleEndpoint = null;
+      unawaited(_learnBleEndpoint(route, pending));
+    }
   }
 
   /// Runs the FF16-triggered upgrade kick once the switch that activated BLE
@@ -1277,11 +1407,24 @@ class CompositeBleTransport implements BleTransport {
     route.bleStateId = id;
     route.bleStateSub = ble.connectionState(id).listen((state) {
       if (_disposed || route.intentional) return;
-      if (state == BleConnectionState.disconnected &&
-          route.active == _Lane.ble) {
-        unawaited(_recoverFromBleDrop(route));
+      if (state == BleConnectionState.disconnected) {
+        if (route.active == _Lane.ble) {
+          unawaited(_recoverFromBleDrop(route));
+        } else if (route.active == _Lane.tcp && route.bleDeviceId == id) {
+          _clearStandbyBle(route, id);
+        }
       }
     }, onError: (Object _) {});
+  }
+
+  void _clearStandbyBle(_Route route, String id) {
+    if (route.bleDeviceId != id) return;
+    final bleSub = route.bleStateSub;
+    route.bleStateSub = null;
+    route.bleStateId = null;
+    unawaited(bleSub?.cancel());
+    route.bleDeviceId = null;
+    route.pendingBleEndpoint = null;
   }
 
   Future<void> _fallbackToBle(_Route route) async {
@@ -1310,6 +1453,47 @@ class CompositeBleTransport implements BleTransport {
       }
       final tried = <String>{};
       var lastReason = 'no_candidate';
+
+      final inFlightPrewarm = route.prewarmFuture;
+      final inFlightBleId = route.prewarmBleId;
+      if (inFlightPrewarm != null && inFlightBleId != null) {
+        tried.add(inFlightBleId);
+        lastReason = 'connect_threw';
+        await inFlightPrewarm;
+        if (_disposed || route.intentional) return;
+        if (route.bleDeviceId == inFlightBleId) {
+          lastReason = 'activation_threw';
+          try {
+            await _activateBle(route);
+            final nowUs = clock.nowUs;
+            route.timeline.onFailoverEnd(nowUs, candidates: tried.length);
+            route.fastRetryUntilUs = nowUs + upgradeRetryWindow.inMicroseconds;
+            return;
+          } catch (_) {
+            if (route.bleDeviceId == inFlightBleId) await _rejectBle(route);
+          }
+        }
+      } else {
+        final standbyBleId = route.bleDeviceId;
+        if (standbyBleId != null) {
+          try {
+            final state = await ble.connectionState(standbyBleId).first;
+            if (state == BleConnectionState.connected) {
+              tried.add(standbyBleId);
+              lastReason = 'activation_threw';
+              await _activateBle(route);
+              final nowUs = clock.nowUs;
+              route.timeline.onFailoverEnd(nowUs, candidates: tried.length);
+              route.fastRetryUntilUs =
+                  nowUs + upgradeRetryWindow.inMicroseconds;
+              return;
+            }
+            await _rejectBle(route);
+          } catch (_) {
+            if (route.bleDeviceId == standbyBleId) await _rejectBle(route);
+          }
+        }
+      }
 
       Future<bool> tryCandidates(List<String> candidates) async {
         for (final bleId in candidates) {
@@ -1621,7 +1805,7 @@ class CompositeBleTransport implements BleTransport {
     route.fastRetryTimer = null;
   }
 
-  Future<_LanEndpoint?> _readBleEndpoint(String bleId) async {
+  Future<_LanEndpoint?> _readBleEndpoint(String bleId, {_Route? route}) async {
     try {
       final value = await ble.read(
         bleId,
@@ -1630,7 +1814,11 @@ class CompositeBleTransport implements BleTransport {
       );
       final endpoint = _LanEndpoint.parse(value);
       if (endpoint != null && endpoint.bridgeId.isNotEmpty) {
+        final changed = _ff16VerifiedBridgeIds[bleId] != endpoint.bridgeId;
         _ff16VerifiedBridgeIds[bleId] = endpoint.bridgeId;
+        if (changed && route != null) {
+          _notifyReadiness(route.deviceId);
+        }
       }
       return endpoint;
     } catch (_) {
@@ -1704,7 +1892,10 @@ class CompositeBleTransport implements BleTransport {
     if (tcpId != null) _bridgeIds[tcpId] = bridgeId;
     final bleId = route.bleDeviceId;
     if (bleId != null) _bridgeIds[bleId] = bridgeId;
-    if (changed) _notifyReadiness(route.deviceId);
+    if (changed) {
+      _notifyReadiness(route.deviceId);
+      _maybePrewarmBle(route);
+    }
   }
 
   /// Starts a bounded [ble.scan] when `_fallbackToBle` has zero untried
@@ -1820,9 +2011,17 @@ class _Route {
 
   String? bridgeId;
   String? bleDeviceId;
+  String? lastBleDeviceId;
   String? tcpDeviceId;
   String? lastWorkingTcpDeviceId;
   final Set<String> tcpCandidates = {};
+
+  Future<void>? prewarmFuture;
+  String? prewarmBleId;
+  bool prewarmCancelled = false;
+  final Set<String> mismatchedBleIds = {};
+  final Set<String> failedPrewarmBleIds = {};
+  _LanEndpoint? pendingBleEndpoint;
 
   /// The dial attempt that currently owns each TCP candidate, so a probe that
   /// timed out can tell whether its connection was adopted or replaced.

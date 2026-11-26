@@ -1114,6 +1114,10 @@ void main() {
           reason: 'the second radio return did not redial over the stale one',
         );
         await until(() => container.read(realDeviceProvider).connected);
+        await until(
+          () => adapter.ccc.where((c) => c == 'on ff14').length == 2,
+          reason: 'the redial did not re-subscribe FF14',
+        );
 
         // One attempt per device per cycle, and the stale attempt published
         // nothing over the recovery: the service the redial built survived.

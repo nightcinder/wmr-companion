@@ -1272,6 +1272,47 @@ void main() {
       expect(secondEvents.single.intervalUs, 12 * 1250);
     });
   });
+
+  group('cold-path deduplication', () {
+    test('first FF16 read reuses _setup read and second FF16 read hits adapter fresh', () async {
+      const doc1 =
+          '{"type":"wmr_ble_endpoint","bridge_id":"b1","hosts":["10.0.0.1"],"port":8765}';
+      const doc2 =
+          '{"type":"wmr_ble_endpoint","bridge_id":"b1","hosts":["10.0.0.2"],"port":8765}';
+      adapter.readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+        doc1.codeUnits,
+      );
+
+      await t.connect(id);
+      expect(adapter.calls.where((c) => c == 'read'), hasLength(1));
+
+      // First read consumes the one-shot _setup value without a second GATT read.
+      final first = await t.read(
+        id,
+        wmrBridgeServiceUuid,
+        wmrBridgeVersionCharUuid,
+      );
+      expect(String.fromCharCodes(first), doc1);
+      expect(adapter.calls.where((c) => c == 'read'), hasLength(1));
+
+      // Post-T1 update on the bridge: second read must hit the adapter fresh.
+      adapter.readValues[wmrBridgeVersionCharUuid] = Uint8List.fromList(
+        doc2.codeUnits,
+      );
+      final second = await t.read(
+        id,
+        wmrBridgeServiceUuid,
+        wmrBridgeVersionCharUuid,
+      );
+      expect(String.fromCharCodes(second), doc2);
+      expect(adapter.calls.where((c) => c == 'read'), hasLength(2));
+    });
+
+    test('stopScan when idle skips adapter stopScan call', () async {
+      await t.stopScan();
+      expect(adapter.calls.where((c) => c == 'stopScan'), isEmpty);
+    });
+  });
 }
 
 class _GatedPermissionAdapter extends FakeBleAdapter {

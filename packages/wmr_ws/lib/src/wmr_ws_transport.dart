@@ -84,6 +84,7 @@ class WmrWsTransport implements BleTransport {
     this.requestTimeout = const Duration(seconds: 5),
     this.livenessInterval = const Duration(milliseconds: 500),
     this.livenessTimeout = const Duration(milliseconds: 1000),
+    this.silenceProbeDelay = Duration.zero,
     this.queueSize = 512,
     WmrWsDiscovery? discovery,
     bool enableDiscovery = false,
@@ -136,6 +137,11 @@ class WmrWsTransport implements BleTransport {
   /// considered half-open. Defaults to one second, so with the default
   /// [livenessInterval] a silent peer is reported within 1500 ms.
   final Duration livenessTimeout;
+
+  /// How long after the last received socket message on an active payload
+  /// stream a liveness `ping` is sent immediately (if no probe is already in
+  /// flight). A non-positive duration disables silence-triggered probing.
+  final Duration silenceProbeDelay;
 
   /// Client-side notification queue bound per stream, mirroring the daemon's
   /// 512-message queue. Overflow drops the newest message and is counted in
@@ -274,6 +280,7 @@ class WmrWsTransport implements BleTransport {
         session.startLiveness(
           interval: livenessInterval,
           timeout: livenessTimeout,
+          silenceProbeDelay: silenceProbeDelay,
           nowMs: () => clock.nowUs ~/ 1000,
           onTimeout: _fail,
         );
@@ -783,8 +790,11 @@ class _WmrWsSession {
 
   Timer? _livenessTimer;
   Timer? _livenessDeadline;
+  Timer? _silenceTimer;
   Duration _livenessInterval = Duration.zero;
   Duration _livenessTimeout = Duration.zero;
+  Duration _silenceProbeDelay = Duration.zero;
+  bool _hasPayloadTraffic = false;
   int _livenessSeq = 0;
   int? _livenessPendingId;
   int Function()? _livenessNowMs;
@@ -882,6 +892,8 @@ class _WmrWsSession {
     _livenessTimer = null;
     _livenessDeadline?.cancel();
     _livenessDeadline = null;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     _livenessPendingId = null;
   }
 
@@ -891,15 +903,39 @@ class _WmrWsSession {
   void startLiveness({
     required Duration interval,
     required Duration timeout,
+    Duration silenceProbeDelay = Duration.zero,
     required int Function() nowMs,
     required void Function(_WmrWsSession, WmrWsException) onTimeout,
   }) {
     if (interval <= Duration.zero || timeout <= Duration.zero) return;
     _livenessInterval = interval;
     _livenessTimeout = timeout;
+    _silenceProbeDelay = silenceProbeDelay;
     _livenessNowMs = nowMs;
     _livenessOnTimeout = onTimeout;
     _scheduleLivenessProbe();
+  }
+
+  void _armSilenceTimer() {
+    if (isClosed ||
+        !isReady ||
+        !_hasPayloadTraffic ||
+        _silenceProbeDelay <= Duration.zero ||
+        _livenessInterval <= Duration.zero) {
+      return;
+    }
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceProbeDelay, _onSilenceTimeout);
+  }
+
+  void _onSilenceTimeout() {
+    _silenceTimer = null;
+    if (isClosed || !isReady || !_hasPayloadTraffic) return;
+    // Never reset or extend an already-armed liveness deadline.
+    if (_livenessPendingId != null) return;
+    _livenessTimer?.cancel();
+    _livenessTimer = null;
+    _sendLivenessProbe();
   }
 
   void _scheduleLivenessProbe() {
@@ -940,6 +976,7 @@ class _WmrWsSession {
 
   void onText(String text, int receivedAtUs) {
     textMessages++;
+    if (isReady && _hasPayloadTraffic) _armSilenceTimer();
     final Object? decoded;
     try {
       decoded = jsonDecode(text);
@@ -1307,6 +1344,9 @@ class _WmrWsSession {
         if (dispatchingCharacteristic == characteristic) {
           dispatchingCharacteristic = null;
           _activeSink = null;
+          _hasPayloadTraffic = false;
+          _silenceTimer?.cancel();
+          _silenceTimer = null;
         }
       }
       // A subscribe for the same characteristic may have replaced the sink
@@ -1346,6 +1386,10 @@ class _WmrWsSession {
 
   void onBinary(List<int> data, int receivedAtUs) {
     payloadMessages++;
+    if (isReady) {
+      _hasPayloadTraffic = true;
+      _armSilenceTimer();
+    }
     final characteristic = dispatchingCharacteristic;
     final sink = characteristic == null ? null : _payloadSinks[characteristic];
     if (sink == null || sink.isClosed) {

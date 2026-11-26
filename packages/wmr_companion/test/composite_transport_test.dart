@@ -6049,6 +6049,682 @@ void main() {
       expect(sw.elapsedMilliseconds, lessThan(500));
     },
   );
+
+  group('warm standby BLE pre-connect (B1-B9)', () {
+    test(
+      'B1: TCP active + WMB1-verified candidate prewarms BLE with CCCDs OFF',
+      () async {
+        await tcp.dispose();
+        tcp = _FakeTcp()
+          ..registerEndpoint(
+            WmrWsEndpoint(
+              host: '127.0.0.1',
+              port: 8765,
+              deviceId: _tcpDeviceId,
+              bridgeId: _bridgeId,
+            ),
+          );
+        ble.dispose();
+        final prefix = _bridgeId.length >= 8
+            ? _bridgeId.substring(0, 8)
+            : _bridgeId;
+        ble =
+            _ServiceDataBle(
+                results: [
+                  BleScanResult(
+                    deviceId: _bleDeviceId,
+                    name: 'wmrpi',
+                    rssi: -45,
+                    serviceData: {
+                      wmrBridgeServiceUuid: utf8.encode('WMB1$prefix'),
+                    },
+                  ),
+                ],
+              )
+              ..onRead = (_, charUuid) {
+                if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+                  return _endpointDocument(bridgeId: _bridgeId);
+                }
+                throw StateError('unexpected read $charUuid');
+              };
+
+        final transport = CompositeBleTransport(
+          tcp: tcp,
+          ble: ble,
+          prewarmBleStandby: true,
+          upgradeInterval: Duration.zero,
+        );
+        addTearDown(transport.dispose);
+
+        final scanSub = transport.scan().listen((_) {});
+        addTearDown(scanSub.cancel);
+        await _settle();
+        await transport.connect(_tcpDeviceId);
+        await _waitFor(
+          () => transport.bleDeviceIdFor(_tcpDeviceId) == _bleDeviceId,
+        );
+        expect(
+          await ble.connectionState(_bleDeviceId).first,
+          BleConnectionState.connected,
+        );
+
+        expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+        expect(
+          transport.fallbackReadinessFor(_tcpDeviceId).hasVerified,
+          isTrue,
+        );
+        expect(
+          ble.cccLog,
+          isEmpty,
+          reason: 'stream CCCDs must stay OFF during prewarm',
+        );
+      },
+    );
+
+    test('B2: unverified systemDevices hit promotes on matching FF16 when prewarm enabled, stays unverified when disabled', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      ble =
+          _ServiceDataBle(
+              results: const [
+                BleScanResult(deviceId: _bleDeviceId, name: 'wmrpi', rssi: -45),
+              ],
+            )
+            ..onRead = (_, charUuid) {
+              if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+                return _endpointDocument(bridgeId: _bridgeId);
+              }
+              throw StateError('unexpected read $charUuid');
+            };
+
+      // Prewarm disabled: stays unverified and does not connect.
+      final disabled = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: false,
+        upgradeInterval: Duration.zero,
+      );
+      final disabledScanSub = disabled.scan().listen((_) {});
+      await _settle();
+      await disabled.connect(_tcpDeviceId);
+      await _settle(30);
+      expect(disabled.fallbackReadinessFor(_tcpDeviceId).hasVerified, isFalse);
+      expect(disabled.fallbackReadinessFor(_tcpDeviceId).unverifiedCount, 1);
+      expect(disabled.bleDeviceIdFor(_tcpDeviceId), isNull);
+      await disabledScanSub.cancel();
+      await disabled.disconnect(_tcpDeviceId);
+      await disabled.dispose();
+
+      // Re-create TCP for enabled case.
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      final enabled = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(enabled.dispose);
+
+      final enabledScanSub = enabled.scan().listen((_) {});
+      addTearDown(enabledScanSub.cancel);
+      await _settle();
+      await enabled.connect(_tcpDeviceId);
+      await _waitFor(
+        () => enabled.fallbackReadinessFor(_tcpDeviceId).hasVerified,
+      );
+      expect(enabled.bleDeviceIdFor(_tcpDeviceId), _bleDeviceId);
+      expect(enabled.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      expect(ble.cccLog, isEmpty);
+    });
+
+    test('B3: TCP stall with warm standby skips reconnect/FF16/FF13 and lands FF14 fast', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      var connectCalls = 0;
+      var ff16Reads = 0;
+      var ff13Reads = 0;
+      final prefix = _bridgeId.length >= 8
+          ? _bridgeId.substring(0, 8)
+          : _bridgeId;
+      ble = _PrewarmHookBle(
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'wmrpi',
+            rssi: -45,
+            serviceData: {wmrBridgeServiceUuid: utf8.encode('WMB1$prefix')},
+          ),
+        ],
+        onConnect: (_) async {
+          connectCalls++;
+        },
+        onReadHook: (_, charUuid) async {
+          final lower = charUuid.toLowerCase();
+          if (lower == wmrBridgeVersionCharUuid) {
+            ff16Reads++;
+            return _endpointDocument(bridgeId: _bridgeId, authRequired: true);
+          }
+          if (lower == wmrBridgeConfigCharUuid) {
+            ff13Reads++;
+            return Uint8List.fromList(
+              utf8.encode('{"type":"wmr_ble_session","token":"secret"}'),
+            );
+          }
+          throw StateError('unexpected read $charUuid');
+        },
+      );
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      final frames = <BleNotification>[];
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen(frames.add);
+      addTearDown(sub.cancel);
+
+      tcp.emit(_tcpDeviceId, wmrBridgeBatchedCharUuid, [1, 2, 3]);
+      await _waitFor(
+        () => transport.bleDeviceIdFor(_tcpDeviceId) == _bleDeviceId,
+      );
+      await _settle(20);
+
+      final connectsBeforeT0 = connectCalls;
+      final ff16BeforeT0 = ff16Reads;
+      expect(ff13Reads, 0, reason: 'prewarm must not read FF13');
+
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      );
+
+      ble.emit(_bleDeviceId, wmrBridgeBatchedCharUuid, [4, 5, 6]);
+      await _waitFor(() => frames.length >= 2);
+
+      expect(
+        connectCalls,
+        connectsBeforeT0,
+        reason: 'must not re-dial standby BLE',
+      );
+      expect(
+        ff16Reads,
+        ff16BeforeT0,
+        reason: 'must not re-read FF16 on standby',
+      );
+      final marks = transport.linkTimelineFor(_tcpDeviceId)!;
+      expect(marks['failover_outcome'], 'landed');
+      final lastTcpUs = marks['episode_last_tcp_record_us']! as int;
+      final firstBleUs = marks['first_ble_record_us']! as int;
+      expect(firstBleUs - lastTcpUs, lessThanOrEqualTo(1000000));
+    });
+
+    test('B4: TCP stall mid-prewarm joins in-flight connect without duplicate ble.connect', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      final connectStarted = Completer<void>();
+      final connectGate = Completer<void>();
+      var connectCalls = 0;
+      final prefix = _bridgeId.length >= 8
+          ? _bridgeId.substring(0, 8)
+          : _bridgeId;
+      ble = _PrewarmHookBle(
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'wmrpi',
+            rssi: -45,
+            serviceData: {wmrBridgeServiceUuid: utf8.encode('WMB1$prefix')},
+          ),
+        ],
+        onConnect: (_) async {
+          connectCalls++;
+          if (!connectStarted.isCompleted) connectStarted.complete();
+          await connectGate.future;
+        },
+        onReadHook: (_, charUuid) async {
+          if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+            return _endpointDocument(bridgeId: _bridgeId);
+          }
+          throw StateError('unexpected read $charUuid');
+        },
+      );
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      await connectStarted.future;
+      expect(connectCalls, 1);
+
+      // Stall TCP while prewarm connect is in flight.
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _settle(20);
+      expect(
+        connectCalls,
+        1,
+        reason: '_fallbackToBle must join in-flight prewarm',
+      );
+
+      // Release the in-flight prewarm connect -> failover activates immediately.
+      connectGate.complete();
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      );
+      expect(connectCalls, 1);
+      expect(
+        transport.linkTimelineFor(_tcpDeviceId)!['failover_outcome'],
+        'landed',
+      );
+    });
+
+    test('B5: prewarm FF16 mismatch rejects cleanly, keeps TCP active, and never tight-loops', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      var connectCalls = 0;
+      var disconnectCalls = 0;
+      ble = _PrewarmHookBle(
+        results: const [
+          BleScanResult(deviceId: _bleDeviceId, name: 'other-pi', rssi: -45),
+        ],
+        onConnect: (_) async {
+          connectCalls++;
+        },
+        onDisconnect: (_) async {
+          disconnectCalls++;
+        },
+        onReadHook: (_, charUuid) async {
+          if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+            return _endpointDocument(bridgeId: 'wrong-bridge-id');
+          }
+          throw StateError('unexpected read $charUuid');
+        },
+      );
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      await _waitFor(() => disconnectCalls >= 1);
+      await _settle(50);
+
+      expect(connectCalls, 1, reason: 'mismatched ID must not tight-loop');
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      expect(transport.bleDeviceIdFor(_tcpDeviceId), isNull);
+    });
+
+    test('B6: standby BLE drop while TCP active clears BLE without breaking TCP, and later stall redials cleanly', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      final prefix = _bridgeId.length >= 8
+          ? _bridgeId.substring(0, 8)
+          : _bridgeId;
+      ble =
+          _ServiceDataBle(
+              results: [
+                BleScanResult(
+                  deviceId: _bleDeviceId,
+                  name: 'wmrpi',
+                  rssi: -45,
+                  serviceData: {
+                    wmrBridgeServiceUuid: utf8.encode('WMB1$prefix'),
+                  },
+                ),
+              ],
+            )
+            ..onRead = (_, charUuid) {
+              if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+                return _endpointDocument(bridgeId: _bridgeId);
+              }
+              throw StateError('unexpected read $charUuid');
+            };
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      final states = <BleConnectionState>[];
+      final stateSub = transport
+          .connectionState(_tcpDeviceId)
+          .listen(states.add);
+      addTearDown(stateSub.cancel);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      await _waitFor(
+        () => transport.bleDeviceIdFor(_tcpDeviceId) == _bleDeviceId,
+      );
+      await _waitFor(() => ble.reads.isNotEmpty);
+      states.clear();
+
+      // Standby BLE drops while TCP is active.
+      await ble.disconnect(_bleDeviceId);
+      await _waitFor(() => transport.bleDeviceIdFor(_tcpDeviceId) == null);
+      expect(transport.activeLegFor(_tcpDeviceId), CompositeLeg.tcp);
+      expect(states, isNot(contains(BleConnectionState.disconnected)));
+
+      // Subsequent TCP stall re-dials BLE cleanly.
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      );
+      expect(transport.bleDeviceIdFor(_tcpDeviceId), _bleDeviceId);
+    });
+
+    test('B7: cold failover never blocks FF14 subscribe on FF13 read when tcpCandidates exist', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      final ff13Hung = Completer<Uint8List>();
+      final prefix = _bridgeId.length >= 8
+          ? _bridgeId.substring(0, 8)
+          : _bridgeId;
+      ble = _PrewarmHookBle(
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'wmrpi',
+            rssi: -45,
+            serviceData: {wmrBridgeServiceUuid: utf8.encode('WMB1$prefix')},
+          ),
+        ],
+        onReadHook: (_, charUuid) {
+          final lower = charUuid.toLowerCase();
+          if (lower == wmrBridgeVersionCharUuid) {
+            return Future.value(
+              _endpointDocument(bridgeId: _bridgeId, authRequired: true),
+            );
+          }
+          if (lower == wmrBridgeConfigCharUuid) {
+            return ff13Hung.future;
+          }
+          throw StateError('unexpected read $charUuid');
+        },
+      );
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: false,
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+      addTearDown(sub.cancel);
+      await _settle();
+
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      );
+      expect(
+        ble.cccLog,
+        contains('on $wmrBridgeBatchedCharUuid'),
+        reason: 'FF14 subscribe must land even while FF13 is hung',
+      );
+    });
+
+    test('B8: disconnect and dispose mid-prewarm with stalled ble.disconnect are bounded', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      final connectStarted = Completer<void>();
+      final connectGate = Completer<void>();
+      final stalledDisconnect = Completer<void>();
+      final prefix = _bridgeId.length >= 8
+          ? _bridgeId.substring(0, 8)
+          : _bridgeId;
+      ble = _PrewarmHookBle(
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'wmrpi',
+            rssi: -45,
+            serviceData: {wmrBridgeServiceUuid: utf8.encode('WMB1$prefix')},
+          ),
+        ],
+        onConnect: (_) async {
+          if (!connectStarted.isCompleted) connectStarted.complete();
+          await connectGate.future;
+        },
+        onDisconnect: (_) => stalledDisconnect.future,
+        onReadHook: (_, charUuid) async {
+          if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+            return _endpointDocument(bridgeId: _bridgeId);
+          }
+          throw StateError('unexpected read $charUuid');
+        },
+      );
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        bleUnsubscribeTimeout: const Duration(milliseconds: 50),
+        upgradeInterval: Duration.zero,
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      await connectStarted.future;
+
+      final sw = Stopwatch()..start();
+      await transport.disconnect(_tcpDeviceId);
+      expect(sw.elapsedMilliseconds, lessThan(400));
+
+      connectGate.complete();
+      await _settle(30);
+      await transport.dispose();
+    });
+
+    test('B9: BLE->TCP upgrade disables FF14 CCCD while preserving warm BLE standby for next stall', () async {
+      await tcp.dispose();
+      tcp = _FakeTcp()
+        ..registerEndpoint(
+          WmrWsEndpoint(
+            host: '127.0.0.1',
+            port: 8765,
+            deviceId: _tcpDeviceId,
+            bridgeId: _bridgeId,
+          ),
+        );
+      ble.dispose();
+      var connectCalls = 0;
+      final prefix = _bridgeId.length >= 8
+          ? _bridgeId.substring(0, 8)
+          : _bridgeId;
+      ble = _PrewarmHookBle(
+        results: [
+          BleScanResult(
+            deviceId: _bleDeviceId,
+            name: 'wmrpi',
+            rssi: -45,
+            serviceData: {wmrBridgeServiceUuid: utf8.encode('WMB1$prefix')},
+          ),
+        ],
+        onConnect: (_) async {
+          connectCalls++;
+        },
+        onReadHook: (_, charUuid) async {
+          if (charUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+            return _endpointDocument(bridgeId: _bridgeId);
+          }
+          throw StateError('unexpected read $charUuid');
+        },
+      );
+
+      final transport = CompositeBleTransport(
+        tcp: tcp,
+        ble: ble,
+        prewarmBleStandby: true,
+        upgradeInterval: const Duration(milliseconds: 60),
+      );
+      addTearDown(transport.dispose);
+
+      final scanSub = transport.scan().listen((_) {});
+      addTearDown(scanSub.cancel);
+      await _settle();
+      await transport.connect(_tcpDeviceId);
+      final sub = transport
+          .subscribe(
+            _tcpDeviceId,
+            wmrBridgeServiceUuid,
+            wmrBridgeBatchedCharUuid,
+          )
+          .listen((_) {});
+      addTearDown(sub.cancel);
+      await _waitFor(
+        () => transport.bleDeviceIdFor(_tcpDeviceId) == _bleDeviceId,
+      );
+      expect(connectCalls, 1);
+
+      // Cycle 1: TCP stalls -> BLE activates -> TCP recovers -> FF14 CCCD off, standby kept.
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      );
+
+      tcp.failConnect = false;
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.tcp,
+      );
+      await _waitFor(
+        () => ble.cccLog.contains('off $wmrBridgeBatchedCharUuid'),
+      );
+      expect(transport.bleDeviceIdFor(_tcpDeviceId), _bleDeviceId);
+      expect(connectCalls, 1);
+
+      // Cycle 2: second TCP stall reuses preserved warm standby without re-connecting.
+      tcp.failConnect = true;
+      tcp.drop(_tcpDeviceId);
+      await _waitFor(
+        () => transport.activeLegFor(_tcpDeviceId) == CompositeLeg.ble,
+      );
+      expect(connectCalls, 1);
+    });
+  });
 }
 
 class _TrackedTimer implements Timer {
@@ -6249,5 +6925,41 @@ class _ServiceDataBle extends FakeTransport {
       },
     );
     return ctl.stream;
+  }
+}
+
+class _PrewarmHookBle extends _ServiceDataBle {
+  _PrewarmHookBle({
+    required super.results,
+    this.onConnect,
+    this.onDisconnect,
+    this.onReadHook,
+  });
+
+  final Future<void> Function(String deviceId)? onConnect;
+  final Future<void> Function(String deviceId)? onDisconnect;
+  final Future<Uint8List> Function(String deviceId, String charUuid)?
+  onReadHook;
+
+  @override
+  Future<void> connect(String deviceId) async {
+    if (onConnect != null) await onConnect!(deviceId);
+    await super.connect(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async {
+    if (onDisconnect != null) await onDisconnect!(deviceId);
+    await super.disconnect(deviceId);
+  }
+
+  @override
+  Future<Uint8List> read(
+    String deviceId,
+    String serviceUuid,
+    String characteristicUuid,
+  ) async {
+    if (onReadHook != null) return onReadHook!(deviceId, characteristicUuid);
+    return super.read(deviceId, serviceUuid, characteristicUuid);
   }
 }
