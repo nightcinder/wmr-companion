@@ -102,6 +102,18 @@ class _Session {
   /// so a later [UniversalBleTransport.discoverServices] from the facade does
   /// not run a second platform discovery on a live stream.
   List<BleServiceInfo>? services;
+
+  /// One-shot FF16 bytes read during [UniversalBleTransport._setup], consumed
+  /// by the first immediate `read(FF16)` so connection setup and endpoint
+  /// verification do not issue a duplicate GATT read. Cleared on first use so
+  /// later `FF16` reads always hit the adapter.
+  Uint8List? _initialVersionBytes;
+
+  Uint8List? takeInitialVersionBytes() {
+    final bytes = _initialVersionBytes;
+    _initialVersionBytes = null;
+    return bytes;
+  }
 }
 
 class _Wanted {
@@ -664,6 +676,13 @@ class UniversalBleTransport
 
   @override
   Future<void> stopScan() async {
+    if (!_scanWanted &&
+        !_scanPaused &&
+        _scanSub == null &&
+        !_adapterScanning &&
+        _scanTimer == null) {
+      return;
+    }
     _scanWanted = false;
     _scanPaused = false;
     _scanTimer?.cancel();
@@ -800,6 +819,7 @@ class UniversalBleTransport
                 )
                 .timeout(versionReadTimeout),
           );
+          session._initialVersionBytes = Uint8List.fromList(bytes);
           isPiEndpoint = _isPiBleEndpoint(bytes);
         } on TimeoutException catch (e) {
           _checkSetup(session);
@@ -1169,6 +1189,11 @@ class UniversalBleTransport
     String serviceUuid,
     String characteristicUuid,
   ) {
+    if (serviceUuid.toLowerCase() == wmrBridgeServiceUuid &&
+        characteristicUuid.toLowerCase() == wmrBridgeVersionCharUuid) {
+      final cached = _sessions[deviceId]?.takeInitialVersionBytes();
+      if (cached != null) return Future.value(cached);
+    }
     return _serial(
       () => _adapter.read(deviceId, serviceUuid, characteristicUuid),
     );

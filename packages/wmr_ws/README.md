@@ -124,10 +124,13 @@ asleep) leaves it writable and silent: `dart:io` reports neither an error nor
 `livenessInterval` (500 ms by default) and requires its `pong` within
 `livenessTimeout` (1000 ms). A missed deadline closes the socket and reports
 `disconnected` with `WmrWsLivenessException`, so `CompositeBleTransport` can
-fall back to BLE instead of showing a connected link that carries nothing. The
-probe ids start at `wmrWsLivenessPingIdBase` (0x10000), above the 16-bit FF15
-id range, so a probe answer never reaches the echo sink. A non-positive
-`livenessInterval` disables the probes.
+fall back to BLE instead of showing a connected link that carries nothing. When
+`silenceProbeDelay` is positive (default `Duration.zero`, disabled), an active
+payload stream that goes silent for `silenceProbeDelay` triggers an immediate
+liveness `ping` if no probe is already in flight, without extending any
+already-armed deadline. The probe ids start at `wmrWsLivenessPingIdBase`
+(0x10000), above the 16-bit FF15 id range, so a probe answer never reaches the
+echo sink. A non-positive `livenessInterval` disables the probes.
 
 ### Queue behaviour
 

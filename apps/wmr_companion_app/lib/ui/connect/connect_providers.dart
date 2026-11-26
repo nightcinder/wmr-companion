@@ -41,7 +41,12 @@ final bleHandoffTransportFactoryProvider =
     Provider<BleTransport Function(BleTransport ble)>(
       (ref) =>
           (ble) => CompositeBleTransport(
-            tcp: WmrWsTransport(endpoints: const []),
+            tcp: WmrWsTransport(
+              endpoints: const [],
+              livenessInterval: const Duration(milliseconds: 250),
+              livenessTimeout: const Duration(milliseconds: 600),
+              silenceProbeDelay: const Duration(milliseconds: 100),
+            ),
             ble: ble,
             // With Wi-Fi off the Pi's LAN address cannot answer; probe the
             // interfaces first so the BLE dial is not held up by TCP.
@@ -200,8 +205,14 @@ final compositeWifiTransportFactoryProvider =
       final ble = ref.watch(realTransportProvider);
       return (endpoint) {
         final composite = CompositeBleTransport(
-          tcp: WmrWsTransport(endpoints: [endpoint]),
+          tcp: WmrWsTransport(
+            endpoints: [endpoint],
+            livenessInterval: const Duration(milliseconds: 250),
+            livenessTimeout: const Duration(milliseconds: 600),
+            silenceProbeDelay: const Duration(milliseconds: 100),
+          ),
           ble: ble,
+          prewarmBleStandby: true,
           // No Wi-Fi: skip the TCP probe so the BLE leg is dialled at once
           // instead of waiting out the remembered LAN address.
           lanAvailable: () => ref.read(lanInterfaceProbeProvider)(),
@@ -1228,6 +1239,9 @@ class RealDeviceController extends Notifier<RealDeviceState> {
   /// not publish over this one. A redial that fails for its own reasons
   /// falls back into the ordinary reconnect campaign.
   Future<void> _recoverAfterRadioOn() async {
+    // Let any synchronous-turn poweredOff status event settle and dispose the
+    // dead ControllerService before redialling.
+    await Future<void>.value();
     if (_intentionalDisconnect) return;
     final dropped = _droppedDeviceIds
         .where((id) => !_userDisconnectedDeviceIds.contains(id))

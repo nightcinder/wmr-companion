@@ -148,6 +148,13 @@ receipt T2 and the journal lower bound to explain the gate result.
   `packages/wmr_ble/lib/src/universal_ble_transport.dart:371-405`). Never
   proceed to preflight or scored runs while `ble_fallback_state` is
   `permission_denied`.
+- **OS pre-bonding before Pi preflight:** Pre-bond the Pixel to `wmrpi` in
+  Android Settings (`Paired: yes`, `WMR_Bridge` `docs/runs/sheets/bench.md:11`)
+  **before** running `bench_optionc.py preflight` and connecting Companion, so
+  warm-standby pre-connect (`packages/wmr_companion/lib/src/composite_transport.dart:1095-1122`)
+  holds an encrypted bond before `T0` (avoiding cold SMP or `Pairable: no`
+  rejection on `FF14` `encrypt-write` after `wmrpi`'s `180 s` boot window,
+  `WMR_Bridge` `pi/wmr_bridge/ble_gatt.py:141, 2088-2142`).
 - **Pi Option C preflight (`WMR_Bridge`):** Run `bench_optionc.py preflight` on
   `wmrpi` (`WMR_Bridge` `docs/runs/sheets/bench.md:7`) and confirm:
   - `Powered: yes` (`wmr-bridge status`, `WMR_Bridge` `pi/wmr_bridge/__main__.py:638-642`)
@@ -163,14 +170,16 @@ receipt T2 and the journal lower bound to explain the gate result.
   and confirm:
   - `ble_fallback: true` (`apps/wmr_companion_app/lib/services/test_bundle.dart:628`)
   - `ble_fallback_state == "ready"` (`apps/wmr_companion_app/lib/services/test_bundle.dart:630`,
-    `packages/wmr_companion/lib/src/composite_transport.dart:269-290`) when
-    `bench_optionc.py preflight` reports `ActiveInstances >= 1`
-  - `ble_fallback_state == "candidate_unverified"` is permitted **only** when
-    `bench_optionc.py preflight` explicitly reports `ActiveInstances == 0` with
-    an active bonded LE link (`packages/wmr_ble/lib/src/universal_ble_transport.dart:565-580`)
-  - Any other `ble_fallback_state` (`disabled`, `scanning`, `no_candidate`,
-    `permission_denied`, `bluetooth_off`, `bluetooth_unavailable`) is a
-    **hard stop**: do not start preflight or scored cuts.
+    `packages/wmr_companion/lib/src/composite_transport.dart:269-290`),
+    promoted via `WMB1` or `systemDevices` `FF16` warm-standby verification
+    (`apps/wmr_companion_app/lib/ui/connect/connect_providers.dart:203-215`,
+    `packages/wmr_companion/lib/src/composite_transport.dart:1803-1818`,
+    `packages/wmr_ble/lib/src/universal_ble_transport.dart:565-580`) even when
+    `ActiveInstances == 0`
+  - Any other `ble_fallback_state` (`disabled`, `scanning`,
+    `candidate_unverified`, `no_candidate`, `permission_denied`, `bluetooth_off`,
+    `bluetooth_unavailable`) is a **hard stop**: do not start preflight or
+    scored cuts.
 - **Unscored preflight `wlan-cycle 10` hard-stop gate:** Run one unscored
   `wlan-cycle 10` preflight cut and export a fresh `diagnostics.json` right
   after `clock-proof.py` stops. **Refuse scored Runs 1–3** unless **all** of
@@ -518,10 +527,18 @@ begin. Both stamps land in the same event-loop turn
 The parts are enough to cross-check the takeover unless it lands within a
 few milliseconds of 2500 ms.
 
-The stall mark lands after the liveness probe gives up. The defaults are a
-500 ms probe interval and a 1000 ms timeout
-(`packages/wmr_ws/lib/src/wmr_ws_transport.dart:85-86`). A `stall +` near
-1500 ms is the probe, not the failover.
+The stall mark lands after the liveness probe gives up. `WmrWsTransport` defaults
+to a 500 ms probe interval, 1000 ms timeout, and `Duration.zero` silence probe
+(`packages/wmr_ws/lib/src/wmr_ws_transport.dart:85-87`), while the BLE-fallback
+composite factories (`compositeWifiTransportFactoryProvider` and
+`bleHandoffTransportFactoryProvider`,
+`apps/wmr_companion_app/lib/ui/connect/connect_providers.dart:40-48, 203-215`)
+configure a 100 ms silence probe (`packages/wmr_ws/lib/src/wmr_ws_transport.dart:919-931`),
+250 ms liveness interval, and 600 ms liveness timeout (bounding active-stream
+`stall +` to ~700 ms). `compositeWifiTransportFactoryProvider` also enables
+opt-in warm-standby BLE pre-connect (`prewarmBleStandby: true`,
+`packages/wmr_companion/lib/src/composite_transport.dart:221, 1095-1122, 1450-1489`)
+with one-shot `FF16` reuse (`packages/wmr_ble/lib/src/universal_ble_transport.dart:110-116, 822, 1194`).
 
 ## Fill-in table
 
