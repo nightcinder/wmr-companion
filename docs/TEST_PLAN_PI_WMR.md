@@ -27,7 +27,7 @@ Reference documents: WMR_Bridge `docs/PI_BRIDGE.md` (checklist P1-P14 and the
 run sheet `docs/runs/sheets/bench.md`), [PROTOCOL.md](PROTOCOL.md),
 [IMU_LOG.md](IMU_LOG.md), [TIMELINE.md](TIMELINE.md), [GAMEPAD.md](GAMEPAD.md).
 Shared vectors: `packages/wmr_core/test/fixtures/wmr_golden_v1.json`
-(identical to WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged) `tests/vectors/wmr_golden_v1.json`).
+(identical to WMR_Bridge `tests/vectors/wmr_golden_v1.json`, merged in PR #238 at `b71cbb0`).
 
 Record for every hardware sitting: Pi model, OS image and kernel, BlueZ
 version, bridge package version, Wi-Fi band and channel, phone model and OS,
@@ -50,8 +50,7 @@ addresses and the session token are never written into a sheet.
 | S4 | Switch timing contract | S1 | specified, not implemented; secondary |
 | S5 | Switch 44-byte calibration blob | S2 | specified, not implemented; secondary |
 
-S1-S5 are the protocol proposals P1-P5 of WMR_Bridge PR #238 (branch `docs/spec-patches`, not yet merged), `docs/PROTOCOL.md`
-("Proposals"), in the same order.
+S1-S5 are the protocol proposals P1-P5 of WMR_Bridge `docs/PROTOCOL.md` ("Proposals", merged in PR #238 at `b71cbb0`), in the same order.
 
 ## M1. Pi bring-up
 
@@ -63,7 +62,7 @@ WebSocket at the expected rate with no bridge-side errors.
 | Test | Where | State | Pass |
 | --- | --- | --- | --- |
 | Pi host suite | WMR_Bridge `pi/run_tests.sh` | exists | all tests pass |
-| Golden vectors, Pi side | WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged) `pi/tests/test_golden_vectors.py` | exists | passes: decoder state, 56-byte records, fragments, batch, echo, timing rules |
+| Golden vectors, Pi side | WMR_Bridge `pi/tests/test_golden_vectors.py` (merged in PR #238 at `b71cbb0`) | exists | passes: decoder state, 56-byte records, fragments, batch, echo, timing rules |
 | Golden vectors, app side | `packages/wmr_core/test/golden_vectors_test.dart` | run: dart format and dart analyze clean; dart test passes (51 tests in packages/wmr_core, run on ixhel; CI build job passed on 6024d34, the head before this commit) | passes in `dart test` |
 | The two copies of the vector file are identical | CI step comparing SHA-256 across the repositories | to write | equal |
 | Replay smoke | `python3 -m wmr_bridge --replay ../samples/controller_frames.txt` with `tools/wifi_probe.py --stream batched --duration 10` | exists | about 160 rec/s, `sequenceGaps` 0, `dropped` 0 |
@@ -88,7 +87,7 @@ streaming to one batched client.
 | Test | Where | State | Pass |
 | --- | --- | --- | --- |
 | Fast decoder equals the reference bit for bit | WMR_Bridge `pi/tests/test_decode.py` (`FastDecodeParityTests`: all 4096 stick values, random reports, IMU edges) | in review | passes |
-| Golden vectors unchanged by the fast decoder | `pi/tests/test_golden_vectors.py` (WMR_Bridge PR #238 (branch docs/spec-patches, not yet merged)) | exists | passes before and after the patch with the same vector file |
+| Golden vectors unchanged by the fast decoder | `pi/tests/test_golden_vectors.py` (WMR_Bridge, merged in PR #238 at `b71cbb0`) | exists | passes before and after the patch with the same vector file |
 | Decode micro-benchmark | WMR_Bridge `pi/tools/bench_decode.py` | in review | prints microseconds per report for the reference and the fast path; no fixed bar on a developer machine |
 
 ### Owner-run hardware tests
@@ -229,7 +228,7 @@ result must be labelled as such.
 ## S1-S5. Spec items
 
 These change the wire or the status. For each, the order is fixed: spec text
-(on WMR_Bridge PR #238, branch `docs/spec-patches`, not yet merged: `docs/PROTOCOL.md` "Proposals" and `docs/SWITCH.md`), golden
+(in WMR_Bridge `docs/PROTOCOL.md` "Proposals" and `docs/SWITCH.md`, merged in PR #238 at `b71cbb0`), golden
 vectors, bridge code, app code. Every row is "to write".
 
 | Id | Item | Automated | Owner-run hardware test |
@@ -237,20 +236,20 @@ vectors, bridge code, app code. Every row is "to write".
 | S1 | Flag bits `TICKS_SYNTHETIC`, `RX_TIME_SYNTHETIC`, `TICK_RESET` | New vector file version with records that set each bit. Parsers on both sides keep the bits. Old app build against a new fake bridge: no behaviour change. `TICK_RESET` starts a timeline epoch on that record. `RX_TIME_SYNTHETIC` records are excluded from offset estimation | Power-cycle a controller on a bridge that implements S1: the first record after the reconnect has `TICK_RESET` in the raw IMU log; no other record has it |
 | S2 | `boot_id`, `controller_epoch`, `features` | Status version 2 golden bytes (24 bytes) parsed by both sides; version 1 parsers accept the longer value. WebSocket `hello`/`status` fields. App re-baselines on a `boot_id` change and starts an epoch on a `controller_epoch` change | Restart the daemon during a session: the app shows one bridge restart, no out-of-order burst. Power-cycle a controller: its epoch increments by 1 and the other hand's does not |
 | S3 | Echo version 2 | 28-byte golden answers with each validity flag. App falls back to version 1 on a timeout and never sends version 2 without `ECHO_V2`. Pi answer has `TX_TIME_VALID` and `USER_SPACE_CLOCK` | 120 s latency run on the Pi over BLE: every ping answered; `tx_time_us - rx_time_us` distribution recorded |
-| S4 | Switch timing contract (secondary) | The worked example of WMR_Bridge `docs/SWITCH.md` (PR #238, branch `docs/spec-patches`, not yet merged) as a firmware test vector. Ticks advance by at least 1 ms per record. App `SwitchBurstTimestamps` leaves supplied ticks unchanged. `TickTimer` reports no discontinuity on a simulated 60 s stream | Needs a Switch controller and the ESP32 firmware; not part of the Pi and WMR scenario |
-| S5 | Switch 44-byte blob (secondary) | Firmware packs version, device type and the 42 bytes (spec on WMR_Bridge PR #238, branch `docs/spec-patches`, not yet merged); `SwitchCalibration.parse` accepts the firmware's golden blob. The gyro factor (816 or 936) is settled and identical on both sides | As S4 |
+| S4 | Switch timing contract (secondary) | The worked example of WMR_Bridge `docs/SWITCH.md` (merged in PR #238 at `b71cbb0`) as a firmware test vector. Ticks advance by at least 1 ms per record. App `SwitchBurstTimestamps` leaves supplied ticks unchanged. `TickTimer` reports no discontinuity on a simulated 60 s stream | Needs a Switch controller and the ESP32 firmware; not part of the Pi and WMR scenario |
+| S5 | Switch 44-byte blob (secondary) | Firmware packs version, device type and the 42 bytes (spec in WMR_Bridge `docs/SWITCH.md`, merged in PR #238 at `b71cbb0`); `SwitchCalibration.parse` accepts the firmware's golden blob. The gyro factor (816 or 936) is settled and identical on both sides | As S4 |
 
 ## Regression set for every change in this plan
 
 Run before a change is called done, whatever the milestone:
 
-1. WMR_Bridge (PR #238, branch `docs/spec-patches`, not yet merged): `cd pi && ./run_tests.sh` and
+1. WMR_Bridge: `cd pi && ./run_tests.sh` and
    `python3 -m pytest tests/test_golden_vectors.py -q`.
 2. WMR_Bridge: `python3 tests/test_docs_links.py` and
    `python3 tests/test_doc_gatt.py` after a documentation change.
 3. App: `dart test` in `packages/wmr_core`, `packages/wmr_ws` and
    `packages/wmr_companion`; `dart format --set-exit-if-changed` as CI does.
-4. The two copies of `wmr_golden_v1.json` (app, and WMR_Bridge PR #238, branch `docs/spec-patches`, not yet merged) are byte-identical.
+4. The two copies of `wmr_golden_v1.json` (app, and WMR_Bridge `tests/vectors/wmr_golden_v1.json`) are byte-identical.
 
 ## What this plan does not cover
 
