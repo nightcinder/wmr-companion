@@ -131,6 +131,8 @@ Make sure that segment D stays within the 10-50 cm/s speed band. The tuner drops
 ## 9. Send
 Capture per gate: logcat `pose-androidxr-<gate>-<timestamp>.log`; exported JSON/CSV; bridge serial `pose-androidxr-serial-<timestamp>.txt`; setup and permission-dialog photos. Zip as `pose-androidxr-<YYYYMMDD>.zip`, record its SHA-256, and attach it with the filled tables. If a file is missing, say which; do not reconstruct numbers.
 
+Host helper: run `tool/aura_sitting_kit.sh collect --dir <evidence-dir>` to stop logcat, write `SHA256SUMS.txt`, zip into `pose-androidxr-<YYYYMMDD>.zip`, and list any missing expected files.
+
 ## 10. Pass/fail for 1.0
 - Gate 1 recorded.
 - Gate 2: permission outcome recorded; if `SPATIAL` is unsupported, the path is not 6DoF-capable.
@@ -157,6 +159,7 @@ Run this sitting in order on an XREAL Aura headset with a Raspberry Pi 3B+ bridg
 1. Install the companion APK on Aura from a computer over `adb`: `adb install -r wmr-companion-0.3.27-rc.2-unified-arm64-v8a.apk`.
 2. Make sure that the installed DroidDeck build on Aura is at or after `nightcinder/DroidDeck` `android-xr` commit `eb03e88`. Run `adb shell pm path <droiddeck-package>` and `adb shell dumpsys package <droiddeck-package> | grep -E "versionName|lastUpdateTime"`. If it predates `eb03e88`, rebuild and install from commit `dcbc017d`.
 3. Start logcat on the computer before starting the tests: `adb logcat -v threadtime > aura-sitting-<YYYYMMDD>.log`.
+4. Host helper: run `tool/aura_sitting_kit.sh preflight` (pass `--droiddeck-package <droiddeck-package>` if needed) to verify the connected device, pinned companion `versionName`/`versionCode`, and DroidDeck package lines, and `tool/aura_sitting_kit.sh start --dir <evidence-dir>` to start logcat.
 
 ### 11.3 6DoF pose gates and 6-run guided bench
 
