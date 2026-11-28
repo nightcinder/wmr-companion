@@ -160,9 +160,13 @@ class UniversalBleTransport
     this.enableRetryDelay = const Duration(milliseconds: 250),
   }) : _adapter = adapter,
        clock = clock ?? MonotonicClock() {
-    _paramsSub = adapter.connectionParams.listen(
-      (p) => _intervalUs[p.deviceId] = p.intervalUs,
-    );
+    _paramsSub = adapter.connectionParams.listen((p) {
+      // A report without a live or in-progress session belongs to a link
+      // that is already gone; keeping it would leak into the next link.
+      if (_sessions.containsKey(p.deviceId)) {
+        _intervalUs[p.deviceId] = p.intervalUs;
+      }
+    });
     _availabilitySub = adapter.availabilityChanges.listen(
       _onAvailabilityChange,
     );
@@ -271,6 +275,7 @@ class UniversalBleTransport
       ..._sessions.keys,
       if (setup != null) setup.deviceId,
     }) {
+      _intervalUs.remove(deviceId);
       if (_sessions.remove(deviceId) != null) {
         _subscribeTimelines[deviceId]?.onDisconnect(clock.nowUs);
       }
@@ -716,6 +721,7 @@ class UniversalBleTransport
 
   Future<void> _setup(String deviceId) async {
     final session = _sessions[deviceId] = _settingUp = _Session(deviceId);
+    _intervalUs.remove(deviceId);
     _setState(deviceId, BleConnectionState.connecting);
     _emit(BleLinkPhase.connecting, deviceId: deviceId);
     var linkAttempted = false;
@@ -872,6 +878,7 @@ class UniversalBleTransport
       if (_sessions[deviceId] != session) rethrow;
 
       _sessions.remove(deviceId);
+      _intervalUs.remove(deviceId);
       _linkSubs.remove(deviceId)?.cancel();
       // Only a dial that reached the stack has an episode to close.
       if (linkAttempted) {
@@ -894,6 +901,7 @@ class UniversalBleTransport
   void _onLinkEvent(_Session session, AdapterConnectionEvent e) {
     if (e.connected || _sessions[session.deviceId] != session) return;
     _sessions.remove(session.deviceId);
+    _intervalUs.remove(session.deviceId);
     _linkSubs.remove(session.deviceId)?.cancel();
     _subscribeTimelines[session.deviceId]?.onDisconnect(clock.nowUs);
     _setState(session.deviceId, BleConnectionState.disconnected);
@@ -1005,6 +1013,7 @@ class UniversalBleTransport
     return _serial(() async {
       // Clearing the session first makes the link event this causes harmless.
       _sessions.remove(deviceId);
+      _intervalUs.remove(deviceId);
       _emit(BleLinkPhase.disconnecting, deviceId: deviceId);
       await _closeStreams(deviceId);
       try {
