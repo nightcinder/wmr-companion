@@ -56,7 +56,7 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
 ## Done gate (before opening a PR)
 - Run `dart format` check, `flutter analyze` (app) and the test suite of every package you touched; CI runs all of them plus `gitleaks` and `semgrep`. Docs-only changes skip the Flutter build jobs.
 - Say which commands you ran and which you did not. Heavy jobs (full Gradle APK, iOS, Unity export) are CI or owner-run.
-- PRs get an automated review (Arthur / Paperclip bot). It blocks on `error` findings; answer each with a fix commit.
+- PRs get an automated review (Arthur / Paperclip bot). It blocks unless rated 5/5; answer every finding that asks for a change with a fix commit.
 
 ## Gotchas (recurring review findings)
 - Citing code in docs or run sheets (`file.dart:84-85`): re-check line numbers against the final head. Stale `file:line` refs and counts ("two intervals", "Gates 2, 7, 8") that disagree with the table beside them are the most common finding.
