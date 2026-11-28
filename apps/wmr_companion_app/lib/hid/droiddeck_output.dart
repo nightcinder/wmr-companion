@@ -29,6 +29,11 @@ final droidDeckTransportFactoryProvider =
               openDroidDeckXrTransport(token: ref.read(droidDeckTokenProvider)),
     );
 
+/// `CLOCK_MONOTONIC` in nanoseconds for DroidDeck packets. Overridden in tests.
+final droidDeckClockNsProvider = Provider<int Function()>(
+  (ref) => droidDeckMonotonicNs,
+);
+
 /// The Android `InputDevice` the sink asks DroidDeck to ignore.
 ///
 /// The companion sends no claim: the flat gamepad it would replace is its own
@@ -168,6 +173,7 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
   int _bindGeneration = 0;
   final List<DecodedSample?> _latest = [null, null];
   final List<Vector3?> _position = [null, null];
+  final List<int> _lastSampleTimeNs = [0, 0];
   final Map<int, String> _handBridge = {};
   GamepadState? _previous;
 
@@ -195,7 +201,9 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
       final sink = DroidDeckXrSink(
         transport: transport,
         claim: ref.read(droidDeckClaimProvider),
+        clockNs: ref.read(droidDeckClockNsProvider),
         hidPeripheral: DroidDeckHidPeripheral(ref, source),
+        initialSampleTimeNs: _lastSampleTimeNs,
       );
       await sink.start();
       if (generation != _generation) {
@@ -226,6 +234,11 @@ class DroidDeckOutput extends Notifier<DroidDeckOutputState> {
     if (sink == null && !state.running) return;
     _generation++;
     _unbindSource();
+    if (sink != null) {
+      final last = sink.lastSampleTimeNs;
+      _lastSampleTimeNs[0] = last[0];
+      _lastSampleTimeNs[1] = last[1];
+    }
     _sink = null;
     _stats = null;
     _clearHands();

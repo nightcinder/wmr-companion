@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart' show Quaternion, Vector3;
+import 'package:wmr_core/ble/ble_transport.dart';
 import 'package:wmr_core/ble/fake_transport.dart';
 import 'package:wmr_core/ble/fake_wmr_bridge.dart';
 import 'package:wmr_core/domain/droiddeck_xr_sink.dart';
+import 'package:wmr_core/protocol/decoded_batch.dart';
 import 'package:wmr_core/protocol/decoded_record.dart';
 import 'package:wmr_core/protocol/gatt.dart';
 import 'package:wmr_core/services/controller_service.dart';
@@ -55,6 +58,13 @@ class FakeDroidDeckTransport
 
   @override
   Future<void> close() async => closed = true;
+}
+
+class _StepClock implements MonotonicClock {
+  _StepClock(this.nowUs);
+
+  @override
+  int nowUs;
 }
 
 void main() {
@@ -313,5 +323,226 @@ void main() {
     await output.start(DebugSource.fake);
     expect(opened, [1, 2]);
     await output.stop();
+  });
+
+  group('DroidDeckOutput sampleTimeNs monotonicity', () {
+    void expectMonotonic(List<Uint8List> packets) {
+      var prevLeft = 0;
+      var prevRight = 0;
+      for (final packet in packets) {
+        final d = ByteData.sublistView(packet);
+        if ((d.getUint32(16, Endian.little) &
+                DroidDeckXrProtocol.flagPacketClaim) !=
+            0) {
+          continue;
+        }
+        final headerTimeNs = d.getInt64(24, Endian.little);
+        final leftNs = d.getInt64(
+          DroidDeckXrProtocol.headerBytes + 96,
+          Endian.little,
+        );
+        final rightNs = d.getInt64(
+          DroidDeckXrProtocol.headerBytes + DroidDeckXrProtocol.handBytes + 96,
+          Endian.little,
+        );
+        expect(leftNs, greaterThan(0));
+        expect(rightNs, greaterThan(0));
+        expect(leftNs, greaterThan(prevLeft));
+        expect(rightNs, greaterThan(prevRight));
+        expect(
+          leftNs,
+          greaterThanOrEqualTo(headerTimeNs - droidDeckMaxSampleAgeNs),
+        );
+        expect(
+          rightNs,
+          greaterThanOrEqualTo(headerTimeNs - droidDeckMaxSampleAgeNs),
+        );
+        expect(leftNs, lessThanOrEqualTo(headerTimeNs));
+        expect(rightNs, lessThanOrEqualTo(headerTimeNs));
+        prevLeft = leftNs;
+        prevRight = rightNs;
+      }
+    }
+
+    test('FF14 batches and idle hand stay strictly monotonic', () async {
+      var nowNs = 5000000000;
+      final clock = _StepClock(1000000);
+      final batchedTransport = FakeTransport(
+        devices: const [fakeBridgeDevice],
+        clock: clock,
+      );
+      final batchedService = ControllerService(
+        batchedTransport,
+        fakeBridgeDeviceId,
+        mode: StreamMode.batched,
+      );
+      await batchedService.start();
+      addTearDown(() async {
+        await batchedService.dispose();
+        await batchedTransport.dispose();
+      });
+
+      final c = ProviderContainer(
+        overrides: [
+          hidTransportProvider.overrideWithValue(hid),
+          controllerServiceProvider(DebugSource.fake)
+              .overrideWithValue(batchedService),
+          droidDeckTransportFactoryProvider.overrideWithValue(
+            () async => droidDeck,
+          ),
+          droidDeckClockNsProvider.overrideWithValue(() => nowNs += 1000),
+          debugPosesProvider(DebugSource.fake)
+              .overrideWith((ref) => poses.stream),
+        ],
+      );
+      addTearDown(c.dispose);
+      c.read(hidOutputProvider);
+
+      await c.read(droidDeckOutputProvider.notifier).start(DebugSource.fake);
+
+      // Emit an FF14 batch of 4 left records sharing one arrival time, then
+      // another batch with an idle right hand.
+      final batch1 = encodeDecodedBatch([
+        encodeDecodedRecord(record(1, hand: 0)),
+        encodeDecodedRecord(record(1, hand: 1)),
+        encodeDecodedRecord(record(2, hand: 0)),
+        encodeDecodedRecord(record(3, hand: 0)),
+      ]);
+      nowNs += 5000000;
+      clock.nowUs += 5000;
+      batchedTransport.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeBatchedCharUuid,
+        batch1,
+      );
+      await pump();
+
+      final batch2 = encodeDecodedBatch([
+        encodeDecodedRecord(record(4, hand: 0)),
+        encodeDecodedRecord(record(5, hand: 0)),
+      ]);
+      nowNs += 10000000;
+      clock.nowUs += 10000;
+      batchedTransport.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeBatchedCharUuid,
+        batch2,
+      );
+      await pump();
+
+      expect(droidDeck.sent, hasLength(6));
+      expectMonotonic(droidDeck.sent);
+      await c.read(droidDeckOutputProvider.notifier).stop();
+    });
+
+    test('transport switch (WebSocket -> BLE -> WebSocket) and stop/restart stay strictly monotonic', () async {
+      var nowNs = 5000000000;
+      final wsClock = _StepClock(100000000);
+      final bleClock = _StepClock(1000000);
+      final wsTransport = FakeTransport(
+        devices: const [fakeBridgeDevice],
+        clock: wsClock,
+      );
+      final bleTransport = FakeTransport(
+        devices: const [fakeBridgeDevice],
+        clock: bleClock,
+      );
+      final wsService = ControllerService(
+        wsTransport,
+        fakeBridgeDeviceId,
+        mode: StreamMode.decoded,
+      );
+      final bleService = ControllerService(
+        bleTransport,
+        fakeBridgeDeviceId,
+        mode: StreamMode.decoded,
+      );
+      await wsService.start();
+      await bleService.start();
+      addTearDown(() async {
+        await wsService.dispose();
+        await bleService.dispose();
+        await wsTransport.dispose();
+        await bleTransport.dispose();
+      });
+
+      final activeServiceProvider = StateProvider<ControllerService?>(
+        (ref) => wsService,
+      );
+      final c = ProviderContainer(
+        overrides: [
+          hidTransportProvider.overrideWithValue(hid),
+          controllerServiceProvider(DebugSource.fake)
+              .overrideWith((ref) => ref.watch(activeServiceProvider)),
+          droidDeckTransportFactoryProvider.overrideWithValue(
+            () async => droidDeck,
+          ),
+          droidDeckClockNsProvider.overrideWithValue(() => nowNs += 1000),
+          debugPosesProvider(DebugSource.fake)
+              .overrideWith((ref) => poses.stream),
+        ],
+      );
+      addTearDown(c.dispose);
+      c.read(hidOutputProvider);
+
+      final output = c.read(droidDeckOutputProvider.notifier);
+      await output.start(DebugSource.fake);
+
+      // Phase 1: WebSocket clock (~100 s).
+      nowNs += 5000000;
+      wsClock.nowUs += 5000;
+      wsTransport.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeDecodedCharUuid,
+        encodeDecodedRecord(record(1, hand: 0)),
+      );
+      await pump();
+
+      // Phase 2: Switch to BLE clock (~1 s).
+      nowNs += 50000000;
+      bleClock.nowUs += 50000;
+      c.read(activeServiceProvider.notifier).state = bleService;
+      await pump();
+      nowNs += 5000000;
+      bleClock.nowUs += 5000;
+      bleTransport.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeDecodedCharUuid,
+        encodeDecodedRecord(record(2, hand: 0)),
+      );
+      await pump();
+
+      // Phase 3: Switch back to WebSocket clock (~100.1 s).
+      nowNs += 50000000;
+      wsClock.nowUs += 105000;
+      c.read(activeServiceProvider.notifier).state = wsService;
+      await pump();
+      nowNs += 5000000;
+      wsClock.nowUs += 5000;
+      wsTransport.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeDecodedCharUuid,
+        encodeDecodedRecord(record(3, hand: 0)),
+      );
+      await pump();
+
+      // Phase 4: Stop and restart DroidDeckOutput.
+      await output.stop();
+      nowNs += 50000000;
+      wsClock.nowUs += 50000;
+      await output.start(DebugSource.fake);
+      nowNs += 5000000;
+      wsClock.nowUs += 5000;
+      wsTransport.emit(
+        fakeBridgeDeviceId,
+        wmrBridgeDecodedCharUuid,
+        encodeDecodedRecord(record(4, hand: 0)),
+      );
+      await pump();
+
+      expect(droidDeck.sent.length, greaterThanOrEqualTo(4));
+      expectMonotonic(droidDeck.sent);
+      await output.stop();
+    });
   });
 }

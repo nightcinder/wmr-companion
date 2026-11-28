@@ -43,7 +43,7 @@ addresses and the session token are never written into a sheet.
 | M3 | Non-blocking `0x06` enable | M1 | in review (separate PR) |
 | M4 | App end to end: WebSocket, BLE fallback, failover | M1 | app transports merged, host-tested |
 | M5 | Raw IMU recorder | M4 | specified, not implemented ([IMU_LOG.md](IMU_LOG.md)) |
-| M6 | DroidDeck output with sample time | M4, timeline | sink merged; `sampleTimeNs` from the timeline specified, not implemented |
+| M6 | DroidDeck output with sample time | M4, timeline | sink, non-blocking reopen queue, angular velocity, and monotonic receive-time `sampleTimeNs` merged and host-tested; `SensorTimeline` replacement specified, not implemented |
 | S1 | Record flag bits 1-3 | spec | specified, not implemented |
 | S2 | `boot_id`, `controller_epoch`, `features` | spec | specified, not implemented |
 | S3 | Echo version 2 (transmit time) | S2 | specified, not implemented |
@@ -208,9 +208,10 @@ output survives send errors.
 | Test | Where | State | Pass |
 | --- | --- | --- | --- |
 | Packet layout | `packages/wmr_core/test/droiddeck_xr_sink_test.dart` | exists | passes |
+| Receive-time `sampleTimeNs` monotonicity on `CLOCK_MONOTONIC` (FF12, FF14 batch, idle hand, 250 ms clamp, transport switch, stop/restart) | `packages/wmr_core/test/droiddeck_xr_sink_test.dart`, `apps/wmr_companion_app/test/hid/droiddeck_output_test.dart` | exists | non-zero, strictly increasing per hand, never in the future, within the 250 ms clamp |
 | `sampleTimeNs` comes from the timeline, on `CLOCK_MONOTONIC` | same file | to write | non-zero, strictly increasing per hand, equal to `hostTimeNs` plus the measured clock offset |
-| Send does not block the main isolate; an error does not stop the output and the socket is reopened | `packages/wmr_core/test/`, `apps/wmr_companion_app/test/hid/droiddeck_output_test.dart` | to write | a failing fake transport is retried; later packets are sent |
-| Angular velocity is the calibrated gyro, not zero | sink test | to write | matches the input record |
+| Send does not block the main isolate; an error does not stop the output and the socket is reopened | `packages/wmr_core/test/droiddeck_xr_queued_transport_test.dart`, `apps/wmr_companion_app/test/hid/droiddeck_output_test.dart` | exists | a failing fake transport is retried and reopened after 500 ms; later packets are sent |
+| Angular velocity is the bias-corrected view-frame rate, not zero | `packages/wmr_core/test/domain/angular_velocity_test.dart` | exists | matches the pipeline view-frame angular velocity (#311) |
 
 ### Owner-run hardware tests
 
