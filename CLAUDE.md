@@ -84,3 +84,8 @@ Flutter companion library and reference app for ESP32 (BTstack) WMR controllers.
 - Do not import Flutter, Riverpod or plugins into `wmr_core`.
 - Do not claim hardware verification the owner did not report.
 - Do not edit the vendor Runtime copies under `packages/wmr_tracking_unity/unity/Assets/WmrTrackingViture|Xreal`.
+
+## Code intelligence
+- Dead code and unused imports: `dart analyze --fatal-infos` per package. Dependencies: `flutter pub deps --style=compact`, `dart pub outdated`. Add no new linter stack.
+- Symbol navigation across the federated packages: use the analyzer first (`dart analyze`, IDE-style references). If a language server is needed, start one per session (Serena over the Dart language server, or `dart mcp-server`) and stop it when done; never leave a daemon running and never run two language servers at once (they overloaded the liesa build host).
+- ast-grep does not match Dart code (checked 2026-11-27); do not use it here.
