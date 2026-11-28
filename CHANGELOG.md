@@ -3,6 +3,12 @@
 All notable changes to the WMR Companion Dart packages. Each package also
 keeps its own changelog. This file records the release as a whole.
 
+## Unreleased
+
+- `DroidDeckXrSink` and `DroidDeckOutput` enforce strictly increasing
+  per-hand `sampleTimeNs` across FF14 batches, idle hands, 250 ms staleness
+  clamping, transport clock switches, and stream restarts (ONY-1854).
+
 ## 0.3.27+35
 
 WMR Companion release candidate. It carries the changes merged since

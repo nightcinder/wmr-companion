@@ -266,7 +266,15 @@ class DroidDeckXrSink {
     this.hidPeripheral,
     this.claimInterval = const Duration(milliseconds: 250),
     this.focused = true,
-  });
+    List<int>? initialSampleTimeNs,
+  }) : _lastSampleTimeNs = [
+         initialSampleTimeNs != null && initialSampleTimeNs.isNotEmpty
+             ? initialSampleTimeNs[0]
+             : 0,
+         initialSampleTimeNs != null && initialSampleTimeNs.length > 1
+             ? initialSampleTimeNs[1]
+             : 0,
+       ];
 
   final DroidDeckXrTransport transport;
 
@@ -287,8 +295,12 @@ class DroidDeckXrSink {
   int _generation = 0;
   int _sequence = 0;
   Timer? _claimTimer;
+  final List<int> _lastSampleTimeNs;
 
   bool get active => _active;
+
+  /// The last `sampleTimeNs` sent for `[left, right]`.
+  List<int> get lastSampleTimeNs => List.unmodifiable(_lastSampleTimeNs);
 
   Future<void> start() async {
     if (_active) return;
@@ -329,37 +341,52 @@ class DroidDeckXrSink {
   }) async {
     if (!_active || !_ready) return;
     final now = clockNs();
-    int sampleTime(DecodedSample sample) => transportNowUs == null
-        ? 0
-        : droidDeckSampleTimeNs(
-            nowNs: now,
-            transportNowUs: transportNowUs,
-            receivedAtUs: sample.receivedAtUs,
-          );
+    final leftTimeNs = _nextSampleTimeNs(0, now, left, transportNowUs);
+    final rightTimeNs = _nextSampleTimeNs(1, now, right, transportNowUs);
     await transport.send(
       encodeDroidDeckXrInput(
         sequence: _nextSequence(),
         timeNs: now,
         left: left == null
-            ? const DroidDeckXrHand()
+            ? DroidDeckXrHand(sampleTimeNs: leftTimeNs)
             : DroidDeckXrHand.fromPipeline(
                 left,
                 gamepad,
                 position: leftPosition,
-                sampleTimeNs: sampleTime(left),
+                sampleTimeNs: leftTimeNs,
               ),
         right: right == null
-            ? const DroidDeckXrHand()
+            ? DroidDeckXrHand(sampleTimeNs: rightTimeNs)
             : DroidDeckXrHand.fromPipeline(
                 right,
                 gamepad,
                 position: rightPosition,
-                sampleTimeNs: sampleTime(right),
+                sampleTimeNs: rightTimeNs,
               ),
         sourceId: sourceId,
         focused: focused,
       ),
     );
+  }
+
+  int _nextSampleTimeNs(
+    int hand,
+    int nowNs,
+    DecodedSample? sample,
+    int? transportNowUs,
+  ) {
+    final raw = sample == null || transportNowUs == null
+        ? nowNs
+        : droidDeckSampleTimeNs(
+            nowNs: nowNs,
+            transportNowUs: transportNowUs,
+            receivedAtUs: sample.receivedAtUs,
+          );
+    final prev = _lastSampleTimeNs[hand];
+    var next = raw > prev ? raw : prev + 1;
+    if (next < 1) next = 1;
+    _lastSampleTimeNs[hand] = next;
+    return next;
   }
 
   Future<void> stop() async {

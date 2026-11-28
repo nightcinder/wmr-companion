@@ -18,6 +18,7 @@ DecodedSample sample({
   int buttons = 0,
   int trigger = 0,
   int battery = 0,
+  int receivedAtUs = 0,
   List<int> stick = const [0, 0],
   List<int> trackpad = const [0, 0],
   vm.Quaternion? orientation,
@@ -35,7 +36,7 @@ DecodedSample sample({
     trigger: trigger,
     battery: battery,
   ),
-  receivedAtUs: 0,
+  receivedAtUs: receivedAtUs,
   step: const TickStep(TickStepKind.step, dtTicks: 1000, dtSeconds: 0.0001),
   orientation: orientation ?? vm.Quaternion.identity(),
   fused: true,
@@ -369,9 +370,294 @@ void main() {
     }
 
     expect(await sendAndRead(transportNowUs: 250000), _timeNs - 250000000);
-    expect(await sendAndRead(transportNowUs: 10000000), _timeNs - 250000000);
+    expect(
+      await sendAndRead(transportNowUs: 10000000),
+      _timeNs - 250000000 + 1,
+    );
     expect(await sendAndRead(), _timeNs, reason: 'no transport clock');
     await sink.stop();
+  });
+
+  group('sampleTimeNs monotonicity', () {
+    void expectMonotonicWithinBounds(
+      List<Uint8List> packets, {
+      bool checkNotInFuture = true,
+    }) {
+      var prevLeft = 0;
+      var prevRight = 0;
+      for (final packet in packets) {
+        final d = ByteData.sublistView(packet);
+        if ((d.getUint32(16, Endian.little) &
+                DroidDeckXrProtocol.flagPacketClaim) !=
+            0) {
+          continue;
+        }
+        final headerTimeNs = d.getInt64(24, Endian.little);
+        final leftNs = d.getInt64(
+          DroidDeckXrProtocol.headerBytes + 96,
+          Endian.little,
+        );
+        final rightNs = d.getInt64(
+          DroidDeckXrProtocol.headerBytes + DroidDeckXrProtocol.handBytes + 96,
+          Endian.little,
+        );
+        expect(leftNs, greaterThan(0));
+        expect(rightNs, greaterThan(0));
+        expect(leftNs, greaterThan(prevLeft));
+        expect(rightNs, greaterThan(prevRight));
+        expect(
+          leftNs,
+          greaterThanOrEqualTo(headerTimeNs - droidDeckMaxSampleAgeNs),
+        );
+        expect(
+          rightNs,
+          greaterThanOrEqualTo(headerTimeNs - droidDeckMaxSampleAgeNs),
+        );
+        if (checkNotInFuture) {
+          expect(leftNs, lessThanOrEqualTo(headerTimeNs));
+          expect(rightNs, lessThanOrEqualTo(headerTimeNs));
+        }
+        prevLeft = leftNs;
+        prevRight = rightNs;
+      }
+    }
+
+    test('(a) steady FF12 stream', () async {
+      var nowNs = _timeNs;
+      var transportUs = 1000000;
+      final transport = FakeTransport();
+      final sink = DroidDeckXrSink(
+        transport: transport,
+        clockNs: () => nowNs,
+        claimInterval: Duration.zero,
+      );
+      await sink.start();
+
+      for (var i = 0; i < 20; i++) {
+        nowNs += 5000000;
+        transportUs += 5000;
+        await sink.submit(
+          left: sample(hand: 0, receivedAtUs: transportUs),
+          right: sample(hand: 1, receivedAtUs: transportUs),
+          gamepad: const GamepadState(
+            leftConnected: true,
+            rightConnected: true,
+          ),
+          transportNowUs: transportUs,
+        );
+      }
+
+      expect(transport.sent, hasLength(20));
+      expectMonotonicWithinBounds(transport.sent);
+      await sink.stop();
+    });
+
+    test(
+      '(b) FF14 batches where several records share one arrival time',
+      () async {
+        var nowNs = _timeNs;
+        var transportUs = 1000000;
+        final transport = FakeTransport();
+        final sink = DroidDeckXrSink(
+          transport: transport,
+          clockNs: () => nowNs,
+          claimInterval: Duration.zero,
+        );
+        await sink.start();
+
+        for (var batch = 0; batch < 5; batch++) {
+          final batchArrivalUs = transportUs;
+          for (var rec = 0; rec < 4; rec++) {
+            // Small clock advance (1 us) between synchronous batch records.
+            nowNs += 1000;
+            transportUs += 1;
+            await sink.submit(
+              left: sample(hand: 0, receivedAtUs: batchArrivalUs),
+              right: sample(hand: 1, receivedAtUs: batchArrivalUs),
+              gamepad: const GamepadState(
+                leftConnected: true,
+                rightConnected: true,
+              ),
+              transportNowUs: transportUs,
+            );
+          }
+          nowNs += 20000000;
+          transportUs += 20000;
+        }
+
+        expect(transport.sent, hasLength(20));
+        expectMonotonicWithinBounds(transport.sent);
+        await sink.stop();
+      },
+    );
+
+    test('(c) a hand that gets no new sample between two sends', () async {
+      var nowNs = _timeNs;
+      var transportUs = 1000000;
+      final transport = FakeTransport();
+      final sink = DroidDeckXrSink(
+        transport: transport,
+        clockNs: () => nowNs,
+        claimInterval: Duration.zero,
+      );
+      await sink.start();
+
+      final staleRight = sample(hand: 1, receivedAtUs: transportUs);
+      for (var i = 0; i < 20; i++) {
+        nowNs += 5000000;
+        transportUs += 5000;
+        await sink.submit(
+          left: sample(hand: 0, receivedAtUs: transportUs),
+          right: staleRight,
+          gamepad: const GamepadState(
+            leftConnected: true,
+            rightConnected: true,
+          ),
+          transportNowUs: transportUs,
+        );
+      }
+
+      expect(transport.sent, hasLength(20));
+      expectMonotonicWithinBounds(transport.sent);
+      await sink.stop();
+    });
+
+    test('(d) a sample older than the 250 ms clamp', () async {
+      var nowNs = _timeNs;
+      var transportUs = 1000000;
+      final transport = FakeTransport();
+      final sink = DroidDeckXrSink(
+        transport: transport,
+        clockNs: () => nowNs,
+        claimInterval: Duration.zero,
+      );
+      await sink.start();
+
+      final oldLeft = sample(hand: 0, receivedAtUs: transportUs);
+      final oldRight = sample(hand: 1, receivedAtUs: transportUs);
+      for (final stepMs in [200, 50, 50, 100, 200, 400]) {
+        nowNs += stepMs * 1000000;
+        transportUs += stepMs * 1000;
+        await sink.submit(
+          left: oldLeft,
+          right: oldRight,
+          gamepad: const GamepadState(
+            leftConnected: true,
+            rightConnected: true,
+          ),
+          transportNowUs: transportUs,
+        );
+      }
+
+      expect(transport.sent, hasLength(6));
+      expectMonotonicWithinBounds(transport.sent);
+      await sink.stop();
+    });
+
+    test('(e) transport switch WebSocket -> BLE -> WebSocket changes transportNowUs', () async {
+      var nowNs = _timeNs;
+      final transport = FakeTransport();
+      final sink = DroidDeckXrSink(
+        transport: transport,
+        clockNs: () => nowNs,
+        claimInterval: Duration.zero,
+      );
+      await sink.start();
+
+      // Phase 1: WebSocket clock (~100 s).
+      var wsUs = 100000000;
+      var left = sample(hand: 0, receivedAtUs: wsUs);
+      var right = sample(hand: 1, receivedAtUs: wsUs);
+      await sink.submit(
+        left: left,
+        right: right,
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: wsUs,
+      );
+
+      // Phase 2: Switch to BLE clock (~1 s). Right still has WS sample.
+      nowNs += 50000000;
+      var bleUs = 1000000;
+      left = sample(hand: 0, receivedAtUs: bleUs);
+      await sink.submit(
+        left: left,
+        right: right,
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: bleUs,
+      );
+
+      nowNs += 5000000;
+      bleUs += 5000;
+      right = sample(hand: 1, receivedAtUs: bleUs);
+      await sink.submit(
+        left: left,
+        right: right,
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: bleUs,
+      );
+
+      // Phase 3: Switch back to WebSocket clock (~100.2 s). Right still has BLE sample.
+      nowNs += 150000000;
+      wsUs += 205000;
+      left = sample(hand: 0, receivedAtUs: wsUs);
+      await sink.submit(
+        left: left,
+        right: right,
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: wsUs,
+      );
+
+      nowNs += 5000000;
+      wsUs += 5000;
+      right = sample(hand: 1, receivedAtUs: wsUs);
+      await sink.submit(
+        left: left,
+        right: right,
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: wsUs,
+      );
+
+      expect(transport.sent, hasLength(5));
+      expectMonotonicWithinBounds(transport.sent);
+      await sink.stop();
+    });
+
+    test('(f) stream stop and restart', () async {
+      var nowNs = _timeNs;
+      var transportUs = 1000000;
+      final transport = FakeTransport();
+      final sink = DroidDeckXrSink(
+        transport: transport,
+        clockNs: () => nowNs,
+        claimInterval: Duration.zero,
+      );
+
+      await sink.start();
+      nowNs += 5000000;
+      transportUs += 5000;
+      await sink.submit(
+        left: sample(hand: 0, receivedAtUs: transportUs),
+        right: sample(hand: 1, receivedAtUs: transportUs),
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: transportUs,
+      );
+      await sink.stop();
+
+      // Restart 50 ms later with an aged sample (250 ms old).
+      nowNs += 50000000;
+      transportUs += 50000;
+      await sink.start();
+      await sink.submit(
+        left: sample(hand: 0, receivedAtUs: transportUs - 250000),
+        right: sample(hand: 1, receivedAtUs: transportUs - 250000),
+        gamepad: const GamepadState(leftConnected: true, rightConnected: true),
+        transportNowUs: transportUs,
+      );
+      await sink.stop();
+
+      expect(transport.sent, hasLength(2));
+      expectMonotonicWithinBounds(transport.sent);
+    });
   });
 
   test('a claim must name at least one matcher', () {

@@ -172,10 +172,10 @@ Run this sitting in order on an XREAL Aura headset with a Raspberry Pi 3B+ bridg
 3. Open the **Gamepad** screen in `wmr-companion`, expand **DroidDeck 6DoF streaming**, and press **Start streaming**.
 4. Record which transport connects. The app tries the abstract Unix domain socket (`droiddeck-ext-xr`) first. If that connect fails (for example, because SELinux blocks it), read the decimal uint32 token (`parseDroidDeckToken`, radix 10) from `droiddeck-ext-xr.token` in DroidDeck's private files directory (for example, `adb shell run-as <droiddeck-package> cat files/droiddeck-ext-xr.token` on a debuggable build, or `adb shell su -c "cat /data/data/<droiddeck-package>/files/droiddeck-ext-xr.token"` on a rooted device), enter it in **Pairing token (optional)**, and press **Start streaming** again to use loopback UDP on `127.0.0.1:29842`.
 5. Run M6-H1 through M6-H4 from [TEST_PLAN_PI_WMR.md](../../TEST_PLAN_PI_WMR.md) (§M6):
-   - M6-H1: Stream both controllers from the Pi bridge to DroidDeck for 5 minutes and log packets on DroidDeck (`sampleTimeNs` non-zero, strictly monotonic per hand, trails receive time by under 100 ms median).
+   - M6-H1: Stream both controllers from the Pi bridge to DroidDeck for 5 minutes and log packets on DroidDeck (`sampleTimeNs` non-zero, strictly monotonic per hand, trails receive time by under 100 ms median). Strict per-hand `sampleTimeNs` monotonicity requires a build containing ONY-1854 (on `v0.3.27-rc.2`, M6-H1 is expected to fail). On builds containing ONY-1854 before `SensorTimeline` is implemented, record the result as "receive-time stamp, not a device sample time" (per [TEST_PLAN_PI_WMR.md](../../TEST_PLAN_PI_WMR.md) §M6).
    - M6-H2: Stop and restart the DroidDeck receiver during the run; output must resume within 2 s without restarting `wmr-companion`.
    - M6-H3: Test buttons, trigger, stick, and orientation in DroidDeck on the correct hand.
-   - M6-H4: Turn Aura Wi-Fi off and back on during the run; DroidDeck input must continue across both switches with monotonic `sampleTimeNs`.
+   - M6-H4: Turn Aura Wi-Fi off and back on during the run; DroidDeck input must continue across both switches with monotonic `sampleTimeNs` (requires a build containing ONY-1854; on `v0.3.27-rc.2`, `sampleTimeNs` monotonicity across the switch is expected to fail).
 
 ### 11.5 ONY-1338 controls, HID-role restore, and OS key-leak check
 
