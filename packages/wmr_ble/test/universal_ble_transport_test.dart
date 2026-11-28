@@ -507,6 +507,50 @@ void main() {
       info = await t.connectionInfo(id);
       expect(info.connectionIntervalUs, 7500);
     });
+
+    test('interval does not survive disconnect and reconnect', () async {
+      await connectAndSubscribe();
+      adapter.emitParams(id, 7500);
+      await pump();
+      await t.disconnect(id);
+      await expectLater(t.connectionInfo(id), throwsStateError);
+
+      await t.connect(id);
+      expect((await t.connectionInfo(id)).connectionIntervalUs, isNull);
+    });
+
+    test('failed connect leaves no interval from an earlier link', () async {
+      await connectAndSubscribe();
+      adapter.emitParams(id, 7500);
+      await pump();
+      await t.disconnect(id);
+
+      adapter.connectError = StateError('timeout');
+      await expectLater(t.connect(id), throwsA(isA<BleTransportException>()));
+      await expectLater(t.connectionInfo(id), throwsStateError);
+
+      adapter.connectError = null;
+      await t.connect(id);
+      expect((await t.connectionInfo(id)).connectionIntervalUs, isNull);
+    });
+
+    test('report for another device leaves this link unchanged', () async {
+      await connectAndSubscribe();
+      adapter.emitParams(id, 7500);
+      adapter.emitParams('other-device', 30000);
+      await pump();
+      expect((await t.connectionInfo(id)).connectionIntervalUs, 7500);
+    });
+
+    test('late report after disconnect is not shown on next link', () async {
+      await connectAndSubscribe();
+      await t.disconnect(id);
+      adapter.emitParams(id, 7500);
+      await pump();
+
+      await t.connect(id);
+      expect((await t.connectionInfo(id)).connectionIntervalUs, isNull);
+    });
   });
 
   group('reconnect', () {
