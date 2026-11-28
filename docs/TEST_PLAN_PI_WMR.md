@@ -222,9 +222,11 @@ output survives send errors.
 | M6-H3 | Buttons, trigger, stick and orientation checked by hand in DroidDeck | each input reaches DroidDeck on the correct hand |
 | M6-H4 | Wi-Fi off and on during the run (M4-H2, M4-H3) | DroidDeck input continues across both switches; `sampleTimeNs` stays monotonic |
 
-Until the timeline is implemented, M6-H1 can only check the existing
-fallback (the send time), which is monotonic but is not a sample time. That
-result must be labelled as such.
+Until the timeline is implemented, M6-H1 can only check the receive-time
+fallback (builds containing ONY-1854; `v0.3.27-rc.2` predates the
+monotonicity fix and is expected to fail M6-H1/M6-H4), which is monotonic
+but is not a device sample time. Record that result as
+"receive-time stamp, not a device sample time".
 
 ## S1-S5. Spec items
 
